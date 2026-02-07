@@ -25,6 +25,7 @@ import {
   validateValue,
 } from '../config/validator.js';
 import { getCategories, getCategoryDescription } from '../config/schema.js';
+import { runBrowser } from '../config/browser.js';
 
 const HELP = `
 steroids config - Manage configuration
@@ -108,8 +109,7 @@ export async function configCommand(args: string[]): Promise<void> {
       await runEdit(subArgs);
       break;
     case 'browse':
-      console.log('TUI browser not yet implemented.');
-      console.log('Use "steroids config show" to view config.');
+      await runBrowser();
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
