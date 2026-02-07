@@ -5,6 +5,9 @@
 
 import type { IAIProvider } from './interface.js';
 import { ClaudeProvider } from './claude.js';
+import { CodexProvider } from './codex.js';
+import { GeminiProvider } from './gemini.js';
+import { OpenAIProvider } from './openai.js';
 
 /**
  * Provider availability status
@@ -177,11 +180,9 @@ export function createDefaultRegistry(): ProviderRegistry {
 
   // Register built-in providers
   registry.register(new ClaudeProvider());
-
-  // Future providers will be registered here:
-  // registry.register(new GeminiProvider());
-  // registry.register(new OpenAIProvider());
-  // registry.register(new CodexProvider());
+  registry.register(new CodexProvider());
+  registry.register(new GeminiProvider());
+  registry.register(new OpenAIProvider());
 
   return registry;
 }

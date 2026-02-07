@@ -17,6 +17,15 @@ export {
 // Claude provider
 export { ClaudeProvider, createClaudeProvider } from './claude.js';
 
+// Codex provider
+export { CodexProvider, createCodexProvider } from './codex.js';
+
+// Gemini provider
+export { GeminiProvider, createGeminiProvider } from './gemini.js';
+
+// OpenAI provider
+export { OpenAIProvider, createOpenAIProvider } from './openai.js';
+
 // Registry
 export {
   type ProviderStatus,
