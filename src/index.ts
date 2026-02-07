@@ -18,6 +18,7 @@ import { logsCommand } from './commands/logs.js';
 import { gcCommand } from './commands/gc.js';
 import { completionCommand } from './commands/completion.js';
 import { locksCommand } from './commands/locks.js';
+import { disputeCommand } from './commands/disputes.js';
 
 const VERSION = '0.1.0';
 
@@ -31,6 +32,7 @@ COMMANDS:
   init              Initialize steroids in current directory
   sections          Manage task sections
   tasks             Manage tasks
+  dispute           Manage coder/reviewer disputes
   loop              Run the orchestrator loop
   runners           Manage runner daemons
   config            Manage configuration
@@ -112,6 +114,9 @@ async function main(): Promise<void> {
         break;
       case 'locks':
         await locksCommand(commandArgs);
+        break;
+      case 'dispute':
+        await disputeCommand(commandArgs);
         break;
       default:
         console.error(`Unknown command: ${command}`);
