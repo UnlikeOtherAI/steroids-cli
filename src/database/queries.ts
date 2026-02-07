@@ -289,7 +289,7 @@ export function rejectTask(
     );
 
     // Create system dispute
-    createDispute(db, taskId, 'system', 'Exceeded 15 rejections', 'system');
+    createSystemDisputeForRejection(db, taskId, 'Exceeded 15 rejections');
 
     return { status: 'failed', rejectionCount: newRejectionCount };
   }
@@ -334,27 +334,19 @@ export function getTaskAudit(
 
 // ============ Dispute Operations ============
 
-export function createDispute(
+// NOTE: Full dispute operations are in src/disputes/
+// This is a minimal helper for backward compatibility with rejectTask
+export function createSystemDisputeForRejection(
   db: Database.Database,
   taskId: string,
-  type: string,
-  reason: string,
-  createdBy: string
+  reason: string
 ): string {
   const id = uuidv4();
 
   db.prepare(
-    `INSERT INTO disputes (id, task_id, type, reason, created_by)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(id, taskId, type, reason, createdBy);
-
-  // Update task status to disputed if not a system dispute
-  if (type !== 'system') {
-    const task = getTask(db, taskId);
-    if (task) {
-      updateTaskStatus(db, taskId, 'disputed', createdBy, reason);
-    }
-  }
+    `INSERT INTO disputes (id, task_id, type, reason, created_by, coder_position)
+     VALUES (?, ?, 'system', ?, 'system', ?)`
+  ).run(id, taskId, reason, 'Task exceeded maximum rejection count and requires human intervention.');
 
   return id;
 }
