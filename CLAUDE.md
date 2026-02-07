@@ -1,5 +1,17 @@
 # Steroids Coding Standards
 
+## Workflow (CRITICAL)
+
+**Commit and push after each turn.** Every time you complete a unit of work (a task, a fix, a feature), you MUST:
+
+1. `git add` the relevant files
+2. `git commit` with a descriptive message
+3. `git push` to the remote
+
+Do NOT accumulate changes across multiple turns. Small, frequent commits are better than large batches.
+
+---
+
 ## Scope
 
 These rules apply to **ALL** Steroids components without exception.

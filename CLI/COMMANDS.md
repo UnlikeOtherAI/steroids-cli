@@ -152,11 +152,10 @@ Update Options:
   --model <model>           Model identifier when actor is LLM
 
 Add Options:
+  --source <file>           Specification file (REQUIRED)
   --section <name>          Add under section heading
   --status <status>         Initial status (default: pending)
   --after <title>           Insert after this task
-  --file <path>             Target file (default: TODO.md)
-  --source <file>           Link to specification file for review
 
 Approve/Reject Options:
   --model <model>           Model performing the review (required)
@@ -181,8 +180,8 @@ Examples:
   steroids tasks update "Fix login bug" --status completed
   steroids tasks update "Fix login" --status in_progress  # Partial match works
 
-  steroids tasks add "New feature" --section "Frontend"
-  steroids tasks add "Bug fix" --after "Fix login bug"
+  steroids tasks add "New feature" --source specs/frontend.md --section "Frontend"
+  steroids tasks add "Bug fix" --source specs/bugfix.md --after "Fix login bug"
 
   # Mark task complete and trigger hooks
   steroids tasks update "Deploy to prod" --status completed
