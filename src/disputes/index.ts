@@ -98,3 +98,14 @@ export {
   listOpenDisputesByAge,
   formatDisputeAge,
 } from './stale.js';
+
+// Markdown log generation
+export {
+  generateDisputeMarkdown,
+  writeDisputeFile,
+  readDisputeFile,
+  disputeFileExists,
+  getDisputeFilePath,
+  updateDisputeFile,
+  generateSingleDisputeMarkdown,
+} from './markdown.js';
