@@ -53,6 +53,12 @@ const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string> = {
 const DEFAULT_TIMEOUT = 900_000;
 
 /**
+ * Default invocation template for Claude CLI
+ * Uses -p flag for print mode with prompt from file via shell substitution
+ */
+const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" --model {model}';
+
+/**
  * Claude AI Provider implementation
  */
 export class ClaudeProvider extends BaseAIProvider {
@@ -227,6 +233,13 @@ export class ClaudeProvider extends BaseAIProvider {
    */
   getDefaultModel(role: 'orchestrator' | 'coder' | 'reviewer'): string {
     return DEFAULT_MODELS[role];
+  }
+
+  /**
+   * Get the default invocation template for Claude CLI
+   */
+  getDefaultInvocationTemplate(): string {
+    return DEFAULT_INVOCATION_TEMPLATE;
   }
 }
 

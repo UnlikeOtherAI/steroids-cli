@@ -62,3 +62,19 @@ export {
   createSystemDispute,
   logMinorDisagreement,
 } from './create.js';
+
+// Resolve operations
+export type {
+  ResolveDisputeResult,
+  ResolveDisputeError,
+  ResolveDisputeOutcome,
+} from './resolve.js';
+
+export {
+  resolve,
+  resolveInFavorOfCoder,
+  resolveInFavorOfReviewer,
+  resolveWithCustomSolution,
+  canResolve,
+  getResolutionSummary,
+} from './resolve.js';
