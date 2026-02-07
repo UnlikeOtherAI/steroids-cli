@@ -160,7 +160,19 @@ export function createTask(
 }
 
 export function getTask(db: Database.Database, id: string): Task | null {
-  return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task | null;
+  // Try exact match first
+  let task = db
+    .prepare('SELECT * FROM tasks WHERE id = ?')
+    .get(id) as Task | null;
+
+  // If not found, try prefix match (for short IDs)
+  if (!task && id.length >= 6) {
+    task = db
+      .prepare('SELECT * FROM tasks WHERE id LIKE ?')
+      .get(`${id}%`) as Task | null;
+  }
+
+  return task;
 }
 
 export function getTaskByTitle(
