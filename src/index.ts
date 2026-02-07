@@ -12,6 +12,12 @@ import { loopCommand } from './commands/loop.js';
 import { runnersCommand } from './commands/runners.js';
 import { configCommand } from './commands/config.js';
 import { healthCommand } from './commands/health.js';
+import { scanCommand } from './commands/scan.js';
+import { backupCommand } from './commands/backup.js';
+import { logsCommand } from './commands/logs.js';
+import { gcCommand } from './commands/gc.js';
+import { completionCommand } from './commands/completion.js';
+import { locksCommand } from './commands/locks.js';
 
 const VERSION = '0.1.0';
 
@@ -29,6 +35,12 @@ COMMANDS:
   runners           Manage runner daemons
   config            Manage configuration
   health            Check project health
+  scan              Scan directory for projects
+  backup            Manage backups
+  logs              View invocation logs
+  gc                Garbage collection
+  completion        Generate shell completions
+  locks             Manage task and section locks
 
 OPTIONS:
   -h, --help        Show help
@@ -82,6 +94,24 @@ async function main(): Promise<void> {
         break;
       case 'health':
         await healthCommand(commandArgs);
+        break;
+      case 'scan':
+        await scanCommand(commandArgs);
+        break;
+      case 'backup':
+        await backupCommand(commandArgs);
+        break;
+      case 'logs':
+        await logsCommand(commandArgs);
+        break;
+      case 'gc':
+        await gcCommand(commandArgs);
+        break;
+      case 'completion':
+        await completionCommand(commandArgs);
+        break;
+      case 'locks':
+        await locksCommand(commandArgs);
         break;
       default:
         console.error(`Unknown command: ${command}`);
