@@ -9,6 +9,7 @@ import { initCommand } from './commands/init.js';
 import { tasksCommand } from './commands/tasks.js';
 import { sectionsCommand } from './commands/sections.js';
 import { loopCommand } from './commands/loop.js';
+import { runnersCommand } from './commands/runners.js';
 
 const VERSION = '0.1.0';
 
@@ -23,6 +24,7 @@ COMMANDS:
   sections          Manage task sections
   tasks             Manage tasks
   loop              Run the orchestrator loop
+  runners           Manage runner daemons
 
 OPTIONS:
   -h, --help        Show help
@@ -67,6 +69,9 @@ async function main(): Promise<void> {
         break;
       case 'loop':
         await loopCommand(commandArgs);
+        break;
+      case 'runners':
+        await runnersCommand(commandArgs);
         break;
       default:
         console.error(`Unknown command: ${command}`);
