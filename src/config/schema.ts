@@ -348,10 +348,13 @@ export const CONFIG_SCHEMA: SchemaObject = {
 };
 
 /**
- * Check if a schema node is a field (has _type)
+ * Check if a schema node is a leaf field (has _type but no child config keys)
  */
 export function isSchemaField(node: SchemaField | SchemaObject): node is SchemaField {
-  return '_type' in node;
+  if (!('_type' in node)) return false;
+  // If it has any non-underscore keys, it's a container object, not a leaf field
+  const nonMetaKeys = Object.keys(node).filter((k) => !k.startsWith('_'));
+  return nonMetaKeys.length === 0;
 }
 
 /**
