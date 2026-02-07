@@ -31,9 +31,11 @@ There is **no "Project" entity** in Steroids. The project is simply the folder c
 ```
 your-project/
 ├── AGENTS.md                  # Project guidelines (optional, for LLMs)
+├── dispute.md                 # Dispute log (created when coder/reviewer disagree)
 └── .steroids/
     ├── config.yaml            # All settings + hooks (YAML with TUI metadata)
     ├── tasks.json             # Tasks and sections (machine-managed)
+    ├── disputes.json          # Active disputes (machine-managed)
     └── backup/                # Backups (if enabled)
 ```
 

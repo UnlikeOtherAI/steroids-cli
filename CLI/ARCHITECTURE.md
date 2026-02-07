@@ -4,16 +4,29 @@
 
 ## Related Documentation
 
+### Orchestrator System (Core)
+- [ORCHESTRATOR.md](./ORCHESTRATOR.md) - **Main daemon loop, task state machine, cron wake-up**
+- [AI-PROVIDERS.md](./AI-PROVIDERS.md) - **Provider configuration (Claude, Gemini, OpenAI)**
+- [PROMPTS.md](./PROMPTS.md) - **Prompt templates for coder/reviewer/orchestrator**
+- [GIT-WORKFLOW.md](./GIT-WORKFLOW.md) - **When and how git push happens**
+
+### Commands & API
 - [COMMANDS.md](./COMMANDS.md) - Core command reference
 - [COMMANDS-ADVANCED.md](./COMMANDS-ADVANCED.md) - Runners, purge, backup commands
 - [API.md](./API.md) - JSON schemas, error codes, environment variables
+
+### Configuration & Storage
 - [CONFIG-SCHEMA.md](./CONFIG-SCHEMA.md) - Config schema system and TUI browser
-- [HOOKS.md](./HOOKS.md) - Event hooks configuration
+- [STORAGE.md](./STORAGE.md) - File storage, tasks.json, config format
+- [SCHEMAS.md](./SCHEMAS.md) - JSON validation schemas
+
+### Task Coordination
 - [RUNNERS.md](./RUNNERS.md) - LLM agent coordination and wake-up system
 - [LOCKING.md](./LOCKING.md) - Task locking for multi-runner coordination
-- [STORAGE.md](./STORAGE.md) - File storage, tasks.json, config format
 - [AUDIT.md](./AUDIT.md) - Audit trail and approval workflow
-- [SCHEMAS.md](./SCHEMAS.md) - JSON validation schemas
+- [HOOKS.md](./HOOKS.md) - Event hooks configuration
+
+### Implementation
 - [IMPLEMENTATION.md](./IMPLEMENTATION.md) - Code examples for implementers
 
 ## Overview
