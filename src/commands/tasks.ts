@@ -68,7 +68,7 @@ STATUS MARKERS:
 EXAMPLES:
   steroids tasks
   steroids tasks --status all
-  steroids tasks add "Implement login" --section "Phase 1"
+  steroids tasks add "Implement login" --section abc123 --source docs/spec.md
   steroids tasks update "Implement login" --status review
   steroids tasks approve abc123 --model claude-sonnet-4
   steroids tasks reject abc123 --model codex --notes "Missing tests"
