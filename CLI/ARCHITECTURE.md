@@ -9,6 +9,7 @@
 - [AI-PROVIDERS.md](./AI-PROVIDERS.md) - **Provider configuration (Claude, Gemini, OpenAI)**
 - [PROMPTS.md](./PROMPTS.md) - **Prompt templates for coder/reviewer/orchestrator**
 - [GIT-WORKFLOW.md](./GIT-WORKFLOW.md) - **When and how git push happens**
+- [DISPUTES.md](./DISPUTES.md) - **Coder/reviewer disagreement handling**
 
 ### Commands & API
 - [COMMANDS.md](./COMMANDS.md) - Core command reference
@@ -17,7 +18,8 @@
 
 ### Configuration & Storage
 - [CONFIG-SCHEMA.md](./CONFIG-SCHEMA.md) - Config schema system and TUI browser
-- [STORAGE.md](./STORAGE.md) - File storage, tasks.json, config format
+- [STORAGE.md](./STORAGE.md) - SQLite storage, database schema
+- [MIGRATIONS.md](./MIGRATIONS.md) - Database migration system
 - [SCHEMAS.md](./SCHEMAS.md) - JSON validation schemas
 
 ### Task Coordination
@@ -48,14 +50,14 @@ your-project/
 ├── .steroids/          # Local project config & state
 │   ├── config.yaml      # Project-specific settings
 │   ├── hooks.yaml       # Webhook/script definitions
-│   └── ids.json         # GUID→location mappings & audit trail
+│   └── steroids.db      # SQLite database (tasks, audit, disputes)
 └── ...
 
 ~/.steroids/            # Global config
 ├── config.yaml          # Global settings
 ├── hooks.yaml           # Global hooks (all projects)
 └── runners/             # Runner coordination
-    ├── state.json       # Current runner states
+    ├── steroids.db      # Global SQLite (runner states)
     ├── lock/            # Singleton lock directory
     └── logs/            # Runner execution logs
 ```

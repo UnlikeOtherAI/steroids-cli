@@ -1,20 +1,26 @@
-# File Storage Specification
+# Storage Specification
 
-> Complete reference for Steroids file-based storage model.
-> For JSON schemas, see [SCHEMAS.md](./SCHEMAS.md)
+> Complete reference for Steroids storage model using SQLite.
+> For database schemas, see [SCHEMAS.md](./SCHEMAS.md)
 
 ---
 
 ## Overview
 
-Steroids uses **file-based storage only** - no database, no lock files.
+Steroids uses **SQLite** for all machine-managed state. This provides:
+
+- **Atomic transactions** - no race conditions between concurrent writers
+- **Built-in locking** - SQLite handles file locking automatically
+- **Single file** - all state in one `.steroids/steroids.db` file
+- **SQL queries** - efficient lookups and aggregations
+- **Corruption resistant** - WAL mode with automatic recovery
 
 **Design principles:**
-- Structured formats only (JSON/YAML) - no markdown parsing
+- SQLite for machine state, YAML for user config
 - All state in `.steroids/` folder
 - GUIDs for stable object identification
-- Git-friendly (all files work with version control)
-- Users interact via CLI, not by editing files directly
+- Git-friendly (single binary file, can be .gitignored or tracked)
+- Users interact via CLI, not by editing database directly
 
 ---
 
@@ -31,12 +37,15 @@ There is **no "Project" entity** in Steroids. The project is simply the folder c
 ```
 your-project/
 ├── AGENTS.md                  # Project guidelines (optional, for LLMs)
-├── dispute.md                 # Dispute log (created when coder/reviewer disagree)
+├── dispute.md                 # Dispute log (human-readable summary)
 └── .steroids/
-    ├── config.yaml            # All settings + hooks (YAML with TUI metadata)
-    ├── tasks.json             # Tasks and sections (machine-managed)
-    ├── disputes.json          # Active disputes (machine-managed)
-    └── backup/                # Backups (if enabled)
+    ├── config.yaml            # All settings + hooks (YAML, user-edited)
+    ├── steroids.db            # SQLite database (all machine state)
+    ├── backup/                # Backups (if enabled)
+    └── logs/                  # LLM invocation logs (text files)
+        ├── a1b2c3d4-coder-001.log
+        ├── a1b2c3d4-reviewer-001.log
+        └── ...
 ```
 
 ### Global Files
@@ -44,23 +53,309 @@ your-project/
 ```
 ~/.steroids/
 ├── config.yaml                # Global settings + hooks (inherited by all projects)
-└── runners/
-    ├── state.json             # Runner states (machine-managed)
-    ├── lock/                  # Singleton lock
-    └── logs/                  # Execution logs
+└── steroids.db                # Global runner state (SQLite)
 ```
 
 ---
 
 ## Format Choices
 
-| File | Format | Reason |
+| Data | Format | Reason |
 |------|--------|--------|
-| `config.yaml` | YAML | User-configured via TUI, includes hooks |
-| `tasks.json` | JSON | Machine-managed, CLI only |
-| `state.json` | JSON | Machine-managed |
+| User config | YAML | Human-readable, supports comments |
+| Tasks, sections, disputes | SQLite | Concurrent access, transactions |
+| Runner state, locks | SQLite | Atomic operations, no race conditions |
+| LLM logs | Text files | Large content, append-only |
 
-**Rule:** YAML = user configures via TUI, JSON = machine-managed
+**Rule:** YAML = user configures, SQLite = machine-managed
+
+---
+
+## Database Schema
+
+### Project Database (`.steroids/steroids.db`)
+
+```sql
+-- Schema metadata (version tracking)
+CREATE TABLE _schema (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+-- Populated with: version, created_at, last_migration
+
+-- Applied migrations log
+CREATE TABLE _migrations (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    checksum TEXT NOT NULL,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Sections (task groups)
+CREATE TABLE sections (
+    id TEXT PRIMARY KEY,           -- UUID
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL,     -- Display order
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Tasks
+CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,                    -- UUID
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', -- pending, in_progress, review, completed, disputed, failed
+    section_id TEXT REFERENCES sections(id),
+    source_file TEXT,                       -- Path to specification
+    rejection_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_section ON tasks(section_id);
+
+-- Audit trail (immutable log of status changes)
+CREATE TABLE audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    actor TEXT NOT NULL,                    -- human:name or model:claude-sonnet-4
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_audit_task ON audit(task_id);
+
+-- Disputes
+CREATE TABLE disputes (
+    id TEXT PRIMARY KEY,                    -- UUID
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    type TEXT NOT NULL,                     -- coder, reviewer, minor, system
+    status TEXT NOT NULL DEFAULT 'open',    -- open, resolved
+    reason TEXT NOT NULL,
+    coder_position TEXT,
+    reviewer_position TEXT,
+    resolution TEXT,                        -- coder, reviewer, custom
+    resolution_notes TEXT,
+    created_by TEXT NOT NULL,               -- model name or human:name
+    resolved_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT
+);
+
+CREATE INDEX idx_disputes_task ON disputes(task_id);
+CREATE INDEX idx_disputes_status ON disputes(status);
+
+-- Task locks (for orchestrator coordination)
+CREATE TABLE task_locks (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Section locks (for section-level coordination)
+CREATE TABLE section_locks (
+    section_id TEXT PRIMARY KEY REFERENCES sections(id),
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+);
+```
+
+### Global Database (`~/.steroids/steroids.db`)
+
+```sql
+-- Runners (orchestrator instances)
+CREATE TABLE runners (
+    id TEXT PRIMARY KEY,                    -- UUID
+    status TEXT NOT NULL DEFAULT 'idle',    -- idle, running, completed, failed
+    pid INTEGER,
+    project_path TEXT,
+    current_task_id TEXT,
+    started_at TEXT,
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Runner locks (singleton enforcement)
+CREATE TABLE runner_lock (
+    id INTEGER PRIMARY KEY CHECK (id = 1),  -- Only one row allowed
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+---
+
+## Task Status Enum
+
+| Status | Marker | Description |
+|--------|--------|-------------|
+| `pending` | `[ ]` | Not started, waiting for coder |
+| `in_progress` | `[-]` | Coder actively working |
+| `review` | `[o]` | Build AND tests passed, waiting for reviewer |
+| `completed` | `[x]` | Reviewer approved, pushed |
+| `disputed` | `[!]` | Disagreement logged, treated as done |
+| `failed` | `[F]` | Terminal: exceeded 15 rejections, requires human |
+
+**Terminal states:** `completed`, `disputed`, `failed` - loop moves to next task.
+
+**Important:** A task can only reach `review` status if the project builds AND all tests pass. The orchestrator verifies both before accepting the submission.
+
+---
+
+## Concurrency Model
+
+SQLite handles concurrency automatically with WAL (Write-Ahead Logging) mode.
+
+### Initialization
+
+```python
+def init_database(db_path):
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")      # Enable WAL for concurrency
+    conn.execute("PRAGMA busy_timeout=5000")     # Wait 5s for locks
+    conn.execute("PRAGMA foreign_keys=ON")       # Enforce referential integrity
+    return conn
+```
+
+### Transactions
+
+All multi-step operations use transactions:
+
+```python
+def update_task_status(task_id, new_status, actor, notes=None):
+    with conn:  # Auto-commit on success, rollback on error
+        # Get current status
+        cursor = conn.execute(
+            "SELECT status FROM tasks WHERE id = ?", (task_id,)
+        )
+        old_status = cursor.fetchone()[0]
+
+        # Update task
+        conn.execute("""
+            UPDATE tasks
+            SET status = ?, updated_at = datetime('now')
+            WHERE id = ?
+        """, (new_status, task_id))
+
+        # Add audit entry
+        conn.execute("""
+            INSERT INTO audit (task_id, from_status, to_status, actor, notes)
+            VALUES (?, ?, ?, ?, ?)
+        """, (task_id, old_status, new_status, actor, notes))
+```
+
+### Lock Acquisition
+
+Atomic lock acquisition for task claiming:
+
+```python
+def acquire_task_lock(task_id, runner_id, timeout_minutes=60):
+    expires = datetime.now() + timedelta(minutes=timeout_minutes)
+
+    try:
+        with conn:
+            # Try to insert lock (fails if exists)
+            conn.execute("""
+                INSERT INTO task_locks (task_id, runner_id, expires_at)
+                VALUES (?, ?, ?)
+            """, (task_id, runner_id, expires.isoformat()))
+            return True
+    except sqlite3.IntegrityError:
+        # Lock exists - check if expired
+        cursor = conn.execute(
+            "SELECT expires_at FROM task_locks WHERE task_id = ?",
+            (task_id,)
+        )
+        row = cursor.fetchone()
+        if row and datetime.fromisoformat(row[0]) < datetime.now():
+            # Expired - take over
+            with conn:
+                conn.execute("""
+                    UPDATE task_locks
+                    SET runner_id = ?, acquired_at = datetime('now'),
+                        expires_at = ?, heartbeat_at = datetime('now')
+                    WHERE task_id = ?
+                """, (runner_id, expires.isoformat(), task_id))
+            return True
+        return False
+```
+
+---
+
+## Task Selection Query
+
+The orchestrator uses this query to find the next task:
+
+```sql
+-- Find next task to work on
+-- Priority: review > in_progress > pending
+-- Order: top to bottom (by section position, then task creation)
+
+SELECT t.id, t.title, t.status, t.section_id
+FROM tasks t
+LEFT JOIN sections s ON t.section_id = s.id
+WHERE t.status NOT IN ('completed', 'disputed', 'failed')
+  AND t.id NOT IN (
+      SELECT task_id FROM task_locks
+      WHERE expires_at > datetime('now')
+  )
+ORDER BY
+    CASE t.status
+        WHEN 'review' THEN 1
+        WHEN 'in_progress' THEN 2
+        WHEN 'pending' THEN 3
+    END,
+    COALESCE(s.position, 999999),
+    t.created_at
+LIMIT 1;
+```
+
+---
+
+## Build & Test Configuration
+
+**Every task submission requires passing build AND tests.** The orchestrator verifies both before accepting code for review.
+
+### What "Build Passes" Means
+
+1. **Compile/Build**: Project compiles without errors
+2. **Tests Pass**: All tests execute successfully
+
+Both must pass. A task cannot reach `review` status otherwise.
+
+### Config Options
+
+```yaml
+# In .steroids/config.yaml
+build:
+  command: "npm run build"    # Build command to run
+  timeout: 600                # Timeout in seconds (default: 10 min)
+  required: true              # If false, skip build verification
+
+test:
+  command: "npm test"         # Test command to run
+  timeout: 600                # Timeout in seconds (default: 10 min)
+  required: true              # If false, skip test verification
+```
+
+### Auto-Detection
+
+If no commands are configured, the orchestrator auto-detects:
+
+| File Present | Build Command | Test Command |
+|--------------|---------------|--------------|
+| `package.json` with `build` script | `npm run build` | `npm test` |
+| `package.json` without `build` | `npm install` | `npm test` |
+| `Cargo.toml` | `cargo build` | `cargo test` |
+| `go.mod` | `go build ./...` | `go test ./...` |
+| `pyproject.toml` | `pip install -e .` | `pytest` |
+| `Makefile` | `make` | `make test` |
+
+If no build/test system is detected and `required` is not set, verification is skipped with a warning.
 
 ---
 
@@ -86,34 +381,6 @@ Configuration is merged from multiple sources with **later sources overriding ea
 | Objects | Deep merge (recursive) |
 | Arrays | Replace entirely (no merge) |
 
-### Example Merge
-
-```yaml
-# ~/.steroids/config.yaml (user-level)
-output:
-  format: table
-  colors: true
-  verbose: false
-projects:
-  ignored: [node_modules, .git]
-
-# ./.steroids/config.yaml (project-level)
-output:
-  verbose: true    # Override just this key
-projects:
-  ignored: [dist]  # REPLACES array entirely
-```
-
-**Result:**
-```yaml
-output:
-  format: table    # From user-level
-  colors: true     # From user-level
-  verbose: true    # Overridden by project-level
-projects:
-  ignored: [dist]  # Array replaced, NOT merged
-```
-
 ### Environment Variable Mapping
 
 Environment variables use `STEROIDS_` prefix with underscore-separated keys:
@@ -126,304 +393,102 @@ Environment variables use `STEROIDS_` prefix with underscore-separated keys:
 
 ---
 
-## Concurrency Model
-
-Steroids uses **task-level locks** to coordinate between runners. See [LOCKING.md](./LOCKING.md) for complete details.
-
-### Key Principles
-
-1. **Always check locks before starting any task** - even after completing another
-2. **Locks belong to runners** - only the lock holder can work on a task
-3. **Wait for foreign locks** - don't steal locks (unless expired)
-4. **Locks auto-expire** - prevents zombie locks from crashed runners
-
-### Write Strategy
-
-1. **Read-Modify-Write**: Read tasks.json, modify in memory, write atomically
-2. **Atomic writes**: Write to temp file, then rename (atomic on POSIX)
-3. **Lock check in same transaction**: Check + acquire lock in single write
-
----
-
-## Task Storage (.steroids/tasks.json)
-
-All tasks and sections live in a single JSON file with GUIDs.
-
-### File Structure
-
-```json
-{
-  "version": 1,
-  "sections": [
-    {
-      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-      "name": "Backend",
-      "createdAt": "2024-01-15T10:00:00Z"
-    }
-  ],
-  "tasks": [
-    {
-      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "title": "Fix login bug",
-      "status": "pending",
-      "sectionId": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-      "sourceFile": "docs/SPEC.md#login",
-      "createdAt": "2024-01-15T10:30:00Z",
-      "audit": []
-    }
-  ]
-}
-```
-
-### Why GUIDs?
-
-| Approach | Problem |
-|----------|---------|
-| Sequential IDs | IDs change on reorder/delete |
-| Title-based | Ambiguous if titles match |
-| **GUID** | Stable, unique, never changes |
-
-### Task Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | UUID | Unique identifier (never changes) |
-| `title` | string | Task description |
-| `status` | enum | pending, in_progress, review, completed |
-| `sectionId` | UUID | Parent section (null if no section) |
-| `sourceFile` | string | Link to spec for review |
-| `createdAt` | datetime | When task was created |
-| `audit` | array | Status change history |
-
-### Section Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | UUID | Unique identifier |
-| `name` | string | Section name |
-| `createdAt` | datetime | When section was created |
-
----
-
 ## Audit Trail
 
-Every task status change is recorded in the task's `audit` array. See [AUDIT.md](./AUDIT.md) for complete details.
+Every task status change is recorded in the `audit` table.
 
-**Quick overview:**
-- Each status change records: actor (human/model), timestamp, approval status
-- Reviewers verify work against `sourceFile` before approving
-- Audit entries stored in `.steroids/tasks.json` with each task
+### Audit Entry Fields
+
+| Field | Description |
+|-------|-------------|
+| `task_id` | Task this entry belongs to |
+| `from_status` | Previous status (null if new) |
+| `to_status` | New status |
+| `actor` | Who made the change (`human:name` or `model:claude-sonnet-4`) |
+| `notes` | Optional notes (rejection reason, approval notes) |
+| `created_at` | When the change happened |
+
+### Viewing Audit Trail
 
 ```bash
-# View audit trail
 steroids tasks audit a1b2c3d4-...
+```
 
-# Approve/reject tasks
-steroids tasks approve a1b2c3d4-... --model claude-opus-4
-steroids tasks reject a1b2c3d4-... --model claude-opus-4 --notes "Missing tests"
+```
+TIMESTAMP            FROM         TO          ACTOR              NOTES
+2024-01-15 10:00:00  -            pending     human:john         Created task
+2024-01-15 10:30:00  pending      in_progress model:sonnet-4     -
+2024-01-15 11:00:00  in_progress  review      model:sonnet-4     -
+2024-01-15 11:15:00  review       in_progress model:opus-4       Missing validation
+2024-01-15 11:45:00  in_progress  review      model:sonnet-4     -
+2024-01-15 12:00:00  review       completed   model:opus-4       LGTM
 ```
 
 ---
 
-## Config File Format
+## LLM Invocation Logs
 
-Config uses a **two-file system**. See [CONFIG-SCHEMA.md](./CONFIG-SCHEMA.md) for details.
+Logs are stored as text files (not in SQLite) because they can be large:
 
-| File | Purpose |
-|------|---------|
-| `config-schema.yaml` | Bundled with CLI, defines structure/options/defaults |
-| `config.yaml` | User's values only (simple YAML) |
-
-### Project Config (.steroids/config.yaml)
-
-```yaml
-# Project-specific configuration
-# Overrides global config
-
-output:
-  format: json
-  verbose: true
-
-health:
-  threshold: 80
-
-backup:
-  enabled: true
-  retentionDays: 14
-```
-
-### Global Config (~/.steroids/config.yaml)
-
-```yaml
-# Global defaults (inherited by all projects)
-
-output:
-  format: table
-  colors: true
-
-projects:
-  basePath: "~/Projects"
-  ignored: [node_modules, .git, dist, build, vendor]
-
-webui:
-  port: 3000
-  host: localhost
-```
-
-The CLI reads the bundled schema to know what settings exist, their types, valid options, and defaults. User configs just store values.
-
----
-
-## Hooks in Config
-
-Hooks are part of config.yaml (not a separate file). See [HOOKS.md](./HOOKS.md) for complete reference.
-
-### Hooks in config.yaml
-
-```yaml
-# In .steroids/config.yaml or ~/.steroids/config.yaml
-
-hooks:
-  _description: "Event hooks for automation"
-
-  - name: slack-notify
-    event:
-      value: task.completed
-    type:
-      value: webhook
-    url:
-      value: "https://hooks.slack.com/..."
-    enabled:
-      value: true
-
-  - name: deploy-script
-    event:
-      value: project.completed
-    type:
-      value: script
-    command:
-      value: "./scripts/deploy.sh"
-```
-
-### Hook Inheritance
-
-Global hooks are inherited by all projects:
+### Log File Naming
 
 ```
-~/.steroids/config.yaml      # Global: slack-notify, logging
-    ↓ (inherited)
-.steroids/config.yaml        # Project: deploy-script (added)
-    ↓ (merged)
-Effective hooks: slack-notify, logging, deploy-script
+{task_id_prefix}-{role}-{attempt}.log
 ```
 
-To override a global hook, define one with the same name in project config.
+Example: `a1b2c3d4-coder-001.log`
 
----
+### Log Format
 
-## File Modification Behavior
-
-### Task Updates
-
-When you run:
-```bash
-steroids tasks update "Fix login bug" --status completed
 ```
+=== STEROIDS INVOCATION LOG ===
+Timestamp: 2024-01-15T10:30:00Z
+Task ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+Role: coder
+Model: claude-sonnet-4
+Duration: 45000ms
+Exit Code: 0
 
-The CLI:
-1. Reads TODO.md into memory
-2. Finds the line matching "Fix login bug"
-3. Changes `- [ ]` to `- [x]`
-4. Writes the entire file atomically
-5. Triggers configured hooks
+=== PROMPT ===
+# STEROIDS CODER TASK
+...
 
-**Before:**
-```markdown
-## Backend
-- [ ] Fix login bug
-- [ ] Add tests
+=== STDOUT ===
+I'll implement the authentication feature...
+...
+
+=== STDERR ===
+
+=== END ===
 ```
-
-**After:**
-```markdown
-## Backend
-- [x] Fix login bug
-- [ ] Add tests
-```
-
-### Task Addition
-
-When you run:
-```bash
-steroids tasks add "New feature" --section "Backend"
-```
-
-The CLI:
-1. Reads TODO.md into memory
-2. Finds the "## Backend" section
-3. Appends task at section end (before next section or EOF)
-4. Writes the entire file atomically
-
-### Config Updates
-
-When you run:
-```bash
-steroids config set output.format json
-```
-
-The CLI:
-1. Reads .steroids/config.yaml (or creates it)
-2. Deep-merges the new value
-3. Writes the entire file atomically
-4. Preserves comments where possible (best effort)
 
 ---
 
 ## Purge & Cleanup
 
-Completed tasks can be purged from the system to keep files clean.
-
 ### What Gets Purged
 
 | Target | Description |
 |--------|-------------|
-| Tasks | Completed tasks removed from TODO.md |
-| IDs | Orphaned GUIDs removed from ids.json |
-| Audit | Optionally kept or removed with tasks |
-| Logs | Old runner logs removed |
+| Tasks | Completed/disputed/failed tasks removed from database |
+| Audit | Entries for purged tasks removed |
+| Disputes | Resolved disputes for purged tasks removed |
+| LLM Logs | Log files for purged tasks deleted |
 
 ### Purge Workflow
 
 ```bash
-# 1. Preview what will be purged
+# Preview what will be purged
 steroids purge tasks --dry-run
 
-# 2. Archive before purging (optional)
+# Archive before purging (exports to markdown)
 steroids purge tasks --archive ./archive/sprint-1.md
 
-# 3. Purge completed tasks older than 30 days
+# Purge completed tasks older than 30 days
 steroids purge tasks --older-than 30d
 
-# 4. Clean up orphaned IDs
-steroids purge ids --orphaned
-```
-
-### Archive Format
-
-When archiving, purged tasks are written to a markdown file:
-
-```markdown
-# Archived Tasks - 2024-01-15
-
-## Backend (5 tasks)
-
-- [x] Fix login bug
-  - Completed: 2024-01-10 by claude-sonnet-4
-  - Approved: 2024-01-10 by claude-opus-4
-
-- [x] Add authentication
-  - Completed: 2024-01-12 by claude-sonnet-4
-  - Approved: 2024-01-12 by human:john
+# Keep logs even when purging tasks
+steroids purge tasks --older-than 30d --keep-logs
 ```
 
 ### Retention Policy
@@ -431,87 +496,92 @@ When archiving, purged tasks are written to a markdown file:
 | Data | Default Retention | Configurable |
 |------|-------------------|--------------|
 | Completed tasks | Forever (manual purge) | Yes |
-| Orphaned IDs | 30 days | Yes |
+| Disputed tasks | Forever (manual purge) | Yes |
+| Failed tasks | Forever (manual purge) | Yes |
+| LLM invocation logs | Purged with task | Keep with `--keep-logs` |
 | Runner logs | 7 days | Yes |
-| Audit trail | Forever | Keep with `--keep-audit` |
-
----
-
-## Backup Configuration
-
-Backups can be enabled/disabled in config. **Project config always overrides global config.**
-
-### Config Options
-
-```yaml
-# ~/.steroids/config.yaml (global defaults)
-backup:
-  enabled: true              # Enable backups globally
-  beforePurge: true          # Auto-backup before purge
-  retentionDays: 30          # Keep backups for 30 days
-  path: ~/.steroids/backups # Custom backup location
-
-# .steroids/config.yaml (project override)
-backup:
-  enabled: false             # Disable backups for this project
-```
-
-### Priority Order
-
-1. Project config (`.steroids/config.yaml`) - highest priority
-2. Global config (`~/.steroids/config.yaml`)
-3. Built-in defaults
-
-### CLI Override
-
-```bash
-# Force backup even if disabled in config
-steroids purge tasks --backup
-
-# Skip backup even if enabled in config
-steroids purge tasks --no-backup
-```
 
 ---
 
 ## Backup Strategy
 
-With backups enabled, Steroids automatically backs up before destructive operations.
+### Database Backup
 
 ```bash
-# Before major changes (Git)
-git add TODO.md && git commit -m "Checkpoint before batch update"
-
-# Before purge (automatic if backup.beforePurge: true)
-steroids purge tasks --older-than 30d
-# → Creates backup automatically
-
-# Explicit backup
-steroids backup create
-```
-
-### Manual Backup
-
-```bash
-# Create backup of all state
+# Create backup (copies steroids.db)
 steroids backup create
 
 # Creates:
 # .steroids/backup/2024-01-15T10-30-00/
-# ├── TODO.md
-# ├── config.yaml
-# ├── hooks.yaml
-# └── ids.json
+# ├── steroids.db
+# └── config.yaml
 
 # Restore from backup
 steroids backup restore .steroids/backup/2024-01-15T10-30-00
+```
+
+### Automatic Backup
+
+```yaml
+# In config.yaml
+backup:
+  enabled: true
+  beforePurge: true     # Auto-backup before purge
+  retentionDays: 30
+```
+
+### SQLite Backup Command
+
+For manual backup:
+
+```bash
+sqlite3 .steroids/steroids.db ".backup .steroids/backup/steroids-$(date +%Y%m%d).db"
+```
+
+---
+
+## Migration from JSON (if applicable)
+
+If upgrading from an older JSON-based version:
+
+```bash
+steroids migrate --from-json
+
+# This will:
+# 1. Read existing JSON files (if migrating from older version)
+# 2. Create steroids.db with proper schema
+# 3. Import all data
+# 4. Archive old JSON files to .steroids/backup/pre-migration/
+```
+
+---
+
+## Database Inspection
+
+For debugging, you can query the database directly:
+
+```bash
+# Open database
+sqlite3 .steroids/steroids.db
+
+# View all tasks
+SELECT id, title, status, rejection_count FROM tasks;
+
+# View audit for a task
+SELECT * FROM audit WHERE task_id = 'a1b2c3d4-...' ORDER BY created_at;
+
+# View active locks
+SELECT * FROM task_locks WHERE expires_at > datetime('now');
+
+# View open disputes
+SELECT * FROM disputes WHERE status = 'open';
 ```
 
 ---
 
 ## Related Documentation
 
-- [TODO-FORMAT.md](./TODO-FORMAT.md) - Markdown parsing grammar
-- [SCHEMAS.md](./SCHEMAS.md) - JSON/YAML validation schemas
+- [SCHEMAS.md](./SCHEMAS.md) - Full SQL schemas
+- [LOCKING.md](./LOCKING.md) - Lock behavior details
 - [HOOKS.md](./HOOKS.md) - Hooks configuration guide
-- [API.md](./API.md) - JSON output schemas
+- [AI-PROVIDERS.md](./AI-PROVIDERS.md) - LLM invocation and logging

@@ -49,10 +49,14 @@ When reviewer approves a task (`[o]` → `[x]`):
 
 ```
 1. Task marked as completed
+   (Build and tests have already passed - verified by orchestrator)
 2. Orchestrator triggers git push
 3. If push succeeds → move to next task
 4. If push fails → log failure, move to next task anyway
+   (Commits are stacked locally; next success pushes all)
 ```
+
+**Prerequisite:** A task can only reach `completed` if build AND tests passed. The push step never happens for code that doesn't build.
 
 ---
 

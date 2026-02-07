@@ -238,7 +238,7 @@ Hooks are part of config.yaml. See [HOOKS.md](./HOOKS.md) and [CONFIG-SCHEMA.md]
 
 ## Task Schema
 
-### Task Object (in tasks.json)
+### Task Object (in SQLite: `.steroids/steroids.db`)
 
 ```yaml
 $schema: "https://json-schema.org/draft/2020-12/schema"
@@ -254,7 +254,7 @@ properties:
     minLength: 1
   status:
     type: string
-    enum: [pending, in_progress, completed, review]
+    enum: [pending, in_progress, review, completed, disputed, failed]
   sectionId:
     type: ["string", "null"]
     format: uuid
@@ -604,24 +604,23 @@ properties:
     description: Error message if status is failed
 ```
 
-### Runner State File (~/.steroids/runners/state.json)
+### Runner State (in SQLite: `~/.steroids/steroids.db`)
 
-```yaml
-$schema: "https://json-schema.org/draft/2020-12/schema"
-type: object
-required: [version, runners]
-properties:
-  version:
-    type: integer
-    const: 1
-  runners:
-    type: object
-    additionalProperties:
-      $ref: "#/$defs/runner"
-  lastWakeup:
-    type: string
-    format: date-time
+Runners are stored in the global SQLite database, not in a JSON file.
+
+```sql
+CREATE TABLE runners (
+    id TEXT PRIMARY KEY,                    -- UUID
+    status TEXT NOT NULL DEFAULT 'idle',    -- idle, running, completed, failed
+    pid INTEGER,
+    project_path TEXT,
+    current_task_id TEXT,
+    started_at TEXT,
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 ```
+
+See [STORAGE.md](./STORAGE.md) for the complete database schema.
 
 ---
 

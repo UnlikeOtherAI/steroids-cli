@@ -47,19 +47,21 @@ Each role can use a different provider/model, or share the same one.
          ▼
     - [o] review           Ready for reviewer
          │
-         ├──────────────────────────────────┐
-         │                                  │
-         ▼                                  ▼
-    - [x] completed                    REJECTED
-    (reviewer approved)                     │
-         │                                  │
-         ▼                                  │
-    [GIT PUSH]                              │
-         │                                  │
-         ▼                                  ▼
-    NEXT TASK ◄─────────────────── Back to - [-] in_progress
-                                   (coder fixes issues)
+         ├──────────────────────────────────┬──────────────────┐
+         │                                  │                  │
+         ▼                                  ▼                  ▼
+    - [x] completed                    REJECTED           - [!] disputed
+    (reviewer approved)                     │             (logged, done)
+         │                                  │                  │
+         ▼                                  │                  ▼
+    [GIT PUSH]                              │             [GIT PUSH]
+         │                                  │                  │
+         ▼                                  ▼                  ▼
+    NEXT TASK ◄─────────────────── Back to - [-] ─────► NEXT TASK
+                                   (coder fixes)
 ```
+
+**Key insight:** Disputed tasks `[!]` are pushed and treated as done. The dispute is logged but doesn't block progress. Human can revisit later if the disagreement causes real problems downstream.
 
 ### Status Markers in TODO.md
 
@@ -69,6 +71,10 @@ Each role can use a different provider/model, or share the same one.
 | `- [-]` | in_progress | Coder actively working |
 | `- [o]` | review | Coder finished, waiting for reviewer |
 | `- [x]` | completed | Reviewer approved, ready for push |
+| `- [!]` | disputed | Disagreement logged, treated as done |
+| `- [F]` | failed | Exceeded 15 rejections, requires human |
+
+**Terminal states:** `[x]`, `[!]`, and `[F]` all cause the loop to move to the next task. Disputed and completed tasks have their code pushed. Failed tasks are a full stop - the project cannot continue automatically until human intervention.
 
 ---
 
@@ -134,8 +140,9 @@ Every minute, the cron job triggers `steroids runners wakeup`:
  NEXT TASK     DISPUTED   NORMAL
                    │         │
                    ▼         ▼
-              STOP &     Back to [-]
-              ASK USER   Coder fixes
+              Mark [!]   Back to [-]
+              Git push   Coder fixes
+              NEXT TASK
 ```
 
 ---
@@ -146,18 +153,21 @@ When looking for the next task, process **top to bottom, one by one**:
 
 ```python
 def find_next_task(tasks):
+    # Skip terminal states: completed [x] and disputed [!] are both "done"
+    active_tasks = [t for t in tasks if t.status not in ["completed", "disputed"]]
+
     # Priority 1: Tasks ready for review (complete the loop first)
-    for task in tasks:
+    for task in active_tasks:
         if task.status == "review":  # [o]
             return task, "review"
 
     # Priority 2: Tasks in progress (resume incomplete work)
-    for task in tasks:
+    for task in active_tasks:
         if task.status == "in_progress":  # [-]
             return task, "resume"
 
     # Priority 3: Next pending task (start new work)
-    for task in tasks:
+    for task in active_tasks:
         if task.status == "pending":  # [ ]
             return task, "start"
 
@@ -165,6 +175,39 @@ def find_next_task(tasks):
 ```
 
 **Rule:** Always complete review tasks first before starting new work.
+
+---
+
+## CLI Invocation Responsibility
+
+**Who calls what:**
+
+| Actor | What They Do | How |
+|-------|--------------|-----|
+| **Orchestrator daemon** | Invokes LLM CLIs with prompts | Spawns subprocess: `claude --print --model X < prompt.txt` |
+| **LLM (Coder/Reviewer)** | Calls `steroids` CLI for status changes | Executes: `steroids tasks update <id> --status review` |
+| **LLM (Coder)** | Edits project files, runs tests | Direct file operations |
+| **LLM (Reviewer)** | Reads diffs, approves/rejects | Executes: `steroids tasks approve <id>` |
+
+### Invocation Flow
+
+```
+Orchestrator Daemon (steroids runners)
+         │
+         │ Spawns subprocess
+         ▼
+    claude --print --model claude-sonnet-4 < /tmp/prompt-xxx.txt
+         │
+         │ LLM runs and outputs actions
+         ▼
+    LLM executes: steroids tasks update abc123 --status review
+         │
+         │ CLI updates database
+         ▼
+    Orchestrator detects new status on next cycle
+```
+
+**Key insight:** The orchestrator daemon doesn't directly change task status. It spawns LLMs, and the LLMs call `steroids` CLI commands to update state. The daemon only reads state and decides which LLM to invoke.
 
 ---
 
@@ -178,15 +221,12 @@ When orchestrator invokes the coder:
    - sourceFile link (specification)
    - AGENTS.md (project guidelines)
    - Relevant project files
+   - Build command (from config or auto-detected)
 
-2. Generate coder prompt (via orchestrator)
+2. Fill coder prompt template with variables
 
 3. Invoke coder CLI:
-   $ claude --prompt "..."
-   # or
-   $ gemini --prompt "..."
-   # or
-   $ openai --prompt "..."
+   $ claude -p "..." --model claude-sonnet-4
 
 4. Coder implements the task:
    - Reads specification from sourceFile
@@ -194,12 +234,134 @@ When orchestrator invokes the coder:
    - Runs tests if applicable
    - NEVER touches .steroids/ files
 
-5. When coder believes task is complete:
-   $ steroids tasks update <id> --status review
-   # This changes [ ] or [-] to [o]
+5. Coder MUST verify build AND tests pass:
+   $ npm run build    # or detected build command
+   $ npm test         # or detected test command
+   # Fix any errors until both pass
 
-6. Orchestrator detects [o] on next cycle
+6. When build AND tests pass, coder submits:
+   $ git add <files>
+   $ git commit -m "feat: task title"
+   $ steroids tasks update <id> --status review
+
+7. Orchestrator validates submission:
+   - Re-runs build command to verify compilation
+   - Re-runs test command to verify all tests pass
+   - If build OR tests fail → back to in_progress (coder fixes)
+   - If both pass → ready for reviewer
 ```
+
+### Build Verification (CRITICAL)
+
+**The project MUST build AND all tests must pass before a task can be reviewed.**
+
+Build verification has two stages:
+1. **Compile**: The project must compile/build without errors
+2. **Tests**: All tests must pass
+
+The orchestrator verifies this by running the build command after the coder submits:
+
+```python
+def verify_build():
+    build_cmd = get_build_command()  # From config or auto-detect
+
+    result = run(build_cmd, timeout=600)  # 10 min timeout
+
+    if result.exit_code != 0:
+        # Build failed - reject submission
+        update_task_status(task_id, "in_progress")
+        add_audit_entry(task_id, "review", "in_progress",
+                        "orchestrator", "Build failed")
+        return False
+
+    # Run tests
+    test_cmd = get_test_command()  # From config or auto-detect
+    if test_cmd:
+        result = run(test_cmd, timeout=600)
+        if result.exit_code != 0:
+            update_task_status(task_id, "in_progress")
+            add_audit_entry(task_id, "review", "in_progress",
+                            "orchestrator", "Tests failed")
+            return False
+
+    return True
+```
+
+### Build & Test Command Detection
+
+| Project Type | Detection | Build Command | Test Command |
+|--------------|-----------|---------------|--------------|
+| Node.js | `package.json` with `build` script | `npm run build` | `npm test` |
+| Node.js | `package.json` without `build` | `npm install` | `npm test` |
+| Rust | `Cargo.toml` | `cargo build` | `cargo test` |
+| Go | `go.mod` | `go build ./...` | `go test ./...` |
+| Python | `pyproject.toml` or `setup.py` | `pip install -e .` | `pytest` |
+| Make | `Makefile` | `make` | `make test` |
+| Custom | `config.yaml` | User-specified | User-specified |
+
+### Custom Build & Test Command
+
+```yaml
+# In .steroids/config.yaml
+build:
+  command: "npm run build"
+  timeout: 600  # 10 minutes
+
+test:
+  command: "npm test"
+  timeout: 600  # 10 minutes
+  required: true  # Tests must pass (default: true)
+```
+
+### Output Validation
+
+After each LLM invocation, the orchestrator verifies the expected state change occurred:
+
+```python
+def validate_coder_output(task_id):
+    # Re-read task state from database
+    task = db.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+
+    if task.status == "review":
+        # Coder correctly called `steroids tasks update --status review`
+        return "success"
+
+    if task.status == "in_progress":
+        # Coder did NOT update status - check for uncommitted work
+        git_status = run("git status --porcelain")
+
+        if git_status:
+            # There's work but coder forgot to submit
+            log_warning("Coder has uncommitted work but didn't submit")
+            # Next cycle will pick up the same task with RESUMING prompt
+            return "retry_next_cycle"
+        else:
+            # Coder did nothing at all
+            log_warning("Coder produced no changes")
+            return "retry_next_cycle"
+
+    return "unexpected_state"
+
+def validate_reviewer_output(task_id):
+    task = db.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+
+    if task.status == "completed":
+        return "approved"
+    if task.status == "in_progress":
+        return "rejected"  # Back to coder
+    if task.status == "disputed":
+        return "disputed"
+    if task.status == "failed":
+        return "failed"  # Exceeded 15 rejections
+    if task.status == "review":
+        # Reviewer did NOT take action
+        log_warning("Reviewer did not approve/reject/dispute")
+        return "retry_next_cycle"
+
+    return "unexpected_state"
+```
+
+**Key:** The orchestrator doesn't trust LLM output. It always re-reads the database to confirm the CLI was actually called. If no action was taken, the same task is picked up again on the next cron cycle.
 
 ---
 
@@ -231,12 +393,80 @@ When orchestrator invokes the reviewer:
 
    REJECT:
    $ steroids tasks reject <id> --model <reviewer-model> --notes "..."
-   # Changes [o] back to [-], coder will fix
+   # Changes [o] back to [-], increments rejection_count, coder will fix
 
-   DISPUTE (rare - see below):
+   APPROVE WITH NOTE (minor issues):
+   $ steroids tasks approve <id> --model <reviewer-model> --notes "Minor: prefer X"
+   # Approves but logs feedback - coder can address later or ignore
+
+   DISPUTE (rare - only for fundamental issues):
    $ steroids dispute create <id> --reason "..."
-   # Stops loop, requires human intervention
+   # Task → disputed, code pushed, loop continues
 ```
+
+---
+
+## Rejection Handling
+
+### Max 15 Rejections
+
+Tasks track a `rejection_count`. After 15 rejections without resolution, the task fails:
+
+```python
+def handle_rejection(task_id, reviewer_notes):
+    with db:
+        # Increment rejection count
+        db.execute("""
+            UPDATE tasks
+            SET rejection_count = rejection_count + 1,
+                status = 'in_progress',
+                updated_at = datetime('now')
+            WHERE id = ?
+        """, (task_id,))
+
+        # Check if exceeded limit
+        count = db.execute(
+            "SELECT rejection_count FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()[0]
+
+        if count >= 15:
+            # Task failed - create system dispute
+            db.execute("""
+                UPDATE tasks SET status = 'failed' WHERE id = ?
+            """, (task_id,))
+
+            db.execute("""
+                INSERT INTO disputes (id, task_id, type, reason, created_by)
+                VALUES (?, ?, 'system', 'Exceeded 15 rejections', 'system')
+            """, (uuid4(), task_id))
+
+            log_error(f"Task {task_id} failed after 15 rejections")
+            return "failed"
+
+        # Add audit entry for rejection
+        db.execute("""
+            INSERT INTO audit (task_id, from_status, to_status, actor, notes)
+            VALUES (?, 'review', 'in_progress', ?, ?)
+        """, (task_id, reviewer_model, reviewer_notes))
+
+        return "retry"
+```
+
+### Failed Status
+
+`failed` is a **terminal state**. When a task fails:
+
+1. Task status becomes `[F]`
+2. A system dispute is auto-created with full history
+3. **The project cannot continue automatically**
+4. Human must intervene to resolve
+
+Human can:
+- Resolve the dispute and manually complete the task
+- Delete the task if it's no longer needed
+- Modify the specification and reset the task
+
+**This should never happen.** If tasks regularly hit 15 rejections, the specification is unclear or there's a fundamental miscommunication between coder and reviewer.
 
 ---
 
@@ -290,6 +520,26 @@ $ steroids dispute log <task-id> --minor --notes "Style preference logged"
 
 ---
 
+## Network Failure Handling
+
+**Simple retry via cron.** If a network failure occurs:
+
+1. The LLM invocation fails
+2. Task status remains unchanged (still `pending` or `in_progress`)
+3. Cron wakes up next minute, sees the same task
+4. Tries again
+
+No special backoff needed - if the network is down, nothing happens. When it comes back, the next cron cycle picks up where it left off.
+
+```python
+def handle_network_failure():
+    # Do nothing special - task status is unchanged
+    # Next cron cycle (1 minute) will retry automatically
+    log_warning("Network failure - will retry next cycle")
+```
+
+---
+
 ## Crash Recovery
 
 ### Detection via Cron
@@ -329,7 +579,7 @@ fi
 
 ## Runner State
 
-### State File (`~/.steroids/runners/state.json`)
+### Runner State (in `~/.steroids/steroids.db`)
 
 ```json
 {
@@ -349,11 +599,36 @@ fi
 }
 ```
 
-### Heartbeat
+### Heartbeat & Hang Detection
+
+Subprocess hang detection is based on **log output timestamps**, not wall-clock time:
+
+- Every log line from the LLM subprocess includes a timestamp
+- If no new log output for **15 minutes**, the subprocess is considered hung
+- Hung subprocesses are killed and the task is retried next cycle
+
+```python
+def check_subprocess_hang(last_log_timestamp):
+    if datetime.now() - last_log_timestamp > timedelta(minutes=15):
+        # No output for 15 minutes - subprocess is hung
+        return True
+    return False
+```
+
+**Why 15 minutes?** LLM coding sessions can involve long pauses for:
+- Complex reasoning
+- Large file generation
+- Build/test execution
+
+But 15 minutes without ANY output (including thinking indicators) means something is wrong.
+
+### Runner Heartbeat
 
 - Runner updates `lastHeartbeat` every 30 seconds
-- Cron checks: if `lastHeartbeat` > 5 minutes ago, runner is stale
+- Cron checks: if `lastHeartbeat` > 5 minutes ago, runner process may have crashed
 - Stale runners are killed and lock is released
+
+**Note:** Runner heartbeat (5 min) is different from subprocess hang detection (15 min from last log).
 
 ---
 
@@ -374,7 +649,7 @@ All task status updates MUST go through the steroids CLI:
 
 DO NOT attempt to directly modify TODO.md checkbox markers.
 DO NOT attempt to read or write .steroids/config.yaml.
-DO NOT attempt to read or write .steroids/tasks.json.
+DO NOT attempt to read or write .steroids/steroids.db.
 ```
 
 This rule is enforced by:
@@ -413,8 +688,9 @@ steroids runners cron uninstall # Remove cron job
 
 ## Related Documentation
 
-- [AI-PROVIDERS.md](./AI-PROVIDERS.md) - Provider configuration and setup
+- [AI-PROVIDERS.md](./AI-PROVIDERS.md) - Provider configuration, invocation, and logging
 - [PROMPTS.md](./PROMPTS.md) - Prompt templates for each role
 - [GIT-WORKFLOW.md](./GIT-WORKFLOW.md) - When and how git operations happen
+- [DISPUTES.md](./DISPUTES.md) - Coder/reviewer disagreement handling
 - [LOCKING.md](./LOCKING.md) - Task and runner locking
 - [RUNNERS.md](./RUNNERS.md) - Runner system details

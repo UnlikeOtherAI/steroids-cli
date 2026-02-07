@@ -54,41 +54,41 @@ Task locking prevents multiple runners from working on the same task simultaneou
 
 ## Lock Structure
 
-### Task Lock (in tasks.json)
+### Task Lock (in SQLite: `.steroids/steroids.db`)
 
-```json
-{
-  "tasks": [
-    {
-      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "title": "Fix login bug",
-      "status": "in_progress",
-      "lock": {
-        "runnerId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-        "acquiredAt": "2024-01-15T10:30:00Z",
-        "expiresAt": "2024-01-15T11:30:00Z"
-      }
-    }
-  ]
-}
+```sql
+-- Task locks table
+CREATE TABLE task_locks (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Example query to check lock
+SELECT * FROM task_locks WHERE task_id = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 ```
 
-### Section Lock (in tasks.json)
+**Example lock record:**
+```
+task_id:      a1b2c3d4-e5f6-7890-abcd-ef1234567890
+runner_id:    f47ac10b-58cc-4372-a567-0e02b2c3d479
+acquired_at:  2024-01-15T10:30:00
+expires_at:   2024-01-15T11:30:00
+heartbeat_at: 2024-01-15T10:35:00
+```
 
-```json
-{
-  "sections": [
-    {
-      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-      "name": "Backend",
-      "lock": {
-        "runnerId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-        "acquiredAt": "2024-01-15T10:30:00Z",
-        "expiresAt": "2024-01-15T11:30:00Z"
-      }
-    }
-  ]
-}
+### Section Lock (in SQLite)
+
+```sql
+-- Section locks table
+CREATE TABLE section_locks (
+    section_id TEXT PRIMARY KEY REFERENCES sections(id),
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+);
 ```
 
 ---
@@ -265,21 +265,73 @@ steroids locks cleanup
 
 ---
 
+## Atomic Lock Acquisition
+
+SQLite transactions ensure atomic lock acquisition:
+
+```python
+def acquire_task_lock(task_id, runner_id, timeout_minutes=60):
+    expires = datetime.now() + timedelta(minutes=timeout_minutes)
+
+    try:
+        with conn:
+            # Try to insert lock (fails if exists due to PRIMARY KEY)
+            conn.execute("""
+                INSERT INTO task_locks (task_id, runner_id, expires_at)
+                VALUES (?, ?, ?)
+            """, (task_id, runner_id, expires.isoformat()))
+            return True
+    except sqlite3.IntegrityError:
+        # Lock exists - check if expired
+        cursor = conn.execute(
+            "SELECT expires_at, runner_id FROM task_locks WHERE task_id = ?",
+            (task_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            if row[1] == runner_id:
+                return True  # We already hold the lock
+            if datetime.fromisoformat(row[0]) < datetime.now():
+                # Expired - take over atomically
+                with conn:
+                    conn.execute("""
+                        UPDATE task_locks
+                        SET runner_id = ?, acquired_at = datetime('now'),
+                            expires_at = ?, heartbeat_at = datetime('now')
+                        WHERE task_id = ? AND expires_at < datetime('now')
+                    """, (runner_id, expires.isoformat(), task_id))
+                    return conn.total_changes > 0
+        return False
+
+def release_task_lock(task_id, runner_id):
+    with conn:
+        conn.execute("""
+            DELETE FROM task_locks
+            WHERE task_id = ? AND runner_id = ?
+        """, (task_id, runner_id))
+```
+
+---
+
 ## Schema
 
-```yaml
-$schema: "https://json-schema.org/draft/2020-12/schema"
-type: object
-properties:
-  runnerId:
-    type: string
-    format: uuid
-  acquiredAt:
-    type: string
-    format: date-time
-  expiresAt:
-    type: string
-    format: date-time
+```sql
+-- Task locks (project database)
+CREATE TABLE task_locks (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Section locks (project database)
+CREATE TABLE section_locks (
+    section_id TEXT PRIMARY KEY REFERENCES sections(id),
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+);
 ```
 
 ---
@@ -287,5 +339,5 @@ properties:
 ## Related Documentation
 
 - [RUNNERS.md](./RUNNERS.md) - Runner coordination
-- [STORAGE.md](./STORAGE.md) - Task storage format
+- [STORAGE.md](./STORAGE.md) - Database schema and storage
 - [COMMANDS-ADVANCED.md](./COMMANDS-ADVANCED.md) - Lock commands

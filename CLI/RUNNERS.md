@@ -45,38 +45,48 @@ A runner spawns and monitors agents. When an agent completes or fails, the runne
 
 ## Global Storage
 
-Runners are stored globally (not per-project):
+Runners are stored globally (not per-project) in SQLite:
 
 ```
 ~/.steroids/
 ├── config.yaml
-├── hooks.yaml
+├── steroids.db              # Global database (runner state)
 └── runners/
-    ├── state.json           # Current runner states
-    ├── lock                  # Singleton lock file
+    ├── lock/                # Singleton lock directory
+    │   └── pid              # PID of lock holder
     └── logs/
         ├── runner-001.log
         └── runner-002.log
 ```
 
-### State File (~/.steroids/runners/state.json)
+### Runner State (in `~/.steroids/steroids.db`)
 
-```json
-{
-  "version": 1,
-  "runners": {
-    "f47ac10b-58cc-4372-a567-0e02b2c3d479": {
-      "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-      "status": "running",
-      "projectPath": "/Users/dev/my-project",
-      "currentTask": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "startedAt": "2024-01-15T10:30:00Z",
-      "lastHeartbeat": "2024-01-15T10:35:00Z",
-      "pid": 12345
-    }
-  },
-  "lastWakeup": "2024-01-15T10:35:00Z"
-}
+```sql
+-- Global runners table
+CREATE TABLE runners (
+    id TEXT PRIMARY KEY,                    -- UUID
+    status TEXT NOT NULL DEFAULT 'idle',    -- idle, running, completed, failed
+    pid INTEGER,
+    project_path TEXT,
+    current_task_id TEXT,
+    started_at TEXT,
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Runner lock (singleton enforcement)
+CREATE TABLE runner_lock (
+    id INTEGER PRIMARY KEY CHECK (id = 1),  -- Only one row allowed
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+**Example runner query:**
+```sql
+SELECT id, status, project_path, current_task_id,
+       datetime(heartbeat_at) as last_heartbeat
+FROM runners
+WHERE status = 'running';
 ```
 
 ---
@@ -316,14 +326,14 @@ The reviewer uses this link to verify the implementation matches the specificati
 
 ```
 1. Runner wants to start task "Fix login"
-2. Check task.lock in tasks.json
+2. Query task_locks table in steroids.db
 3. If lock exists:
    - Is it our lock? → Proceed
    - Is it another runner's lock? → Wait
-   - Is it expired? → Take over
-4. Acquire lock with our runnerId
+   - Is it expired? → Take over (atomic UPDATE)
+4. Acquire lock with our runner_id (INSERT)
 5. Start work on task
-6. Release lock when done
+6. Release lock when done (DELETE)
 ```
 
 ### Why Always Check?
@@ -340,7 +350,7 @@ Locks auto-expire to handle crashed runners:
 - Configurable per-runner
 - Expired locks can be claimed by any runner
 
-See [STORAGE.md](./STORAGE.md) for complete lock structure.
+See [LOCKING.md](./LOCKING.md) for complete lock structure and atomic acquisition.
 
 ---
 
@@ -364,8 +374,8 @@ In `~/.steroids/config.yaml`:
 ```yaml
 runners:
   heartbeatInterval: 30s      # How often to update heartbeat
-  staleTimeout: 5m            # When to consider runner dead
-  agentTimeout: 30m           # Max time for single task
+  staleTimeout: 5m            # When to consider runner process dead
+  subprocessHangTimeout: 15m  # No log output for 15 min = hung subprocess
   maxConcurrent: 1            # Max concurrent runners (currently always 1)
   logRetention: 7d            # How long to keep logs
 
@@ -375,6 +385,15 @@ runners:
     projectPaths:             # Directories to scan for pending tasks
       - ~/Projects
 ```
+
+### Subprocess Hang Detection
+
+LLM subprocesses are monitored by their log output timestamps:
+- Every log line includes a timestamp
+- If no output for **15 minutes**, subprocess is considered hung
+- Hung subprocesses are killed and task retries on next cron cycle
+
+This allows long-running tasks (complex coding, test execution) while catching truly stuck processes.
 
 ---
 

@@ -239,6 +239,52 @@ See [CODE_QUALITY.md](./Docs/CODE_QUALITY.md) for the complete set of 50 coding 
 
 ---
 
+## Database Migrations (CRITICAL)
+
+**You MUST maintain the migration system when changing the database schema.**
+
+### Migration Files Location
+
+```
+migrations/
+├── manifest.json              # MUST be updated when adding migrations
+├── 001_initial_schema.sql
+├── 002_add_rejection_count.sql
+├── 003_add_disputes_table.sql
+└── ...
+```
+
+### When Changing Database Schema
+
+1. **Create a new migration file** with the next sequential number
+2. **Update `migrations/manifest.json`** with the new migration entry
+3. **Include both UP and DOWN** sections in the migration
+4. **Never modify existing migrations** - only add new ones
+5. **Test the migration** with `./scripts/test-migration.sh`
+
+### Manifest Format
+
+```json
+{
+  "version": "X.Y.Z",
+  "migrations": [
+    {
+      "id": 1,
+      "name": "001_initial_schema",
+      "file": "001_initial_schema.sql",
+      "checksum": "sha256:...",
+      "appliedIn": "0.1.0"
+    }
+  ]
+}
+```
+
+**Individual projects fetch migrations from GitHub via raw URLs.** The manifest MUST be accurate or migrations will fail.
+
+See [CLI/MIGRATIONS.md](./CLI/MIGRATIONS.md) for complete migration system documentation.
+
+---
+
 ## Code Review Checklist
 
 Before merging, verify:
@@ -249,3 +295,4 @@ Before merging, verify:
 - [ ] Tests exist and pass
 - [ ] No hard-coded configuration values
 - [ ] Proper error handling with typed errors
+- [ ] If schema changed: migration file created and manifest updated

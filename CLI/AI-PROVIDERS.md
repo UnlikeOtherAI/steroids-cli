@@ -176,39 +176,56 @@ ai:
 
 ### How Steroids Calls AI Providers
 
-The orchestrator invokes AI CLIs with generated prompts:
+The orchestrator invokes AI CLIs with generated prompts via stdin:
 
 ```bash
-# For Claude
-claude --model claude-sonnet-4 --prompt "$(cat prompt.txt)"
+# For Claude Code CLI
+claude --print --model claude-sonnet-4 < /tmp/prompt.txt
 
-# For Gemini
-gemini --model gemini-pro --prompt "$(cat prompt.txt)"
+# For Gemini (via gcloud or standalone)
+# Pattern depends on installation method
+cat /tmp/prompt.txt | gemini-cli generate
 
 # For OpenAI
-openai chat --model gpt-4 --message "$(cat prompt.txt)"
+cat /tmp/prompt.txt | openai api chat.completions.create --model gpt-4
 ```
+
+**Note:** Exact CLI flags depend on the installed version. Steroids detects available CLIs and adapts invocation patterns accordingly. If a CLI's interface changes, update `~/.steroids/config.yaml` with custom invocation templates.
 
 ### Prompt Passing
 
-Prompts are passed via:
-1. **Stdin** - For long prompts
-2. **Temp file** - For very long prompts with context
-3. **--prompt flag** - For shorter prompts
+All prompts are passed via **stdin with temp file**:
 
 ```bash
-# Method 1: Stdin
-echo "$PROMPT" | claude --model claude-sonnet-4
-
-# Method 2: Temp file
+# Standard invocation pattern:
+# 1. Write prompt to temp file
 cat > /tmp/steroids-prompt-$$.txt << 'EOF'
 $PROMPT
 EOF
-claude --model claude-sonnet-4 --prompt-file /tmp/steroids-prompt-$$.txt
-rm /tmp/steroids-prompt-$$.txt
 
-# Method 3: Direct
-claude --model claude-sonnet-4 --prompt "$PROMPT"
+# 2. Invoke CLI with stdin redirection
+claude --print --model claude-sonnet-4 < /tmp/steroids-prompt-$$.txt
+
+# 3. Clean up
+rm /tmp/steroids-prompt-$$.txt
+```
+
+### Custom CLI Templates
+
+If the default invocation doesn't work for your CLI version:
+
+```yaml
+# In ~/.steroids/config.yaml
+ai:
+  coder:
+    provider:
+      value: claude
+    model:
+      value: claude-sonnet-4
+    invocation:
+      # Custom invocation template
+      # {model} and {prompt_file} are substituted
+      value: "claude --print --model {model} < {prompt_file}"
 ```
 
 ---
@@ -310,6 +327,83 @@ If a provider returns a rate limit error:
 [ERROR] Rate limit exceeded after 3 attempts. Task marked as failed.
 ```
 
+### Error Classification
+
+The CLI classifies errors by exit code and output patterns:
+
+| Error Type | Detection | Retry? | Action |
+|------------|-----------|--------|--------|
+| `rate_limit` | Exit 1 + "rate limit" in stderr | Yes (3x) | Exponential backoff |
+| `auth_error` | Exit 1 + "unauthorized"/"auth" | No | Stop, alert user |
+| `network_error` | Exit 1 + "connection"/"timeout" | Yes (cron) | Next cycle retries |
+| `model_not_found` | Exit 1 + "model"/"not found" | No | Stop, alert user |
+| `context_exceeded` | Exit 1 + "context"/"token" | No | Log, move to next task |
+| `subprocess_hung` | No log output for 15 min | No | Kill, next cycle retries |
+| `unknown` | Any other exit 1 | Yes (1x) | Log details for debugging |
+
+### Network Failure Handling
+
+**Simple retry via cron.** No special backoff logic needed:
+
+1. Network failure occurs (connection refused, timeout, DNS failure)
+2. LLM invocation fails, task status remains unchanged
+3. Next cron cycle (1 minute) picks up the same task
+4. Retries automatically when network comes back
+
+```python
+def handle_network_error():
+    # Don't retry immediately - let cron handle it
+    log_warning("Network error - will retry next cron cycle")
+    # Task status unchanged, so next wakeup will pick it up
+```
+
+### Subprocess Hang Detection
+
+LLM subprocesses are monitored by log timestamps, not wall-clock time:
+
+```python
+def monitor_subprocess(process, log_file):
+    last_output_time = datetime.now()
+
+    while process.poll() is None:
+        # Check for new output
+        if has_new_output(log_file):
+            last_output_time = datetime.now()
+
+        # Check for hang (15 minutes with no output)
+        if datetime.now() - last_output_time > timedelta(minutes=15):
+            log_error("Subprocess hung - no output for 15 minutes")
+            process.kill()
+            return "subprocess_hung"
+
+        time.sleep(10)  # Check every 10 seconds
+
+    return "completed"
+```
+
+**Why 15 minutes?** LLM sessions can involve long thinking pauses, but 15 minutes without ANY output (including progress indicators) means the subprocess is stuck.
+
+```python
+def classify_error(exit_code, stderr):
+    if exit_code == 0:
+        return None
+
+    stderr_lower = stderr.lower()
+
+    if "rate limit" in stderr_lower or "429" in stderr:
+        return "rate_limit"
+    if "unauthorized" in stderr_lower or "auth" in stderr_lower:
+        return "auth_error"
+    if "connection" in stderr_lower or "timeout" in stderr_lower:
+        return "network_error"
+    if "model" in stderr_lower and "not found" in stderr_lower:
+        return "model_not_found"
+    if "context" in stderr_lower or "token limit" in stderr_lower:
+        return "context_exceeded"
+
+    return "unknown"
+```
+
 ---
 
 ## Provider-Specific Notes
@@ -379,23 +473,189 @@ openai --version
 - Temp files are deleted immediately after use
 - No prompt content is logged (only success/failure)
 
-### Audit Trail
+### Invocation Logging
 
-Every AI invocation is logged:
+Every AI invocation is logged to `.steroids/logs/` with full input/output capture.
+
+#### Log Directory Structure
+
+```
+.steroids/logs/
+├── a1b2c3d4-coder-001.log      # First coder attempt
+├── a1b2c3d4-coder-002.log      # Second coder attempt (after rejection)
+├── a1b2c3d4-reviewer-001.log   # First review
+├── b2c3d4e5-coder-001.log      # Different task
+└── (index stored in steroids.db)
+```
+
+#### Naming Convention
+
+```
+{task_id_prefix}-{role}-{attempt}.log
+```
+
+| Part | Description |
+|------|-------------|
+| `task_id_prefix` | First 8 chars of task UUID |
+| `role` | `coder`, `reviewer`, or `orchestrator` |
+| `attempt` | Sequential attempt number (001, 002, ...) |
+
+#### Log Entry Format
+
+**Important:** Every log line includes a timestamp for hang detection. If no new timestamped output appears for 15 minutes, the subprocess is considered hung.
 
 ```json
 {
-  "timestamp": "2024-01-15T10:30:00Z",
-  "role": "coder",
-  "provider": "claude",
-  "model": "claude-sonnet-4",
-  "taskId": "task-uuid",
-  "success": true,
-  "durationMs": 45000
+  "version": 1,
+  "meta": {
+    "timestamp": "2024-01-15T10:30:00Z",
+    "taskId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "role": "coder",
+    "provider": "claude",
+    "model": "claude-sonnet-4",
+    "attempt": 1,
+    "durationMs": 45000,
+    "exitCode": 0,
+    "success": true,
+    "lastOutputAt": "2024-01-15T10:30:45Z"  // For hang detection
+  },
+  "invocation": {
+    "command": "claude --print --model claude-sonnet-4",
+    "promptFile": "/tmp/steroids-prompt-12345.txt",
+    "workingDirectory": "/path/to/project"
+  },
+  "input": {
+    "promptHash": "sha256:abc123...",
+    "promptSizeBytes": 15420,
+    "promptPreview": "# Task: Implement user authentication\n\n## Context\n..."
+  },
+  "output": {
+    "stdout": "I'll implement the authentication feature...\n\n```typescript\n...",
+    "stderr": "",
+    "stdoutSizeBytes": 8240
+  },
+  "error": null
 }
 ```
 
-Prompt content is NOT logged for security/privacy.
+#### Error Log Entry
+
+```json
+{
+  "version": 1,
+  "meta": {
+    "timestamp": "2024-01-15T10:32:00Z",
+    "taskId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "role": "coder",
+    "provider": "claude",
+    "model": "claude-sonnet-4",
+    "attempt": 2,
+    "durationMs": 1200,
+    "exitCode": 1,
+    "success": false
+  },
+  "invocation": {
+    "command": "claude --print --model claude-sonnet-4",
+    "promptFile": "/tmp/steroids-prompt-12346.txt",
+    "workingDirectory": "/path/to/project"
+  },
+  "input": {
+    "promptHash": "sha256:def456...",
+    "promptSizeBytes": 15420,
+    "promptPreview": "# Task: Implement user authentication..."
+  },
+  "output": {
+    "stdout": "",
+    "stderr": "Error: Rate limit exceeded. Please try again in 60 seconds.",
+    "stdoutSizeBytes": 0
+  },
+  "error": {
+    "type": "rate_limit",
+    "message": "Rate limit exceeded",
+    "retryable": true,
+    "retryAfterMs": 60000
+  }
+}
+```
+
+#### Index File
+
+Quick lookup without parsing all logs:
+
+```json
+{
+  "version": 1,
+  "tasks": {
+    "a1b2c3d4-e5f6-7890-abcd-ef1234567890": {
+      "title": "Implement user authentication",
+      "logs": [
+        {"file": "a1b2c3d4-coder-001.log", "role": "coder", "success": true},
+        {"file": "a1b2c3d4-reviewer-001.log", "role": "reviewer", "success": true}
+      ]
+    }
+  }
+}
+```
+
+#### CLI Commands
+
+```bash
+# View logs for a task
+steroids logs show a1b2c3d4-...
+
+# View specific invocation
+steroids logs show a1b2c3d4-... --role coder --attempt 1
+
+# Tail recent logs
+steroids logs tail
+
+# Purge old logs
+steroids logs purge --older-than 30d
+```
+
+#### Log Retention
+
+```yaml
+# In ~/.steroids/config.yaml
+logs:
+  enabled:
+    value: true
+  retentionDays:
+    value: 30
+  maxSizeMb:
+    value: 500
+  includePrompts:
+    value: true  # Set false to only log prompt hash, not content
+  purgeWithTasks:
+    value: true  # Delete logs when associated task is purged
+```
+
+#### Purge Behavior
+
+When `steroids purge tasks` is run, associated logs are also purged:
+
+```bash
+# Purge completed tasks older than 30 days
+steroids purge tasks --older-than 30d
+
+# This also deletes:
+# - .steroids/logs/{taskid}-*.log for each purged task
+# - Updates invocation_logs table in steroids.db
+```
+
+Logs for completed/disputed tasks are removed with the task. Only logs for active (pending, in_progress, review) tasks are retained.
+
+```
+Task purged: a1b2c3d4-...
+  → Deleted: .steroids/logs/a1b2c3d4-coder-001.log
+  → Deleted: .steroids/logs/a1b2c3d4-coder-002.log
+  → Deleted: .steroids/logs/a1b2c3d4-reviewer-001.log
+```
+
+To keep logs even after task purge:
+```bash
+steroids purge tasks --older-than 30d --keep-logs
+```
 
 ---
 
