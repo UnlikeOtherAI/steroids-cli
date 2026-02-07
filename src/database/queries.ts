@@ -87,6 +87,25 @@ export function listSections(db: Database.Database): Section[] {
     .all() as Section[];
 }
 
+export function getSection(
+  db: Database.Database,
+  id: string
+): Section | null {
+  // Try exact match first
+  let section = db
+    .prepare('SELECT * FROM sections WHERE id = ?')
+    .get(id) as Section | null;
+
+  // If not found, try prefix match (for short IDs)
+  if (!section && id.length >= 6) {
+    section = db
+      .prepare('SELECT * FROM sections WHERE id LIKE ?')
+      .get(`${id}%`) as Section | null;
+  }
+
+  return section;
+}
+
 export function getSectionByName(
   db: Database.Database,
   name: string

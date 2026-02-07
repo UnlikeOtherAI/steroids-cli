@@ -13,6 +13,7 @@ import {
   approveTask,
   rejectTask,
   getTaskAudit,
+  getSection,
   getSectionByName,
   STATUS_MARKERS,
   type TaskStatus,
@@ -39,12 +40,12 @@ SUBCOMMANDS:
 
 LIST OPTIONS:
   -s, --status      Filter: pending | in_progress | review | completed | all
-  --section         Filter by section name
+  --section <id>    Filter by section ID
   --search          Search in task titles
   -j, --json        Output as JSON
 
 ADD OPTIONS:
-  --section         Add under section
+  --section <id>    Section ID (REQUIRED)
   --source <file>   Specification file (REQUIRED)
 
 UPDATE OPTIONS:
@@ -145,9 +146,10 @@ async function listAllTasks(args: string[]): Promise<void> {
     let sectionId: string | undefined;
 
     if (values.section) {
-      const section = getSectionByName(db, values.section);
+      const section = getSection(db, values.section);
       if (!section) {
         console.error(`Section not found: ${values.section}`);
+        console.error('Use "steroids sections list" to see available sections.');
         process.exit(1);
       }
       sectionId = section.id;
@@ -212,31 +214,38 @@ async function addTask(args: string[]): Promise<void> {
 steroids tasks add <title> - Add a new task
 
 USAGE:
-  steroids tasks add <title> --source <file> [options]
+  steroids tasks add <title> --section <id> --source <file> [options]
 
 OPTIONS:
+  --section <id>        Section ID (REQUIRED)
   --source <file>       Specification file (REQUIRED)
-  --section <name>      Add under section
   -j, --json            Output as JSON
   -h, --help            Show help
 
 EXAMPLES:
-  steroids tasks add "Implement login" --source docs/login-spec.md
-  steroids tasks add "Fix bug" --source tmp/build-phases/02-CONFIGURATION.md --section "Phase 2"
+  steroids tasks add "Implement login" --section abc123 --source docs/login-spec.md
+  steroids tasks add "Fix bug" --section def456 --source specs/bugfix.md
 `);
     return;
   }
 
   if (positionals.length === 0) {
     console.error('Error: task title required');
-    console.error('Usage: steroids tasks add <title> --source <file>');
+    console.error('Usage: steroids tasks add <title> --section <id> --source <file>');
+    process.exit(2);
+  }
+
+  if (!values.section) {
+    console.error('Error: --section <id> is required');
+    console.error('Every task must belong to a section.');
+    console.error('Usage: steroids tasks add <title> --section <id> --source <file>');
     process.exit(2);
   }
 
   if (!values.source) {
     console.error('Error: --source <file> is required');
     console.error('Every task must reference a specification file.');
-    console.error('Usage: steroids tasks add <title> --source <file>');
+    console.error('Usage: steroids tasks add <title> --section <id> --source <file>');
     process.exit(2);
   }
 
@@ -244,19 +253,15 @@ EXAMPLES:
 
   const { db, close } = openDatabase();
   try {
-    let sectionId: string | undefined;
-
-    if (values.section) {
-      const section = getSectionByName(db, values.section);
-      if (!section) {
-        console.error(`Section not found: ${values.section}`);
-        process.exit(1);
-      }
-      sectionId = section.id;
+    const section = getSection(db, values.section);
+    if (!section) {
+      console.error(`Section not found: ${values.section}`);
+      console.error('Use "steroids sections list" to see available sections.');
+      process.exit(1);
     }
 
     const task = createTask(db, title, {
-      sectionId,
+      sectionId: section.id,
       sourceFile: values.source,
     });
 

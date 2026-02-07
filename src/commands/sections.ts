@@ -148,16 +148,17 @@ OPTIONS:
     }
 
     console.log('SECTIONS');
-    console.log('─'.repeat(60));
+    console.log('─'.repeat(90));
     console.log(
-      'POS  NAME                                          TASKS'
+      'ID        NAME                                          TASKS'
     );
-    console.log('─'.repeat(60));
+    console.log('─'.repeat(90));
 
     for (const section of sections) {
       const taskCount = getSectionTaskCount(db, section.id);
+      const shortId = section.id.substring(0, 8);
       console.log(
-        `${String(section.position).padStart(3)}  ${section.name.padEnd(44)}  ${taskCount}`
+        `${shortId}  ${section.name.padEnd(44)}  ${taskCount}`
       );
     }
   } finally {

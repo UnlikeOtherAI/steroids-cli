@@ -138,7 +138,7 @@ Arguments:
 
 List Options:
   -s, --status <status>     Filter: pending | in_progress | completed | review | all (default: pending)
-  --section <name>          Filter by section heading
+  --section <id>            Filter by section ID
   --search <text>           Full-text search in task titles
   --file <path>             Only tasks from specific file (default: TODO.md)
   --sort <field>            Sort by: line | status | section (default: line)
@@ -152,8 +152,8 @@ Update Options:
   --model <model>           Model identifier when actor is LLM
 
 Add Options:
+  --section <id>            Section ID (REQUIRED)
   --source <file>           Specification file (REQUIRED)
-  --section <name>          Add under section heading
   --status <status>         Initial status (default: pending)
   --after <title>           Insert after this task
 
@@ -174,14 +174,14 @@ Default Behavior:
 Examples:
   steroids tasks                                     # All pending tasks
   steroids tasks --status all                        # All tasks regardless of status
-  steroids tasks --section "Backend"                 # Tasks under ## Backend
+  steroids tasks --section abc123                     # Tasks in section abc123
   steroids tasks --search "login"                    # Find tasks containing "login"
 
   steroids tasks update "Fix login bug" --status completed
   steroids tasks update "Fix login" --status in_progress  # Partial match works
 
-  steroids tasks add "New feature" --source specs/frontend.md --section "Frontend"
-  steroids tasks add "Bug fix" --source specs/bugfix.md --after "Fix login bug"
+  steroids tasks add "New feature" --section abc123 --source specs/frontend.md
+  steroids tasks add "Bug fix" --section def456 --source specs/bugfix.md
 
   # Mark task complete and trigger hooks
   steroids tasks update "Deploy to prod" --status completed
