@@ -78,3 +78,23 @@ export {
   canResolve,
   getResolutionSummary,
 } from './resolve.js';
+
+// Stale dispute handling
+export type {
+  StaleAlertType,
+  StaleDisputesResult,
+  StaleDisputeInfo,
+  StaleAlertConfig,
+  AlertResult,
+  StaleCheckOptions,
+} from './stale.js';
+
+export {
+  DEFAULT_TIMEOUT_DAYS,
+  checkStaleDisputes,
+  getStaleDisputeSummary,
+  alertStaleDisputes,
+  performStaleCheck,
+  listOpenDisputesByAge,
+  formatDisputeAge,
+} from './stale.js';
