@@ -10,6 +10,7 @@ import { tasksCommand } from './commands/tasks.js';
 import { sectionsCommand } from './commands/sections.js';
 import { loopCommand } from './commands/loop.js';
 import { runnersCommand } from './commands/runners.js';
+import { configCommand } from './commands/config.js';
 
 const VERSION = '0.1.0';
 
@@ -25,6 +26,7 @@ COMMANDS:
   tasks             Manage tasks
   loop              Run the orchestrator loop
   runners           Manage runner daemons
+  config            Manage configuration
 
 OPTIONS:
   -h, --help        Show help
@@ -72,6 +74,9 @@ async function main(): Promise<void> {
         break;
       case 'runners':
         await runnersCommand(commandArgs);
+        break;
+      case 'config':
+        await configCommand(commandArgs);
         break;
       default:
         console.error(`Unknown command: ${command}`);
