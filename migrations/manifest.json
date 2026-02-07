@@ -1,0 +1,14 @@
+{
+  "version": "0.1.0",
+  "latestDbVersion": 1,
+  "migrations": [
+    {
+      "id": 1,
+      "name": "001_initial_schema",
+      "file": "001_initial_schema.sql",
+      "description": "Initial database schema with tasks, sections, disputes, and audit tables",
+      "checksum": "",
+      "cliVersion": "0.1.0"
+    }
+  ]
+}

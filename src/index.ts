@@ -11,6 +11,7 @@ import { sectionsCommand } from './commands/sections.js';
 import { loopCommand } from './commands/loop.js';
 import { runnersCommand } from './commands/runners.js';
 import { configCommand } from './commands/config.js';
+import { healthCommand } from './commands/health.js';
 
 const VERSION = '0.1.0';
 
@@ -27,6 +28,7 @@ COMMANDS:
   loop              Run the orchestrator loop
   runners           Manage runner daemons
   config            Manage configuration
+  health            Check project health
 
 OPTIONS:
   -h, --help        Show help
@@ -77,6 +79,9 @@ async function main(): Promise<void> {
         break;
       case 'config':
         await configCommand(commandArgs);
+        break;
+      case 'health':
+        await healthCommand(commandArgs);
         break;
       default:
         console.error(`Unknown command: ${command}`);
