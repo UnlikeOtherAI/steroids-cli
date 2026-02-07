@@ -94,13 +94,19 @@ export class ClaudeProvider extends BaseAIProvider {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT;
     const cwd = options.cwd ?? process.cwd();
     const model = options.model;
+    const streamOutput = options.streamOutput ?? true;
+
+    // Apply custom invocation template if provided in options
+    if (options.invocationTemplate) {
+      this.setInvocationTemplate(options.invocationTemplate);
+    }
 
     // Write prompt to temp file
     const promptFile = options.promptFile ?? this.writePromptFile(prompt);
     const createdTempFile = !options.promptFile;
 
     try {
-      return await this.invokeWithFile(promptFile, model, timeout, cwd);
+      return await this.invokeWithFile(promptFile, model, timeout, cwd, streamOutput);
     } finally {
       if (createdTempFile) {
         this.cleanupPromptFile(promptFile);
@@ -109,13 +115,14 @@ export class ClaudeProvider extends BaseAIProvider {
   }
 
   /**
-   * Invoke Claude CLI with a prompt file
+   * Invoke Claude CLI with a prompt file using the invocation template
    */
   private invokeWithFile(
     promptFile: string,
     model: string,
     timeout: number,
-    cwd: string
+    cwd: string,
+    streamOutput: boolean
   ): Promise<InvokeResult> {
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -123,10 +130,11 @@ export class ClaudeProvider extends BaseAIProvider {
       let stderr = '';
       let timedOut = false;
 
-      const cli = this.cliPath ?? 'claude';
+      // Build command from invocation template
+      const command = this.buildCommand(promptFile, model);
 
-      // Use -p flag for print mode, read prompt from file via shell
-      const child = spawn(cli, ['-p', `$(cat ${promptFile})`, '--model', model], {
+      // Spawn using shell to handle the command template
+      const child = spawn(command, {
         shell: true,
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -146,14 +154,18 @@ export class ClaudeProvider extends BaseAIProvider {
       child.stdout?.on('data', (data: Buffer) => {
         const text = data.toString();
         stdout += text;
-        // Stream output in real-time
-        process.stdout.write(text);
+        // Stream output in real-time if enabled
+        if (streamOutput) {
+          process.stdout.write(text);
+        }
       });
 
       child.stderr?.on('data', (data: Buffer) => {
         const text = data.toString();
         stderr += text;
-        process.stderr.write(text);
+        if (streamOutput) {
+          process.stderr.write(text);
+        }
       });
 
       child.on('close', (code) => {

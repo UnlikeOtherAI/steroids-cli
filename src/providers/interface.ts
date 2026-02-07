@@ -17,6 +17,10 @@ export interface InvokeOptions {
   promptFile?: string;
   /** Role for this invocation (orchestrator, coder, reviewer) */
   role?: 'orchestrator' | 'coder' | 'reviewer';
+  /** Custom invocation template (e.g., "claude -p {prompt_file} --model {model}") */
+  invocationTemplate?: string;
+  /** Whether to stream output to stdout/stderr */
+  streamOutput?: boolean;
 }
 
 /**
@@ -140,6 +144,24 @@ export interface IAIProvider {
    * @param path Path to CLI executable
    */
   setCliPath(path: string): void;
+
+  /**
+   * Get the default invocation template
+   * @returns Default template with {prompt_file} and {model} placeholders
+   */
+  getDefaultInvocationTemplate(): string;
+
+  /**
+   * Set a custom invocation template
+   * @param template Custom template with {prompt_file} and {model} placeholders
+   */
+  setInvocationTemplate(template: string): void;
+
+  /**
+   * Get the current invocation template
+   * @returns Current template (custom or default)
+   */
+  getInvocationTemplate(): string;
 }
 
 /**
@@ -151,12 +173,14 @@ export abstract class BaseAIProvider implements IAIProvider {
   abstract readonly displayName: string;
 
   protected cliPath: string | undefined;
+  protected invocationTemplate: string | undefined;
 
   abstract invoke(prompt: string, options: InvokeOptions): Promise<InvokeResult>;
   abstract isAvailable(): Promise<boolean>;
   abstract listModels(): string[];
   abstract getModelInfo(): ModelInfo[];
   abstract getDefaultModel(role: 'orchestrator' | 'coder' | 'reviewer'): string | undefined;
+  abstract getDefaultInvocationTemplate(): string;
 
   /**
    * Classify an error based on exit code and stderr
@@ -225,5 +249,29 @@ export abstract class BaseAIProvider implements IAIProvider {
 
   setCliPath(path: string): void {
     this.cliPath = path;
+  }
+
+  setInvocationTemplate(template: string): void {
+    this.invocationTemplate = template;
+  }
+
+  getInvocationTemplate(): string {
+    return this.invocationTemplate ?? this.getDefaultInvocationTemplate();
+  }
+
+  /**
+   * Build the command from the invocation template
+   * @param promptFile Path to the prompt file
+   * @param model Model identifier
+   * @returns Command string ready for execution
+   */
+  protected buildCommand(promptFile: string, model: string): string {
+    const template = this.getInvocationTemplate();
+    const cli = this.cliPath ?? this.name;
+
+    return template
+      .replace('{cli}', cli)
+      .replace('{prompt_file}', promptFile)
+      .replace('{model}', model);
   }
 }
