@@ -84,6 +84,18 @@ CREATE TABLE IF NOT EXISTS task_locks (
     expires_at TEXT NOT NULL,
     heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_task_locks_expires ON task_locks(expires_at);
+
+-- Section locks (for orchestrator coordination)
+CREATE TABLE IF NOT EXISTS section_locks (
+    section_id TEXT PRIMARY KEY REFERENCES sections(id),
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_section_locks_expires ON section_locks(expires_at);
 `;
 
 export const INITIAL_SCHEMA_DATA = `
