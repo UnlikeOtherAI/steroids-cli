@@ -372,6 +372,11 @@ export const CONFIG_SCHEMA: SchemaObject = {
       },
     },
   },
+  hooks: {
+    _description: 'Event hooks for automation (scripts and webhooks)',
+    _type: 'array',
+    _default: [],
+  },
 };
 
 /**

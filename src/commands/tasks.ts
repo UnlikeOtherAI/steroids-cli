@@ -28,6 +28,13 @@ import {
 import { outputJson as outputEnvelope, outputJsonError, createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
 import { generateHelp } from '../cli/help.js';
+import {
+  shouldSkipHooks,
+  triggerTaskCreated,
+  triggerTaskUpdated,
+  triggerTaskCompleted,
+  triggerHooksSafely,
+} from '../hooks/integration.js';
 
 const HELP = generateHelp({
   command: 'tasks',
@@ -498,6 +505,14 @@ EXAMPLES:
       sourceFile: values.source,
     });
 
+    // Trigger task.created hooks
+    if (!shouldSkipHooks(flags)) {
+      await triggerHooksSafely(
+        () => triggerTaskCreated(task, { verbose: flags.verbose }),
+        { verbose: flags.verbose }
+      );
+    }
+
     out.success({ task });
     if (!flags.json) {
       out.log(`Task created: ${task.title}`);
@@ -591,11 +606,20 @@ EXAMPLES:
     }
 
     // Update status if provided
+    const previousStatus = task.status;
     if (values.status) {
       updateTaskStatus(db, task.id, values.status as TaskStatus, actor, values.notes as string | undefined);
     }
 
     const updated = getTask(db, task.id);
+
+    // Trigger task.updated hooks
+    if (!shouldSkipHooks(flags) && updated) {
+      await triggerHooksSafely(
+        () => triggerTaskUpdated(updated, previousStatus, { verbose: flags.verbose }),
+        { verbose: flags.verbose }
+      );
+    }
 
     if (flags.json) {
       out.success({ task: updated, rejectionReset: oldRejectionCount !== undefined, oldRejectionCount });
@@ -663,6 +687,14 @@ OPTIONS:
     approveTask(db, task.id, values.model, values.notes);
 
     const updated = getTask(db, task.id);
+
+    // Trigger task.completed hooks
+    if (!shouldSkipHooks(flags) && updated) {
+      await triggerHooksSafely(
+        () => triggerTaskCompleted(updated, { verbose: flags.verbose }),
+        { verbose: flags.verbose }
+      );
+    }
 
     out.success({ task: updated });
     if (!flags.json) {

@@ -56,6 +56,15 @@ export enum ErrorCode {
 
   /** Hook execution failed */
   HOOK_FAILED = 'HOOK_FAILED',
+
+  /** Validation error */
+  VALIDATION_ERROR = 'VALIDATION_ERROR',
+
+  /** Internal error */
+  INTERNAL_ERROR = 'INTERNAL_ERROR',
+
+  /** Feature not implemented */
+  NOT_IMPLEMENTED = 'NOT_IMPLEMENTED',
 }
 
 /**
@@ -116,6 +125,9 @@ export const ERROR_CODE_TO_EXIT_CODE: Record<ErrorCode, ExitCode> = {
   [ErrorCode.NOT_INITIALIZED]: ExitCode.CONFIG_ERROR,
   [ErrorCode.MIGRATION_REQUIRED]: ExitCode.CONFIG_ERROR,
   [ErrorCode.HOOK_FAILED]: ExitCode.GENERAL_ERROR,
+  [ErrorCode.VALIDATION_ERROR]: ExitCode.INVALID_ARGUMENTS,
+  [ErrorCode.INTERNAL_ERROR]: ExitCode.GENERAL_ERROR,
+  [ErrorCode.NOT_IMPLEMENTED]: ExitCode.GENERAL_ERROR,
 };
 
 /**

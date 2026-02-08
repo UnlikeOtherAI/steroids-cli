@@ -105,6 +105,7 @@ export interface SteroidsConfig {
       minCoverage?: number;
     };
   };
+  hooks?: unknown[]; // Array of hook configurations
 }
 
 /**

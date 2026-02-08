@@ -40,3 +40,6 @@ export * from './merge.js';
 
 // Orchestrator
 export * from './orchestrator.js';
+
+// Integration helpers
+export * from './integration.js';
