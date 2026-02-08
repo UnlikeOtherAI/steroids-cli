@@ -193,7 +193,6 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
   quality: {
     tests: {
       required: false,
-      minCoverage: 80,
     },
   },
 };

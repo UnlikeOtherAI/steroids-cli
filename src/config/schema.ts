@@ -369,7 +369,6 @@ export const CONFIG_SCHEMA: SchemaObject = {
       minCoverage: {
         _description: 'Minimum test coverage percentage (0-100)',
         _type: 'number',
-        _default: 80,
       },
     },
   },

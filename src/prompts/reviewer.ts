@@ -154,7 +154,7 @@ function getTestCoverageInstructions(config: SteroidsConfig): string {
     return '';
   }
 
-  const minCoverageNote = config.quality.tests.minCoverage
+  const minCoverageNote = config.quality.tests.minCoverage !== undefined
     ? `- Minimum coverage: ${config.quality.tests.minCoverage}%`
     : '';
 
