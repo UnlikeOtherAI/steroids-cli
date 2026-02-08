@@ -46,7 +46,21 @@ CREATE TABLE IF NOT EXISTS _global_schema (
 );
 `;
 
-const GLOBAL_SCHEMA_VERSION = '1';
+/**
+ * Schema upgrade from version 1 to version 2: Add projects table
+ */
+const GLOBAL_SCHEMA_V2_SQL = `
+-- Projects table for tracking registered projects
+CREATE TABLE IF NOT EXISTS projects (
+    path TEXT PRIMARY KEY,
+    name TEXT,
+    registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    enabled INTEGER NOT NULL DEFAULT 1
+);
+`;
+
+const GLOBAL_SCHEMA_VERSION = '2';
 
 /**
  * Get the path to the global steroids directory
@@ -88,15 +102,19 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
 
-  // Create schema (IF NOT EXISTS makes this idempotent)
+  // Create base schema (IF NOT EXISTS makes this idempotent)
   db.exec(GLOBAL_SCHEMA_SQL);
 
-  // Set version if not set
-  const version = db
+  // Get current version
+  const versionRow = db
     .prepare('SELECT value FROM _global_schema WHERE key = ?')
     .get('version') as { value: string } | undefined;
 
-  if (!version) {
+  const currentVersion = versionRow?.value;
+
+  if (!currentVersion) {
+    // Fresh database - apply all schemas and set to latest version
+    db.exec(GLOBAL_SCHEMA_V2_SQL);
     db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
       'version',
       GLOBAL_SCHEMA_VERSION
@@ -105,7 +123,15 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
       'created_at',
       new Date().toISOString()
     );
+  } else if (currentVersion === '1' && GLOBAL_SCHEMA_VERSION === '2') {
+    // Upgrade from version 1 to version 2
+    db.exec(GLOBAL_SCHEMA_V2_SQL);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
   }
+  // Future upgrades would be handled here with additional conditions
 
   return {
     db,
