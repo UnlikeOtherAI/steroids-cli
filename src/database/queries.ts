@@ -417,20 +417,27 @@ export function createSystemDisputeForRejection(
 
 // ============ Task Selection (for orchestrator) ============
 
-export function findNextTask(db: Database.Database): {
+export function findNextTask(
+  db: Database.Database,
+  sectionId?: string
+): {
   task: Task | null;
   action: 'review' | 'resume' | 'start' | 'idle';
 } {
+  // Build WHERE clause for section filtering
+  const sectionFilter = sectionId ? 'AND t.section_id = ?' : '';
+  const sectionParams = sectionId ? [sectionId] : [];
+
   // Priority 1: Tasks ready for review
   const reviewTask = db
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
-       WHERE t.status = 'review'
+       WHERE t.status = 'review' ${sectionFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at
        LIMIT 1`
     )
-    .get() as Task | undefined;
+    .get(...sectionParams) as Task | undefined;
 
   if (reviewTask) {
     return { task: reviewTask, action: 'review' };
@@ -441,11 +448,11 @@ export function findNextTask(db: Database.Database): {
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
-       WHERE t.status = 'in_progress'
+       WHERE t.status = 'in_progress' ${sectionFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at
        LIMIT 1`
     )
-    .get() as Task | undefined;
+    .get(...sectionParams) as Task | undefined;
 
   if (inProgressTask) {
     return { task: inProgressTask, action: 'resume' };
@@ -456,11 +463,11 @@ export function findNextTask(db: Database.Database): {
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
-       WHERE t.status = 'pending'
+       WHERE t.status = 'pending' ${sectionFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at
        LIMIT 1`
     )
-    .get() as Task | undefined;
+    .get(...sectionParams) as Task | undefined;
 
   if (pendingTask) {
     return { task: pendingTask, action: 'start' };

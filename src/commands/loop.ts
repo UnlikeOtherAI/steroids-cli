@@ -8,7 +8,15 @@ import { parseArgs } from 'node:util';
 import { existsSync, statSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { openDatabase } from '../database/connection.js';
-import { getTask, updateTaskStatus, approveTask, rejectTask } from '../database/queries.js';
+import {
+  getTask,
+  updateTaskStatus,
+  approveTask,
+  rejectTask,
+  getSection,
+  getSectionByName,
+  listSections,
+} from '../database/queries.js';
 import {
   selectNextTask,
   markTaskInProgress,
@@ -29,6 +37,7 @@ USAGE:
 
 OPTIONS:
   --project <path>    Run loop for specific project directory
+  --section <id|name> Focus on a specific section only
   --once              Run one iteration only (don't loop)
   --dry-run           Show what would be done without doing it
   -h, --help          Show help
@@ -46,11 +55,15 @@ DESCRIPTION:
   - review > in_progress > pending
   - Within priority: by section position, then creation time
 
+  When using --section, only tasks from that section are processed.
+
 EXAMPLES:
   steroids loop                         # Run until all tasks done
   steroids loop --once                  # Run one task only
   steroids loop --dry-run               # Preview without executing
   steroids loop --project ~/code/myapp  # Run loop for specific project
+  steroids loop --section "Phase 2"     # Focus on specific section
+  steroids loop --section fd1f          # Section by ID prefix
 `;
 
 export async function loopCommand(args: string[], flags: GlobalFlags): Promise<void> {
@@ -61,6 +74,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
       once: { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
       project: { type: 'string' },
+      section: { type: 'string' },
     },
     allowPositionals: false,
   });
@@ -123,18 +137,59 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     process.exit(1);
   }
 
+  const { db, close } = openDatabase();
+
+  // Resolve section if --section flag is provided
+  let focusedSectionId: string | undefined;
+  let focusedSectionName: string | undefined;
+
+  if (values.section) {
+    const sectionInput = values.section as string;
+
+    // Try to resolve by ID (exact or prefix match)
+    let section = getSection(db, sectionInput);
+
+    // If not found by ID, try by name
+    if (!section) {
+      section = getSectionByName(db, sectionInput);
+    }
+
+    if (!section) {
+      console.error(`Error: Section not found: ${sectionInput}`);
+      console.error('');
+      console.error('Available sections:');
+      const sections = listSections(db);
+      if (sections.length === 0) {
+        console.error('  (no sections defined)');
+      } else {
+        for (const s of sections) {
+          console.error(`  ${s.id.substring(0, 8)}  ${s.name}`);
+        }
+      }
+      close();
+      process.exit(1);
+    }
+
+    focusedSectionId = section.id;
+    focusedSectionName = section.name;
+  }
+
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');
   console.log('║                    STEROIDS ORCHESTRATOR                      ║');
+  if (focusedSectionName) {
+    const sectionLabel = `Focused: ${focusedSectionName}`;
+    const padding = Math.floor((60 - sectionLabel.length) / 2);
+    console.log(`║${' '.repeat(padding)}${sectionLabel}${' '.repeat(60 - padding - sectionLabel.length)}║`);
+  }
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
 
-  const { db, close } = openDatabase();
-
   try {
     // Show initial status
-    const counts = getTaskCounts(db);
-    console.log('Task Status:');
+    const counts = getTaskCounts(db, focusedSectionId);
+    const statusLabel = focusedSectionName ? `Task Status (${focusedSectionName} only):` : 'Task Status:';
+    console.log(statusLabel);
     console.log(`  Pending:     ${counts.pending}`);
     console.log(`  In Progress: ${counts.in_progress}`);
     console.log(`  Review:      ${counts.review}`);
@@ -146,7 +201,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     console.log('');
 
     if (values['dry-run']) {
-      const next = selectNextTask(db);
+      const next = selectNextTask(db, focusedSectionId);
       if (next) {
         console.log(`[DRY RUN] Would process: ${next.task.title}`);
         console.log(`  Action: ${next.action}`);
@@ -165,12 +220,18 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
       console.log(`\n─── Iteration ${iteration} ───\n`);
 
       // Select next task
-      const selected = selectNextTask(db);
+      const selected = selectNextTask(db, focusedSectionId);
 
       if (!selected) {
         console.log('');
         console.log('╔════════════════════════════════════════════════════════════╗');
-        console.log('║                      ALL TASKS COMPLETE                       ║');
+        if (focusedSectionName) {
+          const completeLabel = `SECTION "${focusedSectionName}" COMPLETE`;
+          const padding = Math.floor((60 - completeLabel.length) / 2);
+          console.log(`║${' '.repeat(padding)}${completeLabel}${' '.repeat(60 - padding - completeLabel.length)}║`);
+        } else {
+          console.log('║                      ALL TASKS COMPLETE                       ║');
+        }
         console.log('╚════════════════════════════════════════════════════════════╝');
         console.log('');
         break;
@@ -205,8 +266,9 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     }
 
     // Final status
-    const finalCounts = getTaskCounts(db);
-    console.log('\nFinal Status:');
+    const finalCounts = getTaskCounts(db, focusedSectionId);
+    const finalLabel = focusedSectionName ? `\nFinal Status (${focusedSectionName}):` : '\nFinal Status:';
+    console.log(finalLabel);
     console.log(`  Completed: ${finalCounts.completed}`);
     console.log(`  Failed:    ${finalCounts.failed}`);
     console.log(`  Disputed:  ${finalCounts.disputed}`);

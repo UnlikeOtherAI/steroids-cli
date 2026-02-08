@@ -39,6 +39,7 @@ export interface TaskSelectionOptions {
   noWait?: boolean;
   waitTimeoutMs?: number;
   pollIntervalMs?: number;
+  sectionId?: string;  // NEW: Focus on this section only
 }
 
 /**
@@ -53,8 +54,11 @@ export interface TaskSelectionOptions {
  * - Section position (lower first)
  * - Creation time (older first)
  */
-export function selectNextTask(db: Database.Database): SelectedTask | null {
-  const result = findNextTask(db);
+export function selectNextTask(
+  db: Database.Database,
+  sectionId?: string
+): SelectedTask | null {
+  const result = findNextTask(db, sectionId);
 
   if (!result.task || result.action === 'idle') {
     return null;
@@ -88,15 +92,18 @@ export function markTaskInProgress(db: Database.Database, taskId: string): void 
 /**
  * Check if all tasks are completed
  */
-export function areAllTasksComplete(db: Database.Database): boolean {
-  const result = findNextTask(db);
+export function areAllTasksComplete(db: Database.Database, sectionId?: string): boolean {
+  const result = findNextTask(db, sectionId);
   return result.action === 'idle';
 }
 
 /**
  * Count tasks by status
  */
-export function getTaskCounts(db: Database.Database): {
+export function getTaskCounts(
+  db: Database.Database,
+  sectionId?: string
+): {
   pending: number;
   in_progress: number;
   review: number;
@@ -115,9 +122,17 @@ export function getTaskCounts(db: Database.Database): {
     total: 0,
   };
 
-  const rows = db
-    .prepare('SELECT status, COUNT(*) as count FROM tasks GROUP BY status')
-    .all() as { status: string; count: number }[];
+  let query = 'SELECT status, COUNT(*) as count FROM tasks';
+  const params: string[] = [];
+
+  if (sectionId) {
+    query += ' WHERE section_id = ?';
+    params.push(sectionId);
+  }
+
+  query += ' GROUP BY status';
+
+  const rows = db.prepare(query).all(...params) as { status: string; count: number }[];
 
   for (const row of rows) {
     if (row.status in counts) {
@@ -152,7 +167,7 @@ export function selectNextTaskWithLock(
   const lockedTaskIds = new Set(listTaskLocks(db).map(lock => lock.task_id));
 
   // Find next available task that is not locked
-  const candidates = findNextTaskSkippingLocked(db, lockedTaskIds, runnerId);
+  const candidates = findNextTaskSkippingLocked(db, lockedTaskIds, runnerId, options.sectionId);
 
   if (!candidates) {
     return null;
@@ -185,17 +200,22 @@ export function selectNextTaskWithLock(
 function findNextTaskSkippingLocked(
   db: Database.Database,
   lockedTaskIds: Set<string>,
-  runnerId: string
+  runnerId: string,
+  sectionId?: string
 ): SelectedTask | null {
+  // Build WHERE clause for section filtering
+  const sectionFilter = sectionId ? 'AND t.section_id = ?' : '';
+  const sectionParams = sectionId ? [sectionId] : [];
+
   // Priority 1: Tasks in 'review' status
   const reviewTasks = db
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
-       WHERE t.status = 'review'
+       WHERE t.status = 'review' ${sectionFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
-    .all() as Task[];
+    .all(...sectionParams) as Task[];
 
   for (const task of reviewTasks) {
     if (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId)) {
@@ -208,10 +228,10 @@ function findNextTaskSkippingLocked(
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
-       WHERE t.status = 'in_progress'
+       WHERE t.status = 'in_progress' ${sectionFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
-    .all() as Task[];
+    .all(...sectionParams) as Task[];
 
   for (const task of inProgressTasks) {
     if (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId)) {
@@ -227,10 +247,10 @@ function findNextTaskSkippingLocked(
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
-       WHERE t.status = 'pending'
+       WHERE t.status = 'pending' ${sectionFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
-    .all() as Task[];
+    .all(...sectionParams) as Task[];
 
   for (const task of pendingTasks) {
     if (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId)) {
