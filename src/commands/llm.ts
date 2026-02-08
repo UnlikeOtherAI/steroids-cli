@@ -9,82 +9,88 @@ import { listRunners } from '../runners/daemon.js';
 
 const LLM_INSTRUCTIONS = `# STEROIDS LLM QUICK REFERENCE
 
-## SYSTEM OVERVIEW
-Steroids=automated task execution with coder/reviewer loop.
-Tasks: pending→in_progress(coder)→review(reviewer)→completed|rejected→pending
-One runner per project. Multiple projects can run in parallel.
+## WHAT IS STEROIDS
+Steroids=automated task orchestration system.
+It manages tasks and invokes LLM agents (coders/reviewers) to execute them.
+The system spawns separate LLM processes for coding and reviewing.
 
-## YOUR ROLE
-You are either CODER or REVIEWER (check task status).
-CODER: implement task per spec, commit, submit for review.
-REVIEWER: verify implementation matches spec, approve or reject.
+## TASK FLOW
+pending → in_progress (coder works) → review (reviewer checks) → completed OR rejected→pending
+Runner daemon picks tasks and invokes appropriate LLM agents automatically.
 
-## CRITICAL RULES
-1. ONLY work on YOUR project (check current directory)
-2. NEVER modify files in other projects
-3. Read task spec before coding: steroids tasks audit <id>
-4. Commit after completing work
-5. Submit for review: steroids tasks update <id> --status review --actor model --model <your-model>
+## ARCHITECTURE
+- Tasks stored in .steroids/steroids.db (per project)
+- Runner daemon executes the loop (one per project)
+- Coder LLM: implements task, commits, submits for review
+- Reviewer LLM: verifies implementation, approves or rejects
+- You (reading this): likely helping user manage/debug the system
+
+## MULTI-PROJECT
+- Multiple projects can have runners simultaneously
+- Each runner bound to ONE project only
+- Global registry at ~/.steroids/steroids.db tracks all projects
+- NEVER modify files outside current project
 
 ## KEY COMMANDS
 
-### Tasks
-steroids tasks                          # list pending (local)
-steroids tasks --status active          # in_progress+review (local)
+### View Tasks
+steroids tasks                          # pending tasks (current project)
+steroids tasks --status active          # in_progress+review (current project)
 steroids tasks --status active --global # active across ALL projects
 steroids tasks --status all             # all tasks
-steroids tasks audit <id>               # view task spec+history
+steroids tasks audit <id>               # view task spec, history, rejection notes
 
-### Task Actions (CODER)
-steroids tasks update <id> --status in_progress --actor model --model <m>
-steroids tasks update <id> --status review --actor model --model <m>
-
-### Task Actions (REVIEWER)
-steroids tasks approve <id> --model <m>                    # approve
-steroids tasks approve <id> --model <m> --notes "msg"      # approve with note
-steroids tasks reject <id> --model <m> --notes "feedback"  # reject (be specific)
+### Manage Tasks
+steroids tasks update <id> --status <s> --actor model --model <m>
+  statuses: pending, in_progress, review, completed
+steroids tasks approve <id> --model <m> [--notes "msg"]     # mark completed
+steroids tasks reject <id> --model <m> --notes "feedback"   # back to pending
 
 ### Sections
-steroids sections list                  # list sections (local project)
-steroids sections skip <id>             # skip section
-steroids sections unskip <id>           # unskip
+steroids sections list                  # list sections
+steroids sections skip <id>             # exclude from runner
+steroids sections unskip <id>           # include in runner
 
-### Runners
+### Runners (daemon that executes tasks)
 steroids runners list                   # all runners (all projects)
-steroids runners start --detach         # start background runner
-steroids runners start --section "X"    # focus on section
-steroids runners stop --all             # stop all runners
-steroids runners status                 # current runner status
+steroids runners start --detach         # start background daemon
+steroids runners start --section "X"    # focus on specific section
+steroids runners stop --all             # stop all
+steroids runners status                 # current state
+steroids runners logs <pid>             # view daemon output
 
 ### Projects
 steroids projects list                  # all registered projects
 
-## TASK LIFECYCLE
-1. Pick task: steroids tasks (shows pending)
-2. Claim: steroids tasks update <id> --status in_progress --actor model --model <m>
-3. Read spec: steroids tasks audit <id>
-4. Implement (write code, run tests)
-5. Commit changes
-6. Submit: steroids tasks update <id> --status review --actor model --model <m>
+## COMMON OPERATIONS
 
-## REVIEW LIFECYCLE
-1. Check review queue: steroids tasks --status review
-2. Read spec: steroids tasks audit <id>
-3. Verify implementation matches spec
-4. Decision:
-   - APPROVE: steroids tasks approve <id> --model <m>
-   - REJECT: steroids tasks reject <id> --model <m> --notes "specific feedback"
+### Start automation
+steroids runners start --detach         # daemon picks tasks and invokes coders/reviewers
 
-## REJECTION RULES
-- Be SPECIFIC in rejection notes (coder needs to fix)
-- Max 15 rejections per task, then requires human intervention
-- Don't reject for style preferences if it works
+### Check what's happening
+steroids tasks --status active --global # see all active work
+steroids runners list                   # see all running daemons
 
-## MULTI-PROJECT SAFETY
-- Check project: pwd (or see header in task listings)
-- Each project has separate database in .steroids/steroids.db
-- Runner is bound to ONE project
-- NEVER cd to another project and modify files
+### Unblock stuck task in review
+steroids tasks approve <id> --model human   # approve manually
+steroids tasks reject <id> --model human --notes "reason"  # reject manually
+
+### Restart failed task
+steroids tasks update <id> --status pending --actor human  # reset to pending
+
+## TASK STATES
+- pending: waiting to be picked up
+- in_progress: coder is working on it
+- review: coder submitted, waiting for reviewer
+- completed: approved by reviewer
+- failed: exceeded 15 rejections, needs human intervention
+- disputed: coder/reviewer disagreement, needs human resolution
+
+## IMPORTANT NOTES
+- Task spec is in source file (see tasks audit output)
+- Max 15 rejections before task fails
+- Runner auto-restarts via cron (steroids runners cron install)
+- Each project isolated: own database, own runner
 `;
 
 export async function llmCommand(args: string[], flags: GlobalFlags): Promise<void> {

@@ -586,6 +586,23 @@ export function createSystemDisputeForRejection(
 
 // ============ Task Selection (for orchestrator) ============
 
+/**
+ * Helper to filter out tasks from sections with unmet dependencies
+ */
+function filterTasksWithMetDependencies(
+  db: Database.Database,
+  tasks: Task[]
+): Task[] {
+  return tasks.filter(task => {
+    if (!task.section_id) {
+      // Tasks without a section are always allowed
+      return true;
+    }
+    // Check if section has all dependencies met
+    return hasDependenciesMet(db, task.section_id);
+  });
+}
+
 export function findNextTask(
   db: Database.Database,
   sectionId?: string
@@ -598,48 +615,48 @@ export function findNextTask(
   const sectionParams = sectionId ? [sectionId] : [];
 
   // Priority 1: Tasks ready for review
-  const reviewTask = db
+  const reviewTasks = db
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'review' ${sectionFilter}
-       ORDER BY COALESCE(s.position, 999999), t.created_at
-       LIMIT 1`
+       ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
-    .get(...sectionParams) as Task | undefined;
+    .all(...sectionParams) as Task[];
 
-  if (reviewTask) {
-    return { task: reviewTask, action: 'review' };
+  const filteredReviewTasks = filterTasksWithMetDependencies(db, reviewTasks);
+  if (filteredReviewTasks.length > 0) {
+    return { task: filteredReviewTasks[0], action: 'review' };
   }
 
   // Priority 2: Tasks in progress
-  const inProgressTask = db
+  const inProgressTasks = db
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'in_progress' ${sectionFilter}
-       ORDER BY COALESCE(s.position, 999999), t.created_at
-       LIMIT 1`
+       ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
-    .get(...sectionParams) as Task | undefined;
+    .all(...sectionParams) as Task[];
 
-  if (inProgressTask) {
-    return { task: inProgressTask, action: 'resume' };
+  const filteredInProgressTasks = filterTasksWithMetDependencies(db, inProgressTasks);
+  if (filteredInProgressTasks.length > 0) {
+    return { task: filteredInProgressTasks[0], action: 'resume' };
   }
 
   // Priority 3: Pending tasks
-  const pendingTask = db
+  const pendingTasks = db
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'pending' ${sectionFilter}
-       ORDER BY COALESCE(s.position, 999999), t.created_at
-       LIMIT 1`
+       ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
-    .get(...sectionParams) as Task | undefined;
+    .all(...sectionParams) as Task[];
 
-  if (pendingTask) {
-    return { task: pendingTask, action: 'start' };
+  const filteredPendingTasks = filterTasksWithMetDependencies(db, pendingTasks);
+  if (filteredPendingTasks.length > 0) {
+    return { task: filteredPendingTasks[0], action: 'start' };
   }
 
   return { task: null, action: 'idle' };

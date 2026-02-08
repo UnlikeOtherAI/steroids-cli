@@ -4,7 +4,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { findNextTask, getTask, updateTaskStatus, getLastRejectionNotes } from '../database/queries.js';
+import { findNextTask, getTask, updateTaskStatus, getLastRejectionNotes, hasDependenciesMet } from '../database/queries.js';
 import type { Task } from '../database/queries.js';
 import {
   acquireTaskLock,
