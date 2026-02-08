@@ -167,18 +167,21 @@ ${rejectionSection}
 1. Search for files/code that match the specification requirements
 2. Run \`git log --oneline -20\` to see recent commits
 3. If the implementation already exists:
-   - Identify which commit contains the work
-   - Verify it matches the specification
+   - Identify which commit contains the work (you NEED the hash)
+   - Verify it matches the specification with \`git show <hash>\`
    - **Do NOT create duplicate code**
-   - Submit for review with a note identifying the existing commit
+   - Submit for review with a note including the commit hash AND file list
 
 \`\`\`bash
 # Example: If work exists in commit abc1234
-git log --oneline -20  # Find the commit
-git show abc1234       # Verify it matches spec
-# Then submit for review - no new commit needed
-steroids tasks update ${task.id} --status review
+git log --oneline -20  # Find commits
+git show abc1234 --stat  # Verify it matches spec, note the files
+
+# IMPORTANT: Include commit hash and files in your notes
+steroids tasks update ${task.id} --status review --notes "Work exists in commit abc1234. Files: src/foo.ts, src/bar.ts. Verified against spec."
 \`\`\`
+
+The reviewer will check the commit you reference. Be precise about the hash and files.
 
 ---
 
@@ -229,14 +232,15 @@ steroids tasks update ${task.id} --status review
 **CRITICAL: You MUST verify the project builds AND tests pass before submitting for review.**
 
 ### If work already existed (you found it in step 1):
-1. Verify it matches the specification completely
-2. Run build and tests to confirm it works
-3. Submit for review with a note explaining what you found:
+1. Run \`git log --oneline -20\` to find the commit hash
+2. Run \`git show <hash> --stat\` to verify files match spec
+3. Run build and tests to confirm it works
+4. Submit with the **exact commit hash** so the reviewer can verify:
    \`\`\`bash
-   steroids tasks update ${task.id} --status review --notes "Found existing implementation at commit <hash>. Files: <list key files>. Please verify this fulfills the spec or identify gaps."
+   steroids tasks update ${task.id} --status review --notes "Implementation at commit abc1234. Files: src/foo.ts, src/bar.ts. Matches spec requirements X, Y, Z."
    \`\`\`
 
-**The reviewer will see your notes and verify if the existing work is sufficient or if more is needed.**
+**The reviewer will run \`git show <hash>\` to verify. Be precise about which commit.**
 
 ### If you implemented new work:
 1. **Run the build command** for this project type (npm run build, cargo build, go build, make, etc.)
