@@ -758,6 +758,269 @@ Automatic conflict detection and scheduling.
 - Conflict graph computation
 - Dynamic scheduler with backpressure
 
+## Commit Tracking for Review
+
+**Critical for multi-runner:** The reviewer must know exactly which commits belong to the task being reviewed. Can't just `git log -10` when multiple runners are committing in parallel.
+
+### The Problem
+
+```
+Timeline with two runners:
+
+Runner A (API section):
+  T1: Commit abc123 - "Add auth endpoint"
+  T3: Commit def456 - "Add auth tests"
+
+Runner B (Mobile section):
+  T2: Commit 111222 - "Add login screen"
+  T4: Commit 333444 - "Add biometric auth"
+
+Git log shows:
+  333444 - Add biometric auth        (Mobile)
+  def456 - Add auth tests            (API)
+  111222 - Add login screen          (Mobile)
+  abc123 - Add auth endpoint         (API)
+
+Reviewer for API task sees: "Last 2 commits"
+  → Gets 333444, def456
+  → WRONG! 333444 is from Mobile task!
+```
+
+### Solution: Task Commit Registry
+
+Track commits per task in the database:
+
+```sql
+CREATE TABLE task_commits (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  commit_hash TEXT NOT NULL,
+  commit_message TEXT,
+  author TEXT,
+  created_at TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',  -- pending, approved, rejected
+  rejection_reason TEXT,
+
+  FOREIGN KEY (task_id) REFERENCES tasks(id)
+);
+
+-- Index for fast lookup
+CREATE INDEX idx_task_commits_task ON task_commits(task_id);
+CREATE INDEX idx_task_commits_hash ON task_commits(commit_hash);
+```
+
+### Coder Workflow
+
+When coder makes a commit, register it:
+
+```typescript
+async function coderCommit(taskId: string, message: string): Promise<void> {
+  // 1. Make the git commit
+  const hash = await git.commit(message);
+
+  // 2. Register commit with task
+  await db.run(`
+    INSERT INTO task_commits (id, task_id, commit_hash, commit_message, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `, [uuid(), taskId, hash, message, new Date().toISOString()]);
+
+  // 3. Update task with latest commit
+  await db.run(`
+    UPDATE tasks SET latest_commit = ?, updated_at = ? WHERE id = ?
+  `, [hash, new Date().toISOString(), taskId]);
+}
+```
+
+### Reviewer Gets Exact Commits
+
+```typescript
+async function getCommitsForReview(taskId: string): Promise<Commit[]> {
+  // Get all commits for this specific task
+  const commits = await db.all(`
+    SELECT commit_hash, commit_message, created_at, status
+    FROM task_commits
+    WHERE task_id = ?
+    ORDER BY created_at ASC
+  `, [taskId]);
+
+  return commits;
+}
+
+async function generateReviewDiff(taskId: string): Promise<string> {
+  const commits = await getCommitsForReview(taskId);
+
+  if (commits.length === 0) {
+    return "No commits found for this task";
+  }
+
+  // Get the base (commit before first task commit)
+  const firstCommit = commits[0].commit_hash;
+  const baseCommit = await git.getParent(firstCommit);
+
+  // Get the tip (latest commit for this task)
+  const latestCommit = commits[commits.length - 1].commit_hash;
+
+  // Generate diff from base to tip
+  return await git.diff(baseCommit, latestCommit);
+}
+```
+
+### Reviewer Prompt Context
+
+```markdown
+## Commits for This Task
+
+Task ID: abc123
+Task: "Add user authentication endpoint"
+Section: API
+
+### Commits (oldest first):
+1. `abc123` - Add auth endpoint
+2. `def456` - Add auth tests
+3. `ghi789` - Fix auth middleware (after rejection #1)
+
+### Previous Rejections:
+- Rejection #1 (commit def456): "Missing rate limiting on login endpoint"
+  → Fixed in commit ghi789
+
+### Diff to Review:
+(base: commit before abc123) → (tip: ghi789)
+
+```diff
++ Added files...
+```
+
+### DO NOT review commits from other tasks:
+- `111222` (Mobile section - different task)
+- `333444` (Mobile section - different task)
+```
+
+### Tracking Rejected Commits
+
+When reviewer rejects, mark the commits:
+
+```typescript
+async function rejectTask(taskId: string, reason: string): Promise<void> {
+  // 1. Mark current commits as rejected
+  await db.run(`
+    UPDATE task_commits
+    SET status = 'rejected', rejection_reason = ?
+    WHERE task_id = ? AND status = 'pending'
+  `, [reason, taskId]);
+
+  // 2. Update task status
+  await db.run(`
+    UPDATE tasks
+    SET status = 'pending', rejection_count = rejection_count + 1
+    WHERE id = ?
+  `, [taskId]);
+
+  // 3. Store rejection in history
+  await db.run(`
+    INSERT INTO task_rejections (id, task_id, reason, commits, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `, [uuid(), taskId, reason, JSON.stringify(commits), new Date().toISOString()]);
+}
+```
+
+### Reviewer Sees Full History
+
+```
+Task: Add user authentication
+Status: Review (attempt #3)
+
+📜 COMMIT HISTORY:
+┌─────────────────────────────────────────────────────────────────┐
+│ Attempt #1 (REJECTED)                                           │
+│   abc123 - Add auth endpoint                                    │
+│   def456 - Add auth tests                                       │
+│   ❌ Rejected: "Missing rate limiting"                          │
+├─────────────────────────────────────────────────────────────────┤
+│ Attempt #2 (REJECTED)                                           │
+│   ghi789 - Add rate limiting                                    │
+│   ❌ Rejected: "Rate limit too aggressive (1 req/min)"          │
+├─────────────────────────────────────────────────────────────────┤
+│ Attempt #3 (CURRENT - reviewing now)                            │
+│   jkl012 - Adjust rate limit to 10 req/min                      │
+│   mno345 - Add rate limit config option                         │
+└─────────────────────────────────────────────────────────────────┘
+
+📊 CURRENT DIFF (attempt #3 only):
+  base: ghi789 (end of attempt #2)
+  tip:  mno345 (latest)
+
+  Files changed: 2
+  +45 -12 lines
+```
+
+### Base Commit Tracking
+
+Each task records its starting point:
+
+```typescript
+interface Task {
+  id: string;
+  // ... existing fields
+
+  // Commit tracking
+  base_commit: string;      // Commit hash when task started
+  latest_commit?: string;   // Most recent commit for this task
+
+  // For multi-attempt tracking
+  current_attempt: number;
+  attempt_base_commit: string;  // Base for current attempt
+}
+```
+
+When task starts:
+```typescript
+async function startTask(taskId: string): Promise<void> {
+  const currentHead = await git.getHead();
+
+  await db.run(`
+    UPDATE tasks
+    SET status = 'in_progress',
+        base_commit = ?,
+        attempt_base_commit = ?,
+        current_attempt = COALESCE(current_attempt, 0) + 1
+    WHERE id = ?
+  `, [currentHead, currentHead, taskId]);
+}
+```
+
+When task is rejected and restarted:
+```typescript
+async function restartTask(taskId: string): Promise<void> {
+  const currentHead = await git.getHead();
+
+  // Keep original base_commit, update attempt_base
+  await db.run(`
+    UPDATE tasks
+    SET status = 'in_progress',
+        attempt_base_commit = ?,
+        current_attempt = current_attempt + 1
+    WHERE id = ?
+  `, [currentHead, taskId]);
+}
+```
+
+### Multi-Runner Implications
+
+| Scenario | Without Tracking | With Tracking |
+|----------|------------------|---------------|
+| Two runners commit interleaved | Reviewer sees mixed commits | Reviewer sees only task's commits |
+| Task rejected, other tasks continue | Lost track of which commits to review | Clear attempt history |
+| Coder claims "already done" | Can't verify which commits | Can list exact commits made |
+| Rollback needed | Don't know where to revert to | Have base_commit for clean revert |
+
+### Implementation Priority
+
+1. **Add task_commits table** - Track every commit per task
+2. **Update coder** - Register commits when made
+3. **Update reviewer prompt** - Include exact commit list
+4. **Add rejection history** - Track what was rejected and why
+5. **Update diff generation** - Use task's base_commit, not HEAD~N
+
 ## Safety Mechanisms
 
 ### 1. Pre-flight Check
