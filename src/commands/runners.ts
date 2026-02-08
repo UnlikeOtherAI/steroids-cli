@@ -382,7 +382,24 @@ OPTIONS:
   const runners = listRunners();
 
   if (values.json) {
-    console.log(JSON.stringify({ runners }, null, 2));
+    // For JSON output, enrich with section names if available
+    const enrichedRunners = runners.map((runner) => {
+      if (!runner.section_id || !runner.project_path) {
+        return runner;
+      }
+      try {
+        const { db, close } = openDatabase(runner.project_path);
+        try {
+          const section = getSection(db, runner.section_id);
+          return { ...runner, section_name: section?.name };
+        } finally {
+          close();
+        }
+      } catch {
+        return runner;
+      }
+    });
+    console.log(JSON.stringify({ runners: enrichedRunners }, null, 2));
     return;
   }
 
@@ -392,18 +409,39 @@ OPTIONS:
   }
 
   console.log('RUNNERS');
-  console.log('─'.repeat(90));
-  console.log('ID        STATUS      PID       PROJECT                           HEARTBEAT');
-  console.log('─'.repeat(90));
+  console.log('─'.repeat(120));
+  console.log('ID        STATUS      PID       PROJECT                           SECTION                           HEARTBEAT');
+  console.log('─'.repeat(120));
 
   for (const runner of runners) {
     const shortId = runner.id.substring(0, 8);
     const status = runner.status.padEnd(10);
     const pid = (runner.pid?.toString() ?? '-').padEnd(9);
     const project = (runner.project_path ?? '-').substring(0, 30).padEnd(30);
+
+    // Fetch section name if available
+    let sectionDisplay = '-';
+    if (runner.section_id && runner.project_path) {
+      try {
+        const { db, close } = openDatabase(runner.project_path);
+        try {
+          const section = getSection(db, runner.section_id);
+          if (section) {
+            sectionDisplay = section.name.substring(0, 30);
+          }
+        } finally {
+          close();
+        }
+      } catch {
+        // If we can't fetch the section name, just show the ID prefix
+        sectionDisplay = runner.section_id.substring(0, 8);
+      }
+    }
+    const section = sectionDisplay.padEnd(30);
+
     const heartbeat = runner.heartbeat_at.substring(11, 19);
     const alive = runner.pid && isProcessAlive(runner.pid) ? '' : ' (dead)';
-    console.log(`${shortId}  ${status}  ${pid}  ${project}    ${heartbeat}${alive}`);
+    console.log(`${shortId}  ${status}  ${pid}  ${project}    ${section}    ${heartbeat}${alive}`);
   }
 }
 

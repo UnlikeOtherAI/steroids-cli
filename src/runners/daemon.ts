@@ -19,6 +19,7 @@ export interface Runner {
   status: RunnerStatus;
   pid: number | null;
   project_path: string | null;
+  section_id: string | null;
   current_task_id: string | null;
   started_at: string | null;
   heartbeat_at: string;
