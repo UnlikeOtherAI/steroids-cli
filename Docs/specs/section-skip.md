@@ -20,6 +20,9 @@ ALTER TABLE sections ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0;
 
 -- DOWN
 -- SQLite doesn't support DROP COLUMN, so we recreate the table
+-- Must disable foreign keys and wrap in transaction due to section_locks FK
+PRAGMA foreign_keys=OFF;
+BEGIN TRANSACTION;
 CREATE TABLE sections_new (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -29,6 +32,22 @@ CREATE TABLE sections_new (
 INSERT INTO sections_new SELECT id, name, position, created_at FROM sections;
 DROP TABLE sections;
 ALTER TABLE sections_new RENAME TO sections;
+COMMIT;
+PRAGMA foreign_keys=ON;
+```
+
+### TypeScript Interface Update
+
+Update `Section` interface in `src/database/queries.ts`:
+
+```typescript
+export interface Section {
+  id: string;
+  name: string;
+  position: number;
+  skipped: number;  // 0 = active, 1 = skipped
+  created_at: string;
+}
 ```
 
 ## CLI Commands
@@ -78,7 +97,10 @@ af1af290  Phase 10: Web UI [SKIPPED]                    23
 
 ## Task Selector Changes
 
-Update `src/orchestrator/task-selector.ts` to exclude tasks from skipped sections.
+Update task selection queries in **TWO locations**:
+
+1. **`src/database/queries.ts`** - `findNextTask()` function (3 queries)
+2. **`src/orchestrator/task-selector.ts`** - `findNextTaskSkippingLocked()` function (3 queries)
 
 ### Current query (example):
 ```sql
@@ -97,25 +119,25 @@ WHERE t.status = 'pending'
 ORDER BY COALESCE(s.position, 999999), t.created_at
 ```
 
-Apply this to all three task queries:
-1. Review tasks query
-2. In-progress tasks query
-3. Pending tasks query
+Apply this WHERE clause addition to all SIX queries across both files:
+- Review tasks query (status = 'review')
+- In-progress tasks query (status = 'in_progress')
+- Pending tasks query (status = 'pending')
 
 ## Watch Command Changes
 
-Update `src/commands/watch.ts` to display `[SKIPPED]` indicator for skipped sections in the real-time status display.
+If `steroids watch` command exists, update it to display `[SKIPPED]` indicator for skipped sections. Otherwise, skip this task.
 
 ## Implementation Tasks
 
 1. **Migration**: Create `migrations/003_add_section_skipped.sql`
-2. **Manifest**: Update `migrations/manifest.json`
-3. **Queries**: Add `skipSection()`, `unskipSection()`, `getSectionByName()` to queries.ts
+2. **Manifest**: Update `migrations/manifest.json` (bump latestDbVersion to 3)
+3. **Interface & Queries**: Update `Section` interface to add `skipped` field, add `skipSection()` and `unskipSection()` functions to queries.ts (note: `getSectionByName()` already exists)
 4. **Skip command**: Implement in sections.ts
 5. **Unskip command**: Implement in sections.ts
-6. **List update**: Add `--all` flag and hide skipped by default
-7. **Task selector**: Update all three queries to exclude skipped sections
-8. **Watch display**: Show `[SKIPPED]` indicator
+6. **List update**: Add `--all` flag, hide skipped by default, update `listSections()` query
+7. **Task selector**: Update queries in BOTH `queries.ts` AND `task-selector.ts` (6 queries total)
+8. **Watch display**: Show `[SKIPPED]` indicator (if watch command exists)
 
 ## Testing
 
