@@ -4,9 +4,11 @@
  * Entry point for the CLI
  */
 
-import { parseArgs } from 'node:util';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { parseGlobalFlags, applyGlobalFlags } from './cli/flags.js';
+import { CliError, ErrorCode, getExitCode } from './cli/errors.js';
+import { outputJsonError } from './cli/output.js';
 import { initCommand } from './commands/init.js';
 import { tasksCommand } from './commands/tasks.js';
 import { sectionsCommand } from './commands/sections.js';
@@ -73,37 +75,75 @@ COMMANDS:
   completion        Generate shell completions
   locks             Manage task and section locks
 
-OPTIONS:
+GLOBAL OPTIONS:
   -h, --help        Show help
-  -v, --version     Show version
+  --version         Show version
   -j, --json        Output as JSON
   -q, --quiet       Minimal output
+  -v, --verbose     Detailed output
+  --no-color        Disable colored output
+  --config <path>   Custom config file path
+  --dry-run         Preview without executing
+  --timeout <dur>   Command timeout (e.g., 30s, 5m)
+  --no-hooks        Skip hook execution
+
+ENVIRONMENT VARIABLES:
+  STEROIDS_CONFIG        Custom config path
+  STEROIDS_JSON          Output as JSON (1, true)
+  STEROIDS_QUIET         Minimal output (1, true)
+  STEROIDS_VERBOSE       Detailed output (1, true)
+  STEROIDS_NO_HOOKS      Skip hooks (1, true)
+  STEROIDS_NO_COLOR      Disable colors (1, true)
+  STEROIDS_AUTO_MIGRATE  Auto-migrate database (1, true)
+  STEROIDS_TIMEOUT       Command timeout (duration)
+  NO_COLOR               Standard no-color variable
+  CI                     CI environment detected
 
 EXAMPLES:
   steroids init
   steroids sections add "Phase 1"
   steroids tasks add "Implement feature" --section "Phase 1"
-  steroids tasks list
-  steroids loop
+  steroids tasks list --json
+  steroids loop --verbose
+  STEROIDS_QUIET=1 steroids tasks list
 `;
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-
-  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
-    console.log(HELP);
-    process.exit(0);
-  }
-
-  if (args[0] === '-v' || args[0] === '--version') {
-    console.log(`steroids v${VERSION}`);
-    process.exit(0);
-  }
-
-  const command = args[0];
-  const commandArgs = args.slice(1);
-
   try {
+    const args = process.argv.slice(2);
+
+    // Parse global flags first
+    const { flags, remaining } = parseGlobalFlags(args);
+
+    // Apply global flags (e.g., set NO_COLOR)
+    applyGlobalFlags(flags);
+
+    // Handle --help at top level
+    if (flags.help && remaining.length === 0) {
+      console.log(HELP);
+      process.exit(0);
+    }
+
+    // Handle --version at top level
+    if (flags.version && remaining.length === 0) {
+      if (flags.json) {
+        console.log(JSON.stringify({ version: VERSION }, null, 2));
+      } else {
+        console.log(`steroids v${VERSION}`);
+      }
+      process.exit(0);
+    }
+
+    // No command provided
+    if (remaining.length === 0) {
+      console.log(HELP);
+      process.exit(0);
+    }
+
+    const command = remaining[0];
+    const commandArgs = remaining.slice(1);
+
+    // Execute command
     switch (command) {
       case 'about':
         await aboutCommand(commandArgs);
@@ -157,17 +197,49 @@ async function main(): Promise<void> {
         await gitCommand(commandArgs);
         break;
       default:
-        console.error(`Unknown command: ${command}`);
-        console.log(HELP);
-        process.exit(1);
+        if (flags.json) {
+          outputJsonError(
+            command,
+            null,
+            ErrorCode.INVALID_ARGUMENTS,
+            `Unknown command: ${command}`,
+            { command }
+          );
+        } else {
+          console.error(`Error: Unknown command: ${command}`);
+          console.error(`Run 'steroids --help' for usage information.`);
+        }
+        process.exit(getExitCode(ErrorCode.INVALID_ARGUMENTS));
     }
   } catch (error) {
-    if (error instanceof Error) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error('An unexpected error occurred');
+    // Handle CliError with proper exit codes
+    if (error instanceof CliError) {
+      if (process.env.STEROIDS_JSON === '1' || process.env.STEROIDS_JSON === 'true') {
+        outputJsonError('steroids', null, error.code, error.message, error.details);
+      } else {
+        console.error(`Error: ${error.message}`);
+      }
+      process.exit(error.exitCode);
     }
-    process.exit(1);
+
+    // Handle generic errors
+    if (error instanceof Error) {
+      if (process.env.STEROIDS_JSON === '1' || process.env.STEROIDS_JSON === 'true') {
+        outputJsonError('steroids', null, ErrorCode.GENERAL_ERROR, error.message);
+      } else {
+        console.error(`Error: ${error.message}`);
+        if (process.env.STEROIDS_VERBOSE === '1') {
+          console.error(error.stack);
+        }
+      }
+    } else {
+      if (process.env.STEROIDS_JSON === '1' || process.env.STEROIDS_JSON === 'true') {
+        outputJsonError('steroids', null, ErrorCode.GENERAL_ERROR, 'An unexpected error occurred');
+      } else {
+        console.error('An unexpected error occurred');
+      }
+    }
+    process.exit(getExitCode(ErrorCode.GENERAL_ERROR));
   }
 }
 

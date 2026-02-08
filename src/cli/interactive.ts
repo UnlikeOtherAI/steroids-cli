@@ -21,7 +21,7 @@ export function isInteractive(): boolean {
   return (
     process.stdin.isTTY === true &&
     process.stdout.isTTY === true &&
-    !process.env.CI
+    !isCI()
   );
 }
 
@@ -38,8 +38,10 @@ export function isInteractive(): boolean {
  * - JENKINS_URL
  *
  * @returns true if in CI, false otherwise
+ *
+ * Note: This is an internal function. Use the env.ts version for global checks.
  */
-export function isCI(): boolean {
+function isCI(): boolean {
   return !!(
     process.env.CI ||
     process.env.CONTINUOUS_INTEGRATION ||
