@@ -139,7 +139,21 @@ node dist/index.js loop                  # Let automation handle it
 - Documentation updates to CLAUDE.md
 - Emergency patches (must be reviewed afterward)
 
-### 0.1 CLI-First Debugging (CRITICAL)
+### 0.1 Task Restart Behavior
+
+**When manually restarting a task, the rejection count SHOULD be reset to 0.**
+
+Rationale:
+- Manual restart indicates human intervention and a fresh start
+- Previous rejections may no longer be relevant after specification changes
+- Prevents tasks from hitting the failure threshold (15 rejections) unfairly
+
+```bash
+# Restart a stuck task (this should reset rejection_count)
+steroids tasks update <task-id> --status pending --actor human:cli
+```
+
+### 0.2 CLI-First Debugging (CRITICAL)
 
 **NEVER use direct SQL/database access for debugging or inspection.** Always use CLI commands.
 
