@@ -2,6 +2,8 @@
  * Steroids WebUI TypeScript Types
  */
 
+export * from './activity';
+
 export interface Project {
   path: string;
   name: string | null;

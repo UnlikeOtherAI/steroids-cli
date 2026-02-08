@@ -1,16 +1,43 @@
-import React, { useEffect } from 'react';
-import { Project } from '../types';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Project, ActivityStats, TimeRangeOption, TIME_RANGE_OPTIONS } from '../types';
 import { StatTile } from '../components/molecules/StatTile';
+import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
+import { activityApi } from '../services/api';
 
 interface DashboardPageProps {
   project: Project;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
+  const [selectedRange, setSelectedRange] = useState<TimeRangeOption>(TIME_RANGE_OPTIONS[1]); // Default: 24h
+  const [activityStats, setActivityStats] = useState<ActivityStats | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
+
+  const fetchActivityStats = useCallback(async () => {
+    setActivityLoading(true);
+    setActivityError(null);
+    try {
+      const stats = await activityApi.getStats(selectedRange.hours, project.path);
+      setActivityStats(stats);
+    } catch (err) {
+      setActivityError(err instanceof Error ? err.message : 'Failed to load activity stats');
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [selectedRange.hours, project.path]);
+
   useEffect(() => {
-    const interval = setInterval(() => console.log('Refreshing project data...'), 5000);
+    fetchActivityStats();
+  }, [fetchActivityStats]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log('Refreshing project data...');
+      fetchActivityStats();
+    }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchActivityStats]);
 
   const getRunnerStatus = () => {
     if (!project.runner) return 'No Runner';
@@ -64,13 +91,58 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
         </div>
       </div>
 
-      {project.stats && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <StatTile label="Pending" value={project.stats.pending} description="Waiting to start" />
-          <StatTile label="In Progress" value={project.stats.in_progress} description="Currently being worked on" variant="info" />
-          <StatTile label="In Review" value={project.stats.review} description="Awaiting review" variant="warning" />
-          <StatTile label="Completed" value={project.stats.completed} description="Successfully finished" variant="success" />
+      <div className="card p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-text-primary">Activity</h2>
+          <TimeRangeSelector value={selectedRange.value} onChange={setSelectedRange} />
         </div>
+
+        {activityLoading && !activityStats && (
+          <div className="text-center py-4 text-text-muted">Loading activity stats...</div>
+        )}
+
+        {activityError && (
+          <div className="text-center py-4 text-danger">{activityError}</div>
+        )}
+
+        {activityStats && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+              <StatTile label="Completed" value={activityStats.completed} variant="success" />
+              <StatTile label="Failed" value={activityStats.failed} variant="danger" />
+              <StatTile label="Skipped" value={activityStats.skipped} variant="warning" />
+              <StatTile label="Partial" value={activityStats.partial} variant="info" />
+              <StatTile label="Disputed" value={activityStats.disputed} variant="default" />
+            </div>
+            <div className="flex items-center gap-6 text-sm text-text-secondary">
+              <div>
+                <span className="font-medium text-text-primary">{activityStats.tasks_per_hour}</span> tasks/hour
+              </div>
+              <div>
+                <span className="font-medium text-text-primary">{activityStats.success_rate}%</span> success rate
+              </div>
+              <div className="text-text-muted">
+                {activityStats.total} total in last {selectedRange.label}
+              </div>
+            </div>
+          </>
+        )}
+
+        {!activityLoading && !activityError && activityStats && activityStats.total === 0 && (
+          <div className="text-center py-2 text-text-muted">No activity in the selected time range</div>
+        )}
+      </div>
+
+      {project.stats && (
+        <>
+          <h2 className="text-lg font-semibold text-text-primary mb-4">Current Queue</h2>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <StatTile label="Pending" value={project.stats.pending} description="Waiting to start" />
+            <StatTile label="In Progress" value={project.stats.in_progress} description="Currently being worked on" variant="info" />
+            <StatTile label="In Review" value={project.stats.review} description="Awaiting review" variant="warning" />
+            <StatTile label="Completed" value={project.stats.completed} description="Successfully finished" variant="success" />
+          </div>
+        </>
       )}
 
       {project.stats && totalTasks > 0 && (

@@ -2,7 +2,7 @@
  * API service for communicating with Steroids API
  */
 
-import { Project, ProjectsListResponse } from '../types';
+import { Project, ProjectsListResponse, ActivityStats, ActivityStatsResponse } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3501';
 
@@ -98,5 +98,19 @@ export const projectsApi = {
       }
     );
     return response.removed_count;
+  },
+};
+
+export const activityApi = {
+  /**
+   * Get activity statistics for a time range
+   */
+  async getStats(hours: number, projectPath?: string): Promise<ActivityStats> {
+    let url = `/api/activity?hours=${hours}`;
+    if (projectPath) {
+      url += `&project=${encodeURIComponent(projectPath)}`;
+    }
+    const response = await fetchJson<ActivityStatsResponse>(url);
+    return response.stats;
   },
 };
