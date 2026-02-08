@@ -43,7 +43,7 @@ const COLORS = {
  * Note: This is an internal function. Use the env.ts version for global checks.
  */
 function shouldDisableColors(): boolean {
-  return !!(
+  return (
     process.env.NO_COLOR !== undefined ||
     process.env.STEROIDS_NO_COLOR === '1' ||
     process.env.STEROIDS_NO_COLOR === 'true' ||

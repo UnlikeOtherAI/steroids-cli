@@ -109,7 +109,7 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
 
   if (args.length === 0) {
     // Default: list pending tasks
-    await listAllTasks([]);
+    await listAllTasks([], flags);
     return;
   }
 
@@ -118,7 +118,7 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
 
   if (subcommand.startsWith('-')) {
     // It's a flag, so this is a list command
-    await listAllTasks(args);
+    await listAllTasks(args, flags);
     return;
   }
 
@@ -144,7 +144,7 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
       await auditTask(subArgs);
       break;
     case 'list':
-      await listAllTasks(subArgs);
+      await listAllTasks(subArgs, flags);
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
@@ -158,7 +158,7 @@ interface TaskWithProject extends Task {
   project_name?: string;
 }
 
-async function listAllTasks(args: string[]): Promise<void> {
+async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<void> {
   // Check for help flag first (parseArgs doesn't always handle -h well)
   if (args.includes('-h') || args.includes('--help')) {
     console.log(HELP);
@@ -182,6 +182,9 @@ async function listAllTasks(args: string[]): Promise<void> {
     console.log(HELP);
     return;
   }
+
+  // Honor global --json flag or local -j/--json flag
+  const outputJson = values.json || globalFlags?.json;
 
   const statusFilter = values.status as string;
   const isGlobalQuery = values.global as boolean;
@@ -223,7 +226,7 @@ async function listAllTasks(args: string[]): Promise<void> {
       }
     }
 
-    if (values.json) {
+    if (outputJson) {
       console.log(JSON.stringify(allTasks, null, 2));
       return;
     }
@@ -298,7 +301,7 @@ async function listAllTasks(args: string[]): Promise<void> {
       });
     }
 
-    if (values.json) {
+    if (outputJson) {
       console.log(JSON.stringify(tasks, null, 2));
       return;
     }
