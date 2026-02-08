@@ -486,3 +486,39 @@ export function getLastRejectionNotes(
 
   return entry?.notes ?? null;
 }
+
+/**
+ * Get task counts by status for project stats
+ * Used by runner heartbeat to update global database
+ */
+export function getTaskCountsByStatus(db: Database.Database): {
+  pending: number;
+  in_progress: number;
+  review: number;
+  completed: number;
+} {
+  const rows = db
+    .prepare('SELECT status, COUNT(*) as count FROM tasks GROUP BY status')
+    .all() as Array<{ status: string; count: number }>;
+
+  const counts = {
+    pending: 0,
+    in_progress: 0,
+    review: 0,
+    completed: 0,
+  };
+
+  for (const row of rows) {
+    if (row.status === 'pending') {
+      counts.pending = row.count;
+    } else if (row.status === 'in_progress') {
+      counts.in_progress = row.count;
+    } else if (row.status === 'review') {
+      counts.review = row.count;
+    } else if (row.status === 'completed') {
+      counts.completed = row.count;
+    }
+  }
+
+  return counts;
+}

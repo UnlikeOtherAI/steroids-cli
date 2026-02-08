@@ -60,7 +60,19 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 `;
 
-const GLOBAL_SCHEMA_VERSION = '2';
+/**
+ * Schema upgrade from version 2 to version 3: Add stats columns to projects table
+ */
+const GLOBAL_SCHEMA_V3_SQL = `
+-- Add task stats columns (for API/WebUI display without accessing project DBs)
+ALTER TABLE projects ADD COLUMN pending_count INTEGER DEFAULT 0;
+ALTER TABLE projects ADD COLUMN in_progress_count INTEGER DEFAULT 0;
+ALTER TABLE projects ADD COLUMN review_count INTEGER DEFAULT 0;
+ALTER TABLE projects ADD COLUMN completed_count INTEGER DEFAULT 0;
+ALTER TABLE projects ADD COLUMN stats_updated_at TEXT;
+`;
+
+const GLOBAL_SCHEMA_VERSION = '3';
 
 /**
  * Get the path to the global steroids directory
@@ -115,6 +127,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   if (!currentVersion) {
     // Fresh database - apply all schemas and set to latest version
     db.exec(GLOBAL_SCHEMA_V2_SQL);
+    db.exec(GLOBAL_SCHEMA_V3_SQL);
     db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
       'version',
       GLOBAL_SCHEMA_VERSION
@@ -123,9 +136,17 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
       'created_at',
       new Date().toISOString()
     );
-  } else if (currentVersion === '1' && GLOBAL_SCHEMA_VERSION === '2') {
+  } else if (currentVersion === '1') {
     // Upgrade from version 1 to version 2
     db.exec(GLOBAL_SCHEMA_V2_SQL);
+    db.exec(GLOBAL_SCHEMA_V3_SQL);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '2') {
+    // Upgrade from version 2 to version 3
+    db.exec(GLOBAL_SCHEMA_V3_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'

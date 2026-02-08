@@ -13,6 +13,11 @@ export interface RegisteredProject {
   registered_at: string;
   last_seen_at: string;
   enabled: boolean;
+  pending_count?: number;
+  in_progress_count?: number;
+  review_count?: number;
+  completed_count?: number;
+  stats_updated_at?: string | null;
 }
 
 /**
@@ -67,8 +72,8 @@ export function getRegisteredProjects(includeDisabled = false): RegisteredProjec
 
   try {
     const query = includeDisabled
-      ? 'SELECT path, name, registered_at, last_seen_at, enabled FROM projects'
-      : 'SELECT path, name, registered_at, last_seen_at, enabled FROM projects WHERE enabled = 1';
+      ? 'SELECT * FROM projects'
+      : 'SELECT * FROM projects WHERE enabled = 1';
 
     const rows = db.prepare(query).all() as Array<{
       path: string;
@@ -76,6 +81,11 @@ export function getRegisteredProjects(includeDisabled = false): RegisteredProjec
       registered_at: string;
       last_seen_at: string;
       enabled: number;
+      pending_count?: number;
+      in_progress_count?: number;
+      review_count?: number;
+      completed_count?: number;
+      stats_updated_at?: string | null;
     }>;
 
     return rows.map((row) => ({
@@ -84,6 +94,11 @@ export function getRegisteredProjects(includeDisabled = false): RegisteredProjec
       registered_at: row.registered_at,
       last_seen_at: row.last_seen_at,
       enabled: row.enabled === 1,
+      pending_count: row.pending_count,
+      in_progress_count: row.in_progress_count,
+      review_count: row.review_count,
+      completed_count: row.completed_count,
+      stats_updated_at: row.stats_updated_at,
     }));
   } finally {
     close();
@@ -102,13 +117,18 @@ export function getRegisteredProject(path: string): RegisteredProject | null {
 
   try {
     const row = db
-      .prepare('SELECT path, name, registered_at, last_seen_at, enabled FROM projects WHERE path = ?')
+      .prepare('SELECT * FROM projects WHERE path = ?')
       .get(normalizedPath) as {
         path: string;
         name: string | null;
         registered_at: string;
         last_seen_at: string;
         enabled: number;
+        pending_count?: number;
+        in_progress_count?: number;
+        review_count?: number;
+        completed_count?: number;
+        stats_updated_at?: string | null;
       } | undefined;
 
     if (!row) {
@@ -121,6 +141,11 @@ export function getRegisteredProject(path: string): RegisteredProject | null {
       registered_at: row.registered_at,
       last_seen_at: row.last_seen_at,
       enabled: row.enabled === 1,
+      pending_count: row.pending_count,
+      in_progress_count: row.in_progress_count,
+      review_count: row.review_count,
+      completed_count: row.completed_count,
+      stats_updated_at: row.stats_updated_at,
     };
   } finally {
     close();
@@ -241,6 +266,48 @@ export function isProjectRegistered(path: string): boolean {
       .get(normalizedPath) as { 1: number } | undefined;
 
     return row !== undefined;
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Task count statistics for a project
+ */
+export interface ProjectStats {
+  pending: number;
+  in_progress: number;
+  review: number;
+  completed: number;
+}
+
+/**
+ * Update project stats in global database
+ * Called by runner heartbeat to cache stats for API/WebUI access
+ *
+ * @param path - Project path
+ * @param stats - Task counts by status
+ */
+export function updateProjectStats(path: string, stats: ProjectStats): void {
+  const normalizedPath = normalizePath(path);
+  const { db, close } = openGlobalDatabase();
+
+  try {
+    db.prepare(`
+      UPDATE projects SET
+        pending_count = ?,
+        in_progress_count = ?,
+        review_count = ?,
+        completed_count = ?,
+        stats_updated_at = datetime('now')
+      WHERE path = ?
+    `).run(
+      stats.pending,
+      stats.in_progress,
+      stats.review,
+      stats.completed,
+      normalizedPath
+    );
   } finally {
     close();
   }
