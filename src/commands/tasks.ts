@@ -25,7 +25,7 @@ import {
   type Task,
   type TaskStatus,
 } from '../database/queries.js';
-import { outputJson as outputEnvelope, outputJsonError } from '../cli/output.js';
+import { outputJson as outputEnvelope, outputJsonError, createOutput } from '../cli/output.js';
 import { ErrorCode } from '../cli/errors.js';
 import { generateHelp } from '../cli/help.js';
 
@@ -125,29 +125,33 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
       await showStats(subArgs, flags);
       break;
     case 'add':
-      await addTask(subArgs);
+      await addTask(subArgs, flags);
       break;
     case 'update':
-      await updateTask(subArgs);
+      await updateTask(subArgs, flags);
       break;
     case 'approve':
-      await approveTaskCmd(subArgs);
+      await approveTaskCmd(subArgs, flags);
       break;
     case 'reject':
-      await rejectTaskCmd(subArgs);
+      await rejectTaskCmd(subArgs, flags);
       break;
     case 'skip':
-      await skipTaskCmd(subArgs);
+      await skipTaskCmd(subArgs, flags);
       break;
     case 'audit':
-      await auditTask(subArgs);
+      await auditTask(subArgs, flags);
       break;
     case 'list':
       await listAllTasks(subArgs, flags);
       break;
     default:
-      console.error(`Unknown subcommand: ${subcommand}`);
-      console.log(HELP);
+      if (flags.json) {
+        outputJsonError('tasks', subcommand, ErrorCode.INVALID_ARGUMENTS, `Unknown subcommand: ${subcommand}`);
+      } else {
+        console.error(`Unknown subcommand: ${subcommand}`);
+        console.log(HELP);
+      }
       process.exit(1);
   }
 }
@@ -414,20 +418,21 @@ EXAMPLE:
   }
 }
 
-async function addTask(args: string[]): Promise<void> {
+async function addTask(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'tasks', subcommand: 'add', flags });
+
   const { values, positionals } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
       section: { type: 'string' },
       source: { type: 'string' },
     },
     allowPositionals: true,
   });
 
-  if (values.help) {
-    console.log(`
+  if (values.help || flags.help) {
+    out.log(`
 steroids tasks add <title> - Add a new task
 
 USAGE:
@@ -436,7 +441,6 @@ USAGE:
 OPTIONS:
   --section <id>        Section ID (REQUIRED)
   --source <file>       Specification file (REQUIRED)
-  -j, --json            Output as JSON
   -h, --help            Show help
 
 EXAMPLES:
@@ -447,22 +451,25 @@ EXAMPLES:
   }
 
   if (positionals.length === 0) {
-    console.error('Error: task title required');
-    console.error('Usage: steroids tasks add <title> --section <id> --source <file>');
+    out.error(ErrorCode.INVALID_ARGUMENTS, 'task title required', {
+      usage: 'steroids tasks add <title> --section <id> --source <file>',
+    });
     process.exit(2);
   }
 
   if (!values.section) {
-    console.error('Error: --section <id> is required');
-    console.error('Every task must belong to a section.');
-    console.error('Usage: steroids tasks add <title> --section <id> --source <file>');
+    out.error(ErrorCode.INVALID_ARGUMENTS, '--section <id> is required', {
+      usage: 'steroids tasks add <title> --section <id> --source <file>',
+      hint: 'Every task must belong to a section.',
+    });
     process.exit(2);
   }
 
   if (!values.source) {
-    console.error('Error: --source <file> is required');
-    console.error('Every task must reference a specification file.');
-    console.error('Usage: steroids tasks add <title> --section <id> --source <file>');
+    out.error(ErrorCode.INVALID_ARGUMENTS, '--source <file> is required', {
+      usage: 'steroids tasks add <title> --section <id> --source <file>',
+      hint: 'Every task must reference a specification file.',
+    });
     process.exit(2);
   }
 
@@ -472,8 +479,10 @@ EXAMPLES:
   try {
     const section = getSection(db, values.section);
     if (!section) {
-      console.error(`Section not found: ${values.section}`);
-      console.error('Use "steroids sections list" to see available sections.');
+      out.error(ErrorCode.SECTION_NOT_FOUND, `Section not found: ${values.section}`, {
+        sectionId: values.section,
+        hint: 'Use "steroids sections list" to see available sections.',
+      });
       process.exit(1);
     }
 
@@ -482,14 +491,13 @@ EXAMPLES:
       sourceFile: values.source,
     });
 
-    if (values.json) {
-      outputEnvelope('tasks', 'add', { task });
-    } else {
-      console.log(`Task created: ${task.title}`);
-      console.log(`  ID: ${task.id}`);
-      console.log(`  Status: ${task.status}`);
+    out.success({ task });
+    if (!flags.json) {
+      out.log(`Task created: ${task.title}`);
+      out.log(`  ID: ${task.id}`);
+      out.log(`  Status: ${task.status}`);
       if (task.source_file) {
-        console.log(`  Source: ${task.source_file}`);
+        out.log(`  Source: ${task.source_file}`);
       }
     }
   } finally {
@@ -497,12 +505,13 @@ EXAMPLES:
   }
 }
 
-async function updateTask(args: string[]): Promise<void> {
+async function updateTask(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'tasks', subcommand: 'update', flags });
+
   const { values, positionals } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
       status: { type: 'string' },
       actor: { type: 'string', default: 'human:cli' },
       model: { type: 'string' },
@@ -512,8 +521,8 @@ async function updateTask(args: string[]): Promise<void> {
     allowPositionals: true,
   });
 
-  if (values.help || positionals.length === 0) {
-    console.log(`
+  if (values.help || flags.help || positionals.length === 0) {
+    out.log(`
 steroids tasks update <title|id> - Update task status
 
 USAGE:
@@ -525,7 +534,6 @@ OPTIONS:
   --actor <actor>       Actor making the change (default: human:cli)
   --model <model>       Model identifier (for LLM actors)
   --notes <text>        Notes for the reviewer (useful when submitting for review)
-  -j, --json            Output as JSON
   -h, --help            Show help
 
 EXAMPLES:
@@ -537,7 +545,11 @@ EXAMPLES:
   }
 
   if (!values.status && !values['reset-rejections']) {
-    console.error('Error: --status or --reset-rejections required');
+    if (flags.json) {
+      out.error(ErrorCode.INVALID_ARGUMENTS, '--status or --reset-rejections required');
+    } else {
+      console.error('Error: --status or --reset-rejections required');
+    }
     process.exit(1);
   }
 
@@ -552,7 +564,11 @@ EXAMPLES:
     }
 
     if (!task) {
-      console.error(`Task not found: ${identifier}`);
+      if (flags.json) {
+        out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
+      } else {
+        console.error(`Task not found: ${identifier}`);
+      }
       process.exit(1);
     }
 
@@ -574,8 +590,8 @@ EXAMPLES:
 
     const updated = getTask(db, task.id);
 
-    if (values.json) {
-      console.log(JSON.stringify({ ...updated, rejectionReset: oldRejectionCount !== undefined }, null, 2));
+    if (flags.json) {
+      out.success({ task: updated, rejectionReset: oldRejectionCount !== undefined, oldRejectionCount });
     } else {
       console.log(`Task updated: ${task.title}`);
       if (values.status) {
@@ -590,20 +606,21 @@ EXAMPLES:
   }
 }
 
-async function approveTaskCmd(args: string[]): Promise<void> {
+async function approveTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'tasks', subcommand: 'approve', flags });
+
   const { values, positionals } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
       model: { type: 'string' },
       notes: { type: 'string' },
     },
     allowPositionals: true,
   });
 
-  if (values.help || positionals.length === 0) {
-    console.log(`
+  if (values.help || flags.help || positionals.length === 0) {
+    out.log(`
 steroids tasks approve <id> - Approve a task
 
 USAGE:
@@ -612,14 +629,13 @@ USAGE:
 OPTIONS:
   --model <model>   Model performing the review (required)
   --notes <text>    Approval notes
-  -j, --json        Output as JSON
   -h, --help        Show help
 `);
     return;
   }
 
   if (!values.model) {
-    console.error('Error: --model required');
+    out.error(ErrorCode.INVALID_ARGUMENTS, '--model required');
     process.exit(1);
   }
 
@@ -633,7 +649,7 @@ OPTIONS:
     }
 
     if (!task) {
-      console.error(`Task not found: ${identifier}`);
+      out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
       process.exit(1);
     }
 
@@ -641,32 +657,32 @@ OPTIONS:
 
     const updated = getTask(db, task.id);
 
-    if (values.json) {
-      console.log(JSON.stringify(updated, null, 2));
-    } else {
-      console.log(`Task approved: ${task.title}`);
-      console.log(`  Status: completed`);
-      console.log(`  Reviewer: ${values.model}`);
+    out.success({ task: updated });
+    if (!flags.json) {
+      out.log(`Task approved: ${task.title}`);
+      out.log(`  Status: completed`);
+      out.log(`  Reviewer: ${values.model}`);
     }
   } finally {
     close();
   }
 }
 
-async function rejectTaskCmd(args: string[]): Promise<void> {
+async function rejectTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'tasks', subcommand: 'reject', flags });
+
   const { values, positionals } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
       model: { type: 'string' },
       notes: { type: 'string' },
     },
     allowPositionals: true,
   });
 
-  if (values.help || positionals.length === 0) {
-    console.log(`
+  if (values.help || flags.help || positionals.length === 0) {
+    out.log(`
 steroids tasks reject <id> - Reject a task
 
 USAGE:
@@ -675,14 +691,13 @@ USAGE:
 OPTIONS:
   --model <model>   Model performing the review (required)
   --notes <text>    Rejection reason (important for coder)
-  -j, --json        Output as JSON
   -h, --help        Show help
 `);
     return;
   }
 
   if (!values.model) {
-    console.error('Error: --model required');
+    out.error(ErrorCode.INVALID_ARGUMENTS, '--model required');
     process.exit(1);
   }
 
@@ -696,24 +711,23 @@ OPTIONS:
     }
 
     if (!task) {
-      console.error(`Task not found: ${identifier}`);
+      out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
       process.exit(1);
     }
 
     const result = rejectTask(db, task.id, values.model, values.notes);
 
-    if (values.json) {
-      console.log(JSON.stringify({ task, result }, null, 2));
-    } else {
+    out.success({ task, result });
+    if (!flags.json) {
       if (result.status === 'failed') {
-        console.log(`Task FAILED: ${task.title}`);
-        console.log(`  Exceeded 15 rejections. Requires human intervention.`);
+        out.log(`Task FAILED: ${task.title}`);
+        out.log(`  Exceeded 15 rejections. Requires human intervention.`);
       } else {
-        console.log(`Task rejected: ${task.title}`);
-        console.log(`  Status: in_progress (rejection ${result.rejectionCount}/15)`);
-        console.log(`  Reviewer: ${values.model}`);
+        out.log(`Task rejected: ${task.title}`);
+        out.log(`  Status: in_progress (rejection ${result.rejectionCount}/15)`);
+        out.log(`  Reviewer: ${values.model}`);
         if (values.notes) {
-          console.log(`  Notes: ${values.notes}`);
+          out.log(`  Notes: ${values.notes}`);
         }
       }
     }
@@ -722,12 +736,13 @@ OPTIONS:
   }
 }
 
-async function skipTaskCmd(args: string[]): Promise<void> {
+async function skipTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'tasks', subcommand: 'skip', flags });
+
   const { values, positionals } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
       model: { type: 'string' },
       notes: { type: 'string' },
       partial: { type: 'boolean', default: false },
@@ -735,8 +750,8 @@ async function skipTaskCmd(args: string[]): Promise<void> {
     allowPositionals: true,
   });
 
-  if (values.help || positionals.length === 0) {
-    console.log(`
+  if (values.help || flags.help || positionals.length === 0) {
+    out.log(`
 steroids tasks skip <id> - Skip a task (external setup required)
 
 USAGE:
@@ -746,7 +761,6 @@ OPTIONS:
   --model <model>   Model identifying the skip (required for LLM actors)
   --notes <text>    Reason for skipping (e.g., "Cloud SQL - marked SKIP in spec")
   --partial         Mark as partial (coded what we could, rest is external)
-  -j, --json        Output as JSON
   -h, --help        Show help
 
 DESCRIPTION:
@@ -779,7 +793,7 @@ EXAMPLES:
     }
 
     if (!task) {
-      console.error(`Task not found: ${identifier}`);
+      out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
       process.exit(1);
     }
 
@@ -808,43 +822,42 @@ EXAMPLES:
       values.partial ? 'partial' : 'skipped'
     );
 
-    if (values.json) {
-      console.log(JSON.stringify({ task, skipped: true, partial: values.partial }, null, 2));
-    } else {
+    out.success({ task, skipped: true, partial: values.partial });
+    if (!flags.json) {
       const statusLabel = values.partial ? 'PARTIAL' : 'SKIPPED';
-      console.log(`Task ${statusLabel}: ${task.title}`);
-      console.log(`  Status: ${newStatus}`);
-      console.log(`  Actor: ${actor}`);
+      out.log(`Task ${statusLabel}: ${task.title}`);
+      out.log(`  Status: ${newStatus}`);
+      out.log(`  Actor: ${actor}`);
       if (values.notes) {
-        console.log(`  Notes: ${values.notes}`);
+        out.log(`  Notes: ${values.notes}`);
       }
-      console.log('');
-      console.log('  Task will not block the runner. Move on to the next task.');
+      out.log('');
+      out.log('  Task will not block the runner. Move on to the next task.');
     }
   } finally {
     close();
   }
 }
 
-async function auditTask(args: string[]): Promise<void> {
+async function auditTask(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'tasks', subcommand: 'audit', flags });
+
   const { values, positionals } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
     },
     allowPositionals: true,
   });
 
-  if (values.help || positionals.length === 0) {
-    console.log(`
+  if (values.help || flags.help || positionals.length === 0) {
+    out.log(`
 steroids tasks audit <id> - View task audit trail
 
 USAGE:
   steroids tasks audit <id> [options]
 
 OPTIONS:
-  -j, --json        Output as JSON
   -h, --help        Show help
 `);
     return;
@@ -860,30 +873,29 @@ OPTIONS:
     }
 
     if (!task) {
-      console.error(`Task not found: ${identifier}`);
+      out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
       process.exit(1);
     }
 
     const entries = getTaskAudit(db, task.id);
 
-    if (values.json) {
-      console.log(JSON.stringify(entries, null, 2));
-      return;
-    }
+    out.success({ task: { id: task.id, title: task.title }, auditTrail: entries });
 
-    console.log(`Audit trail for: ${task.title}`);
-    console.log(`Task ID: ${task.id}`);
-    console.log('─'.repeat(80));
-    console.log('TIMESTAMP            FROM         TO           ACTOR              NOTES');
-    console.log('─'.repeat(80));
+    if (!flags.json) {
+      out.log(`Audit trail for: ${task.title}`);
+      out.log(`Task ID: ${task.id}`);
+      out.log('─'.repeat(80));
+      out.log('TIMESTAMP            FROM         TO           ACTOR              NOTES');
+      out.log('─'.repeat(80));
 
-    for (const entry of entries) {
-      const ts = entry.created_at.substring(0, 19).replace('T', ' ');
-      const from = (entry.from_status ?? '-').padEnd(12);
-      const to = entry.to_status.padEnd(12);
-      const actor = entry.actor.padEnd(18);
-      const notes = entry.notes ?? '-';
-      console.log(`${ts}  ${from} ${to} ${actor} ${notes}`);
+      for (const entry of entries) {
+        const ts = entry.created_at.substring(0, 19).replace('T', ' ');
+        const from = (entry.from_status ?? '-').padEnd(12);
+        const to = entry.to_status.padEnd(12);
+        const actor = entry.actor.padEnd(18);
+        const notes = entry.notes ?? '-';
+        out.log(`${ts}  ${from} ${to} ${actor} ${notes}`);
+      }
     }
   } finally {
     close();
