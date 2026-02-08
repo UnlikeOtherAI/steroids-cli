@@ -26,6 +26,7 @@ export interface Runner {
 
 export interface DaemonOptions {
   projectPath?: string;
+  sectionId?: string;  // Focus on this section only
   onTaskStart?: (taskId: string) => void;
   onTaskComplete?: (taskId: string) => void;
   onShutdown?: () => void;
@@ -35,15 +36,16 @@ export interface DaemonOptions {
  * Register a new runner in the database
  */
 export function registerRunner(
-  projectPath?: string
+  projectPath?: string,
+  sectionId?: string
 ): { runnerId: string; close: () => void } {
   const { db, close } = openGlobalDatabase();
   const runnerId = uuidv4();
 
   db.prepare(
-    `INSERT INTO runners (id, status, pid, project_path, started_at, heartbeat_at)
-     VALUES (?, 'idle', ?, ?, datetime('now'), datetime('now'))`
-  ).run(runnerId, process.pid, projectPath ?? null);
+    `INSERT INTO runners (id, status, pid, project_path, section_id, started_at, heartbeat_at)
+     VALUES (?, 'idle', ?, ?, ?, datetime('now'), datetime('now'))`
+  ).run(runnerId, process.pid, projectPath ?? null, sectionId ?? null);
 
   return { runnerId, close };
 }
@@ -194,8 +196,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
     process.exit(6); // Resource locked exit code
   }
 
-  // Register runner with effective project path
-  const { runnerId, close: closeDb } = registerRunner(effectiveProjectPath);
+  // Register runner with effective project path and section ID
+  const { runnerId, close: closeDb } = registerRunner(effectiveProjectPath, options.sectionId);
   const { db } = openGlobalDatabase();
 
   // Start heartbeat
@@ -245,6 +247,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
   try {
     await runOrchestratorLoop({
       projectPath: effectiveProjectPath,
+      sectionId: options.sectionId,
       shouldStop: () => shutdownRequested,
       onIteration: (iteration) => {
         // Update heartbeat on each iteration

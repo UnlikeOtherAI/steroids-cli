@@ -16,6 +16,8 @@ import {
 import { checkLockStatus, isProcessAlive } from '../runners/lock.js';
 import { wakeup, checkWakeupNeeded } from '../runners/wakeup.js';
 import { cronStatus, cronInstall, cronUninstall } from '../runners/cron.js';
+import { openDatabase } from '../database/connection.js';
+import { getSection, getSectionByName, listSections } from '../database/queries.js';
 
 const HELP = `
 steroids runners - Manage runner daemons
@@ -34,6 +36,7 @@ SUBCOMMANDS:
 START OPTIONS:
   --detach            Run in background (daemonize)
   --project <path>    Project path to work on
+  --section <id|name> Focus on a specific section only
 
 STOP OPTIONS:
   --id <id>           Stop specific runner by ID
@@ -55,6 +58,7 @@ GLOBAL OPTIONS:
 EXAMPLES:
   steroids runners start                    # Start in foreground
   steroids runners start --detach           # Start in background
+  steroids runners start --section "Phase 2" # Focus on specific section
   steroids runners stop                     # Stop current runner
   steroids runners status                   # Show status
   steroids runners list --json              # List all runners as JSON
@@ -105,6 +109,7 @@ async function runStart(args: string[]): Promise<void> {
       json: { type: 'boolean', short: 'j', default: false },
       detach: { type: 'boolean', short: 'd', default: false },
       project: { type: 'string', short: 'p' },
+      section: { type: 'string' },
     },
     allowPositionals: false,
   });
@@ -119,6 +124,7 @@ USAGE:
 OPTIONS:
   --detach            Run in background
   --project <path>    Project path
+  --section <id|name> Focus on a specific section only
   -j, --json          Output as JSON
   -h, --help          Show help
 `);
@@ -147,9 +153,57 @@ OPTIONS:
     process.exit(6);
   }
 
+  // Resolve section if --section flag is provided
+  let focusedSectionId: string | undefined;
+
+  if (values.section) {
+    const sectionInput = values.section as string;
+    const { db, close } = openDatabase(projectPath);
+
+    try {
+      // Try to resolve by ID (exact or prefix match)
+      let section = getSection(db, sectionInput);
+
+      // If not found by ID, try by name
+      if (!section) {
+        section = getSectionByName(db, sectionInput);
+      }
+
+      if (!section) {
+        const errorMsg = `Section not found: ${sectionInput}`;
+        if (values.json) {
+          console.log(JSON.stringify({ success: false, error: errorMsg }));
+        } else {
+          console.error(`Error: ${errorMsg}`);
+          console.error('');
+          console.error('Available sections:');
+          const sections = listSections(db);
+          if (sections.length === 0) {
+            console.error('  (no sections defined)');
+          } else {
+            for (const s of sections) {
+              console.error(`  ${s.id.substring(0, 8)}  ${s.name}`);
+            }
+          }
+        }
+        close();
+        process.exit(1);
+      }
+
+      focusedSectionId = section.id;
+    } finally {
+      close();
+    }
+  }
+
   if (values.detach) {
     // Spawn detached process - always pass --project for proper tracking
     const spawnArgs = [process.argv[1], 'runners', 'start', '--project', projectPath];
+
+    // Pass --section if specified
+    if (values.section) {
+      spawnArgs.push('--section', values.section as string);
+    }
 
     const child = spawn(
       process.execPath,
@@ -170,7 +224,7 @@ OPTIONS:
   }
 
   // Start in foreground
-  await startDaemon({ projectPath });
+  await startDaemon({ projectPath, sectionId: focusedSectionId });
 }
 
 async function runStop(args: string[]): Promise<void> {

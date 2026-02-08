@@ -21,6 +21,7 @@ function sleep(ms: number): Promise<void> {
 export interface LoopOptions {
   projectPath: string;
   once?: boolean;
+  sectionId?: string;  // Focus on this section only
   onIteration?: (iteration: number) => void;
   onTaskStart?: (taskId: string, action: string) => void;
   onTaskComplete?: (taskId: string) => void;
@@ -32,7 +33,7 @@ export interface LoopOptions {
  * Processes tasks until all are complete or shouldStop returns true
  */
 export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
-  const { projectPath, once = false, shouldStop } = options;
+  const { projectPath, once = false, shouldStop, sectionId } = options;
 
   const { db, close } = openDatabase(projectPath);
 
@@ -51,7 +52,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       options.onIteration?.(iteration);
 
       // Select next task
-      const selected = selectNextTask(db);
+      const selected = selectNextTask(db, sectionId);
 
       if (!selected) {
         console.log('');
@@ -91,7 +92,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
     }
 
     // Final status
-    const finalCounts = getTaskCounts(db);
+    const finalCounts = getTaskCounts(db, sectionId);
     console.log('\nFinal Status:');
     console.log(`  Completed: ${finalCounts.completed}`);
     console.log(`  Failed:    ${finalCounts.failed}`);
