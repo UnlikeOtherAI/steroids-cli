@@ -159,6 +159,11 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _type: 'string',
       _default: '7d',
     },
+    daemonLogs: {
+      _description: 'Enable daemon stdout/stderr logging to disk',
+      _type: 'boolean',
+      _default: true,
+    },
   },
   health: {
     _description: 'Health check configuration',

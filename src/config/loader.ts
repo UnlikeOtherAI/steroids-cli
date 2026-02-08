@@ -47,6 +47,7 @@ export interface SteroidsConfig {
     subprocessHangTimeout?: string;
     maxConcurrent?: number;
     logRetention?: string;
+    daemonLogs?: boolean;
   };
   health?: {
     threshold?: number;
