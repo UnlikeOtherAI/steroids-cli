@@ -91,7 +91,36 @@ All CLIs are independent and can be used standalone.
 
 ## Core Constraints (MANDATORY)
 
-### 0. CLI-First Debugging (CRITICAL)
+### 0. Use Steroids to Build Steroids (CRITICAL)
+
+**NEVER develop features directly in this project.** Use the Steroids CLI to manage all work.
+
+```bash
+# BAD: Just start coding a feature
+# "Let me implement the watch command..."
+
+# GOOD: Use the tool to manage work
+steroids about                           # Understand the system
+steroids tasks list                      # See pending tasks
+steroids sections list                   # See task sections
+steroids tasks update <id> --status in_progress  # Claim a task
+# ... do the work ...
+steroids tasks update <id> --status review       # Submit for review
+```
+
+**Why?**
+- Steroids is designed to orchestrate AI development work
+- Using the tool tests the tool (dogfooding)
+- Tasks have specifications that must be followed
+- The coder/reviewer loop ensures quality
+- Skipping the process bypasses review and quality gates
+
+**The only direct work allowed:**
+- Bug fixes blocking the CLI itself
+- Documentation updates to CLAUDE.md
+- Emergency patches (must be reviewed afterward)
+
+### 0.1 CLI-First Debugging (CRITICAL)
 
 **NEVER use direct SQL/database access for debugging or inspection.** Always use CLI commands.
 
