@@ -52,24 +52,22 @@ EXAMPLES:
 `;
 
 export async function gcCommand(args: string[], flags: GlobalFlags): Promise<void> {
+  // Check global help flag first
+  if (flags.help) {
+    console.log(HELP);
+    return;
+  }
+
   const { values } = parseArgs({
     args,
     options: {
-      help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
       'orphaned-ids': { type: 'boolean', default: false },
       'stale-runners': { type: 'boolean', default: false },
       'temp-files': { type: 'boolean', default: false },
       vacuum: { type: 'boolean', default: false },
-      'dry-run': { type: 'boolean', default: false },
     },
     allowPositionals: false,
   });
-
-  if (values.help) {
-    console.log(HELP);
-    return;
-  }
 
   const projectPath = process.cwd();
   if (!isInitialized(projectPath)) {
@@ -83,7 +81,7 @@ export async function gcCommand(args: string[], flags: GlobalFlags): Promise<voi
     !values['temp-files'] &&
     !values.vacuum;
 
-  const dryRun = values['dry-run'] ?? false;
+  const dryRun = flags.dryRun;
   const result: GcResult = {
     orphanedIds: 0,
     staleRunners: 0,
@@ -117,7 +115,7 @@ export async function gcCommand(args: string[], flags: GlobalFlags): Promise<voi
     close();
   }
 
-  outputResult(result, values.json ?? false, dryRun);
+  outputResult(result, flags.json, dryRun);
 }
 
 function cleanOrphanedIds(db: Database.Database, dryRun: boolean): number {

@@ -69,11 +69,15 @@ EXAMPLES:
 `;
 
 export async function scanCommand(args: string[], flags: GlobalFlags): Promise<void> {
+  // Check global help flag first
+  if (flags.help) {
+    console.log(HELP);
+    return;
+  }
+
   const { values, positionals } = parseArgs({
     args,
     options: {
-      help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
       filter: { type: 'string' },
       sort: { type: 'string', default: 'name' },
       limit: { type: 'string' },
@@ -82,11 +86,6 @@ export async function scanCommand(args: string[], flags: GlobalFlags): Promise<v
     },
     allowPositionals: true,
   });
-
-  if (values.help) {
-    console.log(HELP);
-    return;
-  }
 
   const directory = positionals[0] || process.cwd();
   const depth = parseInt(values.depth ?? '1', 10);
@@ -127,7 +126,7 @@ export async function scanCommand(args: string[], flags: GlobalFlags): Promise<v
     }
   }
 
-  outputResults(projects, values.json ?? false);
+  outputResults(projects, flags.json);
 }
 
 function scanDirectory(directory: string, depth: number): ProjectInfo[] {

@@ -80,22 +80,21 @@ Reviewer checks code quality and adherence to spec.`,
 });
 
 export async function loopCommand(args: string[], flags: GlobalFlags): Promise<void> {
+  // Check global help flag first
+  if (flags.help) {
+    console.log(HELP);
+    return;
+  }
+
   const { values } = parseArgs({
     args,
     options: {
-      help: { type: 'boolean', short: 'h', default: false },
       once: { type: 'boolean', default: false },
-      'dry-run': { type: 'boolean', default: false },
       project: { type: 'string' },
       section: { type: 'string' },
     },
     allowPositionals: false,
   });
-
-  if (values.help) {
-    console.log(HELP);
-    return;
-  }
 
   // Handle --project flag: change directory if specified
   if (values.project) {
@@ -132,7 +131,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     process.chdir(projectPath);
 
     // Only show message if not in dry-run mode (for scripting consistency)
-    if (!values['dry-run']) {
+    if (!flags.dryRun) {
       console.log(`Switched to project: ${projectPath}`);
       console.log('');
     }
@@ -230,7 +229,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     console.log(`  Total:       ${counts.total}`);
     console.log('');
 
-    if (values['dry-run']) {
+    if (flags.dryRun) {
       const next = selectNextTask(db, focusedSectionId);
       if (next) {
         console.log(`[DRY RUN] Would process: ${next.task.title}`);

@@ -97,14 +97,15 @@ EXAMPLES:
 `;
 
 export async function disputeCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0) {
-    // Default: list open disputes
-    await listDisputes([]);
+  // Check global help flag first
+  if (flags.help) {
+    console.log(HELP);
     return;
   }
 
-  if (args[0] === '-h' || args[0] === '--help') {
-    console.log(HELP);
+  if (args.length === 0) {
+    // Default: list open disputes
+    await listDisputes([], flags);
     return;
   }
 
@@ -112,7 +113,7 @@ export async function disputeCommand(args: string[], flags: GlobalFlags): Promis
 
   if (subcommand.startsWith('-')) {
     // It's a flag, so this is a list command
-    await listDisputes(args);
+    await listDisputes(args, flags);
     return;
   }
 
@@ -120,19 +121,19 @@ export async function disputeCommand(args: string[], flags: GlobalFlags): Promis
 
   switch (subcommand) {
     case 'create':
-      await createDisputeCmd(subArgs);
+      await createDisputeCmd(subArgs, flags);
       break;
     case 'list':
-      await listDisputes(subArgs);
+      await listDisputes(subArgs, flags);
       break;
     case 'show':
-      await showDispute(subArgs);
+      await showDispute(subArgs, flags);
       break;
     case 'resolve':
-      await resolveDisputeCmd(subArgs);
+      await resolveDisputeCmd(subArgs, flags);
       break;
     case 'log':
-      await logDisputeCmd(subArgs);
+      await logDisputeCmd(subArgs, flags);
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
@@ -141,7 +142,7 @@ export async function disputeCommand(args: string[], flags: GlobalFlags): Promis
   }
 }
 
-async function createDisputeCmd(args: string[]): Promise<void> {
+async function createDisputeCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     options: {
@@ -249,7 +250,7 @@ OPTIONS:
   }
 }
 
-async function listDisputes(args: string[]): Promise<void> {
+async function listDisputes(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -327,7 +328,7 @@ OPTIONS:
   }
 }
 
-async function showDispute(args: string[]): Promise<void> {
+async function showDispute(args: string[], flags: GlobalFlags): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     options: {
@@ -417,7 +418,7 @@ OPTIONS:
   }
 }
 
-async function resolveDisputeCmd(args: string[]): Promise<void> {
+async function resolveDisputeCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     options: {
@@ -494,7 +495,7 @@ EXAMPLES:
   }
 }
 
-async function logDisputeCmd(args: string[]): Promise<void> {
+async function logDisputeCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     options: {

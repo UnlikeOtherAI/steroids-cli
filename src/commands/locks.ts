@@ -62,20 +62,21 @@ EXAMPLES:
 `;
 
 export async function locksCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0) {
-    await listLocks([]);
+  // Check global help flag first
+  if (flags.help) {
+    console.log(HELP);
     return;
   }
 
-  if (args[0] === '-h' || args[0] === '--help') {
-    console.log(HELP);
+  if (args.length === 0) {
+    await listLocks([], flags);
     return;
   }
 
   const subcommand = args[0];
 
   if (subcommand.startsWith('-')) {
-    await listLocks(args);
+    await listLocks(args, flags);
     return;
   }
 
@@ -83,16 +84,16 @@ export async function locksCommand(args: string[], flags: GlobalFlags): Promise<
 
   switch (subcommand) {
     case 'list':
-      await listLocks(subArgs);
+      await listLocks(subArgs, flags);
       break;
     case 'show':
-      await showLock(subArgs);
+      await showLock(subArgs, flags);
       break;
     case 'release':
-      await releaseLock(subArgs);
+      await releaseLock(subArgs, flags);
       break;
     case 'cleanup':
-      await cleanupLocks(subArgs);
+      await cleanupLocks(subArgs, flags);
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
@@ -101,7 +102,7 @@ export async function locksCommand(args: string[], flags: GlobalFlags): Promise<
   }
 }
 
-async function listLocks(args: string[]): Promise<void> {
+async function listLocks(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -190,7 +191,7 @@ async function listLocks(args: string[]): Promise<void> {
   }
 }
 
-async function showLock(args: string[]): Promise<void> {
+async function showLock(args: string[], flags: GlobalFlags): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     options: {
@@ -276,7 +277,7 @@ OPTIONS:
   }
 }
 
-async function releaseLock(args: string[]): Promise<void> {
+async function releaseLock(args: string[], flags: GlobalFlags): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     options: {
@@ -380,7 +381,7 @@ NOTE:
   }
 }
 
-async function cleanupLocks(args: string[]): Promise<void> {
+async function cleanupLocks(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
