@@ -7,7 +7,7 @@ import type { GlobalFlags } from '../cli/flags.js';
 import { outputJson, outputJsonError } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
 import { generateHelp } from '../cli/help.js';
-import { loadConfig, getProjectConfigPath, getGlobalConfigPath } from '../config/loader.js';
+import { loadConfigFile, getProjectConfigPath, getGlobalConfigPath } from '../config/loader.js';
 import {
   HOOK_EVENTS,
   EVENT_DESCRIPTIONS,
@@ -133,14 +133,14 @@ async function listHooks(args: string[], flags: GlobalFlags): Promise<void> {
   let projectHooks: HookConfig[] = [];
 
   try {
-    const globalConfig = await loadConfig(globalConfigPath);
+    const globalConfig = loadConfigFile(globalConfigPath);
     globalHooks = (globalConfig.hooks as HookConfig[]) || [];
   } catch {
     // Global config might not exist
   }
 
   try {
-    const projectConfig = await loadConfig(projectConfigPath);
+    const projectConfig = loadConfigFile(projectConfigPath);
     projectHooks = (projectConfig.hooks as HookConfig[]) || [];
   } catch {
     // Project config might not exist
@@ -207,14 +207,14 @@ async function validateHooks(args: string[], flags: GlobalFlags): Promise<void> 
   let projectHooks: HookConfig[] = [];
 
   try {
-    const globalConfig = await loadConfig(globalConfigPath);
+    const globalConfig = loadConfigFile(globalConfigPath);
     globalHooks = (globalConfig.hooks as HookConfig[]) || [];
   } catch {
     // Ignore
   }
 
   try {
-    const projectConfig = await loadConfig(projectConfigPath);
+    const projectConfig = loadConfigFile(projectConfigPath);
     projectHooks = (projectConfig.hooks as HookConfig[]) || [];
   } catch {
     // Ignore
@@ -268,14 +268,14 @@ async function testHooks(args: string[], flags: GlobalFlags): Promise<void> {
   let projectHooks: HookConfig[] = [];
 
   try {
-    const globalConfig = await loadConfig(globalConfigPath);
+    const globalConfig = loadConfigFile(globalConfigPath);
     globalHooks = (globalConfig.hooks as HookConfig[]) || [];
   } catch {
     // Ignore
   }
 
   try {
-    const projectConfig = await loadConfig(projectConfigPath);
+    const projectConfig = loadConfigFile(projectConfigPath);
     projectHooks = (projectConfig.hooks as HookConfig[]) || [];
   } catch {
     // Ignore
@@ -327,14 +327,14 @@ async function runHooks(args: string[], flags: GlobalFlags): Promise<void> {
   let projectHooks: HookConfig[] = [];
 
   try {
-    const globalConfig = await loadConfig(globalConfigPath);
+    const globalConfig = loadConfigFile(globalConfigPath);
     globalHooks = (globalConfig.hooks as HookConfig[]) || [];
   } catch {
     // Ignore
   }
 
   try {
-    const projectConfig = await loadConfig(projectConfigPath);
+    const projectConfig = loadConfigFile(projectConfigPath);
     projectHooks = (projectConfig.hooks as HookConfig[]) || [];
   } catch {
     // Ignore

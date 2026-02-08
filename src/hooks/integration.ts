@@ -6,7 +6,7 @@
  */
 
 import { basename } from 'node:path';
-import { loadConfig, getProjectConfigPath, getGlobalConfigPath } from '../config/loader.js';
+import { loadConfigFile, getProjectConfigPath, getGlobalConfigPath } from '../config/loader.js';
 import { mergeHooks, type HookConfig } from './merge.js';
 import { HookOrchestrator, type HookExecutionResult } from './orchestrator.js';
 import type { HookEvent } from './events.js';
@@ -34,14 +34,14 @@ async function loadHooks(projectPath: string): Promise<HookConfig[]> {
   let projectHooks: HookConfig[] = [];
 
   try {
-    const globalConfig = await loadConfig(globalConfigPath);
+    const globalConfig = loadConfigFile(globalConfigPath);
     globalHooks = (globalConfig.hooks as HookConfig[]) || [];
   } catch {
     // Global config might not exist
   }
 
   try {
-    const projectConfig = await loadConfig(projectConfigPath);
+    const projectConfig = loadConfigFile(projectConfigPath);
     projectHooks = (projectConfig.hooks as HookConfig[]) || [];
   } catch {
     // Project config might not exist
