@@ -98,6 +98,12 @@ export interface SteroidsConfig {
     host?: string;
     auth?: boolean;
   };
+  quality?: {
+    tests?: {
+      required?: boolean;
+      minCoverage?: number;
+    };
+  };
 }
 
 /**
@@ -182,6 +188,12 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
     port: 3000,
     host: 'localhost',
     auth: false,
+  },
+  quality: {
+    tests: {
+      required: false,
+      minCoverage: 80,
+    },
   },
 };
 

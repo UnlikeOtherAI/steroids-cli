@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Task, RejectionEntry } from '../database/queries.js';
+import type { SteroidsConfig } from '../config/loader.js';
 
 export interface SectionTask {
   id: string;
@@ -22,6 +23,7 @@ export interface ReviewerPromptContext {
   sectionTasks?: SectionTask[];  // Other tasks in the same section
   rejectionHistory?: RejectionEntry[];  // Past rejections with commit hashes
   submissionNotes?: string | null;  // Notes from coder when submitting for review
+  config: SteroidsConfig;  // Config for quality settings
 }
 
 /**
@@ -145,10 +147,34 @@ ${lines.join('\n')}
 }
 
 /**
+ * Generate test coverage instructions if required
+ */
+function getTestCoverageInstructions(config: SteroidsConfig): string {
+  if (!config.quality?.tests?.required) {
+    return '';
+  }
+
+  const minCoverageNote = config.quality.tests.minCoverage
+    ? `- Minimum coverage: ${config.quality.tests.minCoverage}%`
+    : '';
+
+  return `
+
+## Test Coverage (REQUIRED)
+
+**This project requires tests for new code:**
+- Verify new functionality has corresponding tests
+- Tests must actually exercise the new code paths
+${minCoverageNote}
+- REJECT if tests are missing or inadequate
+`;
+}
+
+/**
  * Generate the reviewer prompt
  */
 export function generateReviewerPrompt(context: ReviewerPromptContext): string {
-  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks, rejectionHistory, submissionNotes } = context;
+  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks, rejectionHistory, submissionNotes, config } = context;
 
   // Format coder's submission notes if present
   const submissionNotesSection = submissionNotes
@@ -226,7 +252,7 @@ Answer these questions:
 3. Are tests present and adequate?
 4. Does code follow AGENTS.md guidelines?
 5. Are all files under 500 lines?
-
+${getTestCoverageInstructions(config)}
 ---
 
 ## Your Decision

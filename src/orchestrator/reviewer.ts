@@ -22,6 +22,7 @@ import {
   getCommitDiff,
   getCommitFiles,
 } from '../git/status.js';
+import { loadConfig } from '../config/loader.js';
 
 export interface ReviewerResult {
   success: boolean;
@@ -219,6 +220,9 @@ export async function invokeReviewer(
     console.warn('Could not fetch task context:', error);
   }
 
+  // Load config to get quality settings
+  const config = loadConfig(projectPath);
+
   const context: ReviewerPromptContext = {
     task,
     projectPath,
@@ -228,6 +232,7 @@ export async function invokeReviewer(
     sectionTasks,
     rejectionHistory,
     submissionNotes,
+    config,
   };
 
   const prompt = generateReviewerPrompt(context);

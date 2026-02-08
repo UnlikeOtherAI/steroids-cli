@@ -345,6 +345,24 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _default: false,
     },
   },
+  quality: {
+    _description: 'Code quality requirements',
+    _type: 'object',
+    tests: {
+      _description: 'Test coverage settings',
+      _type: 'object',
+      required: {
+        _description: 'Whether to require tests for new code',
+        _type: 'boolean',
+        _default: false,
+      },
+      minCoverage: {
+        _description: 'Minimum test coverage percentage (0-100)',
+        _type: 'number',
+        _default: 80,
+      },
+    },
+  },
 };
 
 /**
