@@ -55,10 +55,16 @@ EXAMPLES:
   steroids sections priority abc123 high
   steroids sections priority abc123 25
   steroids sections depends-on abc123 def456
-  steroids sections graph
-  steroids sections graph --mermaid
-  steroids sections graph --output png -o
-  steroids sections graph --tasks --status active
+
+  # Graph output formats:
+  steroids sections graph                      # ASCII tree (default)
+  steroids sections graph --json               # JSON output
+  steroids sections graph --mermaid            # Mermaid flowchart syntax
+  steroids sections graph --output png         # Generate PNG image
+  steroids sections graph --output svg -o      # Generate SVG and open it
+  steroids sections graph --tasks              # Include tasks in graph
+  steroids sections graph --tasks --status active  # Show only active tasks
+  steroids sections graph --section abc123 --tasks # Graph for single section
 `;
 
 export async function sectionsCommand(args: string[], flags: GlobalFlags): Promise<void> {
@@ -219,12 +225,31 @@ OPTIONS:
   --section <id>       Show only specified section
   -h, --help           Show help
 
+OUTPUT FORMATS:
+  Default (ASCII):       steroids sections graph
+  JSON:                  steroids sections graph --json
+  Mermaid syntax:        steroids sections graph --mermaid
+  PNG image:             steroids sections graph --output png
+  SVG image:             steroids sections graph --output svg -o
+
 EXAMPLES:
+  # Basic dependency graph (ASCII tree)
   steroids sections graph
-  steroids sections graph --mermaid
+
+  # Generate PNG and auto-open it
   steroids sections graph --output png -o
+
+  # Show graph with all tasks included
+  steroids sections graph --tasks
+
+  # Filter to show only active tasks (in_progress or review)
   steroids sections graph --tasks --status active
+
+  # Graph for a single section with its tasks
   steroids sections graph --section abc123 --tasks
+
+  # Export as Mermaid syntax (for documentation)
+  steroids sections graph --mermaid > docs/sections.mmd
 `);
     return;
   }
