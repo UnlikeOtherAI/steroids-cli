@@ -4,6 +4,9 @@
 
 import { parseArgs } from 'node:util';
 import { initDatabase, isInitialized, getDbPath } from '../database/connection.js';
+import type { GlobalFlags } from '../cli/flags.js';
+import { createOutput } from '../cli/output.js';
+import { colors, markers } from '../cli/colors.js';
 
 const HELP = `
 steroids init - Initialize Steroids in current directory
@@ -19,7 +22,9 @@ CREATES:
   .steroids/steroids.db    SQLite database with task schema
 `;
 
-export async function initCommand(args: string[]): Promise<void> {
+export async function initCommand(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'init', flags });
+
   const { values } = parseArgs({
     args,
     options: {
@@ -29,30 +34,57 @@ export async function initCommand(args: string[]): Promise<void> {
     allowPositionals: false,
   });
 
-  if (values.help) {
-    console.log(HELP);
+  if (values.help || flags.help) {
+    out.log(HELP);
     return;
   }
 
   const cwd = process.cwd();
+  const dbPath = getDbPath(cwd);
 
   if (isInitialized(cwd)) {
-    console.log('Steroids already initialized in this directory.');
-    console.log(`Database: ${getDbPath(cwd)}`);
+    if (flags.json) {
+      out.success({
+        message: 'Already initialized',
+        database: dbPath,
+        alreadyInitialized: true,
+      });
+    } else {
+      out.log(markers.info('Steroids already initialized in this directory.'));
+      out.log(`Database: ${colors.cyan(dbPath)}`);
+    }
     return;
   }
 
-  console.log('Initializing Steroids...');
+  out.verbose('Initializing Steroids...');
+
+  if (flags.dryRun) {
+    out.log(colors.yellow('Dry run: Would initialize Steroids'));
+    out.log(`Database would be created at: ${dbPath}`);
+    return;
+  }
 
   const { close } = initDatabase(cwd);
   close();
 
-  console.log('');
-  console.log('Steroids initialized successfully!');
-  console.log(`Database: ${getDbPath(cwd)}`);
-  console.log('');
-  console.log('Next steps:');
-  console.log('  steroids sections add "Phase 1"');
-  console.log('  steroids tasks add "My first task" --section "Phase 1"');
-  console.log('  steroids loop');
+  if (flags.json) {
+    out.success({
+      message: 'Initialized successfully',
+      database: dbPath,
+      nextSteps: [
+        'steroids sections add "Phase 1"',
+        'steroids tasks add "My first task" --section "Phase 1"',
+        'steroids loop',
+      ],
+    });
+  } else {
+    out.log('');
+    out.log(markers.success('Steroids initialized successfully!'));
+    out.log(`Database: ${colors.cyan(dbPath)}`);
+    out.log('');
+    out.log(colors.bold('Next steps:'));
+    out.log(`  ${colors.dim('$')} steroids sections add "Phase 1"`);
+    out.log(`  ${colors.dim('$')} steroids tasks add "My first task" --section "Phase 1"`);
+    out.log(`  ${colors.dim('$')} steroids loop`);
+  }
 }

@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids loop - Main orchestrator loop
  * Runs continuously until all tasks are done
@@ -47,7 +48,7 @@ EXAMPLES:
   steroids loop --dry-run        # Preview without executing
 `;
 
-export async function loopCommand(args: string[]): Promise<void> {
+export async function loopCommand(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {

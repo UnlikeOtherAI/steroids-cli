@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids logs - View invocation logs
  *
@@ -71,7 +72,7 @@ EXAMPLES:
   steroids logs purge --older-than 7d
 `;
 
-export async function logsCommand(args: string[]): Promise<void> {
+export async function logsCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;

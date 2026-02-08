@@ -3,6 +3,9 @@
  * Explains what Steroids is for LLMs discovering the tool
  */
 
+import type { GlobalFlags } from '../cli/flags.js';
+import { createOutput } from '../cli/output.js';
+
 const ABOUT_TEXT = `
 STEROIDS - Automated Task Execution System
 ===========================================
@@ -96,53 +99,55 @@ interface AboutOutput {
   rules: string[];
 }
 
-export async function aboutCommand(args: string[]): Promise<void> {
-  if (args.includes('-h') || args.includes('--help')) {
-    console.log(HELP);
+export async function aboutCommand(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'about', flags });
+
+  if (flags.help) {
+    out.log(HELP);
     return;
   }
 
-  if (args.includes('-j') || args.includes('--json')) {
-    const output: AboutOutput = {
-      name: 'Steroids',
-      description: 'AI-powered task orchestration with coder/reviewer loop',
-      version: process.env.npm_package_version ?? '0.0.0',
-      concept: {
-        roles: [
-          { name: 'coder', purpose: 'Implements tasks by writing code, running builds and tests' },
-          { name: 'reviewer', purpose: 'Reviews completed work, approves or rejects with feedback' },
-        ],
-        workflow: [
-          'Human creates tasks with specifications',
-          'Runner picks up pending tasks',
-          'Coder implements following specification',
-          'Reviewer evaluates implementation',
-          'Approved: task complete, next starts',
-          'Rejected: returns to coder with notes',
-          'After 15 rejections: dispute raised',
-        ],
-        lifecycle: ['pending', 'in_progress', 'review', 'completed'],
-      },
-      commands: [
-        { command: 'steroids tasks list', description: 'List pending tasks' },
-        { command: 'steroids tasks list --status all', description: 'Show all tasks' },
-        { command: 'steroids sections list', description: 'Show task sections' },
-        { command: 'steroids tasks update <id> --status review', description: 'Submit for review' },
-        { command: 'steroids tasks approve <id>', description: 'Approve as reviewer' },
-        { command: 'steroids tasks reject <id> --notes "..."', description: 'Reject with feedback' },
-        { command: 'steroids dispute create', description: 'Raise a dispute' },
+  const data: AboutOutput = {
+    name: 'Steroids',
+    description: 'AI-powered task orchestration with coder/reviewer loop',
+    version: process.env.npm_package_version ?? '0.0.0',
+    concept: {
+      roles: [
+        { name: 'coder', purpose: 'Implements tasks by writing code, running builds and tests' },
+        { name: 'reviewer', purpose: 'Reviews completed work, approves or rejects with feedback' },
       ],
-      rules: [
-        'Always run build AND tests before submitting for review',
-        'Read the task specification thoroughly before implementing',
-        'Make small, focused commits',
-        'Never modify code outside the task scope',
-        'If stuck, create a dispute rather than guessing',
+      workflow: [
+        'Human creates tasks with specifications',
+        'Runner picks up pending tasks',
+        'Coder implements following specification',
+        'Reviewer evaluates implementation',
+        'Approved: task complete, next starts',
+        'Rejected: returns to coder with notes',
+        'After 15 rejections: dispute raised',
       ],
-    };
-    console.log(JSON.stringify(output, null, 2));
-    return;
-  }
+      lifecycle: ['pending', 'in_progress', 'review', 'completed'],
+    },
+    commands: [
+      { command: 'steroids tasks list', description: 'List pending tasks' },
+      { command: 'steroids tasks list --status all', description: 'Show all tasks' },
+      { command: 'steroids sections list', description: 'Show task sections' },
+      { command: 'steroids tasks update <id> --status review', description: 'Submit for review' },
+      { command: 'steroids tasks approve <id>', description: 'Approve as reviewer' },
+      { command: 'steroids tasks reject <id> --notes "..."', description: 'Reject with feedback' },
+      { command: 'steroids dispute create', description: 'Raise a dispute' },
+    ],
+    rules: [
+      'Always run build AND tests before submitting for review',
+      'Read the task specification thoroughly before implementing',
+      'Make small, focused commits',
+      'Never modify code outside the task scope',
+      'If stuck, create a dispute rather than guessing',
+    ],
+  };
 
-  console.log(ABOUT_TEXT);
+  if (flags.json) {
+    out.success(data);
+  } else {
+    out.log(ABOUT_TEXT);
+  }
 }

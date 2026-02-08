@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids purge - Purge completed tasks, orphaned IDs, and old logs
  *
@@ -64,7 +65,7 @@ EXAMPLES:
   steroids purge all --yes --backup
 `;
 
-export async function purgeCommand(args: string[]): Promise<void> {
+export async function purgeCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;
@@ -75,16 +76,16 @@ export async function purgeCommand(args: string[]): Promise<void> {
 
   switch (subcommand) {
     case 'tasks':
-      await purgeTasks(subArgs);
+      await purgeTasks(subArgs, flags);
       break;
     case 'ids':
-      await purgeIds(subArgs);
+      await purgeIds(subArgs, flags);
       break;
     case 'logs':
-      await purgeLogs(subArgs);
+      await purgeLogs(subArgs, flags);
       break;
     case 'all':
-      await purgeAll(subArgs);
+      await purgeAll(subArgs, flags);
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
@@ -93,7 +94,7 @@ export async function purgeCommand(args: string[]): Promise<void> {
   }
 }
 
-async function purgeTasks(args: string[]): Promise<void> {
+async function purgeTasks(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -136,7 +137,7 @@ OPTIONS:
   // Create backup if requested
   if (values.backup && !values['dry-run']) {
     const { backupCommand } = await import('./backup.js');
-    await backupCommand(['create']);
+    await backupCommand(['create'], flags);
   }
 
   const { db, close } = openDatabase(projectPath);
@@ -164,7 +165,7 @@ OPTIONS:
   }
 }
 
-async function purgeIds(args: string[]): Promise<void> {
+async function purgeIds(args: string[], _flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -220,7 +221,7 @@ OPTIONS:
   }
 }
 
-async function purgeLogs(args: string[]): Promise<void> {
+async function purgeLogs(args: string[], _flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -277,7 +278,7 @@ OPTIONS:
   }
 }
 
-async function purgeAll(args: string[]): Promise<void> {
+async function purgeAll(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -327,7 +328,7 @@ OPTIONS:
   // Create backup if requested
   if (values.backup && !values['dry-run']) {
     const { backupCommand } = await import('./backup.js');
-    await backupCommand(['create', '--include-logs']);
+    await backupCommand(['create', '--include-logs'], flags);
     console.log('');
   }
 

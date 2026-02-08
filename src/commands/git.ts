@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids git - Git integration commands
  *
@@ -57,7 +58,7 @@ EXAMPLES:
   steroids git log --limit 5
 `;
 
-export async function gitCommand(args: string[]): Promise<void> {
+export async function gitCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;

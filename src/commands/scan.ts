@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids scan - Scan directory for projects
  *
@@ -67,7 +68,7 @@ EXAMPLES:
   steroids scan . --depth 2
 `;
 
-export async function scanCommand(args: string[]): Promise<void> {
+export async function scanCommand(args: string[], flags: GlobalFlags): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     options: {

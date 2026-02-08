@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids gc - Garbage collection
  *
@@ -50,7 +51,7 @@ EXAMPLES:
   steroids gc --temp-files --vacuum
 `;
 
-export async function gcCommand(args: string[]): Promise<void> {
+export async function gcCommand(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {

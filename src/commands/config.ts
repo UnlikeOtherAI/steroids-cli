@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids config - Manage configuration
  */
@@ -77,7 +78,7 @@ EXAMPLES:
   steroids config edit                           # Open in editor
 `;
 
-export async function configCommand(args: string[]): Promise<void> {
+export async function configCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;

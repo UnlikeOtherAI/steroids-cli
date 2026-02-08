@@ -143,58 +143,58 @@ async function main(): Promise<void> {
     const command = remaining[0];
     const commandArgs = remaining.slice(1);
 
-    // Execute command
+    // Execute command - pass flags to all commands
     switch (command) {
       case 'about':
-        await aboutCommand(commandArgs);
+        await aboutCommand(commandArgs, flags);
         break;
       case 'init':
-        await initCommand(commandArgs);
+        await initCommand(commandArgs, flags);
         break;
       case 'sections':
-        await sectionsCommand(commandArgs);
+        await sectionsCommand(commandArgs, flags);
         break;
       case 'tasks':
-        await tasksCommand(commandArgs);
+        await tasksCommand(commandArgs, flags);
         break;
       case 'loop':
-        await loopCommand(commandArgs);
+        await loopCommand(commandArgs, flags);
         break;
       case 'runners':
-        await runnersCommand(commandArgs);
+        await runnersCommand(commandArgs, flags);
         break;
       case 'config':
-        await configCommand(commandArgs);
+        await configCommand(commandArgs, flags);
         break;
       case 'health':
-        await healthCommand(commandArgs);
+        await healthCommand(commandArgs, flags);
         break;
       case 'scan':
-        await scanCommand(commandArgs);
+        await scanCommand(commandArgs, flags);
         break;
       case 'backup':
-        await backupCommand(commandArgs);
+        await backupCommand(commandArgs, flags);
         break;
       case 'logs':
-        await logsCommand(commandArgs);
+        await logsCommand(commandArgs, flags);
         break;
       case 'gc':
-        await gcCommand(commandArgs);
+        await gcCommand(commandArgs, flags);
         break;
       case 'completion':
-        await completionCommand(commandArgs);
+        await completionCommand(commandArgs, flags);
         break;
       case 'locks':
-        await locksCommand(commandArgs);
+        await locksCommand(commandArgs, flags);
         break;
       case 'dispute':
-        await disputeCommand(commandArgs);
+        await disputeCommand(commandArgs, flags);
         break;
       case 'purge':
-        await purgeCommand(commandArgs);
+        await purgeCommand(commandArgs, flags);
         break;
       case 'git':
-        await gitCommand(commandArgs);
+        await gitCommand(commandArgs, flags);
         break;
       default:
         if (flags.json) {
@@ -212,28 +212,42 @@ async function main(): Promise<void> {
         process.exit(getExitCode(ErrorCode.INVALID_ARGUMENTS));
     }
   } catch (error) {
+    // Get flags for error output (re-parse if needed, as we may have thrown before parsing)
+    let errorFlags = { json: false, verbose: false };
+    try {
+      const { flags } = parseGlobalFlags(process.argv.slice(2));
+      errorFlags = { json: flags.json, verbose: flags.verbose };
+    } catch {
+      // If parsing fails, use env vars as fallback
+      errorFlags.json = process.env.STEROIDS_JSON === '1' || process.env.STEROIDS_JSON === 'true';
+      errorFlags.verbose = process.env.STEROIDS_VERBOSE === '1';
+    }
+
     // Handle CliError with proper exit codes
     if (error instanceof CliError) {
-      if (process.env.STEROIDS_JSON === '1' || process.env.STEROIDS_JSON === 'true') {
+      if (errorFlags.json) {
         outputJsonError('steroids', null, error.code, error.message, error.details);
       } else {
         console.error(`Error: ${error.message}`);
+        if (errorFlags.verbose && error.details) {
+          console.error('Details:', JSON.stringify(error.details, null, 2));
+        }
       }
       process.exit(error.exitCode);
     }
 
     // Handle generic errors
     if (error instanceof Error) {
-      if (process.env.STEROIDS_JSON === '1' || process.env.STEROIDS_JSON === 'true') {
+      if (errorFlags.json) {
         outputJsonError('steroids', null, ErrorCode.GENERAL_ERROR, error.message);
       } else {
         console.error(`Error: ${error.message}`);
-        if (process.env.STEROIDS_VERBOSE === '1') {
+        if (errorFlags.verbose) {
           console.error(error.stack);
         }
       }
     } else {
-      if (process.env.STEROIDS_JSON === '1' || process.env.STEROIDS_JSON === 'true') {
+      if (errorFlags.json) {
         outputJsonError('steroids', null, ErrorCode.GENERAL_ERROR, 'An unexpected error occurred');
       } else {
         console.error('An unexpected error occurred');

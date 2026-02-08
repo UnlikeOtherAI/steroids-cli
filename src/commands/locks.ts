@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids locks - Manage task and section locks
  */
@@ -60,7 +61,7 @@ EXAMPLES:
   steroids locks cleanup --dry-run
 `;
 
-export async function locksCommand(args: string[]): Promise<void> {
+export async function locksCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0) {
     await listLocks([]);
     return;

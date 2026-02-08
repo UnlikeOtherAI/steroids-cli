@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids tasks - Manage tasks
  */
@@ -74,7 +75,7 @@ EXAMPLES:
   steroids tasks reject abc123 --model codex --notes "Missing tests"
 `;
 
-export async function tasksCommand(args: string[]): Promise<void> {
+export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0) {
     // Default: list pending tasks
     await listAllTasks([]);

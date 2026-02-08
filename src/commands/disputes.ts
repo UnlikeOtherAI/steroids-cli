@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids dispute - Manage disputes
  *
@@ -95,7 +96,7 @@ EXAMPLES:
   steroids dispute log abc123 --minor --notes "Style preference logged"
 `;
 
-export async function disputeCommand(args: string[]): Promise<void> {
+export async function disputeCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0) {
     // Default: list open disputes
     await listDisputes([]);

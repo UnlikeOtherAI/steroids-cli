@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids sections - Manage task sections
  */
@@ -31,7 +32,7 @@ EXAMPLES:
   steroids sections list --json
 `;
 
-export async function sectionsCommand(args: string[]): Promise<void> {
+export async function sectionsCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;

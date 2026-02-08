@@ -317,7 +317,7 @@ For existing projects that haven't been registered:
 
 Or simpler: require manual registration via `steroids projects add <path>`.
 
-## Implementation Tasks
+## Implementation Tasks (CLI)
 
 1. **Schema update**: Add `projects` table to global database, bump version
 2. **Project registry module**: Create `src/runners/projects.ts` with CRUD functions
@@ -326,7 +326,106 @@ Or simpler: require manual registration via `steroids projects add <path>`.
 5. **Projects command**: New command for managing project registry
 6. **Wakeup overhaul**: Iterate over all registered projects, not cwd
 7. **Runner tracking**: Ensure one runner per project, track by project_path
-8. **Prune command**: Remove stale projects that no longer exist
+8. **Documentation**: Update CLI/COMMANDS.md with new commands
+
+## WebUI/API Integration
+
+The global project registry enables multi-project monitoring in the WebUI and API.
+
+### API Endpoints (New)
+
+Add to `/API/src/routes/`:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/projects` | List all registered projects |
+| POST | `/api/projects` | Register a new project |
+| DELETE | `/api/projects/:path` | Unregister a project |
+| PATCH | `/api/projects/:path` | Enable/disable a project |
+| POST | `/api/projects/prune` | Remove stale projects |
+| GET | `/api/projects/:path/status` | Get project status (tasks, runner) |
+
+### API Response Format
+
+```typescript
+interface ProjectResponse {
+  path: string;
+  name: string | null;
+  enabled: boolean;
+  registered_at: string;
+  last_seen_at: string;
+  stats?: {
+    pending: number;
+    in_progress: number;
+    review: number;
+    completed: number;
+  };
+  runner?: {
+    id: string;
+    status: string;
+    pid: number;
+    current_task_id: string | null;
+  } | null;
+}
+```
+
+### WebUI Pages (New)
+
+| Route | Description |
+|-------|-------------|
+| `/projects` | List all registered projects with status |
+| `/projects/:path` | Project detail (redirects to that project's dashboard) |
+
+### WebUI Dashboard Changes
+
+The main dashboard should show a project selector:
+
+```
+┌─────────────────────────────────────────────────┐
+│  Project: [steroids-cli ▼]                      │
+│                                                 │
+│  Tasks: 77 pending, 1 in progress               │
+│  Runner: Active (PID 97823)                     │
+└─────────────────────────────────────────────────┘
+```
+
+### API Access to Global Database
+
+The API needs to read from `~/.steroids/steroids.db` (global) in addition to per-project databases:
+
+```typescript
+// API/src/services/global-db.ts
+import { openGlobalDatabase } from '../../../src/runners/global-db.js';
+
+export function getRegisteredProjects(): Project[] {
+  const { db, close } = openGlobalDatabase();
+  try {
+    return db.prepare('SELECT * FROM projects').all();
+  } finally {
+    close();
+  }
+}
+```
+
+### Docker Volume Mounts
+
+Update `docker-compose.yml` to mount global steroids directory:
+
+```yaml
+api:
+  volumes:
+    - ~/.steroids:/root/.steroids:ro  # Global DB (read-only)
+    - ./.steroids:/app/.steroids      # Current project
+```
+
+## Implementation Tasks (WebUI/API)
+
+9. **API projects routes**: Create `/api/projects` endpoints
+10. **API global DB access**: Add service to read global database
+11. **WebUI project list**: Create `/projects` page
+12. **WebUI project selector**: Add dropdown to dashboard header
+13. **Docker volume update**: Mount `~/.steroids` in API container
+14. **WebUI architecture update**: Document multi-project support
 
 ## Testing
 

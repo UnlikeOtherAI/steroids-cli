@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids backup - Backup and restore steroids data
  *
@@ -66,7 +67,7 @@ EXAMPLES:
   steroids backup clean --older-than 30d
 `;
 
-export async function backupCommand(args: string[]): Promise<void> {
+export async function backupCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;

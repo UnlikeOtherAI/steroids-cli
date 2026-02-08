@@ -1,3 +1,4 @@
+import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids health - Project health checking with scoring
  *
@@ -77,7 +78,7 @@ EXAMPLES:
   steroids health --check tests
 `;
 
-export async function healthCommand(args: string[]): Promise<void> {
+export async function healthCommand(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
