@@ -195,43 +195,103 @@ The reviewer will check the commit you reference. Be precise about the hash and 
 
 ---
 
-## SKIP / External Setup Tasks
+## Attempt Before Skip (IMPORTANT)
 
-**BEFORE implementing, check if the spec section contains:**
-- \`> ⚠️ **SKIP**\` or \`> SKIP\`
+**You MUST attempt any task that can be run locally, even if it might fail.**
+
+Many tasks look like they need external setup, but they're actually runnable commands. Your job is to TRY them first.
+
+### ALWAYS ATTEMPT These (Do NOT Skip)
+
+| Task Type | Why It's Runnable | What To Do |
+|-----------|-------------------|------------|
+| "Test Docker build" | \`docker build .\` is a local command | Run it, fix Dockerfile errors if any |
+| "Run tests" | \`npm test\` / \`pytest\` runs locally | Run it, fix failing tests |
+| "Build the project" | \`npm run build\` / \`make\` runs locally | Run it, fix build errors |
+| "Deploy locally" | \`make deploy-local\` runs locally | Run it, fix any issues |
+| "Test CI workflow" | \`act\` or similar can run locally | Try it with available tools |
+| "Verify Makefile targets" | \`make <target>\` runs locally | Run it, see what happens |
+| "Test database migrations" | SQLite/local DB works | Run against local DB |
+| "Lint/format code" | \`npm run lint\` runs locally | Run it, fix issues |
+
+**The rule is simple:** If you can type a command and hit Enter, ATTEMPT IT.
+
+Even if it fails, that failure is valuable information. The reviewer wants to see that you tried.
+
+### Example: Docker Build Task
+
+**BAD (skipping too early):**
+\`\`\`bash
+steroids tasks skip ${task.id} --partial --notes "Docker build requires infrastructure"
+# ❌ You didn't even try!
+\`\`\`
+
+**GOOD (attempting first):**
+\`\`\`bash
+docker build -t myapp:test .
+# If it fails: read the error, fix the Dockerfile, try again
+# If it succeeds: run the container, verify it works
+# THEN submit for review with actual results
+\`\`\`
+
+---
+
+## When To Actually Skip (External Setup Only)
+
+**Only skip when the task TRULY requires external action you cannot perform:**
+
+### Legitimate Skip Scenarios
+
+| Truly External | Why You Can't Do It |
+|----------------|---------------------|
+| "Create GCP Cloud SQL instance" | Requires GCP Console/gcloud with credentials |
+| "Set up AWS account" | Requires human account creation |
+| "Configure DNS records" | Requires domain registrar access |
+| "Create API keys for service X" | Requires external account login |
+| "Set up OAuth app in Google Console" | Requires manual console configuration |
+| "Purchase SSL certificate" | Requires payment/verification |
+| "Create Kubernetes cluster" | Requires cloud provider console |
+
+**The test:** If you literally cannot type a command to do it, THEN consider skipping.
+
+**BEFORE skipping, check the spec section for:**
+- \`> ⚠️ **SKIP**\` or \`> SKIP\` markers
 - "manual setup", "handled manually", "external setup"
-- Cloud infrastructure tasks (Cloud SQL, GKE, AWS, etc.) without automation scripts
+- Cloud infrastructure tasks with NO automation scripts provided
 
 **If the task requires EXTERNAL action you cannot perform:**
 
 1. **Fully external** (e.g., "Create Cloud SQL instance" with no Terraform/scripts):
    \`\`\`bash
-   steroids tasks skip ${task.id} --notes "SKIP REASON: Spec section marked '> ⚠️ SKIP'. WHAT'S NEEDED: Human must create Cloud SQL instance via GCP Console. BLOCKING: Tasks #31-#34 depend on this."
+   steroids tasks skip ${task.id} --notes "SKIP REASON: Requires GCP Console access to create Cloud SQL instance - no Terraform/scripts provided. WHAT'S NEEDED: Human must create instance via console. BLOCKING: Tasks #31-#34 depend on this."
    \`\`\`
 
 2. **Partial** (you coded some parts, rest needs human action):
-   - Implement what you can (deployment YAML, config files, etc.)
+   - Implement what you CAN (deployment YAML, config files, etc.)
    - Commit your work with a descriptive message
    - Then:
    \`\`\`bash
-   steroids tasks skip ${task.id} --partial --notes "DONE: Created deployment.yaml and service.yaml. NEEDS HUMAN: GKE cluster must be created manually. BLOCKING: Cannot deploy until cluster exists."
+   steroids tasks skip ${task.id} --partial --notes "DONE: Created deployment.yaml, service.yaml, and ran 'kubectl apply --dry-run' successfully. NEEDS HUMAN: GKE cluster must be created via GCP Console. BLOCKING: Cannot deploy until cluster exists."
    \`\`\`
 
 **Your skip notes MUST include:**
-- WHY it's being skipped (spec says SKIP, requires cloud console, etc.)
+- WHY it's being skipped (requires console access, no automation available, etc.)
 - WHAT specific action a human needs to take
 - WHAT tasks are blocked until this is done (if known)
+- WHAT you attempted before deciding to skip
 
 **DO NOT:**
+- Skip tasks because they're "hard" or "might fail"
+- Skip tasks with runnable commands you haven't tried
 - Flip checkboxes from [ ] to [x] without concrete evidence
 - Mark tasks complete that require human action you cannot verify
 - Get stuck in a loop trying to "complete" infrastructure tasks
-- Skip tasks that ARE codeable just because they're hard
 
 **The reviewer will verify:**
-1. The spec actually says SKIP/manual
-2. The skip reason is legitimate
-3. If partial, the coded work is correct
+1. You actually attempted runnable commands before skipping
+2. The spec actually says SKIP/manual OR requires true external access
+3. The skip reason is legitimate
+4. If partial, the coded work is correct
 
 If approved, the task moves to skipped/partial status and the runner continues to the next task.
 

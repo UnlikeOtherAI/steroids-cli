@@ -30,6 +30,48 @@ Follow semantic versioning strictly:
 
 This ensures every task completion is a deployable artifact and sections mark feature milestones.
 
+### GitHub Releases
+
+**When creating a version, also create a GitHub release using `gh` CLI if available.**
+
+After `npm version` and `git push --tags`:
+
+```bash
+# Get the version just created
+VERSION=$(npm pkg get version | tr -d '"')
+
+# Create GitHub release with release notes
+gh release create "v${VERSION}" \
+  --title "v${VERSION}" \
+  --notes "## Changes in v${VERSION}
+
+- <Brief description of what was added/fixed>
+- <List key changes from commits since last release>
+
+See commit history for full details."
+```
+
+**For minor/major releases**, include more detailed notes:
+```bash
+gh release create "v${VERSION}" \
+  --title "v${VERSION} - <Feature Name>" \
+  --notes "## What's New in v${VERSION}
+
+### Features
+- <New feature 1>
+- <New feature 2>
+
+### Fixes
+- <Bug fix 1>
+
+### Breaking Changes (if any)
+- <Description of breaking change>
+
+Full changelog: https://github.com/UnlikeOtherAI/steroids-cli/compare/v<prev>...v${VERSION}"
+```
+
+**Tip:** Use `gh release list` to see previous releases and `git log --oneline v<prev>..HEAD` to see changes since last release.
+
 ### Use Compiled CLI, Not Node (CRITICAL)
 
 **NEVER run `node dist/index.js` directly.** Always use the installed `steroids` command.
