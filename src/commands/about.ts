@@ -57,6 +57,72 @@ Each task has a sourceFile pointing to a markdown specification.
 The coder MUST follow this specification exactly.
 The reviewer MUST verify the implementation matches the spec.
 
+PROJECT SETUP - HOW TO STRUCTURE WORK
+-------------------------------------
+Steroids works best when projects are structured correctly. Think of it like
+building a house: sections are rooms, tasks are individual construction steps.
+
+SECTIONS = Features or Functional Areas
+  - Each section represents ONE cohesive piece of functionality
+  - Sections should be independent enough to be worked on in isolation
+  - Name sections clearly: "Phase 1: User Authentication", "Phase 2: Dashboard"
+  - Sections have priorities and can depend on other sections
+
+TASKS = Small, Atomic Implementation Steps
+  - Each task should be completable in ONE focused session (15-60 min of AI work)
+  - Tasks should do ONE thing well - if you say "and" you might need two tasks
+  - Tasks must have a clear specification file explaining exactly what to build
+  - Tasks are ordered within sections - earlier tasks may set up later ones
+
+EXAMPLE FROM THIS PROJECT (steroids-cli):
+  Section: "Phase 0.7: Section Focus"
+  Tasks:
+    1. Add --section flag to loop command
+    2. Add sectionId parameter to TaskSelectionOptions
+    3. Update task selection queries to filter by section
+    4. Update loop display to show focused section
+    5. Add section validation
+
+  Each task is small and specific. Together they implement "section focus."
+
+WRITING GOOD SPECIFICATIONS:
+  - Create a specs/ directory with markdown files
+  - Each spec should include: purpose, requirements, examples, edge cases
+  - Reference existing code patterns the implementation should follow
+  - Include acceptance criteria - how do we know it's done?
+
+EXAMPLE SPEC STRUCTURE (specs/feature-name.md):
+  # Feature Name
+
+  ## Overview
+  What this feature does and why.
+
+  ## Requirements
+  - Specific requirement 1
+  - Specific requirement 2
+
+  ## Implementation Notes
+  - Follow pattern in src/existing/similar.ts
+  - Use existing utility from src/utils/helper.ts
+
+  ## Examples
+  \`\`\`bash
+  steroids command --flag value
+  # Expected output...
+  \`\`\`
+
+  ## Acceptance Criteria
+  - [ ] Command works as shown in examples
+  - [ ] Tests pass
+  - [ ] Documentation updated
+
+INITIALIZING A PROJECT:
+  1. steroids init                    # Creates .steroids/ directory
+  2. Create specs/ with your specifications
+  3. steroids sections add "Phase 1: Feature Name"
+  4. steroids tasks add "Task title" --section <id> --source specs/spec.md
+  5. steroids loop                    # Start processing
+
 IMPORTANT RULES
 ---------------
 - Always run build AND tests before submitting for review
@@ -95,6 +161,16 @@ interface AboutOutput {
     workflow: string[];
     lifecycle: string[];
   };
+  projectSetup: {
+    sections: string;
+    tasks: string;
+    specifications: string;
+    example: {
+      section: string;
+      tasks: string[];
+    };
+    steps: string[];
+  };
   commands: { command: string; description: string }[];
   rules: string[];
 }
@@ -126,6 +202,28 @@ export async function aboutCommand(args: string[], flags: GlobalFlags): Promise<
         'After 15 rejections: dispute raised',
       ],
       lifecycle: ['pending', 'in_progress', 'review', 'completed'],
+    },
+    projectSetup: {
+      sections: 'Features or functional areas - each represents ONE cohesive piece of functionality',
+      tasks: 'Small, atomic implementation steps - completable in 15-60 min, does ONE thing well',
+      specifications: 'Markdown files in specs/ with purpose, requirements, examples, acceptance criteria',
+      example: {
+        section: 'Phase 0.7: Section Focus',
+        tasks: [
+          'Add --section flag to loop command',
+          'Add sectionId parameter to TaskSelectionOptions',
+          'Update task selection queries to filter by section',
+          'Update loop display to show focused section',
+          'Add section validation',
+        ],
+      },
+      steps: [
+        'steroids init - creates .steroids/ directory',
+        'Create specs/ with your specifications',
+        'steroids sections add "Phase 1: Feature Name"',
+        'steroids tasks add "Task title" --section <id> --source specs/spec.md',
+        'steroids loop - start processing',
+      ],
     },
     commands: [
       { command: 'steroids tasks list', description: 'List pending tasks' },
