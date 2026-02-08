@@ -375,6 +375,27 @@ export function getTaskRejections(
   }));
 }
 
+/**
+ * Get the latest submission notes (when coder submitted for review)
+ * This captures any notes the coder included with --notes flag
+ */
+export function getLatestSubmissionNotes(
+  db: Database.Database,
+  taskId: string
+): string | null {
+  const entry = db
+    .prepare(
+      `SELECT notes FROM audit
+       WHERE task_id = ?
+       AND to_status = 'review'
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+    .get(taskId) as { notes: string | null } | undefined;
+
+  return entry?.notes ?? null;
+}
+
 // ============ Dispute Operations ============
 
 // NOTE: Full dispute operations are in src/disputes/

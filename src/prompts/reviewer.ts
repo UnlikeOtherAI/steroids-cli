@@ -21,6 +21,7 @@ export interface ReviewerPromptContext {
   modifiedFiles: string[];
   sectionTasks?: SectionTask[];  // Other tasks in the same section
   rejectionHistory?: RejectionEntry[];  // Past rejections with commit hashes
+  submissionNotes?: string | null;  // Notes from coder when submitting for review
 }
 
 /**
@@ -147,7 +148,22 @@ ${lines.join('\n')}
  * Generate the reviewer prompt
  */
 export function generateReviewerPrompt(context: ReviewerPromptContext): string {
-  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks, rejectionHistory } = context;
+  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks, rejectionHistory, submissionNotes } = context;
+
+  // Format coder's submission notes if present
+  const submissionNotesSection = submissionNotes
+    ? `
+---
+
+## Coder's Notes
+
+The coder included these notes when submitting for review:
+
+> ${submissionNotes}
+
+**Review these notes carefully** - the coder may be pointing to existing work or asking for guidance.
+`
+    : '';
 
   const sourceContent = getSourceFileContent(projectPath, task.source_file);
 
@@ -174,7 +190,7 @@ You are a REVIEWER in an automated task execution system. Your job is to verify 
 **Status:** review (submitted by coder)
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}
+${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}
 ## Original Specification
 
 From ${task.source_file ?? '(not specified)'}:

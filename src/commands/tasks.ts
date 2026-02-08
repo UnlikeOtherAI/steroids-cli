@@ -290,6 +290,7 @@ async function updateTask(args: string[]): Promise<void> {
       status: { type: 'string' },
       actor: { type: 'string', default: 'human:cli' },
       model: { type: 'string' },
+      notes: { type: 'string' },
     },
     allowPositionals: true,
   });
@@ -305,8 +306,13 @@ OPTIONS:
   --status <status>   New status: pending | in_progress | review | completed
   --actor <actor>     Actor making the change (default: human:cli)
   --model <model>     Model identifier (for LLM actors)
+  --notes <text>      Notes for the reviewer (useful when submitting for review)
   -j, --json          Output as JSON
   -h, --help          Show help
+
+EXAMPLES:
+  steroids tasks update abc123 --status review
+  steroids tasks update abc123 --status review --notes "Found existing implementation at commit xyz"
 `);
     return;
   }
@@ -335,7 +341,7 @@ OPTIONS:
       ? `model:${values.model}`
       : values.actor ?? 'human:cli';
 
-    updateTaskStatus(db, task.id, values.status as TaskStatus, actor);
+    updateTaskStatus(db, task.id, values.status as TaskStatus, actor, values.notes as string | undefined);
 
     const updated = getTask(db, task.id);
 

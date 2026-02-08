@@ -8,7 +8,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
-import { listTasks, getTaskRejections } from '../database/queries.js';
+import { listTasks, getTaskRejections, getLatestSubmissionNotes } from '../database/queries.js';
 import { openDatabase } from '../database/connection.js';
 import {
   generateReviewerPrompt,
@@ -187,6 +187,7 @@ export async function invokeReviewer(
   // Fetch other tasks in the same section for context
   let sectionTasks: SectionTask[] = [];
   let rejectionHistory: ReturnType<typeof getTaskRejections> = [];
+  let submissionNotes: string | null = null;
 
   try {
     const { db, close } = openDatabase(projectPath);
@@ -207,6 +208,12 @@ export async function invokeReviewer(
       console.log(`Found ${rejectionHistory.length} previous rejection(s) for this task`);
     }
 
+    // Get coder's submission notes (if any)
+    submissionNotes = getLatestSubmissionNotes(db, task.id);
+    if (submissionNotes) {
+      console.log(`Coder included notes with submission`);
+    }
+
     close();
   } catch (error) {
     console.warn('Could not fetch task context:', error);
@@ -220,6 +227,7 @@ export async function invokeReviewer(
     modifiedFiles,
     sectionTasks,
     rejectionHistory,
+    submissionNotes,
   };
 
   const prompt = generateReviewerPrompt(context);

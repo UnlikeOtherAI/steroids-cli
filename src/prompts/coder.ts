@@ -231,24 +231,12 @@ steroids tasks update ${task.id} --status review
 ### If work already existed (you found it in step 1):
 1. Verify it matches the specification completely
 2. Run build and tests to confirm it works
-3. **Create a note for the reviewer** explaining what you found:
+3. Submit for review with a note explaining what you found:
    \`\`\`bash
-   # Commit a note or update existing docs to explain:
-   git commit --allow-empty -m "review: found existing implementation in commit <hash>
-
-   The task appears to be already implemented:
-   - Files: <list key files>
-   - Commit: <hash that added them>
-
-   Requesting review to confirm this fulfills the spec
-   or identify any gaps that still need work."
-   \`\`\`
-4. Submit for review:
-   \`\`\`bash
-   steroids tasks update ${task.id} --status review
+   steroids tasks update ${task.id} --status review --notes "Found existing implementation at commit <hash>. Files: <list key files>. Please verify this fulfills the spec or identify gaps."
    \`\`\`
 
-**The reviewer will then verify if the existing work is sufficient or if more is needed.**
+**The reviewer will see your notes and verify if the existing work is sufficient or if more is needed.**
 
 ### If you implemented new work:
 1. **Run the build command** for this project type (npm run build, cargo build, go build, make, etc.)
