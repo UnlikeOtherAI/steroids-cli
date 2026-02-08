@@ -17,6 +17,8 @@ import { join } from 'node:path';
 import { openDatabase, isInitialized } from '../database/connection.js';
 import { listTasks } from '../database/queries.js';
 import { hasUncommittedChanges, isGitRepo } from '../git/status.js';
+import { generateHelp } from '../cli/help.js';
+import { createOutput } from '../cli/output.js';
 
 // Health check weights (must sum to 100)
 const WEIGHTS = {
@@ -44,41 +46,60 @@ interface HealthResult {
   passed: boolean;
 }
 
-const HELP = `
-steroids health - Check project health
+const HELP = generateHelp({
+  command: 'health',
+  description: 'Check project health with weighted scoring',
+  details: `Runs multiple health checks against your project and calculates an overall health score.
+Each check is weighted, and the total score ranges from 0-100.
+Use --threshold to enforce minimum health requirements in CI/CD pipelines.`,
+  usage: ['steroids health [options]'],
+  options: [
+    { long: 'threshold', description: 'Exit with code 7 if score below threshold', values: '<number>' },
+    { long: 'fix', description: 'Attempt auto-fixes for failing checks' },
+    { long: 'watch', description: 'Continuously monitor health (Ctrl+C to stop)' },
+    { long: 'check', description: 'Run specific check only', values: 'git | deps | tests | lint | tasks' },
+  ],
+  examples: [
+    { command: 'steroids health', description: 'Run all health checks' },
+    { command: 'steroids health --threshold 80', description: 'Require 80+ score' },
+    { command: 'steroids health --fix', description: 'Auto-fix fixable issues' },
+    { command: 'steroids health --watch', description: 'Watch health in real-time' },
+    { command: 'steroids health --check tests', description: 'Run only test check' },
+    { command: 'steroids health --json', description: 'Output as JSON for CI' },
+  ],
+  related: [
+    { command: 'steroids tasks --status all', description: 'View all tasks affecting task score' },
+    { command: 'steroids git status', description: 'Check git status in detail' },
+  ],
+  sections: [
+    {
+      title: 'CHECKS',
+      content: `git (20%)     No uncommitted changes in repository
+deps (20%)    Dependencies installed and up to date
+tests (25%)   All tests pass (highest weight)
+lint (15%)    No linting errors
+tasks (20%)   Task completion percentage
 
-USAGE:
-  steroids health [options]
+Supports: Node.js, Python, Rust, Go projects`,
+    },
+    {
+      title: 'FIXABLE CHECKS',
+      content: `Some checks can auto-fix with --fix:
+- deps: Runs npm install / pip install
+- lint: Runs lint --fix command
 
-OPTIONS:
-  --threshold <n>   Exit with code 7 if score below threshold
-  --fix             Attempt auto-fixes for failing checks
-  --watch           Continuously monitor health (Ctrl+C to stop)
-  --check <name>    Run specific check: git, deps, tests, lint, tasks
-  -j, --json        Output as JSON
-  -h, --help        Show help
-
-CHECKS:
-  git (20%)         No uncommitted changes
-  deps (20%)        Dependencies installed
-  tests (25%)       All tests pass
-  lint (15%)        No lint errors
-  tasks (20%)       Task completion percentage
-
-EXIT CODES:
-  0                 Success (or health above threshold)
-  1                 General error
-  7                 Health score below threshold
-
-EXAMPLES:
-  steroids health
-  steroids health --threshold 80
-  steroids health --fix
-  steroids health --watch
-  steroids health --check tests
-`;
+Non-fixable checks require manual intervention:
+- git: Commit or stash changes
+- tests: Fix failing tests
+- tasks: Complete pending tasks`,
+    },
+  ],
+  showExitCodes: true,
+});
 
 export async function healthCommand(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'health', flags });
+
   const { values } = parseArgs({
     args,
     options: {
@@ -92,8 +113,8 @@ export async function healthCommand(args: string[], flags: GlobalFlags): Promise
     allowPositionals: false,
   });
 
-  if (values.help) {
-    console.log(HELP);
+  if (values.help || flags.help) {
+    out.log(HELP);
     return;
   }
 
