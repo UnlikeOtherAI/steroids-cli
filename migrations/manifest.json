@@ -1,6 +1,6 @@
 {
   "version": "0.2.0",
-  "latestDbVersion": 3,
+  "latestDbVersion": 4,
   "migrations": [
     {
       "id": 1,
@@ -25,6 +25,14 @@
       "description": "Add priority column to sections table (0=highest, 100=lowest, 50=default)",
       "checksum": "",
       "cliVersion": "0.2.13"
+    },
+    {
+      "id": 4,
+      "name": "004_add_section_dependencies",
+      "file": "004_add_section_dependencies.sql",
+      "description": "Add section_dependencies table for tracking section dependencies",
+      "checksum": "",
+      "cliVersion": "0.2.14"
     }
   ]
 }
