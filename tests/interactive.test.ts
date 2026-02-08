@@ -5,7 +5,6 @@
 import { jest, describe, it, expect, beforeEach, afterEach, afterAll } from '@jest/globals';
 import {
   isInteractive,
-  isCI,
   requireInteractive,
   warnNonInteractive,
   getEnvironmentInfo,
@@ -13,9 +12,9 @@ import {
 import { CliError, ErrorCode } from '../src/cli/errors.js';
 
 describe('isInteractive', () => {
+  const originalStdinTTY = process.stdin.isTTY;
+  const originalStdoutTTY = process.stdout.isTTY;
   const originalEnv = { ...process.env };
-  const originalStdin = { ...process.stdin };
-  const originalStdout = { ...process.stdout };
 
   beforeEach(() => {
     // Clear CI env vars
@@ -28,53 +27,54 @@ describe('isInteractive', () => {
     delete process.env.JENKINS_URL;
   });
 
+  afterEach(() => {
+    // Restore TTY state
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true });
+  });
+
   afterAll(() => {
     Object.assign(process.env, originalEnv);
   });
 
   it('should return true when stdin and stdout are TTY and not in CI', () => {
-    // Mock TTY
-    (process.stdin as any).isTTY = true;
-    (process.stdout as any).isTTY = true;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
 
     expect(isInteractive()).toBe(true);
   });
 
   it('should return false when CI env var is set', () => {
-    (process.stdin as any).isTTY = true;
-    (process.stdout as any).isTTY = true;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
     process.env.CI = '1';
 
     expect(isInteractive()).toBe(false);
   });
 
   it('should return false when stdin is not TTY', () => {
-    (process.stdin as any).isTTY = false;
-    (process.stdout as any).isTTY = true;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
 
     expect(isInteractive()).toBe(false);
   });
 
   it('should return false when stdout is not TTY', () => {
-    (process.stdin as any).isTTY = true;
-    (process.stdout as any).isTTY = false;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: false, writable: true });
 
     expect(isInteractive()).toBe(false);
   });
 
   it('should return false when stdin is undefined', () => {
-    (process.stdin as any).isTTY = undefined;
-    (process.stdout as any).isTTY = true;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: undefined, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
 
     expect(isInteractive()).toBe(false);
   });
 });
 
-describe('isCI', () => {
+describe('CI detection via getEnvironmentInfo', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
@@ -92,52 +92,72 @@ describe('isCI', () => {
   });
 
   it('should return false when no CI env vars are set', () => {
-    expect(isCI()).toBe(false);
+    const info = getEnvironmentInfo();
+    expect(info.ci).toBe(false);
   });
 
   it('should detect CI env var', () => {
     process.env.CI = '1';
-    expect(isCI()).toBe(true);
+    const info = getEnvironmentInfo();
+    expect(info.ci).toBe(true);
   });
 
   it('should detect CONTINUOUS_INTEGRATION env var', () => {
     process.env.CONTINUOUS_INTEGRATION = 'true';
-    expect(isCI()).toBe(true);
+    const info = getEnvironmentInfo();
+    expect(info.ci).toBe(true);
   });
 
   it('should detect GITHUB_ACTIONS env var', () => {
     process.env.GITHUB_ACTIONS = 'true';
-    expect(isCI()).toBe(true);
+    const info = getEnvironmentInfo();
+    expect(info.ci).toBe(true);
   });
 
   it('should detect GITLAB_CI env var', () => {
     process.env.GITLAB_CI = 'true';
-    expect(isCI()).toBe(true);
+    const info = getEnvironmentInfo();
+    expect(info.ci).toBe(true);
   });
 
   it('should detect CIRCLECI env var', () => {
     process.env.CIRCLECI = 'true';
-    expect(isCI()).toBe(true);
+    const info = getEnvironmentInfo();
+    expect(info.ci).toBe(true);
   });
 
   it('should detect TRAVIS env var', () => {
     process.env.TRAVIS = 'true';
-    expect(isCI()).toBe(true);
+    const info = getEnvironmentInfo();
+    expect(info.ci).toBe(true);
   });
 
   it('should detect JENKINS_URL env var', () => {
     process.env.JENKINS_URL = 'http://jenkins.local';
-    expect(isCI()).toBe(true);
+    const info = getEnvironmentInfo();
+    expect(info.ci).toBe(true);
   });
 });
 
 describe('requireInteractive', () => {
-  const originalStdin = { ...process.stdin };
-  const originalStdout = { ...process.stdout };
+  const originalStdinTTY = process.stdin.isTTY;
+  const originalStdoutTTY = process.stdout.isTTY;
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
     delete process.env.CI;
+    delete process.env.CONTINUOUS_INTEGRATION;
+    delete process.env.GITHUB_ACTIONS;
+    delete process.env.GITLAB_CI;
+    delete process.env.CIRCLECI;
+    delete process.env.TRAVIS;
+    delete process.env.JENKINS_URL;
+  });
+
+  afterEach(() => {
+    // Restore TTY state
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true });
   });
 
   afterAll(() => {
@@ -145,17 +165,15 @@ describe('requireInteractive', () => {
   });
 
   it('should not throw when in interactive mode', () => {
-    (process.stdin as any).isTTY = true;
-    (process.stdout as any).isTTY = true;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
 
     expect(() => requireInteractive('Test message')).not.toThrow();
   });
 
   it('should throw CliError when not in interactive mode', () => {
-    (process.stdin as any).isTTY = false;
-    (process.stdout as any).isTTY = true;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
 
     expect(() => requireInteractive('Test message')).toThrow(CliError);
     expect(() => requireInteractive('Test message')).toThrow(
@@ -164,9 +182,8 @@ describe('requireInteractive', () => {
   });
 
   it('should throw CliError with INVALID_ARGUMENTS code', () => {
-    (process.stdin as any).isTTY = false;
-    (process.stdout as any).isTTY = true;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
 
     try {
       requireInteractive('Test message');
@@ -178,8 +195,8 @@ describe('requireInteractive', () => {
   });
 
   it('should throw when in CI environment', () => {
-    (process.stdin as any).isTTY = true;
-    (process.stdout as any).isTTY = true;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
     process.env.CI = '1';
 
     expect(() => requireInteractive('Test message')).toThrow(CliError);
@@ -187,13 +204,19 @@ describe('requireInteractive', () => {
 });
 
 describe('warnNonInteractive', () => {
-  const originalStdin = { ...process.stdin };
-  const originalStdout = { ...process.stdout };
+  const originalStdinTTY = process.stdin.isTTY;
+  const originalStdoutTTY = process.stdout.isTTY;
   const originalEnv = { ...process.env };
   let consoleWarnSpy: any;
 
   beforeEach(() => {
     delete process.env.CI;
+    delete process.env.CONTINUOUS_INTEGRATION;
+    delete process.env.GITHUB_ACTIONS;
+    delete process.env.GITLAB_CI;
+    delete process.env.CIRCLECI;
+    delete process.env.TRAVIS;
+    delete process.env.JENKINS_URL;
     delete process.env.STEROIDS_QUIET;
     consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
@@ -202,6 +225,9 @@ describe('warnNonInteractive', () => {
     if (consoleWarnSpy && consoleWarnSpy.mockRestore) {
       consoleWarnSpy.mockRestore();
     }
+    // Restore TTY state
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true });
   });
 
   afterAll(() => {
@@ -209,26 +235,24 @@ describe('warnNonInteractive', () => {
   });
 
   it('should not warn in interactive mode', () => {
-    (process.stdin as any).isTTY = true;
-    (process.stdout as any).isTTY = true;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
 
     warnNonInteractive('Test warning');
     expect(consoleWarnSpy).not.toHaveBeenCalled();
   });
 
   it('should warn in non-interactive mode', () => {
-    (process.stdin as any).isTTY = false;
-    (process.stdout as any).isTTY = true;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
 
     warnNonInteractive('Test warning');
     expect(consoleWarnSpy).toHaveBeenCalledWith('Warning: Test warning');
   });
 
   it('should not warn in quiet mode', () => {
-    (process.stdin as any).isTTY = false;
-    (process.stdout as any).isTTY = true;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
     process.env.STEROIDS_QUIET = '1';
 
     warnNonInteractive('Test warning');
@@ -236,8 +260,8 @@ describe('warnNonInteractive', () => {
   });
 
   it('should include CI hint when in CI', () => {
-    (process.stdin as any).isTTY = true;
-    (process.stdout as any).isTTY = true;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
     process.env.CI = '1';
 
     warnNonInteractive('Test warning');
@@ -249,12 +273,13 @@ describe('warnNonInteractive', () => {
 });
 
 describe('getEnvironmentInfo', () => {
-  const originalStdin = { ...process.stdin };
-  const originalStdout = { ...process.stdout };
+  const originalStdinTTY = process.stdin.isTTY;
+  const originalStdoutTTY = process.stdout.isTTY;
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
     delete process.env.CI;
+    delete process.env.CONTINUOUS_INTEGRATION;
     delete process.env.GITHUB_ACTIONS;
     delete process.env.GITLAB_CI;
     delete process.env.CIRCLECI;
@@ -262,14 +287,19 @@ describe('getEnvironmentInfo', () => {
     delete process.env.JENKINS_URL;
   });
 
+  afterEach(() => {
+    // Restore TTY state
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true });
+  });
+
   afterAll(() => {
     Object.assign(process.env, originalEnv);
   });
 
   it('should return correct info for interactive mode', () => {
-    (process.stdin as any).isTTY = true;
-    (process.stdout as any).isTTY = true;
-    delete process.env.CI;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
 
     const info = getEnvironmentInfo();
     expect(info.interactive).toBe(true);
@@ -280,8 +310,8 @@ describe('getEnvironmentInfo', () => {
   });
 
   it('should detect GitHub Actions', () => {
-    (process.stdin as any).isTTY = false;
-    (process.stdout as any).isTTY = false;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: false, writable: true });
     process.env.GITHUB_ACTIONS = 'true';
 
     const info = getEnvironmentInfo();
