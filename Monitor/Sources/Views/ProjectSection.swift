@@ -58,7 +58,7 @@ struct ProjectSection: View {
                     .padding(.trailing, 12)
                     .padding(.vertical, 4)
                 } else {
-                    ForEach(project.runners) { runner in
+                    ForEach(project.runners.sorted { $0.name < $1.name }) { runner in
                         RunnerMenuItem(runner: runner, projectPath: project.path)
                             .padding(.leading, 20)
                     }

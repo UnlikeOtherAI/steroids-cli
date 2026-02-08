@@ -139,12 +139,17 @@ export const ActivityListPage: React.FC = () => {
       {!loading && !error && entries.length > 0 && (
         <div className="space-y-2">
           {entries.map((entry) => (
-            <div key={entry.id} className="card p-4 flex items-center gap-4">
+            <div
+              key={entry.id}
+              onClick={() => navigate(`/task/${entry.task_id}?project=${encodeURIComponent(entry.project_path)}`)}
+              className="card p-4 flex items-center gap-4 cursor-pointer hover:border-accent transition-colors"
+            >
               <Badge variant={STATUS_VARIANTS[entry.final_status]}>
                 {STATUS_LABELS[entry.final_status]}
               </Badge>
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-text-primary truncate">
+                  <i className="fa-solid fa-arrow-up-right-from-square text-xs text-text-muted mr-2"></i>
                   {entry.task_title}
                 </div>
                 <div className="text-xs text-text-muted flex gap-2 mt-1">

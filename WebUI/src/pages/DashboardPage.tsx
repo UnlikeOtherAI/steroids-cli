@@ -195,7 +195,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
             {project.runner?.current_task_id && (
               <div className="flex-1">
                 <div className="text-sm text-text-secondary">Current Task</div>
-                <div className="text-sm font-mono text-text-primary mt-1">{project.runner.current_task_id.substring(0, 8)}...</div>
+                <div
+                  className="text-sm font-mono text-accent mt-1 cursor-pointer hover:underline"
+                  onClick={() => navigate(`/task/${project.runner!.current_task_id}?project=${encodeURIComponent(project.path)}`)}
+                >
+                  <i className="fa-solid fa-arrow-up-right-from-square text-xs mr-1"></i>
+                  {project.runner.current_task_id.substring(0, 8)}...
+                </div>
               </div>
             )}
             <div className="flex-1">

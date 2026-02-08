@@ -4,6 +4,7 @@
 
 export * from './activity';
 export * from './runner';
+export * from './task';
 
 export interface Project {
   path: string;

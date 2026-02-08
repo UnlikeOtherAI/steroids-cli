@@ -13,6 +13,10 @@ import {
   RunnersListResponse,
   ActiveTask,
   ActiveTasksResponse,
+  TaskDetails,
+  TaskDetailsResponse,
+  TaskLogsResponse,
+  TaskListResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3501';
@@ -163,5 +167,59 @@ export const runnersApi = {
   async getActiveTasks(): Promise<ActiveTask[]> {
     const response = await fetchJson<ActiveTasksResponse>('/api/runners/active-tasks');
     return response.tasks;
+  },
+};
+
+export const tasksApi = {
+  /**
+   * Get task details with full audit trail
+   */
+  async getDetails(taskId: string, projectPath: string): Promise<TaskDetails> {
+    const url = `/api/tasks/${encodeURIComponent(taskId)}?project=${encodeURIComponent(projectPath)}`;
+    const response = await fetchJson<TaskDetailsResponse>(url);
+    return response.task;
+  },
+
+  /**
+   * Get task logs (audit trail) with pagination
+   */
+  async getLogs(
+    taskId: string,
+    projectPath: string,
+    options?: { limit?: number; offset?: number }
+  ): Promise<TaskLogsResponse> {
+    let url = `/api/tasks/${encodeURIComponent(taskId)}/logs?project=${encodeURIComponent(projectPath)}`;
+    if (options?.limit) {
+      url += `&limit=${options.limit}`;
+    }
+    if (options?.offset) {
+      url += `&offset=${options.offset}`;
+    }
+    return fetchJson<TaskLogsResponse>(url);
+  },
+
+  /**
+   * List all tasks for a project
+   */
+  async listForProject(
+    projectPath: string,
+    options?: { status?: string; section?: string; limit?: number }
+  ): Promise<TaskListResponse> {
+    let url = `/api/projects/${encodeURIComponent(projectPath)}/tasks`;
+    const params = new URLSearchParams();
+    if (options?.status) {
+      params.set('status', options.status);
+    }
+    if (options?.section) {
+      params.set('section', options.section);
+    }
+    if (options?.limit) {
+      params.set('limit', options.limit.toString());
+    }
+    const queryString = params.toString();
+    if (queryString) {
+      url += `?${queryString}`;
+    }
+    return fetchJson<TaskListResponse>(url);
   },
 };

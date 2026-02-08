@@ -359,8 +359,21 @@ OPTIONS:
     return;
   }
 
+  // Capture stop context for logging
+  const stopContext = {
+    calledFrom: process.cwd(),
+    callerPid: process.pid,
+    timestamp: new Date().toISOString(),
+    user: process.env.USER || process.env.USERNAME || 'unknown',
+    args: {
+      id: values.id,
+      all: values.all,
+    },
+  };
+
   const runners = listRunners();
   let stopped = 0;
+  const stoppedRunners: { id: string; pid: number | null; project: string | null }[] = [];
 
   const runnersToStop = values.id
     ? runners.filter((r) => r.id === values.id || r.id.startsWith(values.id!))
@@ -368,11 +381,33 @@ OPTIONS:
       ? runners
       : runners.filter((r) => r.pid === process.pid || r.pid !== null);
 
+  // Log stop action to daemon logs
+  const logsDir = path.join(os.homedir(), '.steroids', 'runners', 'logs');
+  const stopLogPath = path.join(logsDir, 'stop-audit.log');
+  fs.mkdirSync(logsDir, { recursive: true });
+
   for (const runner of runnersToStop) {
     if (runner.pid && isProcessAlive(runner.pid)) {
       try {
         process.kill(runner.pid, 'SIGTERM');
         stopped++;
+        stoppedRunners.push({
+          id: runner.id,
+          pid: runner.pid,
+          project: runner.project_path,
+        });
+
+        // Log each stop to audit log
+        const logEntry = {
+          ...stopContext,
+          action: 'stop',
+          runner: {
+            id: runner.id,
+            pid: runner.pid,
+            project: runner.project_path,
+          },
+        };
+        fs.appendFileSync(stopLogPath, JSON.stringify(logEntry) + '\n');
       } catch {
         // Process already dead
       }
@@ -381,9 +416,18 @@ OPTIONS:
   }
 
   if (values.json) {
-    console.log(JSON.stringify({ success: true, stopped }));
+    console.log(JSON.stringify({
+      success: true,
+      stopped,
+      stoppedRunners,
+      context: stopContext,
+    }));
   } else {
     console.log(`Stopped ${stopped} runner(s)`);
+    if (stopped > 0 && !values.all) {
+      console.log(`  Called from: ${stopContext.calledFrom}`);
+      console.log(`  Audit log: ${stopLogPath}`);
+    }
   }
 }
 

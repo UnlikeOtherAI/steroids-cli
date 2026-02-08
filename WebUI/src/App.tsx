@@ -5,6 +5,7 @@ import { ActivityListPage } from './pages/ActivityListPage';
 import { RunnersPage } from './pages/RunnersPage';
 import { RunningTasksPage } from './pages/RunningTasksPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
+import { TaskDetailPage } from './pages/TaskDetailPage';
 import { AppShell } from './components/layouts';
 import { useProject } from './contexts/ProjectContext';
 import './App.css';
@@ -16,6 +17,7 @@ function App() {
   const getPageTitle = () => {
     if (location.pathname.startsWith('/activity')) return 'Activity';
     if (location.pathname.startsWith('/project/')) return 'Project Details';
+    if (location.pathname.startsWith('/task/')) return 'Task Details';
     switch (location.pathname) {
       case '/': return 'Dashboard';
       case '/projects': return 'Projects';
@@ -33,6 +35,7 @@ function App() {
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
         <Route path="/activity" element={<ActivityListPage />} />
+        <Route path="/task/:taskId" element={<TaskDetailPage />} />
         <Route path="/runners" element={<RunnersPage />} />
         <Route path="/tasks" element={<RunningTasksPage />} />
         <Route path="/settings" element={<div className="p-8"><p className="text-text-secondary">Settings page coming soon...</p></div>} />

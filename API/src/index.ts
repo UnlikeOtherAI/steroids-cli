@@ -8,6 +8,7 @@ import cors from 'cors';
 import projectsRouter from './routes/projects.js';
 import activityRouter from './routes/activity.js';
 import runnersRouter from './routes/runners.js';
+import tasksRouter from './routes/tasks.js';
 
 const app = express();
 const PORT = process.env.PORT || 3501;
@@ -26,13 +27,14 @@ app.use((req, res, next) => {
 app.use('/api', projectsRouter);
 app.use('/api', activityRouter);
 app.use('/api', runnersRouter);
+app.use('/api', tasksRouter);
 
 // Health check
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '0.2.5',
+    version: '0.4.1',
   });
 });
 
@@ -40,11 +42,12 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Steroids API',
-    version: '0.2.5',
+    version: '0.4.1',
     endpoints: [
       'GET /health',
       'GET /api/projects',
       'GET /api/projects/status?path=<path>',
+      'GET /api/projects/<path>/tasks',
       'POST /api/projects',
       'POST /api/projects/remove',
       'POST /api/projects/enable',
@@ -53,6 +56,8 @@ app.get('/', (req, res) => {
       'GET /api/activity?hours=<hours>&project=<path>',
       'GET /api/runners',
       'GET /api/runners/active-tasks',
+      'GET /api/tasks/<taskId>?project=<path>',
+      'GET /api/tasks/<taskId>/logs?project=<path>',
     ],
   });
 });
