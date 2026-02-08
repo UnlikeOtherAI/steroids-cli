@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { STATUS_MARKERS } from '../database/queries.js';
+import { isInteractive } from '../cli/interactive.js';
 
 export interface SectionWithDeps {
   section: {
@@ -104,13 +106,50 @@ export function isMmdcInstalled(): boolean {
   }
 }
 
-// Prompt to install mmdc (just shows message for now)
+// Prompt to install mmdc
 export async function installMmdc(): Promise<boolean> {
   console.log('Mermaid CLI not found. Install it to generate images.');
   console.log('Run: npm install -g @mermaid-js/mermaid-cli');
   console.log('');
-  console.error('Error: Please install @mermaid-js/mermaid-cli manually');
-  return false;
+
+  // If not interactive, don't prompt
+  if (!isInteractive()) {
+    console.error('Error: Not in interactive mode. Please install @mermaid-js/mermaid-cli manually');
+    return false;
+  }
+
+  // Prompt user for confirmation
+  const answer = await promptUser('Install now? [y/N] ');
+
+  if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+    console.log('Installation cancelled.');
+    return false;
+  }
+
+  try {
+    console.log('Installing @mermaid-js/mermaid-cli...');
+    execSync('npm install -g @mermaid-js/mermaid-cli', { stdio: 'inherit' });
+    console.log('Installation complete!');
+    return true;
+  } catch (error: any) {
+    console.error(`Error installing @mermaid-js/mermaid-cli: ${error.message}`);
+    return false;
+  }
+}
+
+// Helper function to prompt user for input
+function promptUser(question: string): Promise<string> {
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 // Generate image from Mermaid syntax
