@@ -136,6 +136,38 @@ steroids loop
 
 The Makefile does steps 2-3: `make build`
 
+### Testing in Temp Directories (CRITICAL)
+
+**When testing `steroids init` in temp directories, ALWAYS use `--no-register`.**
+
+```bash
+# BAD - Pollutes global project registry
+mkdir /tmp/test-project
+cd /tmp/test-project
+steroids init -y  # ❌ Registers in global DB
+
+# GOOD - Keeps registry clean
+mkdir /tmp/test-project
+cd /tmp/test-project
+steroids init -y --no-register  # ✓ No global registration
+```
+
+**Why?**
+- `steroids init` auto-registers projects in the global database
+- Test directories pollute the registry and show up in `steroids projects list`
+- The wakeup cron may try to start runners for stale test directories
+- Cleanup becomes a manual chore
+
+**When writing integration test scripts:**
+```bash
+#!/bin/bash
+# Integration test for CLI
+cd /tmp && mkdir -p test-cli && cd test-cli
+steroids init -y --no-register  # Always --no-register in temp dirs!
+# ... run tests ...
+rm -rf /tmp/test-cli
+```
+
 ### Debug Stuck Runners (CRITICAL)
 
 **When a runner appears stuck, ALWAYS investigate why.** Don't just restart - find the root cause.
