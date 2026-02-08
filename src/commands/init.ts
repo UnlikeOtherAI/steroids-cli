@@ -10,20 +10,37 @@ import type { GlobalFlags } from '../cli/flags.js';
 import { createOutput } from '../cli/output.js';
 import { colors, markers } from '../cli/colors.js';
 import { registerProject } from '../runners/projects.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids init - Initialize Steroids in current directory
-
-USAGE:
-  steroids init [options]
-
-OPTIONS:
-  -y, --yes         Accept all defaults
-  -h, --help        Show help
-
-CREATES:
-  .steroids/steroids.db    SQLite database with task schema
-`;
+const HELP = generateHelp({
+  command: 'init',
+  description: 'Initialize Steroids in current directory',
+  details: `Sets up Steroids task management system in the current directory.
+Creates a .steroids directory with SQLite database for task tracking.
+Registers the project in the global registry for multi-project management.`,
+  usage: ['steroids init [options]'],
+  options: [
+    { short: 'y', long: 'yes', description: 'Accept all defaults without prompts' },
+  ],
+  examples: [
+    { command: 'steroids init', description: 'Initialize in current directory' },
+    { command: 'steroids init --yes', description: 'Initialize with defaults' },
+    { command: 'steroids init --dry-run', description: 'Preview initialization' },
+    { command: 'steroids init --json', description: 'Output result as JSON' },
+  ],
+  related: [
+    { command: 'steroids sections add', description: 'Add task sections after init' },
+    { command: 'steroids tasks add', description: 'Add tasks after init' },
+    { command: 'steroids loop', description: 'Start automation after setup' },
+  ],
+  sections: [
+    {
+      title: 'CREATES',
+      content: `.steroids/steroids.db    SQLite database with task schema
+Registers project in global registry at ~/.steroids/projects.db`,
+    },
+  ],
+});
 
 /**
  * Try to extract project name from package.json if it exists

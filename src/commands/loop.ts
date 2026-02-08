@@ -28,43 +28,56 @@ import { invokeReviewer } from '../orchestrator/reviewer.js';
 import { pushToRemote } from '../git/push.js';
 import { getCurrentCommitSha } from '../git/status.js';
 import { hasActiveRunnerForProject } from '../runners/wakeup.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids loop - Run the orchestrator loop
+const HELP = generateHelp({
+  command: 'loop',
+  description: 'Run the automated coder/reviewer orchestration loop',
+  details: `The orchestrator loop is the heart of Steroids automation.
+It continuously selects tasks, assigns them to coder or reviewer, and tracks progress.
+Runs until all tasks are completed or interrupted.`,
+  usage: ['steroids loop [options]'],
+  options: [
+    { long: 'project', description: 'Run loop for specific project directory', values: '<path>' },
+    { long: 'section', description: 'Focus on a specific section only', values: '<id|name>' },
+    { long: 'once', description: 'Run one iteration only (don\'t loop continuously)' },
+  ],
+  examples: [
+    { command: 'steroids loop', description: 'Run until all tasks done' },
+    { command: 'steroids loop --once', description: 'Process one task only' },
+    { command: 'steroids loop --dry-run', description: 'Preview without executing' },
+    { command: 'steroids loop --verbose', description: 'Show detailed progress' },
+    { command: 'steroids loop --project ~/code/myapp', description: 'Run for specific project' },
+    { command: 'steroids loop --section "Phase 2"', description: 'Focus on specific section' },
+    { command: 'steroids loop --section fd1f', description: 'Section by ID prefix' },
+    { command: 'STEROIDS_NO_HOOKS=1 steroids loop', description: 'Run without git hooks' },
+  ],
+  related: [
+    { command: 'steroids tasks', description: 'View task status during loop execution' },
+    { command: 'steroids runners', description: 'Manage background loop runners' },
+    { command: 'steroids dispute', description: 'View coder/reviewer disputes' },
+  ],
+  sections: [
+    {
+      title: 'HOW IT WORKS',
+      content: `1. Select next task (review > in_progress > pending)
+2. Invoke coder (Claude) for pending/rejected tasks
+3. Invoke reviewer (Codex) for tasks in review
+4. Push to git on task completion
+5. Repeat until all tasks complete or interrupted
 
-USAGE:
-  steroids loop [options]
-
-OPTIONS:
-  --project <path>    Run loop for specific project directory
-  --section <id|name> Focus on a specific section only
-  --once              Run one iteration only (don't loop)
-  --dry-run           Show what would be done without doing it
-  -h, --help          Show help
-
-DESCRIPTION:
-  The loop continuously:
-  1. Finds the next task to work on
-  2. Invokes the coder (Claude) or reviewer (Codex)
-  3. Pushes to git on completion
-  4. Continues until all tasks are done
-
-  The coder is responsible for running build/test commands.
-
-  Task priority:
-  - review > in_progress > pending
-  - Within priority: by section position, then creation time
-
-  When using --section, only tasks from that section are processed.
-
-EXAMPLES:
-  steroids loop                         # Run until all tasks done
-  steroids loop --once                  # Run one task only
-  steroids loop --dry-run               # Preview without executing
-  steroids loop --project ~/code/myapp  # Run loop for specific project
-  steroids loop --section "Phase 2"     # Focus on specific section
-  steroids loop --section fd1f          # Section by ID prefix
-`;
+Coder is responsible for running build/test commands.
+Reviewer checks code quality and adherence to spec.`,
+    },
+    {
+      title: 'TASK PRIORITY',
+      content: `Tasks are selected in this order:
+- Status priority: review > in_progress > pending
+- Within same status: section position, then creation time
+- Section dependencies respected (waiting sections blocked)`,
+    },
+  ],
+});
 
 export async function loopCommand(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({

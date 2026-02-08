@@ -25,72 +25,65 @@ import { getSection, getSectionByName, listSections, getTask, listTasks, type Ta
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { getRegisteredProjects } from '../runners/projects.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids runners - Manage runner daemons
-
-USAGE:
-  steroids runners <subcommand> [options]
-
-SUBCOMMANDS:
-  start               Start runner daemon
-  stop                Stop runner(s)
-  status              Show runner status
-  list                List all runners (use --tree for detailed view)
-  logs                View daemon crash/output logs
-  wakeup              Check and restart stale runners
-  cron                Manage cron job
-
-START OPTIONS:
-  --detach            Run in background (daemonize)
-  --project <path>    Project path to work on
-  --section <id|name> Focus on a specific section only
-
-STOP OPTIONS:
-  --id <id>           Stop specific runner by ID
-  --all               Stop all runners
-
-LIST OPTIONS:
-  --tree              Show tree view with projects, runners, and tasks
-
-LOGS OPTIONS:
-  <pid>               Show logs for specific PID
-  --tail <n>          Show last n lines (default: 50)
-  --follow            Follow log output
-  --clear             Clear all daemon logs
-
-WAKEUP OPTIONS:
-  --quiet             Suppress output (for cron)
-  --dry-run           Check without acting
-
-CRON SUBCOMMANDS:
-  cron install        Install cron job (every minute)
-  cron uninstall      Remove cron job
-  cron status         Check cron status
-
-GLOBAL OPTIONS:
-  -j, --json          Output as JSON
-  -h, --help          Show help
-
-EXAMPLES:
-  steroids runners start                    # Start in foreground
-  steroids runners start --detach           # Start in background
-  steroids runners start --section "Phase 2" # Focus on specific section
-  steroids runners stop                     # Stop current runner
-  steroids runners status                   # Show status
-  steroids runners list                     # List all runners (all projects)
-  steroids runners list --tree              # Tree view with tasks
-  steroids runners list --json              # List all runners as JSON
-  steroids runners logs                     # List available daemon logs
-  steroids runners logs 12345               # View logs for PID 12345
-  steroids runners logs --follow            # Follow latest log
-  steroids runners wakeup --dry-run         # Check what would happen
-  steroids runners cron install             # Install cron wake-up
-
-MULTI-PROJECT:
-  Different projects can run runners in parallel (one runner per project).
-  The 'list' command shows runners from ALL registered projects.
-`;
+const HELP = generateHelp({
+  command: 'runners',
+  description: 'Manage background runner daemons for automated task execution',
+  details: `Runners are daemon processes that execute the orchestrator loop in the background.
+Each project can have one active runner processing tasks.
+Runners can be started manually or managed automatically via cron.`,
+  usage: ['steroids runners <subcommand> [options]'],
+  subcommands: [
+    { name: 'start', description: 'Start runner daemon (foreground or background)' },
+    { name: 'stop', description: 'Stop runner(s) for current or all projects' },
+    { name: 'status', description: 'Show runner status for current project' },
+    { name: 'list', description: 'List all runners across all projects' },
+    { name: 'logs', args: '[pid]', description: 'View daemon crash/output logs' },
+    { name: 'wakeup', description: 'Check and restart stale runners' },
+    { name: 'cron', args: '<install|uninstall|status>', description: 'Manage cron job for auto-wakeup' },
+  ],
+  options: [
+    { long: 'detach', description: 'Run in background (daemonize) - start subcommand' },
+    { long: 'project', description: 'Project path to work on', values: '<path>' },
+    { long: 'section', description: 'Focus on specific section only', values: '<id|name>' },
+    { long: 'id', description: 'Stop specific runner by ID - stop subcommand', values: '<id>' },
+    { long: 'all', description: 'Stop all runners - stop subcommand' },
+    { long: 'tree', description: 'Show tree view with projects/runners/tasks - list subcommand' },
+    { long: 'tail', description: 'Show last n lines of logs', values: '<n>', default: '50' },
+    { long: 'follow', description: 'Follow log output in real-time' },
+    { long: 'clear', description: 'Clear all daemon logs' },
+  ],
+  examples: [
+    { command: 'steroids runners start', description: 'Start in foreground' },
+    { command: 'steroids runners start --detach', description: 'Start in background' },
+    { command: 'steroids runners start --section "Phase 2"', description: 'Focus on specific section' },
+    { command: 'steroids runners stop', description: 'Stop runner for current project' },
+    { command: 'steroids runners stop --all', description: 'Stop all runners' },
+    { command: 'steroids runners status', description: 'Show runner status' },
+    { command: 'steroids runners list', description: 'List all runners (all projects)' },
+    { command: 'steroids runners list --tree', description: 'Tree view with tasks' },
+    { command: 'steroids runners list --json', description: 'JSON output' },
+    { command: 'steroids runners logs', description: 'List available logs' },
+    { command: 'steroids runners logs 12345', description: 'View logs for PID 12345' },
+    { command: 'steroids runners logs --follow', description: 'Follow latest log' },
+    { command: 'steroids runners wakeup', description: 'Restart stale runners' },
+    { command: 'steroids runners cron install', description: 'Install cron wake-up' },
+    { command: 'steroids runners cron status', description: 'Check cron status' },
+  ],
+  related: [
+    { command: 'steroids loop', description: 'Run orchestrator loop manually' },
+    { command: 'steroids tasks', description: 'View tasks being processed' },
+  ],
+  sections: [
+    {
+      title: 'MULTI-PROJECT',
+      content: `Different projects can run runners in parallel (one per project).
+The 'list' command shows runners from ALL registered projects.
+Use 'wakeup' to check if any projects need runners restarted.`,
+    },
+  ],
+});
 
 export async function runnersCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {

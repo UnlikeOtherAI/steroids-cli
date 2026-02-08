@@ -5,6 +5,7 @@
 
 import type { GlobalFlags } from '../cli/flags.js';
 import { createOutput } from '../cli/output.js';
+import { generateHelp } from '../cli/help.js';
 
 const ABOUT_TEXT = `
 STEROIDS - Automated Task Execution System
@@ -137,20 +138,25 @@ For full documentation:
 - Config: steroids config show
 `;
 
-const HELP = `
-Usage: steroids about [options]
-
-Explains what Steroids is and how it works, designed for LLMs
-that are discovering this tool for the first time.
-
-Options:
-  -j, --json    Output as JSON (structured for LLM parsing)
-  -h, --help    Show this help
-
-Examples:
-  steroids about              # Human-readable explanation
-  steroids about --json       # Structured JSON for LLM parsing
-`;
+const HELP = generateHelp({
+  command: 'about',
+  description: 'Explains what Steroids is and how it works',
+  details: `Designed for LLMs discovering this tool for the first time.
+Provides comprehensive overview of architecture, workflow, and best practices.
+Use --json for structured output optimized for LLM parsing.`,
+  usage: ['steroids about [options]'],
+  examples: [
+    { command: 'steroids about', description: 'Human-readable explanation' },
+    { command: 'steroids about --json', description: 'Structured JSON for LLM parsing' },
+  ],
+  related: [
+    { command: 'steroids llm', description: 'Compact quick reference when context is lost' },
+    { command: 'steroids --help', description: 'CLI help with all commands' },
+  ],
+  showGlobalOptions: true,
+  showExitCodes: false,
+  showEnvVars: false,
+});
 
 interface AboutOutput {
   name: string;

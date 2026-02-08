@@ -22,50 +22,69 @@ import {
   addDependency,
   removeDependency
 } from './sections-commands.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids sections - Manage task sections
-
-USAGE:
-  steroids sections <subcommand> [options]
-
-SUBCOMMANDS:
-  add <name>                       Add a new section
-  list [--deps]                    List all sections
-  priority <id> <value>            Set section priority (0-100 or high/medium/low)
-  depends-on <id> <depends-on-id>  Add section dependency
-  no-depends-on <id> <dep-id>      Remove section dependency
-  graph [options]                  Show dependency graph (ASCII, Mermaid, PNG/SVG)
-
-OPTIONS:
-  -h, --help        Show help
-  -j, --json        Output as JSON
-
-GRAPH OPTIONS:
-  --mermaid         Output Mermaid flowchart syntax
-  --output <fmt>    Generate image file (png or svg)
-  -o, --open        Auto-open generated file
-  --tasks           Include tasks within sections
-  --status <s>      Filter tasks by status
-  --section <id>    Show only specified section
-
-EXAMPLES:
-  steroids sections add "Phase 1: Foundation"
-  steroids sections list --deps
-  steroids sections priority abc123 high
-  steroids sections priority abc123 25
-  steroids sections depends-on abc123 def456
-
-  # Graph output formats:
-  steroids sections graph                      # ASCII tree (default)
-  steroids sections graph --json               # JSON output
-  steroids sections graph --mermaid            # Mermaid flowchart syntax
-  steroids sections graph --output png         # Generate PNG image
-  steroids sections graph --output svg -o      # Generate SVG and open it
-  steroids sections graph --tasks              # Include tasks in graph
-  steroids sections graph --tasks --status active  # Show only active tasks
-  steroids sections graph --section abc123 --tasks # Graph for single section
-`;
+const HELP = generateHelp({
+  command: 'sections',
+  description: 'Manage task sections and dependencies',
+  details: `Sections organize tasks into logical phases or milestones.
+Each section can have dependencies on other sections, controlling execution order.
+Sections help structure large projects and track high-level progress.`,
+  usage: ['steroids sections <subcommand> [options]'],
+  subcommands: [
+    { name: 'add', args: '<name>', description: 'Add a new section' },
+    { name: 'list', args: '[--deps]', description: 'List all sections with task counts' },
+    { name: 'priority', args: '<id> <value>', description: 'Set section priority (0-100 or high/medium/low)' },
+    { name: 'depends-on', args: '<id> <depends-on-id>', description: 'Add section dependency' },
+    { name: 'no-depends-on', args: '<id> <dep-id>', description: 'Remove section dependency' },
+    { name: 'graph', args: '[options]', description: 'Show dependency graph (ASCII, Mermaid, image)' },
+  ],
+  options: [
+    { long: 'deps', description: 'Show dependencies in list view' },
+    { long: 'mermaid', description: 'Output Mermaid flowchart syntax (graph subcommand)' },
+    { long: 'output', description: 'Generate image file (graph subcommand)', values: 'png | svg' },
+    { short: 'o', long: 'open', description: 'Auto-open generated file' },
+    { long: 'tasks', description: 'Include tasks within sections in graph' },
+    { long: 'status', description: 'Filter tasks by status in graph', values: '<status>' },
+    { long: 'section', description: 'Show only specified section in graph', values: '<id>' },
+  ],
+  examples: [
+    { command: 'steroids sections add "Phase 1: Foundation"', description: 'Add new section' },
+    { command: 'steroids sections list', description: 'List all sections with task counts' },
+    { command: 'steroids sections list --deps', description: 'Show dependencies' },
+    { command: 'steroids sections priority abc123 high', description: 'Set priority (high/medium/low)' },
+    { command: 'steroids sections priority abc123 25', description: 'Set numeric priority (0-100)' },
+    { command: 'steroids sections depends-on abc123 def456', description: 'Add dependency' },
+    { command: 'steroids sections no-depends-on abc123 def456', description: 'Remove dependency' },
+    { command: 'steroids sections graph', description: 'ASCII tree view (default)' },
+    { command: 'steroids sections graph --json', description: 'JSON output' },
+    { command: 'steroids sections graph --mermaid', description: 'Mermaid flowchart syntax' },
+    { command: 'steroids sections graph --output png', description: 'Generate PNG image' },
+    { command: 'steroids sections graph --output svg --open', description: 'Generate and open SVG' },
+    { command: 'steroids sections graph --tasks', description: 'Include tasks in graph' },
+    { command: 'steroids sections graph --tasks --status active', description: 'Show active tasks only' },
+    { command: 'steroids sections graph --section abc123 --tasks', description: 'Single section graph' },
+  ],
+  related: [
+    { command: 'steroids tasks', description: 'Manage tasks within sections' },
+    { command: 'steroids loop', description: 'Run automation respecting section dependencies' },
+  ],
+  sections: [
+    {
+      title: 'PRIORITY VALUES',
+      content: `high      = 75
+medium    = 50 (default)
+low       = 25
+Or any number 0-100`,
+    },
+    {
+      title: 'DEPENDENCIES',
+      content: `Sections can depend on other sections.
+Tasks in a section only run if all dependency sections are completed.
+Use 'graph' subcommand to visualize the dependency tree.`,
+    },
+  ],
+});
 
 export async function sectionsCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {

@@ -27,82 +27,74 @@ import {
 } from '../database/queries.js';
 import { outputJson as outputEnvelope, outputJsonError } from '../cli/output.js';
 import { ErrorCode } from '../cli/errors.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids tasks - Manage tasks
-
-USAGE:
-  steroids tasks [options]
-  steroids tasks add <title> [options]
-  steroids tasks update <id|title> [options]
-  steroids tasks approve <id|title> [options]
-  steroids tasks reject <id|title> [options]
-  steroids tasks skip <id|title> [options]
-  steroids tasks audit <id|title>
-
-SUBCOMMANDS:
-  (none)            List tasks (default)
-  stats             Show task counts by status
-  add               Add a new task
-  update            Update task status
-  approve           Approve a task (mark completed)
-  reject            Reject a task (back to in_progress)
-  skip              Skip a task (external setup, manual action required)
-  audit             View task audit trail
-
-LIST OPTIONS:
-  -s, --status      Filter by status (default: pending)
-                    Values: pending, in_progress, review, completed,
-                            disputed, failed, skipped, partial, active, all
-                    'active' = in_progress + review (tasks being worked on)
-                    'failed' = exceeded 15 rejections, needs human help
-                    'skipped' = external setup, needs human action
-                    'partial' = some coded, rest needs human action
-  -g, --global      List tasks across ALL registered projects
-  --section <id>    Filter by section ID (local project only)
-  --search          Search in task titles
-  -j, --json        Output as JSON
-  -h, --help        Show this help
-
-ADD OPTIONS:
-  --section <id>    Section ID (REQUIRED)
-  --source <file>   Specification file (REQUIRED)
-
-UPDATE OPTIONS:
-  --status            New status: pending | in_progress | review | completed
-  --reset-rejections  Reset rejection count to 0 (keeps audit history)
-  --actor             Actor making the change
-  --model             Model identifier (for LLM actors)
-
-APPROVE/REJECT OPTIONS:
-  --model           Model performing the review (required)
-  --notes           Review notes/comments
-
-SKIP OPTIONS:
-  --notes           Reason for skipping (e.g., "Cloud SQL - manual setup")
-  --model           Model identifying the skip (required for LLM actors)
-  --partial         Mark as partial (coded some, rest needs human action)
-
-STATUS MARKERS:
-  [ ] pending       Not started
-  [-] in_progress   Being worked on
-  [o] review        Ready for review
-  [x] completed     Approved
-  [!] disputed      Disagreement logged
-  [F] failed        Exceeded 15 rejections
-  [S] skipped       Fully external - nothing to code
-  [s] partial       Coded what we could, rest is external
-
-EXAMPLES:
-  steroids tasks
-  steroids tasks --status all
-  steroids tasks --status skipped             # See what needs manual action
-  steroids tasks add "Implement login" --section abc123 --source docs/spec.md
-  steroids tasks update "Implement login" --status review
-  steroids tasks approve abc123 --model claude-sonnet-4
-  steroids tasks reject abc123 --model codex --notes "Missing tests"
-  steroids tasks skip abc123 --notes "Cloud SQL - spec says SKIP"
-`;
+const HELP = generateHelp({
+  command: 'tasks',
+  description: 'Manage tasks in the automated development workflow',
+  details: `Tasks are units of work that flow through the coder/reviewer loop.
+Each task has a specification file and tracks progress through various states.
+Use this command to add, update, approve, reject, or skip tasks.`,
+  usage: [
+    'steroids tasks [options]',
+    'steroids tasks <subcommand> [args] [options]',
+  ],
+  subcommands: [
+    { name: 'list', description: 'List tasks (default subcommand)' },
+    { name: 'stats', description: 'Show task counts by status' },
+    { name: 'add', args: '<title>', description: 'Add a new task' },
+    { name: 'update', args: '<id|title>', description: 'Update task status' },
+    { name: 'approve', args: '<id|title>', description: 'Approve a task (mark completed)' },
+    { name: 'reject', args: '<id|title>', description: 'Reject a task (back to in_progress)' },
+    { name: 'skip', args: '<id|title>', description: 'Skip a task (external/manual work)' },
+    { name: 'audit', args: '<id|title>', description: 'View task audit trail' },
+  ],
+  options: [
+    { short: 's', long: 'status', description: 'Filter by status', values: 'pending | in_progress | review | completed | disputed | failed | skipped | partial | active | all', default: 'pending' },
+    { short: 'g', long: 'global', description: 'List tasks across ALL registered projects' },
+    { long: 'section', description: 'Filter by section ID (local project only)', values: '<id>' },
+    { long: 'search', description: 'Search in task titles', values: '<query>' },
+    { long: 'reset-rejections', description: 'Reset rejection count to 0 (update subcommand)' },
+    { long: 'actor', description: 'Actor making the change', values: '<name>' },
+    { long: 'model', description: 'Model identifier (for LLM actors)', values: '<model>' },
+    { long: 'notes', description: 'Review notes/comments', values: '<text>' },
+    { long: 'source', description: 'Specification file (add subcommand)', values: '<file>' },
+    { long: 'partial', description: 'Mark as partial when skipping' },
+  ],
+  examples: [
+    { command: 'steroids tasks', description: 'List pending tasks' },
+    { command: 'steroids tasks --status all', description: 'List all tasks' },
+    { command: 'steroids tasks --status active', description: 'Show active tasks (in_progress + review)' },
+    { command: 'steroids tasks --status skipped', description: 'See what needs manual action' },
+    { command: 'steroids tasks --global --json', description: 'List tasks from all projects as JSON' },
+    { command: 'steroids tasks add "Implement login" --section abc123 --source docs/spec.md', description: 'Add new task' },
+    { command: 'steroids tasks update "Implement login" --status review', description: 'Update task status' },
+    { command: 'steroids tasks approve abc123 --model claude-sonnet-4', description: 'Approve a task' },
+    { command: 'steroids tasks reject abc123 --model codex --notes "Missing tests"', description: 'Reject a task' },
+    { command: 'steroids tasks skip abc123 --notes "Cloud SQL - manual setup"', description: 'Skip a task' },
+    { command: 'steroids tasks audit abc123', description: 'View task history' },
+    { command: 'steroids tasks stats --json', description: 'Get task statistics as JSON' },
+  ],
+  related: [
+    { command: 'steroids sections', description: 'Manage task sections' },
+    { command: 'steroids loop', description: 'Run automation on pending tasks' },
+    { command: 'steroids dispute', description: 'View coder/reviewer disputes' },
+  ],
+  sections: [
+    {
+      title: 'STATUS VALUES',
+      content: `pending         [ ]  Not started
+in_progress     [-]  Being worked on by coder
+review          [o]  Ready for reviewer
+completed       [x]  Approved by reviewer
+disputed        [!]  Coder/reviewer disagreement
+failed          [F]  Exceeded 15 rejections (needs human)
+skipped         [S]  Fully external (nothing to code)
+partial         [s]  Coded what we could, rest external
+active          Combined: in_progress + review`,
+    },
+  ],
+});
 
 export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<void> {
   // Check global help flag (parsed by main CLI)
