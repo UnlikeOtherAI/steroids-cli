@@ -71,9 +71,10 @@ These rules apply to **ALL** Steroids components without exception.
 ## Architecture Documentation
 
 - [CLI Architecture](./CLI/ARCHITECTURE.md) - Main task management CLI
+- [Monitor](./Monitor/ARCHITECTURE.md) - Mac menu bar app (multi-project)
 - [Pump](./Pump/README.md) - Data gathering CLI (Google APIs, LLM grounding)
 - [Iron](./Iron/README.md) - Documentation scaffolding CLI
-- [WebUI Architecture](./WebUI/ARCHITECTURE.md) - Dashboard-specific architecture
+- [WebUI Architecture](./WebUI/ARCHITECTURE.md) - Dashboard (ON HOLD)
 - [Code Quality](./Docs/CODE_QUALITY.md) - The 50 rules in detail
 
 ### The Suite: Pump Iron + Steroids
@@ -81,9 +82,10 @@ These rules apply to **ALL** Steroids components without exception.
 | Component | Purpose | Status |
 |-----------|---------|--------|
 | **Steroids CLI** | Task management, runners, hooks | Designing |
+| **Monitor** | Mac menu bar app for multi-project monitoring | Planned |
 | **Pump** | Data gathering, LLM grounding (Google APIs) | Planned |
 | **Iron** | Documentation scaffolding wizard | Planned |
-| **WebUI** | Visual dashboard | Planned |
+| **WebUI** | Visual dashboard (single project) | On Hold |
 
 All CLIs are independent and can be used standalone.
 

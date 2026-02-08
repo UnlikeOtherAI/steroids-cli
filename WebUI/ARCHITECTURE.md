@@ -1,5 +1,16 @@
 # WebUI Architecture
 
+> [!CAUTION]
+> **DEVELOPMENT ON HOLD** - Do not develop this component until further notice.
+>
+> Reason: The current design only supports single-project monitoring. Before proceeding, we need to decide whether to:
+> 1. Add multi-project support (significant architectural changes)
+> 2. Keep WebUI as a single-project deep-dive tool while Monitor handles multi-project overview
+>
+> For quick multi-project monitoring, see [Monitor](../Monitor/ARCHITECTURE.md) instead.
+
+---
+
 > For global coding rules (500-line limit, testability, patterns), see [CLAUDE.md](../CLAUDE.md)
 
 ## Overview
