@@ -22,16 +22,7 @@ function App() {
   return (
     <AppShell title={getPageTitle()} project={selectedProject}>
       <Routes>
-        <Route path="/" element={
-          selectedProject ? (
-            <DashboardPage project={selectedProject} />
-          ) : (
-            <div className="flex items-center justify-center h-[400px] flex-col gap-4">
-              <p className="text-xl text-text-secondary">Select a project to view its dashboard</p>
-              <a href="/projects" className="text-accent hover:text-accent-hover underline">View all projects</a>
-            </div>
-          )
-        } />
+        <Route path="/" element={<DashboardPage project={selectedProject} />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/tasks" element={<div className="p-8"><p className="text-text-secondary">Tasks page coming soon...</p></div>} />
         <Route path="/settings" element={<div className="p-8"><p className="text-text-secondary">Settings page coming soon...</p></div>} />

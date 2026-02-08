@@ -9,6 +9,15 @@ interface ProjectCardProps {
   onRemove?: (path: string) => void;
 }
 
+function truncateMiddle(str: string, maxLen: number = 40): string {
+  if (str.length <= maxLen) return str;
+  const ellipsis = '...';
+  const charsToShow = maxLen - ellipsis.length;
+  const frontChars = Math.ceil(charsToShow / 2);
+  const backChars = Math.floor(charsToShow / 2);
+  return str.slice(0, frontChars) + ellipsis + str.slice(-backChars);
+}
+
 export const ProjectCard: React.FC<ProjectCardProps> = ({
   project,
   onEnable,
@@ -31,12 +40,12 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <h3 className="text-lg font-semibold text-gray-900 truncate">
             {project.name || project.path.split('/').pop() || 'Project'}
           </h3>
-          <p className="text-sm text-gray-500 truncate mt-1" title={project.path}>
-            {project.path}
+          <p className="text-xs text-gray-400 mt-1 font-mono cursor-help" title={project.path}>
+            {truncateMiddle(project.path, 35)}
           </p>
         </div>
         <div className="flex gap-2 ml-4">

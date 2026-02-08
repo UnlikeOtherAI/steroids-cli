@@ -2,10 +2,19 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Project, ActivityStats, TimeRangeOption, TIME_RANGE_OPTIONS } from '../types';
 import { StatTile } from '../components/molecules/StatTile';
 import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
-import { activityApi } from '../services/api';
+import { activityApi, projectsApi } from '../services/api';
 
 interface DashboardPageProps {
-  project: Project;
+  project?: Project | null;
+}
+
+interface AggregateStats {
+  pending: number;
+  in_progress: number;
+  review: number;
+  completed: number;
+  projectCount: number;
+  runningRunners: number;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
@@ -13,90 +22,165 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
   const [activityStats, setActivityStats] = useState<ActivityStats | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
+  const [aggregateStats, setAggregateStats] = useState<AggregateStats | null>(null);
 
   const fetchActivityStats = useCallback(async () => {
     setActivityLoading(true);
     setActivityError(null);
     try {
-      const stats = await activityApi.getStats(selectedRange.hours, project.path);
+      // If project is provided, get project-specific stats; otherwise get aggregate
+      const stats = await activityApi.getStats(selectedRange.hours, project?.path);
       setActivityStats(stats);
     } catch (err) {
       setActivityError(err instanceof Error ? err.message : 'Failed to load activity stats');
     } finally {
       setActivityLoading(false);
     }
-  }, [selectedRange.hours, project.path]);
+  }, [selectedRange.hours, project?.path]);
+
+  const fetchAggregateStats = useCallback(async () => {
+    if (project) return; // Skip if viewing a specific project
+    try {
+      const projects = await projectsApi.list(false);
+      const aggregate: AggregateStats = {
+        pending: 0,
+        in_progress: 0,
+        review: 0,
+        completed: 0,
+        projectCount: projects.length,
+        runningRunners: 0,
+      };
+      for (const p of projects) {
+        if (p.stats) {
+          aggregate.pending += p.stats.pending;
+          aggregate.in_progress += p.stats.in_progress;
+          aggregate.review += p.stats.review;
+          aggregate.completed += p.stats.completed;
+        }
+        if (p.runner?.status === 'running') {
+          aggregate.runningRunners++;
+        }
+      }
+      setAggregateStats(aggregate);
+    } catch (err) {
+      console.error('Failed to load aggregate stats:', err);
+    }
+  }, [project]);
 
   useEffect(() => {
     fetchActivityStats();
-  }, [fetchActivityStats]);
+    fetchAggregateStats();
+  }, [fetchActivityStats, fetchAggregateStats]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      console.log('Refreshing project data...');
       fetchActivityStats();
+      fetchAggregateStats();
     }, 5000);
     return () => clearInterval(interval);
-  }, [fetchActivityStats]);
+  }, [fetchActivityStats, fetchAggregateStats]);
 
-  const getRunnerStatus = () => {
-    if (!project.runner) return 'No Runner';
-    return project.runner.status.charAt(0).toUpperCase() + project.runner.status.slice(1);
-  };
+  // Project-specific view
+  if (project) {
+    const totalTasks = project.stats
+      ? project.stats.pending + project.stats.in_progress + project.stats.review + project.stats.completed
+      : 0;
+    const completionRate = project.stats && totalTasks > 0 ? Math.round((project.stats.completed / totalTasks) * 100) : 0;
+    const projectName = project.name || project.path.split('/').pop() || 'Project';
 
-  const getRunnerBadgeClass = () => {
-    if (!project.runner) return 'badge-accent';
-    const status = project.runner.status.toLowerCase();
-    if (status === 'running' || status === 'active') return 'badge-success';
-    if (status === 'idle') return 'badge-warning';
-    return 'badge-accent';
-  };
+    const getRunnerStatus = () => {
+      if (!project.runner) return 'No Runner';
+      return project.runner.status.charAt(0).toUpperCase() + project.runner.status.slice(1);
+    };
 
-  const totalTasks = project.stats
-    ? project.stats.pending + project.stats.in_progress + project.stats.review + project.stats.completed
-    : 0;
-  const completionRate = project.stats && totalTasks > 0 ? Math.round((project.stats.completed / totalTasks) * 100) : 0;
-  const projectName = project.name || project.path.split('/').pop() || 'Project';
+    const getRunnerBadgeClass = () => {
+      if (!project.runner) return 'badge-accent';
+      const status = project.runner.status.toLowerCase();
+      if (status === 'running' || status === 'active') return 'badge-success';
+      if (status === 'idle') return 'badge-warning';
+      return 'badge-accent';
+    };
 
-  return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="card p-6 mb-6">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold text-text-primary">{projectName}</h1>
-            <p className="text-text-muted mt-1 text-sm">{project.path}</p>
-          </div>
-          <span className={project.enabled ? 'badge-success' : 'badge-accent'}>
-            {project.enabled ? 'Enabled' : 'Disabled'}
-          </span>
-        </div>
-        <div className="flex items-center gap-6 p-4 bg-bg-surface rounded-lg">
-          <div className="flex-1">
-            <div className="text-sm text-text-secondary">Runner Status</div>
-            <div className="flex items-center gap-2 mt-1">
-              <span className={getRunnerBadgeClass()}>{getRunnerStatus()}</span>
-              {project.runner?.pid && <span className="text-sm text-text-muted">PID {project.runner.pid}</span>}
+    return (
+      <div className="p-8 max-w-6xl mx-auto">
+        <div className="card p-6 mb-6">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h1 className="text-3xl font-bold text-text-primary">{projectName}</h1>
+              <p className="text-text-muted mt-1 text-sm">{project.path}</p>
             </div>
+            <span className={project.enabled ? 'badge-success' : 'badge-accent'}>
+              {project.enabled ? 'Enabled' : 'Disabled'}
+            </span>
           </div>
-          {project.runner?.current_task_id && (
+          <div className="flex items-center gap-6 p-4 bg-bg-surface rounded-lg">
             <div className="flex-1">
-              <div className="text-sm text-text-secondary">Current Task</div>
-              <div className="text-sm font-mono text-text-primary mt-1">{project.runner.current_task_id.substring(0, 8)}...</div>
+              <div className="text-sm text-text-secondary">Runner Status</div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={getRunnerBadgeClass()}>{getRunnerStatus()}</span>
+                {project.runner?.pid && <span className="text-sm text-text-muted">PID {project.runner.pid}</span>}
+              </div>
             </div>
-          )}
-          <div className="flex-1">
-            <div className="text-sm text-text-secondary">Last Seen</div>
-            <div className="text-sm text-text-primary mt-1">{new Date(project.last_seen_at).toLocaleString()}</div>
+            {project.runner?.current_task_id && (
+              <div className="flex-1">
+                <div className="text-sm text-text-secondary">Current Task</div>
+                <div className="text-sm font-mono text-text-primary mt-1">{project.runner.current_task_id.substring(0, 8)}...</div>
+              </div>
+            )}
+            <div className="flex-1">
+              <div className="text-sm text-text-secondary">Last Seen</div>
+              <div className="text-sm text-text-primary mt-1">{new Date(project.last_seen_at).toLocaleString()}</div>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="card p-6 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-text-primary">Activity</h2>
-          <TimeRangeSelector value={selectedRange.value} onChange={setSelectedRange} />
+        <div className="card p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-text-primary">Activity</h2>
+            <TimeRangeSelector value={selectedRange.value} onChange={setSelectedRange} />
+          </div>
+          {renderActivityStats()}
         </div>
 
+        {project.stats && (
+          <>
+            <h2 className="text-lg font-semibold text-text-primary mb-4">Current Queue</h2>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <StatTile label="Pending" value={project.stats.pending} description="Waiting to start" />
+              <StatTile label="In Progress" value={project.stats.in_progress} description="Currently being worked on" variant="info" />
+              <StatTile label="In Review" value={project.stats.review} description="Awaiting review" variant="warning" />
+              <StatTile label="Completed" value={project.stats.completed} description="Successfully finished" variant="success" />
+            </div>
+          </>
+        )}
+
+        {project.stats && totalTasks > 0 && (
+          <div className="card p-6 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-text-primary">Overall Progress</h2>
+              <span className="text-2xl font-bold text-text-primary">{completionRate}%</span>
+            </div>
+            <div className="w-full bg-bg-surface rounded-full h-4 overflow-hidden">
+              <div className="bg-success h-4 transition-all duration-500" style={{ width: `${completionRate}%` }} />
+            </div>
+            <div className="text-sm text-text-secondary mt-2">{project.stats.completed} of {totalTasks} tasks completed</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Aggregate view (no project selected - home dashboard)
+  const totalTasks = aggregateStats
+    ? aggregateStats.pending + aggregateStats.in_progress + aggregateStats.review + aggregateStats.completed
+    : 0;
+  const completionRate = aggregateStats && totalTasks > 0
+    ? Math.round((aggregateStats.completed / totalTasks) * 100)
+    : 0;
+
+  function renderActivityStats() {
+    return (
+      <>
         {activityLoading && !activityStats && (
           <div className="text-center py-4 text-text-muted">Loading activity stats...</div>
         )}
@@ -131,21 +215,50 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
         {!activityLoading && !activityError && activityStats && activityStats.total === 0 && (
           <div className="text-center py-2 text-text-muted">No activity in the selected time range</div>
         )}
+      </>
+    );
+  }
+
+  return (
+    <div className="p-8 max-w-6xl mx-auto">
+      <div className="card p-6 mb-6">
+        <h1 className="text-3xl font-bold text-text-primary mb-2">Steroids Dashboard</h1>
+        <p className="text-text-muted">Overview of all projects</p>
+        {aggregateStats && (
+          <div className="flex items-center gap-6 mt-4 p-4 bg-bg-surface rounded-lg">
+            <div>
+              <div className="text-sm text-text-secondary">Projects</div>
+              <div className="text-2xl font-bold text-text-primary">{aggregateStats.projectCount}</div>
+            </div>
+            <div>
+              <div className="text-sm text-text-secondary">Active Runners</div>
+              <div className="text-2xl font-bold text-success">{aggregateStats.runningRunners}</div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {project.stats && (
+      <div className="card p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-text-primary">Activity</h2>
+          <TimeRangeSelector value={selectedRange.value} onChange={setSelectedRange} />
+        </div>
+        {renderActivityStats()}
+      </div>
+
+      {aggregateStats && (
         <>
-          <h2 className="text-lg font-semibold text-text-primary mb-4">Current Queue</h2>
+          <h2 className="text-lg font-semibold text-text-primary mb-4">Current Queue (All Projects)</h2>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <StatTile label="Pending" value={project.stats.pending} description="Waiting to start" />
-            <StatTile label="In Progress" value={project.stats.in_progress} description="Currently being worked on" variant="info" />
-            <StatTile label="In Review" value={project.stats.review} description="Awaiting review" variant="warning" />
-            <StatTile label="Completed" value={project.stats.completed} description="Successfully finished" variant="success" />
+            <StatTile label="Pending" value={aggregateStats.pending} description="Waiting to start" />
+            <StatTile label="In Progress" value={aggregateStats.in_progress} description="Currently being worked on" variant="info" />
+            <StatTile label="In Review" value={aggregateStats.review} description="Awaiting review" variant="warning" />
+            <StatTile label="Completed" value={aggregateStats.completed} description="Successfully finished" variant="success" />
           </div>
         </>
       )}
 
-      {project.stats && totalTasks > 0 && (
+      {aggregateStats && totalTasks > 0 && (
         <div className="card p-6 mb-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-text-primary">Overall Progress</h2>
@@ -154,29 +267,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
           <div className="w-full bg-bg-surface rounded-full h-4 overflow-hidden">
             <div className="bg-success h-4 transition-all duration-500" style={{ width: `${completionRate}%` }} />
           </div>
-          <div className="text-sm text-text-secondary mt-2">{project.stats.completed} of {totalTasks} tasks completed</div>
+          <div className="text-sm text-text-secondary mt-2">{aggregateStats.completed} of {totalTasks} tasks completed</div>
         </div>
       )}
-
-      {!project.stats && (
-        <div className="card p-6 text-center border border-info/20 bg-info-soft/30">
-          <p className="text-info">Statistics not yet available. Runner will update stats during operation.</p>
-        </div>
-      )}
-
-      <div className="card p-6">
-        <h2 className="text-lg font-semibold text-text-primary mb-4">Project Information</h2>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <div className="text-text-secondary">Registered</div>
-            <div className="text-text-primary mt-1">{new Date(project.registered_at).toLocaleString()}</div>
-          </div>
-          <div>
-            <div className="text-text-secondary">Status</div>
-            <div className="text-text-primary mt-1">{project.enabled ? 'Enabled for automation' : 'Disabled'}</div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };
