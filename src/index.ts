@@ -27,6 +27,7 @@ import { purgeCommand } from './commands/purge.js';
 import { gitCommand } from './commands/git.js';
 import { aboutCommand } from './commands/about.js';
 import { projectsCommand } from './commands/projects.js';
+import { llmCommand } from './commands/llm.js';
 
 // Read version from package.json - search up from dist folder
 function getVersion(): string {
@@ -56,6 +57,7 @@ USAGE:
 
 COMMANDS:
   about             Explain what Steroids is (for LLMs discovering this tool)
+  llm               Compact instructions for LLM agents (call when context lost)
 
   init              Initialize steroids in current directory
   sections          Manage task sections
@@ -200,6 +202,9 @@ async function main(): Promise<void> {
         break;
       case 'projects':
         await projectsCommand(commandArgs, flags);
+        break;
+      case 'llm':
+        await llmCommand(commandArgs, flags);
         break;
       default:
         if (flags.json) {
