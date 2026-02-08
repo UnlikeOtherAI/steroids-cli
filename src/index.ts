@@ -5,6 +5,8 @@
  */
 
 import { parseArgs } from 'node:util';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { initCommand } from './commands/init.js';
 import { tasksCommand } from './commands/tasks.js';
 import { sectionsCommand } from './commands/sections.js';
@@ -22,7 +24,25 @@ import { disputeCommand } from './commands/disputes.js';
 import { purgeCommand } from './commands/purge.js';
 import { gitCommand } from './commands/git.js';
 
-const VERSION = '0.1.0';
+// Read version from package.json - search up from dist folder
+function getVersion(): string {
+  // When running from dist/, package.json is one level up
+  const paths = [
+    join(__dirname, '..', 'package.json'),
+    join(__dirname, 'package.json'),
+    join(process.cwd(), 'package.json'),
+  ];
+  for (const p of paths) {
+    if (existsSync(p)) {
+      try {
+        const pkg = JSON.parse(readFileSync(p, 'utf-8'));
+        if (pkg.name === 'steroids-cli') return pkg.version;
+      } catch { /* ignore */ }
+    }
+  }
+  return '0.0.0';
+}
+const VERSION = getVersion();
 
 const HELP = `
 steroids - Automated task execution with coder/reviewer loop
