@@ -59,6 +59,7 @@ function getSourceFileContent(
 
 /**
  * Format rejection history for coder
+ * Shows the LATEST rejection prominently, with summary of earlier ones
  */
 function formatRejectionHistoryForCoder(
   taskId: string,
@@ -69,7 +70,17 @@ function formatRejectionHistoryForCoder(
     return '';
   }
 
-  const historyLines = rejectionHistory.map(r => {
+  const latest = rejectionHistory[rejectionHistory.length - 1];
+  const latestCommitRef = latest.commit_sha ? ` (commit: ${latest.commit_sha.substring(0, 7)})` : '';
+
+  // For high rejection counts, only show last 2 rejections in full to avoid overwhelming
+  const recentRejections = rejectionHistory.length > 3
+    ? rejectionHistory.slice(-2)
+    : rejectionHistory;
+
+  const olderCount = rejectionHistory.length - recentRejections.length;
+
+  const recentLines = recentRejections.map(r => {
     const commitRef = r.commit_sha ? ` (commit: ${r.commit_sha.substring(0, 7)})` : '';
     const notes = r.notes || '(no detailed notes)';
     return `### Rejection #${r.rejection_number}${commitRef}
@@ -77,52 +88,52 @@ ${notes}
 `;
   });
 
-  // Always provide guidance, with extra emphasis after multiple rejections
-  const guidanceNote = `
-**Before implementing, you MUST:**
-1. Read ALL the rejection notes above carefully
-2. **ACTUALLY RUN the reviewer's repro commands** - they provide exact test cases
-3. Look for patterns - is the same issue being raised repeatedly?
-4. Use \`git show <commit-hash>\` to see what you tried before
-5. The reviewer provides file:line references - READ those exact lines
-6. Look for similar working patterns in the codebase
-
-**CRITICAL: The reviewer tests specific scenarios.** Before claiming "done":
-- Extract EVERY command/scenario from the rejection notes
-- Run EACH ONE and verify the expected behavior
-- If the reviewer says "\`cmd --flag\` outputs X", run it and check
-- Do NOT say "everything works" without testing their exact repros
-${rejectionHistory.length >= 3 ? `
-**⚠️ REJECTION COUNT: ${rejectionHistory.length}/15** - The reviewer keeps finding the SAME issues.
-Before submitting again:
-1. Make a checklist of EVERY issue mentioned in the latest rejection
-2. Fix each one and VERIFY with the exact command/scenario given
-3. Do NOT submit until you've tested EVERY scenario the reviewer mentioned
-` : ''}${rejectionHistory.length >= 5 ? `
-**🚨 HIGH REJECTION COUNT** - You may be misunderstanding the spec.
-Re-read the specification from scratch. The reviewer's feedback is correct.
-` : ''}`;
+  const olderSummary = olderCount > 0
+    ? `\n_${olderCount} earlier rejection(s) omitted - they raised the same issues._\n`
+    : '';
 
   return `
 ---
 
-## Rejection History
+## ⚠️ REJECTION #${rejectionHistory.length} OF 15 - FIX THESE SPECIFIC ISSUES
 
-**CRITICAL:** Review this history before implementing. Your past attempts were rejected for specific reasons.
-Use the commit hashes to examine what you tried: \`git show <hash>\`
-${guidanceNote}
-${historyLines.join('\n')}
+**YOU HAVE BEEN REJECTED ${rejectionHistory.length} TIMES FOR THE SAME ISSUES.**
+
+The reviewer has given you EXACT file:line references. You MUST:
+1. **Open each file mentioned** and go to the exact line number
+2. **Make the specific change requested** - do not improvise
+3. **Run the tests** to verify coverage meets 80%
+4. **Do NOT submit** until every issue below is addressed
+
 ---
 
-You MUST address the feedback above. This is rejection #${rejectionHistory.length} of 15.
-After 15 rejections, this task will require human intervention.
+## LATEST REJECTION${latestCommitRef}
 
-If you believe the reviewer is fundamentally wrong about the specification, you may dispute:
+**READ THIS CAREFULLY - EVERY ISSUE MUST BE FIXED:**
+
+${latest.notes || '(no notes)'}
+
+---
+${olderSummary}
+${recentLines.length > 1 ? `## Previous Rejection (for context)\n\n${recentLines[0]}` : ''}
+---
+
+## CHECKLIST BEFORE SUBMITTING
+
+Before running \`steroids tasks update ${taskId} --status review\`, verify:
+
+- [ ] Each file:line mentioned above has been edited
+- [ ] The specific type/code changes requested have been made
+- [ ] \`npm test\` passes
+- [ ] \`npm test -- --coverage\` shows >= 80% overall coverage
+- [ ] You tested the specific scenarios mentioned in the rejection
+
+**DO NOT claim "implementation complete" or "all tests pass" without addressing EVERY point above.**
+
+If you believe the reviewer is wrong, dispute with:
 \`\`\`bash
 steroids dispute create ${taskId} --reason "explanation" --type coder
 \`\`\`
-
-But only dispute if there's a genuine specification disagreement. Frivolous disputes will be deleted.
 `;
 }
 
