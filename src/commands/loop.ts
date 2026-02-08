@@ -5,6 +5,8 @@ import type { GlobalFlags } from '../cli/flags.js';
  */
 
 import { parseArgs } from 'node:util';
+import { existsSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { openDatabase } from '../database/connection.js';
 import { getTask, updateTaskStatus, approveTask, rejectTask } from '../database/queries.js';
 import {
@@ -25,6 +27,7 @@ USAGE:
   steroids loop [options]
 
 OPTIONS:
+  --project <path>    Run loop for specific project directory
   --once              Run one iteration only (don't loop)
   --dry-run           Show what would be done without doing it
   -h, --help          Show help
@@ -43,9 +46,10 @@ DESCRIPTION:
   - Within priority: by section position, then creation time
 
 EXAMPLES:
-  steroids loop                  # Run until all tasks done
-  steroids loop --once           # Run one task only
-  steroids loop --dry-run        # Preview without executing
+  steroids loop                         # Run until all tasks done
+  steroids loop --once                  # Run one task only
+  steroids loop --dry-run               # Preview without executing
+  steroids loop --project ~/code/myapp  # Run loop for specific project
 `;
 
 export async function loopCommand(args: string[], flags: GlobalFlags): Promise<void> {
@@ -55,6 +59,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
       help: { type: 'boolean', short: 'h', default: false },
       once: { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
+      project: { type: 'string' },
     },
     allowPositionals: false,
   });
@@ -62,6 +67,30 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
   if (values.help) {
     console.log(HELP);
     return;
+  }
+
+  // Handle --project flag: change directory if specified
+  if (values.project) {
+    const projectPath = resolve(values.project as string);
+    const steroidsDbPath = join(projectPath, '.steroids', 'steroids.db');
+
+    // Validate project exists and has steroids database
+    if (!existsSync(projectPath)) {
+      console.error(`Error: Directory does not exist: ${projectPath}`);
+      process.exit(1);
+    }
+
+    if (!existsSync(steroidsDbPath)) {
+      console.error(`Error: Not a steroids project: ${projectPath}`);
+      console.error(`  Missing: ${steroidsDbPath}`);
+      console.error('  Run "steroids init" in that directory first.');
+      process.exit(1);
+    }
+
+    // Change to project directory
+    process.chdir(projectPath);
+    console.log(`Switched to project: ${projectPath}`);
+    console.log('');
   }
 
   const projectPath = process.cwd();
