@@ -1,13 +1,15 @@
 # WebUI Architecture
 
-> [!CAUTION]
-> **DEVELOPMENT ON HOLD** - Do not develop this component until further notice.
+> [!NOTE]
+> **Multi-Project Support Added** - The WebUI now supports multi-project monitoring via the Global Runner Registry.
 >
-> Reason: The current design only supports single-project monitoring. Before proceeding, we need to decide whether to:
-> 1. Add multi-project support (significant architectural changes)
-> 2. Keep WebUI as a single-project deep-dive tool while Monitor handles multi-project overview
+> Key features:
+> - Project selector dropdown to switch between registered projects
+> - `/api/projects` endpoints for project management
+> - Global database (`~/.steroids/steroids.db`) access for cross-project state
+> - Per-project deep-dive while maintaining cross-project awareness
 >
-> For quick multi-project monitoring, see [Monitor](../Monitor/ARCHITECTURE.md) instead.
+> For lightweight Mac menu bar monitoring, see [Monitor](../Monitor/ARCHITECTURE.md).
 
 ---
 
@@ -149,6 +151,8 @@ TaskCard/
 
 ### Dashboard
 - `/` - Overview with key metrics (task counts, runner status, health)
+- **Project Selector** - Dropdown in header to switch between registered projects
+- `/projects` - Project management (list, add, remove, enable/disable)
 
 ### Tasks
 - `/tasks` - Task list with filters (status, section)
@@ -277,6 +281,16 @@ TaskCard/
 | GET | `/api/logs/:id` | Get log content |
 | DELETE | `/api/logs` | Purge old logs |
 
+### Projects (Multi-Project Support)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/projects` | List all registered projects |
+| POST | `/api/projects` | Register a new project |
+| DELETE | `/api/projects` | Remove a project (body: {path}) |
+| POST | `/api/projects/enable` | Enable a project (body: {path}) |
+| POST | `/api/projects/disable` | Disable a project (body: {path}) |
+| POST | `/api/projects/prune` | Remove projects with missing directories |
+
 ### System
 | Method | Path | Description |
 |--------|------|-------------|
@@ -353,11 +367,16 @@ services:
     ports:
       - "3501:3501"
     volumes:
-      - ~/.steroids:/root/.steroids
+      # Global database for cross-project state (runners, projects registry)
+      - ~/.steroids:/root/.steroids:ro
+      # Current project database (tasks, sections, audit)
       - ./.steroids:/app/.steroids
     environment:
       - NODE_ENV=production
+      - GLOBAL_DB_PATH=/root/.steroids/steroids.db
 ```
+
+> **Note:** The API reads from the global database (`~/.steroids/steroids.db`) for project registry and runner state, while project-specific data comes from the mounted `.steroids` directory.
 
 ---
 
