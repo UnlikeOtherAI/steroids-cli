@@ -1,6 +1,6 @@
 {
-  "version": "0.1.0",
-  "latestDbVersion": 1,
+  "version": "0.2.0",
+  "latestDbVersion": 2,
   "migrations": [
     {
       "id": 1,
@@ -9,6 +9,14 @@
       "description": "Initial database schema with tasks, sections, disputes, and audit tables",
       "checksum": "",
       "cliVersion": "0.1.0"
+    },
+    {
+      "id": 2,
+      "name": "002_add_commit_sha",
+      "file": "002_add_commit_sha.sql",
+      "description": "Add commit_sha column to audit table for tracking commits per status change",
+      "checksum": "",
+      "cliVersion": "0.2.3"
     }
   ]
 }

@@ -5,7 +5,7 @@
 
 import { parseArgs } from 'node:util';
 import { openDatabase } from '../database/connection.js';
-import { getTask, updateTaskStatus } from '../database/queries.js';
+import { getTask, updateTaskStatus, approveTask, rejectTask } from '../database/queries.js';
 import {
   selectNextTask,
   markTaskInProgress,
@@ -15,6 +15,7 @@ import {
 import { invokeCoder } from '../orchestrator/coder.js';
 import { invokeReviewer } from '../orchestrator/reviewer.js';
 import { pushToRemote } from '../git/push.js';
+import { getCurrentCommitSha } from '../git/status.js';
 
 const HELP = `
 steroids loop - Run the orchestrator loop
@@ -200,12 +201,19 @@ async function runReviewerPhase(
     return;
   }
 
-  // Re-read task to see what the reviewer decided
-  const updatedTask = getTask(db, task.id);
-  if (!updatedTask) return;
+  // Get current commit SHA for audit trail
+  const commitSha = getCurrentCommitSha(projectPath) ?? undefined;
 
-  if (updatedTask.status === 'completed') {
+  // Handle the decision from the reviewer output
+  // (Codex can't write to database, so we execute the decision here)
+  if (result.decision === 'approve') {
+    console.log('\n>>> Reviewer decision: APPROVE');
+    approveTask(db, task.id, 'codex', result.notes, commitSha);
+
     console.log('\n✓ Task APPROVED');
+    if (commitSha) {
+      console.log(`Commit: ${commitSha.substring(0, 7)}`);
+    }
 
     // Push to git
     console.log('Pushing to git...');
@@ -216,11 +224,31 @@ async function runReviewerPhase(
     } else {
       console.warn('Push failed. Will stack and retry on next completion.');
     }
-  } else if (updatedTask.status === 'in_progress') {
-    console.log(`\n✗ Task REJECTED (${updatedTask.rejection_count}/15)`);
-    console.log('Returning to coder for fixes.');
-  } else if (updatedTask.status === 'disputed') {
+  } else if (result.decision === 'reject') {
+    console.log('\n>>> Reviewer decision: REJECT');
+    const rejectResult = rejectTask(db, task.id, 'codex', result.notes, commitSha);
+
+    if (rejectResult.status === 'failed') {
+      console.log('\n✗ Task FAILED (exceeded 15 rejections)');
+      console.log('Human intervention required.');
+    } else {
+      console.log(`\n✗ Task REJECTED (${rejectResult.rejectionCount}/15)`);
+      if (commitSha) {
+        console.log(`Commit: ${commitSha.substring(0, 7)}`);
+      }
+      if (result.notes) {
+        console.log(`Notes: ${result.notes}`);
+      }
+      console.log('Returning to coder for fixes.');
+    }
+  } else if (result.decision === 'dispute') {
+    console.log('\n>>> Reviewer decision: DISPUTE');
+    updateTaskStatus(db, task.id, 'disputed', 'codex', result.notes, commitSha);
+
     console.log('\n! Task DISPUTED');
+    if (result.notes) {
+      console.log(`Reason: ${result.notes}`);
+    }
     console.log('Pushing current work and moving to next task.');
 
     // Push even for disputed tasks
@@ -228,11 +256,10 @@ async function runReviewerPhase(
     if (pushResult.success) {
       console.log(`Pushed disputed work (${pushResult.commitHash})`);
     }
-  } else if (updatedTask.status === 'failed') {
-    console.log('\n✗ Task FAILED (exceeded 15 rejections)');
-    console.log('Human intervention required.');
   } else {
-    console.log(`Reviewer did not take action (status: ${updatedTask.status}). Will retry.`);
+    // No clear decision parsed from output
+    console.log('\nReviewer did not provide a clear decision. Will retry.');
+    console.log('Expected APPROVE, REJECT, or DISPUTE in output.');
   }
 }
 

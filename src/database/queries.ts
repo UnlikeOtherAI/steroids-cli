@@ -234,7 +234,8 @@ export function updateTaskStatus(
   taskId: string,
   newStatus: TaskStatus,
   actor: string,
-  notes?: string
+  notes?: string,
+  commitSha?: string
 ): void {
   const task = getTask(db, taskId);
   if (!task) {
@@ -247,23 +248,25 @@ export function updateTaskStatus(
     `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`
   ).run(newStatus, taskId);
 
-  addAuditEntry(db, taskId, oldStatus, newStatus, actor, notes);
+  addAuditEntry(db, taskId, oldStatus, newStatus, actor, notes, commitSha);
 }
 
 export function approveTask(
   db: Database.Database,
   taskId: string,
   model: string,
-  notes?: string
+  notes?: string,
+  commitSha?: string
 ): void {
-  updateTaskStatus(db, taskId, 'completed', `model:${model}`, notes);
+  updateTaskStatus(db, taskId, 'completed', `model:${model}`, notes, commitSha);
 }
 
 export function rejectTask(
   db: Database.Database,
   taskId: string,
   model: string,
-  notes?: string
+  notes?: string,
+  commitSha?: string
 ): { status: 'retry' | 'failed'; rejectionCount: number } {
   const task = getTask(db, taskId);
   if (!task) {
@@ -285,7 +288,8 @@ export function rejectTask(
       task.status,
       'failed',
       `model:${model}`,
-      `Exceeded 15 rejections. Last note: ${notes ?? 'none'}`
+      `Exceeded 15 rejections. Last note: ${notes ?? 'none'}`,
+      commitSha
     );
 
     // Create system dispute
@@ -300,7 +304,7 @@ export function rejectTask(
      WHERE id = ?`
   ).run(newRejectionCount, taskId);
 
-  addAuditEntry(db, taskId, task.status, 'in_progress', `model:${model}`, notes);
+  addAuditEntry(db, taskId, task.status, 'in_progress', `model:${model}`, notes, commitSha);
 
   return { status: 'retry', rejectionCount: newRejectionCount };
 }
@@ -313,12 +317,13 @@ export function addAuditEntry(
   fromStatus: string | null,
   toStatus: string,
   actor: string,
-  notes?: string
+  notes?: string,
+  commitSha?: string
 ): void {
   db.prepare(
-    `INSERT INTO audit (task_id, from_status, to_status, actor, notes)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(taskId, fromStatus, toStatus, actor, notes ?? null);
+    `INSERT INTO audit (task_id, from_status, to_status, actor, notes, commit_sha)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(taskId, fromStatus, toStatus, actor, notes ?? null, commitSha ?? null);
 }
 
 export function getTaskAudit(

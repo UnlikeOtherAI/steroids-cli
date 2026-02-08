@@ -108,33 +108,35 @@ Answer these questions:
 
 ## Your Decision
 
-You MUST choose ONE of these actions:
+After reviewing, you MUST output ONE of these decisions:
 
 ### APPROVE (implementation is correct)
 If the code correctly implements the specification:
-\`\`\`bash
-steroids tasks approve ${task.id} --model opus
+\`\`\`
+DECISION: APPROVE
+\`\`\`
+
+### APPROVE WITH NOTE (minor issues, not blocking)
+If you have minor concerns but the implementation is acceptable:
+\`\`\`
+DECISION: APPROVE
+Notes: [your minor feedback here]
 \`\`\`
 
 ### REJECT (needs changes)
 If there are issues that must be fixed:
-\`\`\`bash
-steroids tasks reject ${task.id} --model opus --notes "specific feedback"
+\`\`\`
+DECISION: REJECT
+Notes: [specific feedback for the coder]
 \`\`\`
 Be specific in your notes. The coder will use them to fix the issues.
 This will be rejection #${task.rejection_count + 1}.
 
-### APPROVE WITH NOTE (minor issues, not blocking)
-If you have minor concerns but the implementation is acceptable:
-\`\`\`bash
-steroids tasks approve ${task.id} --model opus --notes "Minor: prefer X over Y"
-\`\`\`
-This approves the task but logs your feedback. The coder may address it later or ignore it.
-
 ### DISPUTE (fundamental disagreement)
 Only if there's a genuine specification or architecture conflict:
-\`\`\`bash
-steroids dispute create ${task.id} --reason "explanation" --type reviewer
+\`\`\`
+DECISION: DISPUTE
+Reason: [explanation of the conflict]
 \`\`\`
 Use sparingly. Most issues should be resolved via reject/fix cycle.
 
@@ -146,14 +148,12 @@ Use sparingly. Most issues should be resolved via reject/fix cycle.
 2. **NEVER modify code yourself** - only review it
 3. **Be specific in rejection notes** - vague feedback wastes cycles
 4. **Approve if it works** - don't reject for style preferences
-5. **You MUST run one of the commands above**
-
-If you do NOT run a command, the task will remain in review and you will be invoked again.
+5. **You MUST output a DECISION block** exactly as shown above
 
 ---
 
 ## Review Now
 
-Examine the diff above and make your decision.
+Examine the diff above and make your decision. End your response with a DECISION block.
 `;
 }

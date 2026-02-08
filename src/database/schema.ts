@@ -51,10 +51,12 @@ CREATE TABLE IF NOT EXISTS audit (
     to_status TEXT NOT NULL,
     actor TEXT NOT NULL,
     notes TEXT,
+    commit_sha TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_task ON audit(task_id);
+CREATE INDEX IF NOT EXISTS idx_audit_commit ON audit(commit_sha);
 
 -- Disputes
 CREATE TABLE IF NOT EXISTS disputes (

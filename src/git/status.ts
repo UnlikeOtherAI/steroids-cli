@@ -5,6 +5,36 @@
 import { execSync } from 'node:child_process';
 
 /**
+ * Get the current HEAD commit SHA
+ */
+export function getCurrentCommitSha(projectPath: string = process.cwd()): string | null {
+  try {
+    return execSync('git rev-parse HEAD', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get short (7 char) commit SHA
+ */
+export function getShortCommitSha(projectPath: string = process.cwd()): string | null {
+  try {
+    return execSync('git rev-parse --short HEAD', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get git status output
  */
 export function getGitStatus(projectPath: string = process.cwd()): string {
