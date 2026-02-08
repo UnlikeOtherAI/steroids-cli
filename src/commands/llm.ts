@@ -4,8 +4,12 @@
  */
 
 import type { GlobalFlags } from '../cli/flags.js';
+import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import { getRegisteredProjects } from '../runners/projects.js';
 import { listRunners } from '../runners/daemon.js';
+import { openDatabase } from '../database/connection.js';
+import { listTasks } from '../database/queries.js';
 
 const LLM_INSTRUCTIONS = `# STEROIDS LLM QUICK REFERENCE
 
@@ -144,6 +148,43 @@ OPTIONS:
       }
     } catch {
       console.log('Active runners: unknown');
+    }
+
+    // Global active tasks
+    console.log('');
+    console.log('Active tasks (all projects):');
+    try {
+      const projects = getRegisteredProjects(false);
+      let totalActive = 0;
+      for (const project of projects) {
+        const dbPath = `${project.path}/.steroids/steroids.db`;
+        if (!existsSync(dbPath)) continue;
+
+        try {
+          const { db, close } = openDatabase(project.path);
+          try {
+            const inProgress = listTasks(db, { status: 'in_progress' });
+            const review = listTasks(db, { status: 'review' });
+            const active = [...inProgress, ...review];
+            const projName = project.name || basename(project.path);
+
+            for (const task of active) {
+              totalActive++;
+              const status = task.status === 'in_progress' ? 'CODING' : 'REVIEW';
+              console.log(`  [${status}] ${projName}: ${task.title.slice(0,50)} (${task.id.slice(0,8)})`);
+            }
+          } finally {
+            close();
+          }
+        } catch {
+          // Skip inaccessible projects
+        }
+      }
+      if (totalActive === 0) {
+        console.log('  (none)');
+      }
+    } catch {
+      console.log('  (unknown)');
     }
 
     console.log('');
