@@ -31,6 +31,7 @@ export function generateMermaidSyntax(
 ): string {
   let mermaid = 'graph TD\n';
   const nodeIds = new Map<string, string>();
+  const taskNodes: Array<{ id: string; status: string }> = [];
 
   // Generate node IDs
   sectionsWithDeps.forEach((item, idx) => {
@@ -51,6 +52,9 @@ export function generateMermaidSyntax(
         const marker = STATUS_MARKERS[task.status as keyof typeof STATUS_MARKERS] || '[ ]';
         const rejections = task.rejection_count > 0 ? ` (${task.rejection_count})` : '';
         mermaid += `        ${taskId}["${marker} ${task.title}${rejections}"]\n`;
+
+        // Track task nodes for styling
+        taskNodes.push({ id: taskId, status: task.status });
       });
       mermaid += '    end\n';
     } else {
@@ -69,6 +73,23 @@ export function generateMermaidSyntax(
       }
     });
   });
+
+  // Add class definitions for task status colors
+  if (includeTasks && taskNodes.length > 0) {
+    mermaid += '\n';
+    mermaid += '    classDef pending fill:#9ca3af,stroke:#6b7280,color:#000\n';
+    mermaid += '    classDef in_progress fill:#3b82f6,stroke:#2563eb,color:#fff\n';
+    mermaid += '    classDef review fill:#eab308,stroke:#ca8a04,color:#000\n';
+    mermaid += '    classDef completed fill:#22c55e,stroke:#16a34a,color:#fff\n';
+    mermaid += '    classDef disputed fill:#f97316,stroke:#ea580c,color:#fff\n';
+    mermaid += '    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff\n';
+    mermaid += '\n';
+
+    // Apply classes to task nodes
+    taskNodes.forEach(({ id, status }) => {
+      mermaid += `    class ${id} ${status}\n`;
+    });
+  }
 
   return mermaid;
 }
