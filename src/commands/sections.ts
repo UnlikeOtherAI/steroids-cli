@@ -23,6 +23,7 @@ import {
   removeDependency
 } from './sections-commands.js';
 import { generateHelp } from '../cli/help.js';
+import { createOutput } from '../cli/output.js';
 
 const HELP = generateHelp({
   command: 'sections',
@@ -112,7 +113,7 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
       await removeDependency(subArgs);
       break;
     case 'graph':
-      await showGraph(subArgs);
+      await showGraph(subArgs, flags);
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
@@ -122,17 +123,19 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
 }
 
 async function listAllSections(args: string[], globalFlags?: GlobalFlags): Promise<void> {
+  const flags = globalFlags || { json: false, quiet: false, verbose: false, help: false, version: false, noColor: false, dryRun: false, noHooks: false, noWait: false };
+  const out = createOutput({ command: 'sections', subcommand: 'list', flags });
+
   const { values } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
       deps: { type: 'boolean', default: false },
     },
     allowPositionals: false,
   });
 
-  if (values.help) {
+  if (values.help || flags.help) {
     console.log(`
 steroids sections list - List all sections
 
@@ -141,7 +144,7 @@ USAGE:
 
 OPTIONS:
   --deps              Show dependencies inline
-  -j, --json          Output as JSON
+  -j, --json          Output as JSON (global flag)
   -h, --help          Show help
 `);
     return;
@@ -151,17 +154,17 @@ OPTIONS:
   try {
     const sections = listSections(db);
 
-    // Honor global --json flag or local -j/--json flag
-    const outputJson = values.json || globalFlags?.json;
-
-    if (outputJson) {
+    if (flags.json) {
       const result = sections.map((s) => ({
         ...s,
         task_count: getSectionTaskCount(db, s.id),
         pending_dependencies: getPendingDependencies(db, s.id),
         dependencies: values.deps ? getSectionDependencies(db, s.id) : undefined,
       }));
-      console.log(JSON.stringify(result, null, 2));
+      out.success({
+        sections: result,
+        total: result.length,
+      });
       return;
     }
 
@@ -211,12 +214,14 @@ OPTIONS:
   }
 }
 
-async function showGraph(args: string[]): Promise<void> {
+async function showGraph(args: string[], globalFlags?: GlobalFlags): Promise<void> {
+  const flags = globalFlags || { json: false, quiet: false, verbose: false, help: false, version: false, noColor: false, dryRun: false, noHooks: false, noWait: false };
+  const out = createOutput({ command: 'sections', subcommand: 'graph', flags });
+
   const { values } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
       mermaid: { type: 'boolean', default: false },
       output: { type: 'string' },  // png or svg
       open: { type: 'boolean', short: 'o', default: false },
@@ -227,7 +232,7 @@ async function showGraph(args: string[]): Promise<void> {
     allowPositionals: false,
   });
 
-  if (values.help) {
+  if (values.help || flags.help) {
     console.log(`
 steroids sections graph - Show dependency graph
 
@@ -323,14 +328,14 @@ EXAMPLES:
     });
 
     // Handle JSON output
-    if (values.json) {
+    if (flags.json) {
       const graph = sectionsWithDeps.map((s) => ({
         ...s.section,
         dependencies: s.dependencies,
         pending_dependencies: s.pendingDeps,
         tasks: s.tasks,
       }));
-      console.log(JSON.stringify(graph, null, 2));
+      out.success({ graph });
       return;
     }
 

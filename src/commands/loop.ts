@@ -29,6 +29,7 @@ import { pushToRemote } from '../git/push.js';
 import { getCurrentCommitSha } from '../git/status.js';
 import { hasActiveRunnerForProject } from '../runners/wakeup.js';
 import { generateHelp } from '../cli/help.js';
+import { createOutput } from '../cli/output.js';
 
 const HELP = generateHelp({
   command: 'loop',
@@ -80,6 +81,8 @@ Reviewer checks code quality and adherence to spec.`,
 });
 
 export async function loopCommand(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'loop', flags });
+
   // Check global help flag first
   if (flags.help) {
     console.log(HELP);
@@ -205,88 +208,123 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
       }
     }
 
-    console.log('');
-    console.log('╔════════════════════════════════════════════════════════════╗');
-    console.log('║                    STEROIDS ORCHESTRATOR                      ║');
-    if (focusedSectionName) {
-      const sectionLabel = `Focused: ${focusedSectionName}`;
-      const padding = Math.floor((60 - sectionLabel.length) / 2);
-      console.log(`║${' '.repeat(padding)}${sectionLabel}${' '.repeat(60 - padding - sectionLabel.length)}║`);
+    // Show initial status (skip in JSON mode)
+    if (!flags.json) {
+      console.log('');
+      console.log('╔════════════════════════════════════════════════════════════╗');
+      console.log('║                    STEROIDS ORCHESTRATOR                      ║');
+      if (focusedSectionName) {
+        const sectionLabel = `Focused: ${focusedSectionName}`;
+        const padding = Math.floor((60 - sectionLabel.length) / 2);
+        console.log(`║${' '.repeat(padding)}${sectionLabel}${' '.repeat(60 - padding - sectionLabel.length)}║`);
+      }
+      console.log('╚════════════════════════════════════════════════════════════╝');
+      console.log('');
     }
-    console.log('╚════════════════════════════════════════════════════════════╝');
-    console.log('');
-    // Show initial status
+
     const counts = getTaskCounts(db, focusedSectionId);
-    const statusLabel = focusedSectionName ? `Task Status (${focusedSectionName} only):` : 'Task Status:';
-    console.log(statusLabel);
-    console.log(`  Pending:     ${counts.pending}`);
-    console.log(`  In Progress: ${counts.in_progress}`);
-    console.log(`  Review:      ${counts.review}`);
-    console.log(`  Completed:   ${counts.completed}`);
-    console.log(`  Disputed:    ${counts.disputed}`);
-    console.log(`  Failed:      ${counts.failed}`);
-    console.log(`  ─────────────────`);
-    console.log(`  Total:       ${counts.total}`);
-    console.log('');
+    if (!flags.json) {
+      const statusLabel = focusedSectionName ? `Task Status (${focusedSectionName} only):` : 'Task Status:';
+      console.log(statusLabel);
+      console.log(`  Pending:     ${counts.pending}`);
+      console.log(`  In Progress: ${counts.in_progress}`);
+      console.log(`  Review:      ${counts.review}`);
+      console.log(`  Completed:   ${counts.completed}`);
+      console.log(`  Disputed:    ${counts.disputed}`);
+      console.log(`  Failed:      ${counts.failed}`);
+      console.log(`  ─────────────────`);
+      console.log(`  Total:       ${counts.total}`);
+      console.log('');
+    }
 
     if (flags.dryRun) {
       const next = selectNextTask(db, focusedSectionId);
-      if (next) {
-        console.log(`[DRY RUN] Would process: ${next.task.title}`);
-        console.log(`  Action: ${next.action}`);
-        console.log(`  Task ID: ${next.task.id}`);
+      if (flags.json) {
+        out.success({
+          dryRun: true,
+          nextTask: next ? {
+            id: next.task.id,
+            title: next.task.title,
+            action: next.action,
+            status: next.task.status,
+          } : null,
+          counts,
+        });
       } else {
-        console.log('[DRY RUN] No tasks to process');
+        if (next) {
+          console.log(`[DRY RUN] Would process: ${next.task.title}`);
+          console.log(`  Action: ${next.action}`);
+          console.log(`  Task ID: ${next.task.id}`);
+        } else {
+          console.log('[DRY RUN] No tasks to process');
+        }
       }
       return;
     }
 
     let iteration = 0;
+    const processedTasks: { taskId: string; title: string; action: string; status: string }[] = [];
 
     // Main loop
     while (true) {
       iteration++;
-      console.log(`\n─── Iteration ${iteration} ───\n`);
+      if (!flags.json) {
+        console.log(`\n─── Iteration ${iteration} ───\n`);
+      }
 
       // Select next task
       const selected = selectNextTask(db, focusedSectionId);
 
       if (!selected) {
-        console.log('');
-        console.log('╔════════════════════════════════════════════════════════════╗');
-        if (focusedSectionName) {
-          const completeLabel = `SECTION "${focusedSectionName}" COMPLETE`;
-          const padding = Math.floor((60 - completeLabel.length) / 2);
-          console.log(`║${' '.repeat(padding)}${completeLabel}${' '.repeat(60 - padding - completeLabel.length)}║`);
-        } else {
-          console.log('║                      ALL TASKS COMPLETE                       ║');
+        if (!flags.json) {
+          console.log('');
+          console.log('╔════════════════════════════════════════════════════════════╗');
+          if (focusedSectionName) {
+            const completeLabel = `SECTION "${focusedSectionName}" COMPLETE`;
+            const padding = Math.floor((60 - completeLabel.length) / 2);
+            console.log(`║${' '.repeat(padding)}${completeLabel}${' '.repeat(60 - padding - completeLabel.length)}║`);
+          } else {
+            console.log('║                      ALL TASKS COMPLETE                       ║');
+          }
+          console.log('╚════════════════════════════════════════════════════════════╝');
+          console.log('');
         }
-        console.log('╚════════════════════════════════════════════════════════════╝');
-        console.log('');
         break;
       }
 
       const { task, action } = selected;
 
-      console.log(`Task: ${task.title}`);
-      console.log(`Action: ${action}`);
-      console.log(`Status: ${task.status}`);
+      if (!flags.json) {
+        console.log(`Task: ${task.title}`);
+        console.log(`Action: ${action}`);
+        console.log(`Status: ${task.status}`);
+      }
+
+      // Track processed task for JSON output
+      processedTasks.push({
+        taskId: task.id,
+        title: task.title,
+        action,
+        status: task.status,
+      });
 
       if (action === 'start') {
         // Starting a new task
         markTaskInProgress(db, task.id);
-        await runCoderPhase(db, task, projectPath, 'start');
+        await runCoderPhase(db, task, projectPath, 'start', flags.json);
       } else if (action === 'resume') {
         // Resuming in-progress task
-        await runCoderPhase(db, task, projectPath, 'resume');
+        await runCoderPhase(db, task, projectPath, 'resume', flags.json);
       } else if (action === 'review') {
         // Task ready for review
-        await runReviewerPhase(db, task, projectPath);
+        await runReviewerPhase(db, task, projectPath, flags.json);
       }
 
       // Check if we should continue
       if (values.once) {
-        console.log('\n[--once] Stopping after one iteration');
+        if (!flags.json) {
+          console.log('\n[--once] Stopping after one iteration');
+        }
         break;
       }
 
@@ -296,11 +334,22 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
 
     // Final status
     const finalCounts = getTaskCounts(db, focusedSectionId);
-    const finalLabel = focusedSectionName ? `\nFinal Status (${focusedSectionName}):` : '\nFinal Status:';
-    console.log(finalLabel);
-    console.log(`  Completed: ${finalCounts.completed}`);
-    console.log(`  Failed:    ${finalCounts.failed}`);
-    console.log(`  Disputed:  ${finalCounts.disputed}`);
+
+    if (flags.json) {
+      out.success({
+        iterations: iteration,
+        processedTasks,
+        initialCounts: counts,
+        finalCounts,
+        focusedSection: focusedSectionName || null,
+      });
+    } else {
+      const finalLabel = focusedSectionName ? `\nFinal Status (${focusedSectionName}):` : '\nFinal Status:';
+      console.log(finalLabel);
+      console.log(`  Completed: ${finalCounts.completed}`);
+      console.log(`  Failed:    ${finalCounts.failed}`);
+      console.log(`  Disputed:  ${finalCounts.disputed}`);
+    }
   } finally {
     close();
   }
@@ -310,11 +359,14 @@ async function runCoderPhase(
   db: ReturnType<typeof openDatabase>['db'],
   task: ReturnType<typeof getTask>,
   projectPath: string,
-  action: 'start' | 'resume'
+  action: 'start' | 'resume',
+  jsonMode = false
 ): Promise<void> {
   if (!task) return;
 
-  console.log('\n>>> Invoking CODER...\n');
+  if (!jsonMode) {
+    console.log('\n>>> Invoking CODER...\n');
+  }
 
   const result = await invokeCoder(task, projectPath, action);
 
@@ -327,26 +379,33 @@ async function runCoderPhase(
   const updatedTask = getTask(db, task.id);
   if (!updatedTask) return;
 
-  if (updatedTask.status === 'review') {
-    console.log('\nCoder submitted for review. Ready for reviewer.');
-  } else {
-    console.log(`Task status unchanged (${updatedTask.status}). Will retry next iteration.`);
+  if (!jsonMode) {
+    if (updatedTask.status === 'review') {
+      console.log('\nCoder submitted for review. Ready for reviewer.');
+    } else {
+      console.log(`Task status unchanged (${updatedTask.status}). Will retry next iteration.`);
+    }
   }
 }
 
 async function runReviewerPhase(
   db: ReturnType<typeof openDatabase>['db'],
   task: ReturnType<typeof getTask>,
-  projectPath: string
+  projectPath: string,
+  jsonMode = false
 ): Promise<void> {
   if (!task) return;
 
-  console.log('\n>>> Invoking REVIEWER...\n');
+  if (!jsonMode) {
+    console.log('\n>>> Invoking REVIEWER...\n');
+  }
 
   const result = await invokeReviewer(task, projectPath);
 
   if (result.timedOut) {
-    console.warn('Reviewer timed out. Will retry next iteration.');
+    if (!jsonMode) {
+      console.warn('Reviewer timed out. Will retry next iteration.');
+    }
     return;
   }
 
@@ -356,57 +415,77 @@ async function runReviewerPhase(
   if (!updatedTask) return;
 
   if (updatedTask.status === 'completed') {
-    console.log('\n✓ Task APPROVED');
+    if (!jsonMode) {
+      console.log('\n✓ Task APPROVED');
+      console.log('Pushing to git...');
+    }
 
     // Push to git
-    console.log('Pushing to git...');
     const pushResult = pushToRemote(projectPath);
 
-    if (pushResult.success) {
-      console.log(`Pushed successfully (${pushResult.commitHash})`);
-    } else {
-      console.warn('Push failed. Will stack and retry on next completion.');
+    if (!jsonMode) {
+      if (pushResult.success) {
+        console.log(`Pushed successfully (${pushResult.commitHash})`);
+      } else {
+        console.warn('Push failed. Will stack and retry on next completion.');
+      }
     }
   } else if (updatedTask.status === 'in_progress') {
-    console.log(`\n✗ Task REJECTED (${updatedTask.rejection_count}/15)`);
-    console.log('Returning to coder for fixes.');
+    if (!jsonMode) {
+      console.log(`\n✗ Task REJECTED (${updatedTask.rejection_count}/15)`);
+      console.log('Returning to coder for fixes.');
+    }
   } else if (updatedTask.status === 'disputed') {
-    console.log('\n! Task DISPUTED');
-    console.log('Pushing current work and moving to next task.');
+    if (!jsonMode) {
+      console.log('\n! Task DISPUTED');
+      console.log('Pushing current work and moving to next task.');
+    }
 
     // Push even for disputed tasks
     const pushResult = pushToRemote(projectPath);
-    if (pushResult.success) {
+    if (!jsonMode && pushResult.success) {
       console.log(`Pushed disputed work (${pushResult.commitHash})`);
     }
   } else if (updatedTask.status === 'failed') {
-    console.log('\n✗ Task FAILED (exceeded 15 rejections)');
-    console.log('Human intervention required.');
+    if (!jsonMode) {
+      console.log('\n✗ Task FAILED (exceeded 15 rejections)');
+      console.log('Human intervention required.');
+    }
   } else if (updatedTask.status === 'review') {
     // Reviewer didn't run a command - check if we can parse the decision as fallback
     if (result.decision) {
-      console.log(`\nReviewer indicated ${result.decision.toUpperCase()} but command may have failed.`);
-      console.log('Attempting fallback...');
+      if (!jsonMode) {
+        console.log(`\nReviewer indicated ${result.decision.toUpperCase()} but command may have failed.`);
+        console.log('Attempting fallback...');
+      }
 
       const commitSha = getCurrentCommitSha(projectPath) ?? undefined;
 
       if (result.decision === 'approve') {
         approveTask(db, task.id, 'codex', result.notes, commitSha);
-        console.log('✓ Task APPROVED (via fallback)');
+        if (!jsonMode) {
+          console.log('✓ Task APPROVED (via fallback)');
+        }
 
         const pushResult = pushToRemote(projectPath);
-        if (pushResult.success) {
+        if (!jsonMode && pushResult.success) {
           console.log(`Pushed successfully (${pushResult.commitHash})`);
         }
       } else if (result.decision === 'reject') {
         rejectTask(db, task.id, 'codex', result.notes, commitSha);
-        console.log('✗ Task REJECTED (via fallback)');
+        if (!jsonMode) {
+          console.log('✗ Task REJECTED (via fallback)');
+        }
       } else if (result.decision === 'dispute') {
         updateTaskStatus(db, task.id, 'disputed', 'codex', result.notes, commitSha);
-        console.log('! Task DISPUTED (via fallback)');
+        if (!jsonMode) {
+          console.log('! Task DISPUTED (via fallback)');
+        }
       }
     } else {
-      console.log('\nReviewer did not take action (status unchanged). Will retry.');
+      if (!jsonMode) {
+        console.log('\nReviewer did not take action (status unchanged). Will retry.');
+      }
     }
   }
 }
