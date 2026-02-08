@@ -46,6 +46,9 @@ function getSourceFileContent(
   return content;
 }
 
+// Maximum tasks to show in section context (prevents prompt bloat)
+const MAX_SECTION_TASKS = 15;
+
 /**
  * Format section tasks for display
  */
@@ -61,13 +64,19 @@ function formatSectionTasks(currentTaskId: string, sectionTasks?: SectionTask[])
     'completed': '✅',
   };
 
-  const lines = sectionTasks
-    .filter(t => t.id !== currentTaskId)
-    .map(t => {
-      const emoji = statusEmoji[t.status] || '❓';
-      const marker = t.status === 'completed' ? ' (done)' : t.status === 'pending' ? ' (pending)' : '';
-      return `- ${emoji} ${t.title}${marker}`;
-    });
+  const otherTasks = sectionTasks.filter(t => t.id !== currentTaskId);
+  const tasksToShow = otherTasks.slice(0, MAX_SECTION_TASKS);
+  const remainingCount = otherTasks.length - tasksToShow.length;
+
+  const lines = tasksToShow.map(t => {
+    const emoji = statusEmoji[t.status] || '❓';
+    const marker = t.status === 'completed' ? ' (done)' : t.status === 'pending' ? ' (pending)' : '';
+    return `- ${emoji} ${t.title}${marker}`;
+  });
+
+  if (remainingCount > 0) {
+    lines.push(`- ... and ${remainingCount} more task${remainingCount > 1 ? 's' : ''}`);
+  }
 
   if (lines.length === 0) return '';
 
