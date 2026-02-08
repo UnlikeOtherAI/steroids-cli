@@ -39,7 +39,15 @@ export interface Section {
   id: string;
   name: string;
   position: number;
+  priority?: number;  // 0 = highest, 100 = lowest, 50 = default (added by migration 003)
   skipped?: number;  // 0 = active, 1 = skipped (added by migration 003)
+  created_at: string;
+}
+
+export interface SectionDependency {
+  id: string;
+  section_id: string;
+  depends_on_section_id: string;
   created_at: string;
 }
 
@@ -145,6 +153,42 @@ export function getSectionTaskCount(
     .prepare('SELECT COUNT(*) as count FROM tasks WHERE section_id = ?')
     .get(sectionId) as { count: number };
   return result.count;
+}
+
+/**
+ * Get dependencies for a section that have incomplete tasks
+ * Returns sections that the given section depends on and have pending/in_progress/review tasks
+ */
+export function getPendingDependencies(
+  db: Database.Database,
+  sectionId: string
+): Section[] {
+  return db
+    .prepare(
+      `SELECT DISTINCT s.*
+       FROM sections s
+       INNER JOIN section_dependencies sd ON s.id = sd.depends_on_section_id
+       WHERE sd.section_id = ?
+       AND EXISTS (
+         SELECT 1 FROM tasks t
+         WHERE t.section_id = s.id
+         AND t.status IN ('pending', 'in_progress', 'review')
+       )
+       ORDER BY s.position ASC`
+    )
+    .all(sectionId) as Section[];
+}
+
+/**
+ * Check if all dependencies for a section are met
+ * Dependencies are considered met when all tasks in dependent sections are completed
+ */
+export function hasDependenciesMet(
+  db: Database.Database,
+  sectionId: string
+): boolean {
+  const pendingDeps = getPendingDependencies(db, sectionId);
+  return pendingDeps.length === 0;
 }
 
 // ============ Task Operations ============
