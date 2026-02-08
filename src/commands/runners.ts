@@ -377,7 +377,7 @@ OPTIONS:
   }
 
   const result = wakeup({
-    quiet: values.quiet || flags.quiet,
+    quiet: values.quiet || flags.quiet || values.json || flags.json,
     dryRun: flags.dryRun,
   });
 
