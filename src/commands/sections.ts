@@ -35,11 +35,19 @@ SUBCOMMANDS:
   priority <id> <value>            Set section priority (0-100 or high/medium/low)
   depends-on <id> <depends-on-id>  Add section dependency
   no-depends-on <id> <dep-id>      Remove section dependency
-  graph                            Show dependency graph
+  graph [options]                  Show dependency graph (ASCII, Mermaid, PNG/SVG)
 
 OPTIONS:
   -h, --help        Show help
   -j, --json        Output as JSON
+
+GRAPH OPTIONS:
+  --mermaid         Output Mermaid flowchart syntax
+  --output <fmt>    Generate image file (png or svg)
+  -o, --open        Auto-open generated file
+  --tasks           Include tasks within sections
+  --status <s>      Filter tasks by status
+  --section <id>    Show only specified section
 
 EXAMPLES:
   steroids sections add "Phase 1: Foundation"
@@ -48,6 +56,9 @@ EXAMPLES:
   steroids sections priority abc123 25
   steroids sections depends-on abc123 def456
   steroids sections graph
+  steroids sections graph --mermaid
+  steroids sections graph --output png -o
+  steroids sections graph --tasks --status active
 `;
 
 export async function sectionsCommand(args: string[], flags: GlobalFlags): Promise<void> {
