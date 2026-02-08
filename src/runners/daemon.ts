@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { openGlobalDatabase } from './global-db.js';
 import { acquireLock, releaseLock, checkLockStatus } from './lock.js';
 import { createHeartbeatManager } from './heartbeat.js';
+import { hasActiveRunnerForProject } from './wakeup.js';
 
 export type RunnerStatus = 'idle' | 'running' | 'stopping';
 
@@ -112,6 +113,15 @@ export function getRunner(runnerId: string): Runner | null {
  * This is the main entry point for background task processing
  */
 export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
+  // Check if there's already an active runner for this specific project
+  if (options.projectPath && hasActiveRunnerForProject(options.projectPath)) {
+    console.error(
+      `A runner is already active for project: ${options.projectPath}`
+    );
+    console.error('Only one runner per project is allowed.');
+    process.exit(6); // Resource locked exit code
+  }
+
   // Try to acquire lock
   const lockResult = acquireLock();
 
@@ -182,13 +192,21 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
 }
 
 /**
- * Check if daemon can be started (no existing lock)
+ * Check if daemon can be started (no existing lock or project-specific runner)
  */
-export function canStartDaemon(): {
+export function canStartDaemon(projectPath?: string): {
   canStart: boolean;
   reason?: string;
   existingPid?: number;
 } {
+  // Check for project-specific runner first
+  if (projectPath && hasActiveRunnerForProject(projectPath)) {
+    return {
+      canStart: false,
+      reason: `A runner is already active for project: ${projectPath}`,
+    };
+  }
+
   const status = checkLockStatus();
 
   if (status.locked) {

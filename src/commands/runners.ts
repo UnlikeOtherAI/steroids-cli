@@ -126,7 +126,8 @@ OPTIONS:
   }
 
   // Check if we can start
-  const check = canStartDaemon();
+  const projectPath = values.project as string | undefined;
+  const check = canStartDaemon(projectPath);
   if (!check.canStart && !check.reason?.includes('zombie')) {
     if (values.json) {
       console.log(
@@ -147,9 +148,14 @@ OPTIONS:
 
   if (values.detach) {
     // Spawn detached process
+    const spawnArgs = [process.argv[1], 'runners', 'start'];
+    if (projectPath) {
+      spawnArgs.push('--project', projectPath);
+    }
+
     const child = spawn(
       process.execPath,
-      [process.argv[1], 'runners', 'start', '--project', values.project ?? process.cwd()],
+      spawnArgs,
       {
         detached: true,
         stdio: 'ignore',
@@ -166,7 +172,7 @@ OPTIONS:
   }
 
   // Start in foreground
-  await startDaemon({ projectPath: values.project });
+  await startDaemon({ projectPath });
 }
 
 async function runStop(args: string[]): Promise<void> {

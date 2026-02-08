@@ -19,6 +19,7 @@ import { invokeCoder } from '../orchestrator/coder.js';
 import { invokeReviewer } from '../orchestrator/reviewer.js';
 import { pushToRemote } from '../git/push.js';
 import { getCurrentCommitSha } from '../git/status.js';
+import { hasActiveRunnerForProject } from '../runners/wakeup.js';
 
 const HELP = `
 steroids loop - Run the orchestrator loop
@@ -111,6 +112,16 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
   }
 
   const projectPath = process.cwd();
+
+  // Check if a runner is already active for this project
+  if (hasActiveRunnerForProject(projectPath)) {
+    console.error('Error: A runner is already active for this project');
+    console.error('  Project: ' + projectPath);
+    console.error('');
+    console.error('Only one runner per project is allowed.');
+    console.error('Use "steroids runners list" to see active runners.');
+    process.exit(1);
+  }
 
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');

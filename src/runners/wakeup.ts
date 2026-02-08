@@ -56,8 +56,9 @@ function projectHasPendingWork(projectPath: string): boolean {
 
 /**
  * Check if there's an active runner for a specific project
+ * Exported for use in daemon startup checks
  */
-function hasActiveRunnerForProject(projectPath: string): boolean {
+export function hasActiveRunnerForProject(projectPath: string): boolean {
   const { db, close } = openGlobalDatabase();
   try {
     const row = db
