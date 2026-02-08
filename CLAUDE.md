@@ -10,6 +10,26 @@
 
 Do NOT accumulate changes across multiple turns. Small, frequent commits are better than large batches.
 
+### Release Versioning
+
+Follow semantic versioning strictly:
+
+- **Patch release (0.1.x)** - After each completed task
+  ```bash
+  npm version patch
+  git push --tags
+  ```
+
+- **Minor release (0.x.0)** - After each completed section
+  ```bash
+  npm version minor
+  git push --tags
+  ```
+
+- **Major release (x.0.0)** - Breaking changes or major milestones only
+
+This ensures every task completion is a deployable artifact and sections mark feature milestones.
+
 ---
 
 ## Scope
