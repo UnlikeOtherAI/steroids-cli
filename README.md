@@ -160,14 +160,26 @@ webui:
 
 ### Environment Variables
 
-```bash
-# Server configuration
-PORT=3000
-HOST=localhost
-NODE_ENV=development
+Steroids CLI supports environment variables for configuration. See [Environment Variables Documentation](./Docs/ENVIRONMENT_VARIABLES.md) for complete details.
 
-# Optional
-LOG_LEVEL=info                  # debug | info | warn | error
+```bash
+# Output control
+STEROIDS_JSON=1                 # Output as JSON
+STEROIDS_QUIET=1                # Minimal output
+STEROIDS_VERBOSE=1              # Detailed output
+STEROIDS_NO_COLOR=1             # Disable colors
+NO_COLOR=1                      # Standard no-color flag
+
+# Configuration
+STEROIDS_CONFIG=/path/to/config.yaml
+STEROIDS_TIMEOUT=30s            # Command timeout
+
+# Behavior
+STEROIDS_NO_HOOKS=1             # Skip hook execution
+STEROIDS_AUTO_MIGRATE=1         # Auto-apply migrations
+
+# Automatically detected
+CI=1                            # CI environment (set by CI systems)
 ```
 
 ---
@@ -234,6 +246,7 @@ Steroids follows clean architecture principles with clear separation between:
 
 - [CLAUDE.md](./CLAUDE.md) - Global coding standards
 - [CLI Architecture](./CLI/ARCHITECTURE.md) - Command-line architecture
+- [Environment Variables](./Docs/ENVIRONMENT_VARIABLES.md) - Environment variable reference
 - [Pump](./Pump/README.md) - Data gathering CLI
 - [Iron](./Iron/README.md) - Documentation scaffolding CLI
 - [WebUI Architecture](./WebUI/ARCHITECTURE.md) - Dashboard architecture
