@@ -120,3 +120,57 @@ steroids sections graph --output png -o   # Generate AND open the file
 - Linux: `/tmp/`
 - Windows: `%TEMP%`
 - Filename: `steroids-sections-graph-{timestamp}.{png|svg}`
+
+---
+
+## Task Graph Visualization
+
+The graph command should also support showing tasks within sections.
+
+### Section-only view (default)
+```bash
+steroids sections graph
+# Shows only sections and their dependencies
+```
+
+### Full view with tasks
+```bash
+steroids sections graph --tasks
+steroids sections graph --tasks --output png -o
+```
+
+**Output includes:**
+- Sections as containers/subgraphs
+- Tasks within each section
+- Task status indicated by color/style:
+  - `[ ]` pending - gray
+  - `[-]` in_progress - blue  
+  - `[o]` review - yellow
+  - `[x]` completed - green
+  - `[!]` disputed - orange
+  - `[F]` failed - red
+- Dependencies between sections shown as arrows
+- Rejection count shown for tasks with rejections
+
+### Mermaid with tasks
+```mermaid
+graph TD
+    subgraph A[Phase 0.4: Global Runner Registry]
+        A1[✓ Add projects table]
+        A2[✓ Create projects.ts]
+        A3[● Add selector dropdown]
+        A4[ ] Update docker-compose
+    end
+    subgraph B[Phase 0.7: Section Focus]
+        B1[ ] Add --section flag
+        B2[ ] Update queries
+    end
+    A --> B
+```
+
+### Filter options
+```bash
+steroids sections graph --tasks --status active    # Only show in_progress/review
+steroids sections graph --tasks --status pending   # Only show pending
+steroids sections graph --section <id>             # Only show one section
+```
