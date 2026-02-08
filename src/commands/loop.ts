@@ -139,53 +139,62 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
 
   const { db, close } = openDatabase();
 
-  // Resolve section if --section flag is provided
+  // Declare these outside the try block so they're available throughout the function
   let focusedSectionId: string | undefined;
   let focusedSectionName: string | undefined;
 
-  if (values.section) {
-    const sectionInput = values.section as string;
-
-    // Try to resolve by ID (exact or prefix match)
-    let section = getSection(db, sectionInput);
-
-    // If not found by ID, try by name
-    if (!section) {
-      section = getSectionByName(db, sectionInput);
-    }
-
-    if (!section) {
-      console.error(`Error: Section not found: ${sectionInput}`);
-      console.error('');
-      console.error('Available sections:');
-      const sections = listSections(db);
-      if (sections.length === 0) {
-        console.error('  (no sections defined)');
-      } else {
-        for (const s of sections) {
-          console.error(`  ${s.id.substring(0, 8)}  ${s.name}`);
-        }
-      }
-      close();
-      process.exit(1);
-    }
-
-    focusedSectionId = section.id;
-    focusedSectionName = section.name;
-  }
-
-  console.log('');
-  console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║                    STEROIDS ORCHESTRATOR                      ║');
-  if (focusedSectionName) {
-    const sectionLabel = `Focused: ${focusedSectionName}`;
-    const padding = Math.floor((60 - sectionLabel.length) / 2);
-    console.log(`║${' '.repeat(padding)}${sectionLabel}${' '.repeat(60 - padding - sectionLabel.length)}║`);
-  }
-  console.log('╚════════════════════════════════════════════════════════════╝');
-  console.log('');
-
   try {
+    // Resolve section if --section flag is provided
+    if (values.section) {
+      const sectionInput = values.section as string;
+
+      try {
+        // Try to resolve by ID (exact or prefix match)
+        let section = getSection(db, sectionInput);
+
+        // If not found by ID, try by name
+        if (!section) {
+          section = getSectionByName(db, sectionInput);
+        }
+
+        if (!section) {
+          console.error(`Error: Section not found: ${sectionInput}`);
+          console.error('');
+          console.error('Available sections:');
+          const sections = listSections(db);
+          if (sections.length === 0) {
+            console.error('  (no sections defined)');
+          } else {
+            for (const s of sections) {
+              console.error(`  ${s.id.substring(0, 8)}  ${s.name}`);
+            }
+          }
+          process.exit(1);
+        }
+
+        focusedSectionId = section.id;
+        focusedSectionName = section.name;
+      } catch (error) {
+        // Handle ambiguous prefix error from getSection()
+        if (error instanceof Error) {
+          console.error(`Error: ${error.message}`);
+        } else {
+          console.error('Error: Failed to resolve section');
+        }
+        process.exit(1);
+      }
+    }
+
+    console.log('');
+    console.log('╔════════════════════════════════════════════════════════════╗');
+    console.log('║                    STEROIDS ORCHESTRATOR                      ║');
+    if (focusedSectionName) {
+      const sectionLabel = `Focused: ${focusedSectionName}`;
+      const padding = Math.floor((60 - sectionLabel.length) / 2);
+      console.log(`║${' '.repeat(padding)}${sectionLabel}${' '.repeat(60 - padding - sectionLabel.length)}║`);
+    }
+    console.log('╚════════════════════════════════════════════════════════════╝');
+    console.log('');
     // Show initial status
     const counts = getTaskCounts(db, focusedSectionId);
     const statusLabel = focusedSectionName ? `Task Status (${focusedSectionName} only):` : 'Task Status:';
