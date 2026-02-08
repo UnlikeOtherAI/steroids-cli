@@ -72,12 +72,17 @@ EXAMPLES:
   steroids runners start --section "Phase 2" # Focus on specific section
   steroids runners stop                     # Stop current runner
   steroids runners status                   # Show status
+  steroids runners list                     # List all runners (all projects)
   steroids runners list --json              # List all runners as JSON
   steroids runners logs                     # List available daemon logs
   steroids runners logs 12345               # View logs for PID 12345
   steroids runners logs --follow            # Follow latest log
   steroids runners wakeup --dry-run         # Check what would happen
   steroids runners cron install             # Install cron wake-up
+
+MULTI-PROJECT:
+  Different projects can run runners in parallel (one runner per project).
+  The 'list' command shows runners from ALL registered projects.
 `;
 
 export async function runnersCommand(args: string[], flags: GlobalFlags): Promise<void> {

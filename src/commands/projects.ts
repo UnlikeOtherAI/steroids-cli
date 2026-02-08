@@ -49,6 +49,10 @@ EXAMPLES:
   steroids projects disable ~/code/on-hold
   steroids projects enable ~/code/on-hold
   steroids projects prune
+
+NOTE:
+  When multiple projects are registered, a warning is displayed reminding
+  LLM agents to only work on their own project and not modify other projects.
 `;
 
 export async function projectsCommand(args: string[], flags: GlobalFlags): Promise<void> {
