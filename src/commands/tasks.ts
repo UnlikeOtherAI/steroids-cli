@@ -47,8 +47,10 @@ SUBCOMMANDS:
 LIST OPTIONS:
   -s, --status      Filter by status (default: pending)
                     Values: pending, in_progress, review, completed,
-                            disputed, failed, active, all
+                            disputed, failed, skipped, partial, active, all
                     'active' = in_progress + review (tasks being worked on)
+                    'skipped' = external setup, needs human action
+                    'partial' = some coded, rest needs human action
   -g, --global      List tasks across ALL registered projects
   --section <id>    Filter by section ID (local project only)
   --search          Search in task titles
@@ -85,10 +87,12 @@ STATUS MARKERS:
 EXAMPLES:
   steroids tasks
   steroids tasks --status all
+  steroids tasks --status skipped             # See what needs manual action
   steroids tasks add "Implement login" --section abc123 --source docs/spec.md
   steroids tasks update "Implement login" --status review
   steroids tasks approve abc123 --model claude-sonnet-4
   steroids tasks reject abc123 --model codex --notes "Missing tests"
+  steroids tasks skip abc123 --notes "Cloud SQL - spec says SKIP"
 `;
 
 export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<void> {
