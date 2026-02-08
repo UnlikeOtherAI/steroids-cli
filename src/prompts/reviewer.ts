@@ -7,12 +7,19 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
 
+export interface SectionTask {
+  id: string;
+  title: string;
+  status: string;
+}
+
 export interface ReviewerPromptContext {
   task: Task;
   projectPath: string;
   reviewerModel: string;
   gitDiff: string;
   modifiedFiles: string[];
+  sectionTasks?: SectionTask[];  // Other tasks in the same section
 }
 
 /**
@@ -40,10 +47,49 @@ function getSourceFileContent(
 }
 
 /**
+ * Format section tasks for display
+ */
+function formatSectionTasks(currentTaskId: string, sectionTasks?: SectionTask[]): string {
+  if (!sectionTasks || sectionTasks.length <= 1) {
+    return '';
+  }
+
+  const statusEmoji: Record<string, string> = {
+    'pending': '⏳',
+    'in_progress': '🔄',
+    'review': '👀',
+    'completed': '✅',
+  };
+
+  const lines = sectionTasks
+    .filter(t => t.id !== currentTaskId)
+    .map(t => {
+      const emoji = statusEmoji[t.status] || '❓';
+      const marker = t.status === 'completed' ? ' (done)' : t.status === 'pending' ? ' (pending)' : '';
+      return `- ${emoji} ${t.title}${marker}`;
+    });
+
+  if (lines.length === 0) return '';
+
+  return `
+---
+
+## Other Tasks in This Section
+
+**IMPORTANT:** The task you are reviewing is ONE of several tasks implementing this feature.
+Do NOT reject this task for issues that are explicitly listed as separate tasks below.
+Focus ONLY on whether THIS task's scope is correctly implemented.
+
+${lines.join('\n')}
+
+`;
+}
+
+/**
  * Generate the reviewer prompt
  */
 export function generateReviewerPrompt(context: ReviewerPromptContext): string {
-  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles } = context;
+  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks } = context;
 
   const sourceContent = getSourceFileContent(projectPath, task.source_file);
 
@@ -70,8 +116,7 @@ You are a REVIEWER in an automated task execution system. Your job is to verify 
 **Status:** review (submitted by coder)
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-
----
+${formatSectionTasks(task.id, sectionTasks)}---
 
 ## Original Specification
 

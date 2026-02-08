@@ -8,9 +8,12 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
+import { listTasks } from '../database/queries.js';
+import { openDatabase } from '../database/connection.js';
 import {
   generateReviewerPrompt,
   type ReviewerPromptContext,
+  type SectionTask,
 } from '../prompts/reviewer.js';
 import {
   getGitDiff,
@@ -181,12 +184,30 @@ export async function invokeReviewer(
     modifiedFiles = getModifiedFiles(projectPath);
   }
 
+  // Fetch other tasks in the same section for context
+  let sectionTasks: SectionTask[] = [];
+  if (task.section_id) {
+    try {
+      const { db, close } = openDatabase(projectPath);
+      const allSectionTasks = listTasks(db, { sectionId: task.section_id });
+      sectionTasks = allSectionTasks.map(t => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+      }));
+      close();
+    } catch (error) {
+      console.warn('Could not fetch section tasks:', error);
+    }
+  }
+
   const context: ReviewerPromptContext = {
     task,
     projectPath,
     reviewerModel: REVIEWER_MODEL,
     gitDiff,
     modifiedFiles,
+    sectionTasks,
   };
 
   const prompt = generateReviewerPrompt(context);
