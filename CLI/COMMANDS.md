@@ -520,6 +520,100 @@ Use cases:
 
 ---
 
+## `steroids loop`
+
+Run the orchestrator loop (coder/reviewer cycle).
+
+```
+Usage: steroids loop [options]
+
+Options:
+  --section <id|name>   Focus on a specific section only
+  --max-iterations <n>  Maximum iterations before stopping
+  --dry-run             Preview what would run without executing
+  -v, --verbose         Detailed output
+  -j, --json            Output as JSON
+  -h, --help            Show help
+
+Examples:
+  steroids loop                              # Run until all tasks complete
+  steroids loop --section "Phase 2"          # Focus on specific section
+  steroids loop --section fd1f               # Focus by section ID prefix
+  steroids loop --max-iterations 5           # Run at most 5 iterations
+  steroids loop --dry-run                    # Preview without executing
+```
+
+### Section Focus Behavior
+
+When `--section` is specified:
+- Only tasks from that section are selected
+- Task counts reflect only that section
+- Loop exits when that section is complete
+- Skipped sections cannot be focused (error)
+
+---
+
+## `steroids runners`
+
+Manage runner daemons for background task execution.
+
+```
+Usage: steroids runners <subcommand> [options]
+
+Subcommands:
+  start                 Start a runner daemon
+  stop                  Stop runner(s)
+  status                Show runner status
+  list                  List all runners
+  wakeup                Check and restart stale runners
+  cron                  Manage cron job for auto-wakeup
+
+Start Options:
+  --detach              Run in background (daemonize)
+  --project <path>      Project path to work on
+  --section <id|name>   Focus on a specific section only
+
+Stop Options:
+  --id <id>             Stop specific runner by ID
+  --all                 Stop all runners
+
+Wakeup Options:
+  --quiet               Suppress output (for cron)
+  --dry-run             Check without acting
+
+Cron Subcommands:
+  cron install          Install cron job (every minute)
+  cron uninstall        Remove cron job
+  cron status           Check cron status
+
+Examples:
+  steroids runners start                           # Start in foreground
+  steroids runners start --detach                  # Start in background
+  steroids runners start --section "Phase 2"       # Focus on section
+  steroids runners stop                            # Stop current runner
+  steroids runners stop --all                      # Stop all runners
+  steroids runners list                            # List all runners
+  steroids runners wakeup --dry-run                # Check stale runners
+  steroids runners cron install                    # Install auto-wakeup
+```
+
+### Multiple Focused Runners
+
+You can run multiple runners focused on different sections:
+
+```bash
+# Terminal 1: Work on backend
+steroids runners start --section "Phase 2: Backend" --detach
+
+# Terminal 2: Work on frontend
+steroids runners start --section "Phase 3: Frontend" --detach
+
+# Check status
+steroids runners list
+```
+
+---
+
 ## `steroids ui`
 
 Launch and manage the WebUI Docker container.
