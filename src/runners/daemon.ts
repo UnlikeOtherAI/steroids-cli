@@ -236,6 +236,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
     await runOrchestratorLoop({
       projectPath: effectiveProjectPath,
       sectionId: options.sectionId,
+      runnerId,  // Pass runner ID for activity logging
       shouldStop: () => shutdownRequested,
       onIteration: (iteration) => {
         // Update heartbeat on each iteration

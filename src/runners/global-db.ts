@@ -80,7 +80,26 @@ const GLOBAL_SCHEMA_V4_SQL = `
 ALTER TABLE runners ADD COLUMN section_id TEXT;
 `;
 
-const GLOBAL_SCHEMA_VERSION = '4';
+/**
+ * Schema upgrade from version 4 to version 5: Add activity_log table
+ */
+const GLOBAL_SCHEMA_V5_SQL = `
+-- Activity log for tracking task completions across all projects
+CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_path TEXT NOT NULL,
+    runner_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    task_title TEXT NOT NULL,
+    section_name TEXT,
+    final_status TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON activity_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_activity_log_project ON activity_log(project_path);
+`;
+
+const GLOBAL_SCHEMA_VERSION = '5';
 
 /**
  * Get the path to the global steroids directory
@@ -137,6 +156,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V2_SQL);
     db.exec(GLOBAL_SCHEMA_V3_SQL);
     db.exec(GLOBAL_SCHEMA_V4_SQL);
+    db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
       'version',
       GLOBAL_SCHEMA_VERSION
@@ -146,25 +166,35 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
       new Date().toISOString()
     );
   } else if (currentVersion === '1') {
-    // Upgrade from version 1 to version 2, 3, and 4
+    // Upgrade from version 1 to latest
     db.exec(GLOBAL_SCHEMA_V2_SQL);
     db.exec(GLOBAL_SCHEMA_V3_SQL);
     db.exec(GLOBAL_SCHEMA_V4_SQL);
+    db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
     );
   } else if (currentVersion === '2') {
-    // Upgrade from version 2 to version 3 and 4
+    // Upgrade from version 2 to latest
     db.exec(GLOBAL_SCHEMA_V3_SQL);
     db.exec(GLOBAL_SCHEMA_V4_SQL);
+    db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
     );
   } else if (currentVersion === '3') {
-    // Upgrade from version 3 to version 4
+    // Upgrade from version 3 to latest
     db.exec(GLOBAL_SCHEMA_V4_SQL);
+    db.exec(GLOBAL_SCHEMA_V5_SQL);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '4') {
+    // Upgrade from version 4 to version 5
+    db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'

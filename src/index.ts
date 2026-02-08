@@ -28,6 +28,7 @@ import { gitCommand } from './commands/git.js';
 import { aboutCommand } from './commands/about.js';
 import { projectsCommand } from './commands/projects.js';
 import { llmCommand } from './commands/llm.js';
+import { statsCommand } from './commands/stats.js';
 
 // Read version from package.json - search up from dist folder
 function getVersion(): string {
@@ -62,6 +63,7 @@ COMMANDS:
   init              Initialize steroids in current directory
   sections          Manage task sections
   tasks             Manage tasks
+  stats             Global activity statistics
   projects          Manage global project registry
   dispute           Manage coder/reviewer disputes
   loop              Run the orchestrator loop
@@ -200,6 +202,9 @@ async function main(): Promise<void> {
         break;
       case 'projects':
         await projectsCommand(commandArgs, flags);
+        break;
+      case 'stats':
+        await statsCommand(commandArgs, flags);
         break;
       case 'llm':
         await llmCommand(commandArgs, flags);

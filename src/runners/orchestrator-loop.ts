@@ -4,7 +4,7 @@
  */
 
 import { openDatabase } from '../database/connection.js';
-import { getTask } from '../database/queries.js';
+import { getTask, getSection } from '../database/queries.js';
 import {
   selectNextTask,
   markTaskInProgress,
@@ -12,6 +12,7 @@ import {
 } from '../orchestrator/task-selector.js';
 import { invokeCoder } from '../orchestrator/coder.js';
 import { invokeReviewer } from '../orchestrator/reviewer.js';
+import { logActivity } from './activity-log.js';
 import { execSync } from 'node:child_process';
 
 function sleep(ms: number): Promise<void> {
@@ -22,6 +23,7 @@ export interface LoopOptions {
   projectPath: string;
   once?: boolean;
   sectionId?: string;  // Focus on this section only
+  runnerId?: string;   // For activity logging
   onIteration?: (iteration: number) => void;
   onTaskStart?: (taskId: string, action: string) => void;
   onTaskComplete?: (taskId: string) => void;
@@ -77,7 +79,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       } else if (action === 'resume') {
         await runCoderPhase(db, task, projectPath, 'resume');
       } else if (action === 'review') {
-        await runReviewerPhase(db, task, projectPath);
+        await runReviewerPhase(db, task, projectPath, options.runnerId);
       }
 
       options.onTaskComplete?.(task.id);
@@ -130,7 +132,8 @@ async function runCoderPhase(
 async function runReviewerPhase(
   db: ReturnType<typeof openDatabase>['db'],
   task: NonNullable<ReturnType<typeof getTask>>,
-  projectPath: string
+  projectPath: string,
+  runnerId?: string
 ): Promise<void> {
   console.log('\n>>> Invoking REVIEWER...\n');
 
@@ -143,6 +146,10 @@ async function runReviewerPhase(
 
   const updatedTask = getTask(db, task.id);
   if (!updatedTask) return;
+
+  // Get section name for activity logging
+  const section = task.section_id ? getSection(db, task.section_id) : null;
+  const sectionName = section?.name ?? null;
 
   if (result.decision === 'approve') {
     console.log('\n✓ Task APPROVED');
@@ -158,17 +165,54 @@ async function runReviewerPhase(
     } catch (error) {
       console.warn('Failed to push:', error);
     }
+
+    // Log activity for completed task
+    if (runnerId) {
+      logActivity(
+        projectPath,
+        runnerId,
+        task.id,
+        task.title,
+        sectionName,
+        'completed'
+      );
+    }
   } else if (result.decision === 'reject') {
     console.log('\n✗ Task REJECTED');
     console.log(`Rejection count: ${updatedTask.rejection_count}/15`);
     if (result.notes) {
       console.log(`Notes: ${result.notes}`);
     }
-    console.log('Returning to coder for fixes.');
+
+    // Check if task failed (exceeded 15 rejections)
+    if (updatedTask.status === 'failed' && runnerId) {
+      logActivity(
+        projectPath,
+        runnerId,
+        task.id,
+        task.title,
+        sectionName,
+        'failed'
+      );
+    } else {
+      console.log('Returning to coder for fixes.');
+    }
   } else if (result.decision === 'dispute') {
     console.log('\n! Task DISPUTED');
     if (result.notes) {
       console.log(`Reason: ${result.notes}`);
+    }
+
+    // Log activity for disputed task
+    if (runnerId) {
+      logActivity(
+        projectPath,
+        runnerId,
+        task.id,
+        task.title,
+        sectionName,
+        'disputed'
+      );
     }
   } else {
     console.log(`\nReviewer completed without clear decision. Status: ${updatedTask.status}`);

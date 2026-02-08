@@ -5,9 +5,10 @@ import type { GlobalFlags } from '../cli/flags.js';
 
 import { parseArgs } from 'node:util';
 import { existsSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { openDatabase } from '../database/connection.js';
 import { getRegisteredProjects } from '../runners/projects.js';
+import { logActivity } from '../runners/activity-log.js';
 import {
   createTask,
   listTasks,
@@ -794,10 +795,26 @@ EXAMPLES:
       ? `model:${values.model}`
       : 'human:cli';
 
+    // Get section name before updating
+    const section = task.section_id ? getSection(db, task.section_id) : null;
+    const sectionName = section?.name ?? null;
+    const taskTitle = task.title;
+
     updateTaskStatus(db, task.id, newStatus as TaskStatus, actor, values.notes as string | undefined);
 
     // Refresh task to get updated status
     task = getTask(db, task.id)!;
+
+    // Log activity for skipped/partial task
+    const projectPath = resolve(process.cwd());
+    logActivity(
+      projectPath,
+      'cli',  // CLI operations use 'cli' as runner ID
+      task.id,
+      taskTitle,
+      sectionName,
+      values.partial ? 'partial' : 'skipped'
+    );
 
     if (values.json) {
       console.log(JSON.stringify({ task, skipped: true, partial: values.partial }, null, 2));
