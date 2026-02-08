@@ -214,6 +214,60 @@ export function setSectionPriority(
 }
 
 /**
+ * Check if adding a dependency would create a circular dependency
+ * Returns true if circular dependency would be created
+ */
+export function wouldCreateCircularDependency(
+  db: Database.Database,
+  sectionId: string,
+  dependsOnSectionId: string
+): boolean {
+  // Self-dependency is always circular
+  if (sectionId === dependsOnSectionId) {
+    return true;
+  }
+
+  // Build dependency graph
+  const visited = new Set<string>();
+  const recursionStack = new Set<string>();
+
+  function hasCycle(currentId: string): boolean {
+    if (recursionStack.has(currentId)) {
+      return true; // Found a cycle
+    }
+    if (visited.has(currentId)) {
+      return false; // Already checked this path
+    }
+
+    visited.add(currentId);
+    recursionStack.add(currentId);
+
+    // Get all sections that currentId depends on
+    const deps = db
+      .prepare(
+        `SELECT depends_on_section_id FROM section_dependencies WHERE section_id = ?`
+      )
+      .all(currentId) as Array<{ depends_on_section_id: string }>;
+
+    // Add the proposed new dependency for simulation
+    if (currentId === sectionId) {
+      deps.push({ depends_on_section_id: dependsOnSectionId });
+    }
+
+    for (const dep of deps) {
+      if (hasCycle(dep.depends_on_section_id)) {
+        return true;
+      }
+    }
+
+    recursionStack.delete(currentId);
+    return false;
+  }
+
+  return hasCycle(sectionId);
+}
+
+/**
  * Add a dependency between sections
  * Makes sectionId depend on dependsOnSectionId
  */
@@ -222,6 +276,11 @@ export function addSectionDependency(
   sectionId: string,
   dependsOnSectionId: string
 ): SectionDependency {
+  // Check for circular dependencies
+  if (wouldCreateCircularDependency(db, sectionId, dependsOnSectionId)) {
+    throw new Error('Cannot add dependency: would create a circular dependency');
+  }
+
   const id = uuidv4();
 
   try {
