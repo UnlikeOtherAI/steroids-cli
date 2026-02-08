@@ -91,24 +91,113 @@ SQLite concurrent write access.
 | **Retry with backoff** | Retry on SQLITE_BUSY | Latency spikes |
 | **Separate databases** | Per-runner state files | Coordination complexity |
 
-### 5. Build/Test Conflicts (MODERATE)
+### 5. Build/Test Conflicts (HIGH)
 
-Shared build artifacts and test state.
+Shared build artifacts, compilation state, and test resources.
 
-**Risk Level:** Moderate - Tests may see partial state.
+**Risk Level:** HIGH - Can cause false failures, corrupt builds, or inconsistent state.
 
 **Scenarios:**
-- Runner A runs tests while Runner B is mid-build
-- Shared `node_modules` or build cache
-- Test database state
+
+| Scenario | What Happens | Impact |
+|----------|--------------|--------|
+| **Partial build artifacts** | Runner A compiles half the files, Runner B runs tests | Tests fail on incomplete build |
+| **Shared node_modules** | Both runners run `npm install` simultaneously | Corrupted dependencies, missing packages |
+| **Lock file conflicts** | Both modify `package-lock.json` or `yarn.lock` | Merge conflicts, inconsistent deps |
+| **TypeScript incremental** | `.tsbuildinfo` written by both runners | Corrupt incremental state, phantom errors |
+| **Build cache collision** | Shared `dist/`, `.next/`, `build/` directories | Overwritten files, stale artifacts |
+| **Test database** | Both runners seed/migrate test DB | Data corruption, flaky tests |
+| **Port conflicts** | Both start dev servers on same port | One fails to bind |
+| **Shared temp files** | Both write to `/tmp/myapp-*` | Overwritten state |
+
+**Detailed Example - The Half-Build Problem:**
+
+```
+Timeline:
+  T0: Runner A starts building API (npm run build)
+  T1: Runner A compiles src/index.ts -> dist/index.js
+  T2: Runner B finishes its task, runs tests (npm test)
+  T3: Tests import dist/utils.js - NOT YET COMPILED
+  T4: Tests FAIL - "Cannot find module dist/utils.js"
+  T5: Runner A finishes build - but B already reported failure
+```
+
+This causes:
+- False negatives (tests fail when code is fine)
+- Wasted coder cycles fixing non-bugs
+- Flaky CI that erodes trust
 
 **Mitigation Strategies:**
 
 | Strategy | Description | Tradeoff |
 |----------|-------------|----------|
-| **Isolated workdirs** | Git worktrees per runner | Disk space |
-| **Build locks** | Serialize build/test phases | Slower |
-| **Container isolation** | Each runner in own container | Resource heavy |
+| **Isolated workdirs** | Git worktrees per runner, separate `node_modules` | Disk space (2-10GB per runner) |
+| **Build locks** | Global lock during build/test phases | Serializes work, reduces parallelism |
+| **Container isolation** | Each runner in Docker with own filesystem | Resource heavy, slower startup |
+| **Monorepo tooling** | Use Nx/Turborepo with proper caching | Requires tooling adoption |
+| **Output namespacing** | `dist-runner-1/`, `dist-runner-2/` | Config complexity |
+| **Atomic build-test** | Lock held from build start through test end | Long lock duration |
+
+**Recommended Approach for Monorepos:**
+
+Use **component-level isolation** where each monorepo package has independent build:
+
+```
+my-monorepo/
+├── packages/
+│   ├── api/
+│   │   ├── node_modules/    <- Independent
+│   │   ├── dist/            <- Independent
+│   │   └── package.json
+│   ├── mobile/
+│   │   ├── node_modules/    <- Independent
+│   │   ├── build/           <- Independent
+│   │   └── package.json
+│   └── shared/
+│       ├── node_modules/    <- Shared, needs locking
+│       └── dist/            <- Shared, needs locking
+```
+
+**Rules:**
+1. Runner in `api` zone only builds/tests `packages/api`
+2. Runner in `mobile` zone only builds/tests `packages/mobile`
+3. Changes to `shared` require exclusive lock (all runners pause)
+4. Each package manages its own `node_modules` (npm workspaces or independent)
+
+**Build Lock Protocol:**
+
+```typescript
+async function safeBuildAndTest(runner: Runner, task: Task): Promise<void> {
+  // 1. Acquire build lock for affected packages
+  const packages = getAffectedPackages(task);
+  const locks = await acquireBuildLocks(packages);
+
+  try {
+    // 2. Install dependencies (if needed)
+    await npmInstall(packages);
+
+    // 3. Build
+    await build(packages);
+
+    // 4. Test
+    await test(packages);
+
+  } finally {
+    // 5. Release locks
+    await releaseBuildLocks(locks);
+  }
+}
+```
+
+**Database Isolation for Tests:**
+
+```yaml
+# Config per runner
+test:
+  database:
+    strategy: isolated  # Options: isolated, shared, none
+    prefix: runner-${RUNNER_ID}  # Creates test_runner_abc123 DB
+```
 
 ## Proposed Architecture
 
