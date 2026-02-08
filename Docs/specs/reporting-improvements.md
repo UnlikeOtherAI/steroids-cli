@@ -21,7 +21,9 @@ Currently, monitoring Steroids requires:
 
 ### 1. `steroids status`
 
-Quick non-interactive status check.
+Quick non-interactive status check **for the current project**.
+
+> **Note:** This differs from `steroids runners status` which shows runners across ALL registered projects. `steroids status` is project-scoped and provides task-level detail.
 
 ```bash
 # Human-readable summary
@@ -40,13 +42,22 @@ steroids status --json
 ```
 
 **Implementation:**
-- Reads from `.steroids/steroids.db` and `~/.steroids/steroids.db`
+- Reads from `.steroids/steroids.db` (project database)
+- References `~/.steroids/steroids.db` for runner state
 - No side effects, purely informational
 - Exit code 0 if healthy, non-zero if issues detected
+
+**Comparison:**
+| Command | Scope | Shows |
+|---------|-------|-------|
+| `steroids status` | Current project | Tasks, sections, current activity |
+| `steroids runners status` | All projects | Runner PIDs, heartbeats, lock state |
 
 ### 2. `steroids logs tail`
 
 Real-time log following with filtering.
+
+> **Note:** Basic `steroids logs tail` exists. Enhancements add filtering and structured output. Related tasks in Phase 11 (Watch Command).
 
 ```bash
 # Follow all logs
