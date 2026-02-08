@@ -542,6 +542,18 @@ OPTIONS:
     const alive = runner.pid && isProcessAlive(runner.pid) ? '' : ' (dead)';
     console.log(`${shortId}  ${status}  ${pid}  ${project}    ${section}    ${heartbeat}${alive}`);
   }
+
+  // Check if there are multiple projects
+  const uniqueProjects = new Set(runners.map(r => r.project_path).filter(Boolean));
+  if (uniqueProjects.size > 1) {
+    const currentProject = process.cwd();
+    console.log('');
+    console.log('─'.repeat(120));
+    console.log(`⚠️  MULTI-PROJECT WARNING: ${uniqueProjects.size} different projects have runners.`);
+    console.log(`   Your current project: ${currentProject}`);
+    console.log('   DO NOT modify files in other projects. Each runner works only on its own project.');
+    console.log('─'.repeat(120));
+  }
 }
 
 async function runLogs(args: string[]): Promise<void> {

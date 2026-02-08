@@ -170,6 +170,18 @@ async function listProjects(
   }
 
   out.log(colors.dim(`Total: ${projects.length} project(s)`));
+
+  // Multi-project warning for LLMs
+  if (projects.length > 1) {
+    const currentProject = process.cwd();
+    out.log('');
+    out.log(colors.yellow('─'.repeat(70)));
+    out.log(colors.yellow('⚠️  MULTI-PROJECT ENVIRONMENT'));
+    out.log(colors.yellow(`   Your current project: ${currentProject}`));
+    out.log(colors.yellow('   DO NOT modify files in other projects.'));
+    out.log(colors.yellow('   Each runner/coder works ONLY on its own project.'));
+    out.log(colors.yellow('─'.repeat(70)));
+  }
 }
 
 async function addProject(
