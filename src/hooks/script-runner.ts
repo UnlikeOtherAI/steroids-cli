@@ -21,8 +21,8 @@ export interface ScriptHookConfig {
   args?: string[];
   /** Working directory (defaults to project path) */
   cwd?: string;
-  /** Timeout in seconds (default 60) */
-  timeout?: number;
+  /** Timeout (e.g., "60s", "5m", "1h" or number in seconds) */
+  timeout?: string | number;
   /** Run async without blocking (default false) */
   async?: boolean;
 }
@@ -150,7 +150,7 @@ function spawnAsync(
     cwd,
     detached: true,
     stdio: 'ignore',
-    shell: true,
+    shell: false,
   });
 
   // Detach from parent process
@@ -177,14 +177,12 @@ function spawnSync(
     let stderr = '';
     let timedOut = false;
     let hasResolved = false;
+    let killTimer: NodeJS.Timeout | null = null;
 
-    // Build the full command with args
-    const fullCommand = args.length > 0 ? `${command} ${args.join(' ')}` : command;
-
-    const child = spawn(fullCommand, [], {
+    // Spawn with args as separate argv entries to preserve args-with-spaces
+    const child = spawn(command, args, {
       cwd,
-      shell: true,
-      timeout: timeoutMs,
+      shell: false,
     });
 
     // Capture stdout
@@ -204,32 +202,40 @@ function spawnSync(
       child.kill('SIGTERM');
 
       // Force kill after 5 seconds if still running
-      setTimeout(() => {
+      killTimer = setTimeout(() => {
         if (!child.killed) {
           child.kill('SIGKILL');
         }
       }, 5000);
+      killTimer.unref(); // Don't keep event loop alive
     }, timeoutMs);
+    timeoutHandle.unref(); // Don't keep event loop alive
 
     // Handle process exit
     child.on('close', (code, signal) => {
       if (hasResolved) return;
       hasResolved = true;
       clearTimeout(timeoutHandle);
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
 
-      resolve({
+      const result: ScriptResult = {
         success: !timedOut && code === 0,
         exitCode: code,
         stdout: stdout.trim(),
         stderr: stderr.trim(),
         duration: Date.now() - startTime,
-        timedOut,
-        error: timedOut
-          ? `Script execution timed out after ${timeoutMs}ms`
-          : signal
-            ? `Process killed by signal: ${signal}`
-            : undefined,
-      });
+      };
+
+      if (timedOut) {
+        result.timedOut = true;
+        result.error = `Script execution timed out after ${timeoutMs}ms`;
+      } else if (signal) {
+        result.error = `Process killed by signal: ${signal}`;
+      }
+
+      resolve(result);
     });
 
     // Handle spawn errors
@@ -237,6 +243,9 @@ function spawnSync(
       if (hasResolved) return;
       hasResolved = true;
       clearTimeout(timeoutHandle);
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
 
       resolve({
         success: false,

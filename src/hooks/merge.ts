@@ -167,7 +167,7 @@ export function toScriptRunnerConfig(hook: ScriptHookYaml): ScriptHookConfig {
     command: hook.command,
     args: hook.args,
     cwd: hook.cwd,
-    timeout: hook.timeout as number | undefined,
+    timeout: hook.timeout,
     async: hook.async,
   };
 }
