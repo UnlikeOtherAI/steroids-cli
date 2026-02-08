@@ -92,38 +92,6 @@ steroids loop --once
 
 **Always document the root cause when found and create a fix.**
 
-### Docker Image Releases (WebUI/API)
-
-**Release a new Docker image version with every WebUI or API change.**
-
-After making changes to `/WebUI` or `/API`:
-
-```bash
-# Build and tag with version
-docker build -t unlikeotherai/steroids-web:$(npm pkg get version | tr -d '"') ./WebUI
-docker build -t unlikeotherai/steroids-api:$(npm pkg get version | tr -d '"') ./API
-
-# Also tag as latest
-docker tag unlikeotherai/steroids-web:$(npm pkg get version | tr -d '"') unlikeotherai/steroids-web:latest
-docker tag unlikeotherai/steroids-api:$(npm pkg get version | tr -d '"') unlikeotherai/steroids-api:latest
-
-# Push all tags
-docker push unlikeotherai/steroids-web:$(npm pkg get version | tr -d '"')
-docker push unlikeotherai/steroids-web:latest
-docker push unlikeotherai/steroids-api:$(npm pkg get version | tr -d '"')
-docker push unlikeotherai/steroids-api:latest
-```
-
-Or use the Makefile:
-```bash
-make build push
-```
-
-**Docker Hub:**
-- Organization: `unlikeotherai` (primary)
-- Fallback: `rafiki270`
-- Ports: 3500 (web), 3501 (api)
-
 ---
 
 ## Scope

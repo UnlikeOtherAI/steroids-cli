@@ -151,79 +151,31 @@ dist/
 
 ---
 
-## Docker Deployment
+## Local Development
 
-### Dockerfile
+### Running WebUI and API
 
-```dockerfile
-# Dockerfile
-FROM node:20-alpine AS builder
-
-WORKDIR /app
-RUN corepack enable pnpm
-
-# Install dependencies
-COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
-COPY WebUI/packages/api/package.json WebUI/packages/api/
-COPY WebUI/packages/web/package.json WebUI/packages/web/
-COPY shared/package.json shared/
-RUN pnpm install --frozen-lockfile
-
-# Build
-COPY . .
-RUN pnpm build
-
-# Production image
-FROM node:20-alpine AS runner
-
-WORKDIR /app
-RUN corepack enable pnpm
-
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/pnpm-lock.yaml ./
-COPY --from=builder /app/WebUI/packages/api/dist ./api/
-COPY --from=builder /app/WebUI/packages/web/dist ./web/
-
-# Install production dependencies only
-RUN pnpm install --prod --frozen-lockfile
-
-EXPOSE 3000
-CMD ["node", "api/main.js"]
-```
-
-### Docker Compose
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-
-services:
-  app:
-    build: .
-    environment:
-      NODE_ENV: production
-      PORT: 3000
-    ports:
-      - "3000:3000"
-    volumes:
-      - steroids_data:/app/.steroids
-
-volumes:
-  steroids_data:
-```
-
-### Running with Docker
+From the project root:
 
 ```bash
-# Build and start
-docker-compose up -d
+# Using Makefile
+make launch
 
-# View logs
-docker-compose logs -f app
-
-# Stop
-docker-compose down
+# Or manually
+cd API && npm start &
+cd WebUI && npm run dev &
 ```
+
+### Stopping Services
+
+```bash
+make stop-ui
+```
+
+### Access Points
+
+- **WebUI**: http://localhost:3500
+- **API**: http://localhost:3501
 
 ---
 

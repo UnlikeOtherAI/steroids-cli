@@ -32,7 +32,6 @@ The Steroids WebUI is a developer dashboard built with React and Vite (CSR), wit
 | State | React Context + TanStack Query | Local + server state |
 | Backend | Fastify | REST API server |
 | Real-time | WebSocket | Live updates |
-| Container | Docker | Deployment |
 | Package Manager | pnpm | Monorepo support |
 
 ---
@@ -54,7 +53,6 @@ The Steroids WebUI is a developer dashboard built with React and Vite (CSR), wit
 │   ├── types/                   # TypeScript types
 │   └── main.tsx                 # Entry point
 ├── public/
-├── Dockerfile
 ├── vite.config.ts
 └── package.json
 
@@ -74,11 +72,9 @@ The Steroids WebUI is a developer dashboard built with React and Vite (CSR), wit
 │   ├── middleware/              # Auth, logging, CORS
 │   ├── websocket/               # Real-time events
 │   └── main.ts                  # Entry point
-├── Dockerfile
 └── package.json
 
-/docker-compose.yml              # Orchestrates web + api
-/Makefile                        # Development commands
+/Makefile                        # Development commands (make launch)
 ```
 
 ---
@@ -336,147 +332,32 @@ TaskCard/
 
 ---
 
-## Docker Configuration
+## Local Development
 
 ### Ports
-- **3500** - Web UI (React frontend)
+- **3500** - Web UI (React/Vite dev server)
 - **3501** - API (Fastify backend)
 
-### Docker Hub
-- **Organization**: `unlikeotherai` (primary)
-- **Fallback**: `rafiki270` (if org unavailable)
-- **Images**:
-  - `unlikeotherai/steroids-web:latest`
-  - `unlikeotherai/steroids-api:latest`
+### Running Locally
 
-### docker-compose.yml
-
-```yaml
-version: '3.8'
-services:
-  api:
-    image: unlikeotherai/steroids-api:latest
-    container_name: steroids-api
-    ports:
-      - "3501:3501"
-    volumes:
-      # Global database for cross-project state (runners, projects registry)
-      - ~/.steroids:/root/.steroids:ro
-      # Current project database (tasks, sections, audit)
-      - ./.steroids:/app/.steroids
-    environment:
-      - PORT=3501
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3501/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-      interval: 30s
-      timeout: 3s
-      start_period: 5s
-      retries: 3
-
-  web:
-    image: unlikeotherai/steroids-web:latest
-    container_name: steroids-web
-    ports:
-      - "3500:3500"
-    environment:
-      - VITE_API_URL=http://localhost:3501
-    restart: unless-stopped
-    depends_on:
-      - api
-```
-
-> **Note:** The API reads from the global database (`~/.steroids/steroids.db`) for project registry and runner state, while project-specific data comes from the mounted `.steroids` directory.
-
----
-
-## Makefile
-
-```makefile
-.PHONY: help launch build push
-
-# Default target - show help
-help:
-	@echo "Steroids WebUI Development"
-	@echo ""
-	@echo "Usage:"
-	@echo "  make launch    - Launch web and API in development mode"
-	@echo "  make build     - Build Docker images"
-	@echo "  make push      - Push images to Docker Hub"
-	@echo "  make clean     - Clean build artifacts"
-	@echo ""
-
-# Launch development environment
-launch:
-	@echo "Starting Steroids WebUI..."
-	docker-compose up --build
-
-# Build production images
-build:
-	docker build -t unlikeotherai/steroids-web:latest ./WebUI
-	docker build -t unlikeotherai/steroids-api:latest ./API
-
-# Push to Docker Hub
-push: build
-	docker push unlikeotherai/steroids-web:latest
-	docker push unlikeotherai/steroids-api:latest
-
-# Clean up
-clean:
-	docker-compose down -v
-	rm -rf WebUI/dist API/dist
-```
-
----
-
-## CLI Integration
-
-### `steroids ui launch`
-
-Launches the WebUI in a Docker container.
+From the project root:
 
 ```bash
-steroids ui launch [options]
+# Using Makefile
+make launch
 
-Options:
-  --detach              Run in background
-  --port <port>         Web UI port (default: 3500)
-  --api-port <port>     API port (default: 3501)
-  --no-pull             Skip pulling latest image
-  -h, --help            Show help
-
-Examples:
-  steroids ui launch                    # Launch with latest image
-  steroids ui launch --detach           # Run in background
-  steroids ui launch --port 8080        # Custom port
+# Or manually
+cd API && npm start &
+cd WebUI && npm run dev &
 ```
 
-**Behavior:**
-1. Check for latest image: `docker pull unlikeotherai/steroids-web:latest`
-2. Start containers via docker-compose
-3. Open browser to `http://localhost:3500`
-4. Stream logs (unless `--detach`)
-
-### `steroids ui stop`
-
-Stops the WebUI containers.
+### Stopping
 
 ```bash
-steroids ui stop
+make stop-ui
 ```
 
-### `steroids ui status`
-
-Shows WebUI container status.
-
-```bash
-steroids ui status
-
-Output:
-  Web UI: Running (http://localhost:3500)
-  API:    Running (http://localhost:3501)
-  Uptime: 2h 15m
-```
+> **Note:** The API reads from the global database (`~/.steroids/steroids.db`) for project registry and runner state. Running locally gives full filesystem access to all registered projects.
 
 ---
 

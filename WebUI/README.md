@@ -42,12 +42,17 @@ VITE_API_URL=http://localhost:3501
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 
-## Docker
+## Running Locally
 
 ```bash
-# Build image
-docker build -t unlikeotherai/steroids-web:latest .
+# Install dependencies
+npm install
 
-# Run container
-docker run -p 3500:3500 unlikeotherai/steroids-web:latest
+# Development mode
+npm run dev
+
+# Or from project root
+make launch
 ```
+
+Access at http://localhost:3500

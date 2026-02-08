@@ -221,22 +221,21 @@ HTTP status codes:
 - Projects must contain `.steroids/steroids.db` to be registered
 - All paths are resolved to canonical form (symlinks resolved)
 
-## Docker Deployment
-
-Build and run with Docker:
+## Running Locally
 
 ```bash
-# Build image
-docker build -t unlikeotherai/steroids-api:0.2.5 .
-docker tag unlikeotherai/steroids-api:0.2.5 unlikeotherai/steroids-api:latest
+# From the API directory
+npm install
+npm run build
+npm start
 
-# Run container
-docker run -p 3501:3501 \
-  -v ~/.steroids:/root/.steroids:ro \
-  unlikeotherai/steroids-api:latest
+# API available at http://localhost:3501
 ```
 
-Note: The global database at `~/.steroids/steroids.db` must be mounted for the API to function.
+Or use the Makefile from the project root:
+```bash
+make launch
+```
 
 ## Architecture
 

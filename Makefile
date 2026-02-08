@@ -1,6 +1,6 @@
 # Steroids CLI Makefile
 
-.PHONY: build install clean test lint help restart
+.PHONY: build install clean test lint help restart launch stop-ui
 
 # Default target
 help:
@@ -13,9 +13,9 @@ help:
 	@echo "  make test      - Run tests"
 	@echo "  make lint      - Run linter"
 	@echo ""
-	@echo "Docker targets (WebUI/API):"
-	@echo "  make docker    - Build Docker images"
-	@echo "  make push      - Push Docker images"
+	@echo "WebUI/API targets:"
+	@echo "  make launch    - Start WebUI and API locally"
+	@echo "  make stop-ui   - Stop WebUI and API"
 
 # Build CLI and link globally
 build:
@@ -45,17 +45,24 @@ test:
 lint:
 	npm run lint
 
-# Docker targets for WebUI/API
-VERSION := $(shell npm pkg get version | tr -d '"')
+# Launch WebUI and API locally
+launch:
+	@echo "Starting Steroids API..."
+	@cd API && npm start &
+	@sleep 2
+	@echo "Starting Steroids WebUI..."
+	@cd WebUI && npm run dev &
+	@sleep 2
+	@echo ""
+	@echo "Steroids Dashboard running:"
+	@echo "  WebUI: http://localhost:3500"
+	@echo "  API:   http://localhost:3501"
+	@echo ""
+	@echo "Use 'make stop-ui' to stop"
 
-docker:
-	docker build -t unlikeotherai/steroids-web:$(VERSION) ./WebUI
-	docker build -t unlikeotherai/steroids-api:$(VERSION) ./API
-	docker tag unlikeotherai/steroids-web:$(VERSION) unlikeotherai/steroids-web:latest
-	docker tag unlikeotherai/steroids-api:$(VERSION) unlikeotherai/steroids-api:latest
-
-push:
-	docker push unlikeotherai/steroids-web:$(VERSION)
-	docker push unlikeotherai/steroids-web:latest
-	docker push unlikeotherai/steroids-api:$(VERSION)
-	docker push unlikeotherai/steroids-api:latest
+# Stop WebUI and API
+stop-ui:
+	@echo "Stopping Steroids UI services..."
+	-@pkill -f "steroids-api" 2>/dev/null || true
+	-@pkill -f "vite.*WebUI" 2>/dev/null || true
+	@echo "Stopped"
