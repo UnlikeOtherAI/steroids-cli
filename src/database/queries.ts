@@ -106,10 +106,22 @@ export function getSection(
     .get(id) as Section | null;
 
   // If not found, try prefix match (for short IDs)
-  if (!section && id.length >= 6) {
-    section = db
+  if (!section && id.length >= 4) {
+    const matches = db
       .prepare('SELECT * FROM sections WHERE id LIKE ?')
-      .get(`${id}%`) as Section | null;
+      .all(`${id}%`) as Section[];
+
+    if (matches.length === 1) {
+      section = matches[0];
+    } else if (matches.length > 1) {
+      // Ambiguous prefix - throw error with suggestions
+      const matchingIds = matches.map(s => `${s.id.substring(0, 8)} (${s.name})`).join(', ');
+      throw new Error(
+        `Ambiguous section prefix "${id}". Matches: ${matchingIds}. ` +
+        `Please provide a longer prefix or use the full section name.`
+      );
+    }
+    // If 0 matches, section remains null and will be handled by caller
   }
 
   return section;
