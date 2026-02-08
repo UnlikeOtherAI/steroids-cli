@@ -109,3 +109,24 @@ export {
   updateDisputeFile,
   generateSingleDisputeMarkdown,
 } from './markdown.js';
+
+// Dispute behavior and loop integration
+export type {
+  DisputeBehaviorConfig,
+  LoopBlockResult,
+  DisputeBehavior,
+  DisputeCreatedActions,
+  DisputedTaskHandling,
+} from './behavior.js';
+
+export {
+  DEFAULT_DISPUTE_BEHAVIOR,
+  checkLoopBlocked,
+  getDisputeBehavior,
+  getActionsOnDisputeCreated,
+  getDisputeLoopSummary,
+  canLoopProceed,
+  getDisputedTaskHandling,
+  TERMINAL_STATUSES,
+  isTerminalStatus,
+} from './behavior.js';
