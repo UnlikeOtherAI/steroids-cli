@@ -30,6 +30,34 @@ Follow semantic versioning strictly:
 
 This ensures every task completion is a deployable artifact and sections mark feature milestones.
 
+### Use Compiled CLI, Not Node (CRITICAL)
+
+**NEVER run `node dist/index.js` directly.** Always use the installed `steroids` command.
+
+```bash
+# BAD - Don't do this
+node dist/index.js tasks list
+node dist/index.js loop
+
+# GOOD - Use the compiled CLI
+steroids tasks list
+steroids loop
+```
+
+**Why?**
+- Tests the actual user experience
+- Uses the properly linked binary
+- Ensures PATH and permissions work correctly
+- Catches installation/linking issues
+
+**When you need to update the CLI:**
+1. Stop any running processes: `steroids runners stop --all`
+2. Rebuild: `npm run build`
+3. Relink: `npm link`
+4. Restart: `steroids runners start --detach`
+
+The Makefile does steps 2-3: `make build`
+
 ### Docker Image Releases (WebUI/API)
 
 **Release a new Docker image version with every WebUI or API change.**

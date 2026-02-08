@@ -1,12 +1,13 @@
 # Steroids CLI Makefile
 
-.PHONY: build install clean test lint help
+.PHONY: build install clean test lint help restart
 
 # Default target
 help:
 	@echo "Steroids CLI Development Commands"
 	@echo ""
 	@echo "  make build     - Build CLI and link globally"
+	@echo "  make restart   - Stop runners, rebuild, restart runner"
 	@echo "  make install   - Install dependencies"
 	@echo "  make clean     - Remove build artifacts"
 	@echo "  make test      - Run tests"
@@ -20,6 +21,13 @@ help:
 build:
 	npm run build
 	npm link
+
+# Stop runners, rebuild, and restart
+restart:
+	-steroids runners stop --all
+	npm run build
+	npm link
+	steroids runners start --detach
 
 # Install dependencies
 install:
