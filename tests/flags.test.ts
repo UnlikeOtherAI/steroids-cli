@@ -19,6 +19,7 @@ describe('parseGlobalFlags', () => {
     delete process.env.STEROIDS_QUIET;
     delete process.env.STEROIDS_VERBOSE;
     delete process.env.STEROIDS_NO_HOOKS;
+    delete process.env.STEROIDS_NO_WAIT;
     delete process.env.STEROIDS_NO_COLOR;
     delete process.env.NO_COLOR;
     delete process.env.STEROIDS_CONFIG;
@@ -96,6 +97,11 @@ describe('parseGlobalFlags', () => {
     it('should parse --no-hooks flag', () => {
       const result = parseGlobalFlags(['--no-hooks']);
       expect(result.flags.noHooks).toBe(true);
+    });
+
+    it('should parse --no-wait flag', () => {
+      const result = parseGlobalFlags(['--no-wait']);
+      expect(result.flags.noWait).toBe(true);
     });
   });
 
@@ -208,6 +214,12 @@ describe('parseGlobalFlags', () => {
       expect(result.flags.timeout).toBe(120000);
     });
 
+    it('should read STEROIDS_NO_WAIT env var', () => {
+      process.env.STEROIDS_NO_WAIT = '1';
+      const result = parseGlobalFlags([]);
+      expect(result.flags.noWait).toBe(true);
+    });
+
     it('should override env var with CLI flag', () => {
       process.env.STEROIDS_JSON = '1';
       // The flag wins - but since it's also true, test with a value flag
@@ -258,5 +270,6 @@ describe('getDefaultFlags', () => {
     expect(defaults.dryRun).toBe(false);
     expect(defaults.timeout).toBeUndefined();
     expect(defaults.noHooks).toBe(false);
+    expect(defaults.noWait).toBe(false);
   });
 });

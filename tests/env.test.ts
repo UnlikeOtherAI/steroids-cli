@@ -348,6 +348,7 @@ describe('Environment Variable Support', () => {
       expect(ENV_VARS).toHaveProperty('STEROIDS_QUIET');
       expect(ENV_VARS).toHaveProperty('STEROIDS_VERBOSE');
       expect(ENV_VARS).toHaveProperty('STEROIDS_NO_HOOKS');
+      expect(ENV_VARS).toHaveProperty('STEROIDS_NO_WAIT');
       expect(ENV_VARS).toHaveProperty('STEROIDS_NO_COLOR');
       expect(ENV_VARS).toHaveProperty('STEROIDS_AUTO_MIGRATE');
       expect(ENV_VARS).toHaveProperty('STEROIDS_TIMEOUT');
@@ -358,6 +359,7 @@ describe('Environment Variable Support', () => {
     it('should have correct values', () => {
       expect(ENV_VARS.STEROIDS_CONFIG).toBe('STEROIDS_CONFIG');
       expect(ENV_VARS.STEROIDS_JSON).toBe('STEROIDS_JSON');
+      expect(ENV_VARS.STEROIDS_NO_WAIT).toBe('STEROIDS_NO_WAIT');
       expect(ENV_VARS.NO_COLOR).toBe('NO_COLOR');
     });
   });

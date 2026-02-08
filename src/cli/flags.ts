@@ -32,6 +32,8 @@ export interface GlobalFlags {
   timeout?: number;
   /** Skip hook execution (--no-hooks) */
   noHooks: boolean;
+  /** Don't wait for locks to be released (--no-wait) */
+  noWait: boolean;
 }
 
 /**
@@ -59,6 +61,7 @@ export function getDefaultFlags(): GlobalFlags {
     dryRun: false,
     timeout: undefined,
     noHooks: false,
+    noWait: false,
   };
 }
 
@@ -115,6 +118,9 @@ export function loadEnvFlags(): Partial<GlobalFlags> {
   }
   if (isTruthy(process.env.STEROIDS_NO_HOOKS)) {
     env.noHooks = true;
+  }
+  if (isTruthy(process.env.STEROIDS_NO_WAIT)) {
+    env.noWait = true;
   }
   if (isTruthy(process.env.STEROIDS_NO_COLOR) || process.env.NO_COLOR !== undefined) {
     env.noColor = true;
@@ -219,6 +225,11 @@ export function parseGlobalFlags(args: string[]): ParsedArgs {
 
       case '--no-hooks':
         flags.noHooks = true;
+        i++;
+        break;
+
+      case '--no-wait':
+        flags.noWait = true;
         i++;
         break;
 

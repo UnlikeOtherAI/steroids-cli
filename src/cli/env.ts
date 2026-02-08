@@ -36,6 +36,9 @@ export const ENV_VARS = {
   /** Command timeout duration (maps to --timeout) */
   STEROIDS_TIMEOUT: 'STEROIDS_TIMEOUT',
 
+  /** Don't wait for locks (maps to --no-wait) */
+  STEROIDS_NO_WAIT: 'STEROIDS_NO_WAIT',
+
   /** Standard NO_COLOR env var (also maps to --no-color) */
   NO_COLOR: 'NO_COLOR',
 
@@ -215,6 +218,11 @@ export const ENV_VAR_DOCS = {
     description: 'Command timeout duration',
     values: 'Duration (e.g., 30s, 5m, 1h)',
     mapsTo: '--timeout',
+  },
+  [ENV_VARS.STEROIDS_NO_WAIT]: {
+    description: "Don't wait for locks to be released",
+    values: '1, true',
+    mapsTo: '--no-wait',
   },
   [ENV_VARS.NO_COLOR]: {
     description: 'Standard no-color.org variable',
