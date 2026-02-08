@@ -230,8 +230,11 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 
 | Command | Description |
 |---------|-------------|
-| `steroids config show` | Display current configuration |
+| `steroids config show [key]` | Display configuration (supports nested paths like `quality.tests`) |
+| `steroids config set <key> <value>` | Set configuration value (supports nested paths) |
 | `steroids config init` | Initialize config with defaults |
+| `steroids config validate` | Validate configuration syntax |
+| `steroids config edit` | Open config in $EDITOR |
 
 ---
 
@@ -263,8 +266,12 @@ The daemon:
 Steroids includes a web dashboard for visual monitoring:
 
 ```bash
-# Using Docker Compose
-docker-compose up -d
+# From the steroids-cli directory
+make launch
+
+# Or start components individually
+cd API && npm start &
+cd WebUI && npm run dev &
 
 # Access at
 # Web UI: http://localhost:3500
