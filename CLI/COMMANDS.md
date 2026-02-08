@@ -5,6 +5,33 @@
 
 ---
 
+## `steroids about`
+
+**Start here if you're an LLM discovering this tool.**
+
+Explains what Steroids is and how it works in detail suitable for AI agents.
+
+```
+Usage: steroids about [options]
+
+Options:
+  -j, --json    Output as structured JSON for LLM parsing
+  -h, --help    Show help
+
+Examples:
+  steroids about              # Human-readable explanation
+  steroids about --json       # Structured JSON for parsing
+```
+
+The about command covers:
+- What Steroids is (AI task orchestration)
+- The coder/reviewer loop concept
+- Task lifecycle (pending → in_progress → review → completed)
+- Key commands for working with tasks
+- Important rules for implementation
+
+---
+
 ## Design Philosophy
 
 **Every command supports full non-interactive operation via explicit flags.**

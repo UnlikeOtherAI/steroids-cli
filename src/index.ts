@@ -23,6 +23,7 @@ import { locksCommand } from './commands/locks.js';
 import { disputeCommand } from './commands/disputes.js';
 import { purgeCommand } from './commands/purge.js';
 import { gitCommand } from './commands/git.js';
+import { aboutCommand } from './commands/about.js';
 
 // Read version from package.json - search up from dist folder
 function getVersion(): string {
@@ -51,6 +52,8 @@ USAGE:
   steroids <command> [options]
 
 COMMANDS:
+  about             Explain what Steroids is (for LLMs discovering this tool)
+
   init              Initialize steroids in current directory
   sections          Manage task sections
   tasks             Manage tasks
@@ -102,6 +105,9 @@ async function main(): Promise<void> {
 
   try {
     switch (command) {
+      case 'about':
+        await aboutCommand(commandArgs);
+        break;
       case 'init':
         await initCommand(commandArgs);
         break;

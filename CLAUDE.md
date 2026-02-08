@@ -30,6 +30,38 @@ Follow semantic versioning strictly:
 
 This ensures every task completion is a deployable artifact and sections mark feature milestones.
 
+### Docker Image Releases (WebUI/API)
+
+**Release a new Docker image version with every WebUI or API change.**
+
+After making changes to `/WebUI` or `/API`:
+
+```bash
+# Build and tag with version
+docker build -t unlikeotherai/steroids-web:$(npm pkg get version | tr -d '"') ./WebUI
+docker build -t unlikeotherai/steroids-api:$(npm pkg get version | tr -d '"') ./API
+
+# Also tag as latest
+docker tag unlikeotherai/steroids-web:$(npm pkg get version | tr -d '"') unlikeotherai/steroids-web:latest
+docker tag unlikeotherai/steroids-api:$(npm pkg get version | tr -d '"') unlikeotherai/steroids-api:latest
+
+# Push all tags
+docker push unlikeotherai/steroids-web:$(npm pkg get version | tr -d '"')
+docker push unlikeotherai/steroids-web:latest
+docker push unlikeotherai/steroids-api:$(npm pkg get version | tr -d '"')
+docker push unlikeotherai/steroids-api:latest
+```
+
+Or use the Makefile:
+```bash
+make build push
+```
+
+**Docker Hub:**
+- Organization: `unlikeotherai` (primary)
+- Fallback: `rafiki270`
+- Ports: 3500 (web), 3501 (api)
+
 ---
 
 ## Scope
@@ -58,6 +90,30 @@ All CLIs are independent and can be used standalone.
 ---
 
 ## Core Constraints (MANDATORY)
+
+### 0. CLI-First Debugging (CRITICAL)
+
+**NEVER use direct SQL/database access for debugging or inspection.** Always use CLI commands.
+
+```bash
+# BAD: Direct SQL access
+sqlite3 .steroids/steroids.db "SELECT * FROM tasks"
+
+# GOOD: Use CLI commands
+steroids tasks list --status all
+steroids sections list
+steroids dispute list
+steroids runners list
+steroids logs list
+```
+
+**Why?**
+- CLI commands provide consistent, formatted output
+- CLI respects business logic and validation
+- Direct SQL bypasses the application layer
+- Debugging via CLI tests the actual user experience
+
+The only exception is during migration development or emergency recovery documented in [MIGRATIONS.md](./CLI/MIGRATIONS.md).
 
 ### 1. File Size Limit
 
