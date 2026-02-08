@@ -81,12 +81,26 @@ ${notes}
   const guidanceNote = `
 **Before implementing, you MUST:**
 1. Read ALL the rejection notes above carefully
-2. Look for patterns - is the same issue being raised repeatedly?
-3. Use \`git show <commit-hash>\` to see what you tried before
-4. The reviewer should have provided file:line references - use them
-5. Look for similar working patterns in the codebase
-${rejectionHistory.length >= 5 ? `
-**⚠️ HIGH REJECTION COUNT (${rejectionHistory.length})** - Consider if you're misunderstanding the specification
+2. **ACTUALLY RUN the reviewer's repro commands** - they provide exact test cases
+3. Look for patterns - is the same issue being raised repeatedly?
+4. Use \`git show <commit-hash>\` to see what you tried before
+5. The reviewer provides file:line references - READ those exact lines
+6. Look for similar working patterns in the codebase
+
+**CRITICAL: The reviewer tests specific scenarios.** Before claiming "done":
+- Extract EVERY command/scenario from the rejection notes
+- Run EACH ONE and verify the expected behavior
+- If the reviewer says "\`cmd --flag\` outputs X", run it and check
+- Do NOT say "everything works" without testing their exact repros
+${rejectionHistory.length >= 3 ? `
+**⚠️ REJECTION COUNT: ${rejectionHistory.length}/15** - The reviewer keeps finding the SAME issues.
+Before submitting again:
+1. Make a checklist of EVERY issue mentioned in the latest rejection
+2. Fix each one and VERIFY with the exact command/scenario given
+3. Do NOT submit until you've tested EVERY scenario the reviewer mentioned
+` : ''}${rejectionHistory.length >= 5 ? `
+**🚨 HIGH REJECTION COUNT** - You may be misunderstanding the spec.
+Re-read the specification from scratch. The reviewer's feedback is correct.
 ` : ''}`;
 
   return `
@@ -363,6 +377,32 @@ If approved, the task moves to skipped/partial status and the runner continues t
 If you do NOT run \`steroids tasks update\`, your work will not be submitted and you will be restarted on the next cycle.
 
 ---
+${task.rejection_count > 0 ? `
+## ⚠️ THIS TASK HAS BEEN REJECTED ${task.rejection_count} TIME(S)
+
+**You MUST address the reviewer's feedback before submitting again.**
+
+The reviewer provides SPECIFIC repro steps. Before claiming done:
+
+1. **Extract every test case** from the rejection notes above
+2. **Run each one** and verify the EXACT expected behavior
+3. **Fix issues at the source** - not just surface symptoms
+4. **Test again** after each fix
+
+Example: If the reviewer says:
+> "\`steroids init --dry-run --json\` outputs nothing"
+
+You must:
+1. Run \`steroids init --dry-run --json\` yourself
+2. See that it outputs nothing
+3. Find WHY (trace the code path)
+4. Fix the root cause
+5. Run the command again to verify it now works
+6. THEN move to the next issue
+
+Do NOT submit for review until you have tested EVERY scenario mentioned.
+
+` : ''}---
 
 ## Start Now
 
