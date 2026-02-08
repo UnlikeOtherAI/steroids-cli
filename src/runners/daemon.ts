@@ -4,7 +4,6 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { openGlobalDatabase } from './global-db.js';
-import { acquireLock, releaseLock, checkLockStatus } from './lock.js';
 import { createHeartbeatManager } from './heartbeat.js';
 import { hasActiveRunnerForProject } from './wakeup.js';
 import { runOrchestratorLoop } from './orchestrator-loop.js';
@@ -183,21 +182,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
     process.exit(6); // Resource locked exit code
   }
 
-  // Try to acquire lock
-  const lockResult = acquireLock();
-
-  if (!lockResult.acquired) {
-    if (lockResult.isZombie) {
-      console.error('Found zombie lock, cleaned up. Retry starting.');
-    } else {
-      console.error(
-        `Another runner is already active (PID: ${lockResult.existingPid})`
-      );
-    }
-    process.exit(6); // Resource locked exit code
-  }
-
   // Register runner with effective project path and section ID
+  // Note: Per-project isolation is enforced by hasActiveRunnerForProject() above
   const { runnerId, close: closeDb } = registerRunner(effectiveProjectPath, options.sectionId);
   const { db } = openGlobalDatabase();
 
@@ -227,7 +213,6 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
 
     // Clean up
     unregisterRunner(runnerId);
-    releaseLock();
     closeDb();
 
     console.log('Runner stopped.');
@@ -283,7 +268,7 @@ export function canStartDaemon(projectPath?: string): {
   // Default to cwd if not specified for consistent per-project tracking
   const effectivePath = projectPath ?? process.cwd();
 
-  // Check for project-specific runner first
+  // Check for project-specific runner (one runner per project allowed)
   if (hasActiveRunnerForProject(effectivePath)) {
     return {
       canStart: false,
@@ -291,23 +276,6 @@ export function canStartDaemon(projectPath?: string): {
     };
   }
 
-  const status = checkLockStatus();
-
-  if (status.locked) {
-    return {
-      canStart: false,
-      reason: 'Another runner is already active',
-      existingPid: status.pid ?? undefined,
-    };
-  }
-
-  if (status.isZombie) {
-    return {
-      canStart: true,
-      reason: 'Found zombie lock (will be cleaned)',
-      existingPid: status.pid ?? undefined,
-    };
-  }
-
+  // Multiple projects can run in parallel - no global lock check
   return { canStart: true };
 }
