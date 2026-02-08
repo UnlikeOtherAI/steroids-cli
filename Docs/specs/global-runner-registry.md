@@ -338,12 +338,78 @@ Add to `/API/src/routes/`:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/projects` | List all registered projects |
+| GET | `/api/projects` | List all registered projects with stats |
 | POST | `/api/projects` | Register a new project |
-| DELETE | `/api/projects/:path` | Unregister a project |
-| PATCH | `/api/projects/:path` | Enable/disable a project |
+| POST | `/api/projects/remove` | Unregister a project (path in body) |
+| POST | `/api/projects/enable` | Enable a project (path in body) |
+| POST | `/api/projects/disable` | Disable a project (path in body) |
 | POST | `/api/projects/prune` | Remove stale projects |
-| GET | `/api/projects/:path/status` | Get project status (tasks, runner) |
+
+**Note:** Using POST with body instead of path parameters because paths contain `/` which breaks URL routing.
+
+```typescript
+// Request body for project operations
+interface ProjectRequest {
+  path: string;  // e.g., "/Users/john/code/myapp"
+}
+```
+
+### Stats Caching Strategy
+
+**Problem:** API container can't access all project directories via Docker volumes.
+
+**Solution:** Store stats in global database, updated by runners:
+
+```sql
+-- Add to projects table
+ALTER TABLE projects ADD COLUMN pending_count INTEGER DEFAULT 0;
+ALTER TABLE projects ADD COLUMN in_progress_count INTEGER DEFAULT 0;
+ALTER TABLE projects ADD COLUMN review_count INTEGER DEFAULT 0;
+ALTER TABLE projects ADD COLUMN completed_count INTEGER DEFAULT 0;
+ALTER TABLE projects ADD COLUMN stats_updated_at TEXT;
+```
+
+Runners update stats in global DB during heartbeat:
+```typescript
+// In runner heartbeat loop
+function updateProjectStats(projectPath: string): void {
+  const projectDb = openProjectDatabase(projectPath);
+  const globalDb = openGlobalDatabase();
+
+  const stats = getTaskCounts(projectDb);
+  globalDb.prepare(`
+    UPDATE projects SET
+      pending_count = ?,
+      in_progress_count = ?,
+      review_count = ?,
+      completed_count = ?,
+      stats_updated_at = datetime('now')
+    WHERE path = ?
+  `).run(stats.pending, stats.in_progress, stats.review, stats.completed, projectPath);
+}
+```
+
+This way, API only reads from global DB - no access to project DBs needed.
+
+### Path Validation (Security)
+
+All path operations must validate:
+```typescript
+function isValidProjectPath(path: string): boolean {
+  try {
+    const realPath = realpathSync(path);
+    // Must contain .steroids directory
+    if (!existsSync(join(realPath, '.steroids', 'steroids.db'))) {
+      return false;
+    }
+    // Must not be system directories
+    const forbidden = ['/etc', '/var', '/usr', '/bin', '/sbin', '/System'];
+    return !forbidden.some(f => realPath.startsWith(f));
+  } catch {
+    return false;
+  }
+}
+```
 
 ### API Response Format
 
