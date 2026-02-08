@@ -85,7 +85,7 @@ export async function runnersCommand(args: string[], flags: GlobalFlags): Promis
       await runList(subArgs);
       break;
     case 'wakeup':
-      await runWakeup(subArgs);
+      await runWakeup(subArgs, flags);
       break;
     case 'cron':
       await runCron(subArgs);
@@ -349,14 +349,13 @@ OPTIONS:
   }
 }
 
-async function runWakeup(args: string[]): Promise<void> {
+async function runWakeup(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
       json: { type: 'boolean', short: 'j', default: false },
       quiet: { type: 'boolean', short: 'q', default: false },
-      'dry-run': { type: 'boolean', default: false },
     },
     allowPositionals: false,
   });
@@ -378,16 +377,16 @@ OPTIONS:
   }
 
   const result = wakeup({
-    quiet: values.quiet,
-    dryRun: values['dry-run'],
+    quiet: values.quiet || flags.quiet,
+    dryRun: flags.dryRun,
   });
 
-  if (values.json) {
+  if (values.json || flags.json) {
     console.log(JSON.stringify(result, null, 2));
     return;
   }
 
-  if (!values.quiet) {
+  if (!values.quiet && !flags.quiet) {
     console.log(`Action: ${result.action}`);
     console.log(`Reason: ${result.reason}`);
     if (result.pid) {
