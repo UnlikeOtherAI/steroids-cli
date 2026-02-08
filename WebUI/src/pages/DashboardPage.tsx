@@ -49,7 +49,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
         <div className="flex items-start justify-between mb-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">
-              {project.name || 'Unnamed Project'}
+              {project.name || project.path.split('/').pop() || 'Project'}
             </h1>
             <p className="text-gray-500 mt-1 text-sm">{project.path}</p>
           </div>

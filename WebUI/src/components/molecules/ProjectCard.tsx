@@ -33,7 +33,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <h3 className="text-lg font-semibold text-gray-900 truncate">
-            {project.name || 'Unnamed Project'}
+            {project.name || project.path.split('/').pop() || 'Project'}
           </h3>
           <p className="text-sm text-gray-500 truncate mt-1" title={project.path}>
             {project.path}

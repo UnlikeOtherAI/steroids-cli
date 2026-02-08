@@ -72,6 +72,42 @@ Full changelog: https://github.com/UnlikeOtherAI/steroids-cli/compare/v<prev>...
 
 **Tip:** Use `gh release list` to see previous releases and `git log --oneline v<prev>..HEAD` to see changes since last release.
 
+### Dependency Management (CRITICAL)
+
+**Always use the latest stable versions of dependencies.** Before adding or updating packages:
+
+1. **Check for latest versions** before installing any package:
+   ```bash
+   # Check latest version of a package
+   npm view <package-name> version
+
+   # Or use npm-check-updates to see all outdated deps
+   npx npm-check-updates
+   ```
+
+2. **Use exact or up-to-date ranges** when adding new dependencies:
+   ```bash
+   # Good: Install latest version
+   npm install package-name@latest
+
+   # Good: Check and update all deps
+   npx npm-check-updates -u && npm install
+   ```
+
+3. **Periodically audit dependencies**:
+   ```bash
+   npm audit
+   npm outdated
+   ```
+
+**Why latest versions matter:**
+- Security patches and bug fixes
+- Performance improvements
+- Better compatibility with modern tooling
+- Reduced technical debt
+
+**When adding WebUI/API dependencies**, always verify you're installing the current stable release, not an older version from cached package-lock.json or outdated tutorials.
+
 ### Use Compiled CLI, Not Node (CRITICAL)
 
 **NEVER run `node dist/index.js` directly.** Always use the installed `steroids` command.

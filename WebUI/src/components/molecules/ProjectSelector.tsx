@@ -56,7 +56,7 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({
 
   const getDisplayName = (project: Project | null) => {
     if (!project) return 'Select Project';
-    return project.name || project.path.split('/').pop() || 'Unnamed Project';
+    return project.name || project.path.split('/').pop() || 'Project';
   };
 
   if (loading && projects.length === 0) {
@@ -105,7 +105,7 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({
               }`}
             >
               <div className="font-medium text-gray-900 truncate">
-                {project.name || 'Unnamed Project'}
+                {project.name || project.path.split('/').pop() || 'Project'}
               </div>
               <div className="text-xs text-gray-500 truncate mt-1">{project.path}</div>
               {project.stats && (
