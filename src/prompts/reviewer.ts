@@ -72,16 +72,16 @@ ${notes}
 `;
   });
 
-  const escalationNote = rejections.length >= 5
-    ? `
-**⚠️ HIGH REJECTION COUNT (${rejections.length})**
-The coder may be misunderstanding the feedback. Consider:
-- Providing file:line references with exact code snippets
-- Pointing to similar working patterns in the codebase
-- Explaining WHY the current approach doesn't work, not just WHAT is wrong
-- If the same issue keeps recurring, explain it from a different angle
-`
-    : '';
+  // Always provide specific guidance - don't wait for high rejection count
+  const guidanceNote = `
+**Rejection Best Practices:**
+- Provide specific file:line references (e.g., \`src/foo.ts:42\`)
+- Include exact code snippets that need to change
+- Point to similar working patterns in the codebase
+- Explain WHY the current approach doesn't work, not just WHAT is wrong
+${rejections.length >= 5 ? `
+**⚠️ HIGH REJECTION COUNT (${rejections.length})** - Consider explaining from a different angle
+` : ''}`;
 
   return `
 ---
@@ -93,7 +93,7 @@ The coder may be misunderstanding the feedback. Consider:
 - If an issue was raised before and not fixed, be MORE SPECIFIC about what exactly needs to change
 - Use commit hashes to examine previous attempts: \`git show <hash>\`
 - The coder only sees YOUR rejection notes - make them actionable
-${escalationNote}
+${guidanceNote}
 ${lines.join('\n')}
 `;
 }

@@ -62,16 +62,25 @@ router.get('/projects', (req: Request, res: Response) => {
         } | undefined;
 
         // Get stats (if available from cached stats)
-        const stats = db
-          .prepare(
-            'SELECT pending_count, in_progress_count, review_count, completed_count FROM projects WHERE path = ?'
-          )
-          .get(project.path) as {
+        // Check if stats columns exist first
+        type StatsResult = {
           pending_count: number | null;
           in_progress_count: number | null;
           review_count: number | null;
           completed_count: number | null;
-        } | undefined;
+        };
+
+        let stats: StatsResult | undefined = undefined;
+
+        try {
+          stats = db
+            .prepare(
+              'SELECT pending_count, in_progress_count, review_count, completed_count FROM projects WHERE path = ?'
+            )
+            .get(project.path) as StatsResult | undefined;
+        } catch {
+          // Stats columns don't exist yet - that's ok, they're optional
+        }
 
         const response: ProjectResponse = {
           path: project.path,

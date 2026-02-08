@@ -77,17 +77,17 @@ ${notes}
 `;
   });
 
-  const escalationNote = rejectionHistory.length >= 5
-    ? `
-**⚠️ HIGH REJECTION COUNT (${rejectionHistory.length})**
-Multiple attempts have been rejected. Before implementing:
+  // Always provide guidance, with extra emphasis after multiple rejections
+  const guidanceNote = `
+**Before implementing, you MUST:**
 1. Read ALL the rejection notes above carefully
 2. Look for patterns - is the same issue being raised repeatedly?
 3. Use \`git show <commit-hash>\` to see what you tried before
-4. If the issue is unclear, the rejection notes should have specifics
-5. Consider if you're misunderstanding the specification
-`
-    : '';
+4. The reviewer should have provided file:line references - use them
+5. Look for similar working patterns in the codebase
+${rejectionHistory.length >= 5 ? `
+**⚠️ HIGH REJECTION COUNT (${rejectionHistory.length})** - Consider if you're misunderstanding the specification
+` : ''}`;
 
   return `
 ---
@@ -96,7 +96,7 @@ Multiple attempts have been rejected. Before implementing:
 
 **CRITICAL:** Review this history before implementing. Your past attempts were rejected for specific reasons.
 Use the commit hashes to examine what you tried: \`git show <hash>\`
-${escalationNote}
+${guidanceNote}
 ${historyLines.join('\n')}
 ---
 
