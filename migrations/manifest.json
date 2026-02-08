@@ -1,6 +1,6 @@
 {
   "version": "0.2.0",
-  "latestDbVersion": 2,
+  "latestDbVersion": 3,
   "migrations": [
     {
       "id": 1,
@@ -17,6 +17,14 @@
       "description": "Add commit_sha column to audit table for tracking commits per status change",
       "checksum": "",
       "cliVersion": "0.2.3"
+    },
+    {
+      "id": 3,
+      "name": "003_add_section_priority",
+      "file": "003_add_section_priority.sql",
+      "description": "Add priority column to sections table (0=highest, 100=lowest, 50=default)",
+      "checksum": "",
+      "cliVersion": "0.2.13"
     }
   ]
 }
