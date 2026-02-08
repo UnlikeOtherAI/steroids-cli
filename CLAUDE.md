@@ -199,9 +199,37 @@ All CLIs are independent and can be used standalone.
 
 ---
 
+## Icon Library
+
+**Use Font Awesome for all icons.** This applies to all components (CLI help text, WebUI, documentation).
+
+---
+
+## Test Directories (IMPORTANT)
+
+**Projects are only registered globally if they are inside a git repository.**
+
+This prevents test/temporary directories from polluting the global project registry. When running `steroids init`:
+
+- **In a git repo** → Registered in `~/.steroids/steroids.db` (appears in Monitor, wakeup, etc.)
+- **Not in a git repo** → Local `.steroids/` created but NOT registered globally
+- **With `--no-register`** → Explicitly skip registration even in a git repo
+
+This means AI agents can freely create test directories in `/tmp/` or elsewhere to test functionality without polluting the global registry. The test projects will work locally but won't appear in the Monitor app or interfere with real projects.
+
+---
+
 ## Core Constraints (MANDATORY)
 
-### 0. Use Steroids to Build Steroids (CRITICAL)
+### 0. Understand the System First (CRITICAL)
+
+**Before doing ANYTHING, run this command. It explains everything.**
+
+```bash
+steroids llm
+```
+
+### 0.1 Use Steroids to Build Steroids (CRITICAL)
 
 **NEVER develop features directly in this project.** Use the Steroids CLI to manage all work.
 
@@ -211,13 +239,13 @@ All CLIs are independent and can be used standalone.
 npm run build
 
 # 2. Verify CLI works
-node dist/index.js --version
-node dist/index.js tasks list
+steroids --version
+steroids tasks list
 
-# 3. Launch the automated loop and WATCH it
-node dist/index.js loop
-# Or use the watch command for real-time monitoring:
-node dist/index.js watch
+# 3. Launch the automated runner daemon
+steroids runners start --detach
+# Or run in foreground to see real-time output:
+steroids loop
 ```
 
 **Why build first?**
@@ -247,7 +275,7 @@ node dist/index.js loop                  # Let automation handle it
 - Documentation updates to CLAUDE.md
 - Emergency patches (must be reviewed afterward)
 
-### 0.1 Task Restart Behavior
+### 0.2 Task Restart Behavior
 
 **When manually restarting a task, the rejection count SHOULD be reset to 0.**
 
@@ -261,7 +289,7 @@ Rationale:
 steroids tasks update <task-id> --status pending --actor human:cli
 ```
 
-### 0.2 CLI-First Debugging (CRITICAL)
+### 0.3 CLI-First Debugging (CRITICAL)
 
 **NEVER use direct SQL/database access for debugging or inspection.** Always use CLI commands.
 
