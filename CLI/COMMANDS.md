@@ -484,14 +484,22 @@ Usage: steroids sections [options]
        steroids sections reorder [options]
        steroids sections skip <id|name> [options]
        steroids sections unskip <id|name> [options]
+       steroids sections priority <id> <priority>
+       steroids sections depends-on <id> <depends-on-id>
+       steroids sections no-depends-on <id> <dep-id>
+       steroids sections graph [options]
 
 Arguments:
   name                      Section name
   id                        Section GUID (or partial match)
+  priority                  Priority value (0-100) or high/medium/low
+  depends-on-id             Section ID that must be completed first
+  dep-id                    Dependency to remove
 
 List Options:
   --include-tasks           Include task count for each section
   --all                     Include skipped sections (hidden by default)
+  --deps                    Show dependencies inline
 
 Add Options:
   --position <n>            Position in ordering (default: append)
@@ -512,10 +520,25 @@ Reorder Options:
 Skip/Unskip Options:
   (none)                    Section is identified by ID or name
 
+Priority Options:
+  high                      Sets priority to 10
+  medium                    Sets priority to 50 (default)
+  low                       Sets priority to 90
+  0-100                     Custom priority value (0 = highest, 100 = lowest)
+
+Graph Options:
+  --mermaid                 Output Mermaid flowchart syntax
+  --output <format>         Generate image file (png or svg)
+  -o, --open                Auto-open generated file
+  --tasks                   Include tasks within sections
+  --status <status>         Filter tasks by status (pending, active, etc.)
+  --section <id>            Show only specified section
+
 Examples:
   steroids sections                                  # List active sections
   steroids sections --all                            # Include skipped sections
   steroids sections --include-tasks                  # Show task counts
+  steroids sections list --deps                      # Show dependencies inline
   steroids sections add "Phase 1 - Backend"          # Add new section
   steroids sections add "Phase 2" --position 2       # Insert at position
   steroids sections update abc123 --name "Phase 1"   # Rename section
@@ -525,6 +548,24 @@ Examples:
   steroids sections skip "Phase 3"                   # Skip section (defer work)
   steroids sections skip abc123                      # Skip by ID
   steroids sections unskip "Phase 3"                 # Re-enable section
+
+  # Priority management
+  steroids sections priority abc123 high             # Set to high priority (10)
+  steroids sections priority abc123 25               # Set to custom priority (25)
+  steroids sections priority abc123 low              # Set to low priority (90)
+
+  # Dependency management
+  steroids sections depends-on abc123 def456         # Phase abc123 depends on def456
+  steroids sections no-depends-on abc123 def456      # Remove dependency
+
+  # Dependency graph visualization
+  steroids sections graph                            # ASCII dependency tree
+  steroids sections graph --mermaid                  # Mermaid flowchart syntax
+  steroids sections graph --output png               # Generate PNG file
+  steroids sections graph --output svg -o            # Generate SVG and open it
+  steroids sections graph --tasks                    # Include tasks in graph
+  steroids sections graph --tasks --status active    # Show only active tasks
+  steroids sections graph --section abc123 --tasks   # Graph one section with tasks
 ```
 
 ### Section Skip Behavior
@@ -540,6 +581,130 @@ Use cases:
 - Future development phases not ready to start
 - Temporarily parking work on a feature
 - Focusing the loop on specific priorities
+
+### Section Priorities
+
+Sections can have priorities to control the order in which tasks are selected:
+
+- **Priority range:** 0-100 (0 = highest priority, 100 = lowest priority)
+- **Default priority:** 50 (medium)
+- **Presets:** high (10), medium (50), low (90)
+
+**Priority affects task selection:**
+1. Sections are ordered by: unmet dependencies (blocked last), then priority, then position
+2. Tasks from higher priority sections are selected first
+3. Skipped sections are never selected regardless of priority
+
+**Examples:**
+```bash
+steroids sections priority abc123 high    # Critical section (priority 10)
+steroids sections priority def456 25      # Custom high priority
+steroids sections priority ghi789 low     # Defer work (priority 90)
+```
+
+### Section Dependencies
+
+Sections can depend on other sections, creating a dependency graph:
+
+- **Dependency rules:** A section cannot start until all its dependencies are completed
+- **Circular detection:** The system prevents circular dependencies
+- **Blocked indicator:** Sections with unmet dependencies show `[BLOCKED]` marker
+
+**How dependencies work:**
+1. `sections depends-on A B` means "A depends on B" (B must complete first)
+2. Task selection skips sections where any dependency has incomplete tasks
+3. The orchestrator respects the dependency order automatically
+
+**Examples:**
+```bash
+# Phase 2 depends on Phase 1
+steroids sections depends-on phase2-id phase1-id
+
+# Remove the dependency
+steroids sections no-depends-on phase2-id phase1-id
+
+# View the dependency tree
+steroids sections graph
+```
+
+### Dependency Graph Visualization
+
+The `graph` subcommand visualizes section dependencies and tasks:
+
+**Output formats:**
+1. **ASCII tree (default):** Text-based tree view for terminal
+2. **Mermaid syntax:** For embedding in markdown/docs
+3. **PNG/SVG images:** Rendered diagrams (requires Mermaid CLI)
+
+**Graph features:**
+- Shows section hierarchy based on dependencies
+- Displays priorities for each section
+- Marks blocked sections with `[BLOCKED]` indicator
+- Can include tasks with status indicators
+- Filter by task status or single section
+
+**ASCII tree example:**
+```
+SECTION DEPENDENCY GRAPH
+─────────────────────────────────────────────────────────────────
+└─> Phase 0.4: Global Runner Registry (priority: 10) [IN PROGRESS]
+    ├─> Phase 0.7: Section Focus (priority: 20)
+    │   └─> Phase 0.8: Priorities & Dependencies (priority: 30)
+    └─> Phase 2: Configuration (priority: 50) [BLOCKED]
+```
+
+**Mermaid output:**
+```bash
+steroids sections graph --mermaid
+# Outputs Mermaid flowchart syntax to stdout
+# Can be embedded in markdown or docs
+```
+
+**Image generation:**
+```bash
+# Generate PNG file
+steroids sections graph --output png
+# Output: /tmp/steroids-sections-graph-1707412345.png
+
+# Generate and auto-open SVG
+steroids sections graph --output svg -o
+# Automatically opens the generated file
+```
+
+**Including tasks:**
+```bash
+# Show sections with all their tasks
+steroids sections graph --tasks
+
+# Show only active tasks (in_progress + review)
+steroids sections graph --tasks --status active
+
+# Focus on one section with its tasks
+steroids sections graph --section abc123 --tasks
+```
+
+**Task status indicators in graphs:**
+- `[ ]` pending - gray
+- `[-]` in_progress - blue
+- `[o]` review - yellow
+- `[x]` completed - green
+- `[!]` disputed - orange
+- `[F]` failed - red
+- Rejection counts shown: `(3)` means 3 rejections
+
+**Mermaid CLI installation:**
+
+Image generation requires the Mermaid CLI tool. If not installed:
+```bash
+# Manual installation
+npm install -g @mermaid-js/mermaid-cli
+
+# Or let steroids prompt you interactively
+steroids sections graph --output png
+# Will prompt: "Install now? [y/N]"
+```
+
+The Mermaid CLI (`mmdc`) converts Mermaid syntax to PNG/SVG images with proper styling and colors.
 
 ---
 
