@@ -16,23 +16,24 @@ import {
 
 /**
  * Available Claude models
+ * Use aliases (sonnet, opus, haiku) for latest versions
  */
 const CLAUDE_MODELS: ModelInfo[] = [
   {
-    id: 'claude-opus-4',
-    name: 'Claude Opus 4',
+    id: 'opus',
+    name: 'Claude Opus (latest)',
     recommendedFor: ['orchestrator', 'reviewer'],
     supportsStreaming: true,
   },
   {
-    id: 'claude-sonnet-4',
-    name: 'Claude Sonnet 4',
+    id: 'sonnet',
+    name: 'Claude Sonnet (latest)',
     recommendedFor: ['coder'],
     supportsStreaming: true,
   },
   {
-    id: 'claude-haiku-4',
-    name: 'Claude Haiku 4',
+    id: 'haiku',
+    name: 'Claude Haiku (latest)',
     recommendedFor: [],
     supportsStreaming: true,
   },
@@ -42,9 +43,9 @@ const CLAUDE_MODELS: ModelInfo[] = [
  * Default models per role
  */
 const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string> = {
-  orchestrator: 'claude-opus-4',
-  coder: 'claude-sonnet-4',
-  reviewer: 'claude-opus-4',
+  orchestrator: 'opus',
+  coder: 'sonnet',
+  reviewer: 'opus',
 };
 
 /**

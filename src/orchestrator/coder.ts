@@ -53,7 +53,7 @@ async function invokeClaudeCli(
 
     const child = spawn('claude', [
       '--print',
-      '--model', 'claude-sonnet-4',
+      '--model', 'sonnet',
       '--system-prompt', systemPrompt,
     ], {
       cwd: process.cwd(),
