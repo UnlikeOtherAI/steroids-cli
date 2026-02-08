@@ -5,15 +5,6 @@ import { Runner } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
 
-function truncateMiddle(str: string, maxLen: number = 40): string {
-  if (str.length <= maxLen) return str;
-  const ellipsis = '...';
-  const charsToShow = maxLen - ellipsis.length;
-  const frontChars = Math.ceil(charsToShow / 2);
-  const backChars = Math.floor(charsToShow / 2);
-  return str.slice(0, frontChars) + ellipsis + str.slice(-backChars);
-}
-
 function getStatusBadgeVariant(status: string) {
   const s = status.toLowerCase();
   if (s === 'running' || s === 'active') return 'success';
@@ -119,21 +110,17 @@ export const RunnersPage: React.FC = () => {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3">
                     <h3 className="text-lg font-semibold text-gray-900">
-                      {runner.id.slice(0, 8)}
+                      {runner.project_name || (runner.project_path ? runner.project_path.split('/').pop() : 'Unknown Project')}
                     </h3>
                     <Badge variant={getStatusBadgeVariant(runner.status)}>
                       {runner.status.charAt(0).toUpperCase() + runner.status.slice(1)}
                     </Badge>
                   </div>
 
-                  {runner.project_path && (
-                    <p
-                      className="text-sm text-gray-500 mt-1 font-mono cursor-help"
-                      title={runner.project_path}
-                    >
-                      {runner.project_name || truncateMiddle(runner.project_path, 50)}
-                    </p>
-                  )}
+                  <p className="text-sm text-gray-500 mt-1">
+                    Runner: {runner.id.slice(0, 8)}
+                    {runner.pid && <span className="ml-2">(PID {runner.pid})</span>}
+                  </p>
 
                   {runner.current_task_id && runner.project_path && (
                     <div
@@ -143,14 +130,13 @@ export const RunnersPage: React.FC = () => {
                       <p className="text-sm text-blue-800">
                         <i className="fa-solid fa-arrow-up-right-from-square text-xs mr-2"></i>
                         <span className="font-medium">Current Task:</span>{' '}
-                        {runner.current_task_id}
+                        {runner.current_task_title || runner.current_task_id.slice(0, 8)}
                       </p>
                     </div>
                   )}
                 </div>
 
                 <div className="text-right text-sm text-gray-500">
-                  {runner.pid && <p>PID: {runner.pid}</p>}
                   <p>Heartbeat: {formatTimeAgo(runner.heartbeat_at)}</p>
                   {runner.started_at && (
                     <p>Started: {formatTimeAgo(runner.started_at)}</p>

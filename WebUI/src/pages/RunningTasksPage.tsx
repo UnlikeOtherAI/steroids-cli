@@ -5,15 +5,6 @@ import { ActiveTask } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
 
-function truncateMiddle(str: string, maxLen: number = 40): string {
-  if (str.length <= maxLen) return str;
-  const ellipsis = '...';
-  const charsToShow = maxLen - ellipsis.length;
-  const frontChars = Math.ceil(charsToShow / 2);
-  const backChars = Math.floor(charsToShow / 2);
-  return str.slice(0, frontChars) + ellipsis + str.slice(-backChars);
-}
-
 function formatTimeAgo(dateStr: string | null): string {
   if (!dateStr) return 'Unknown';
   const date = new Date(dateStr);
@@ -103,22 +94,24 @@ export const RunningTasksPage: React.FC = () => {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3">
                     <h3 className="text-lg font-semibold text-gray-900">
-                      <i className="fa-solid fa-arrow-up-right-from-square text-xs text-gray-400 mr-2"></i>
-                      {task.current_task_id}
+                      {task.project_name || task.project_path.split('/').pop()}
                     </h3>
                     <Badge variant="info">In Progress</Badge>
                   </div>
 
-                  <p
-                    className="text-sm text-gray-500 mt-1 font-mono cursor-help"
-                    title={task.project_path}
-                  >
-                    {task.project_name || truncateMiddle(task.project_path, 50)}
+                  <p className="text-sm text-gray-500 mt-1">
+                    Runner: {task.runner_id.slice(0, 8)}
                   </p>
+
+                  <div className="mt-2 p-2 bg-blue-50 rounded border border-blue-100">
+                    <p className="text-sm text-blue-800">
+                      <i className="fa-solid fa-arrow-up-right-from-square text-xs mr-2"></i>
+                      Task: {task.current_task_id.slice(0, 8)}...
+                    </p>
+                  </div>
                 </div>
 
                 <div className="text-right text-sm text-gray-500">
-                  <p>Runner: {task.runner_id.slice(0, 8)}</p>
                   <p>Started: {formatTimeAgo(task.started_at)}</p>
                 </div>
               </div>
