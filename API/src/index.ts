@@ -12,9 +12,13 @@ import tasksRouter from './routes/tasks.js';
 
 const app = express();
 const PORT = process.env.PORT || 3501;
+const HOST = process.env.HOST || '0.0.0.0';
 
-// Middleware
-app.use(cors());
+// Middleware - CORS allowing all origins for local network access
+app.use(cors({
+  origin: true, // Allow all origins
+  credentials: true,
+}));
 app.use(express.json());
 
 // Request logging
@@ -34,7 +38,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: '0.4.1',
+    version: '0.4.2',
   });
 });
 
@@ -42,7 +46,7 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Steroids API',
-    version: '0.4.1',
+    version: '0.4.2',
     endpoints: [
       'GET /health',
       'GET /api/projects',
@@ -81,9 +85,9 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Steroids API server listening on port ${PORT}`);
+// Start server on all interfaces
+app.listen(Number(PORT), HOST, () => {
+  console.log(`Steroids API server listening on ${HOST}:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`API docs: http://localhost:${PORT}/`);
 });
