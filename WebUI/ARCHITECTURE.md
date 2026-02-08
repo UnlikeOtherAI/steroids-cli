@@ -284,12 +284,13 @@ TaskCard/
 ### Projects (Multi-Project Support)
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/projects` | List all registered projects |
-| POST | `/api/projects` | Register a new project |
-| DELETE | `/api/projects` | Remove a project (body: {path}) |
+| GET | `/api/projects` | List all registered projects with stats |
+| POST | `/api/projects` | Register a new project (body: {path, name?}) |
+| POST | `/api/projects/remove` | Remove a project (body: {path}) |
 | POST | `/api/projects/enable` | Enable a project (body: {path}) |
 | POST | `/api/projects/disable` | Disable a project (body: {path}) |
 | POST | `/api/projects/prune` | Remove projects with missing directories |
+| GET | `/api/projects/status` | Get single project status (query: ?path=...) |
 
 ### System
 | Method | Path | Description |
@@ -353,17 +354,9 @@ TaskCard/
 ```yaml
 version: '3.8'
 services:
-  web:
-    image: unlikeotherai/steroids-web:latest
-    ports:
-      - "3500:3500"
-    environment:
-      - API_URL=http://api:3501
-    depends_on:
-      - api
-
   api:
     image: unlikeotherai/steroids-api:latest
+    container_name: steroids-api
     ports:
       - "3501:3501"
     volumes:
@@ -372,8 +365,25 @@ services:
       # Current project database (tasks, sections, audit)
       - ./.steroids:/app/.steroids
     environment:
-      - NODE_ENV=production
-      - GLOBAL_DB_PATH=/root/.steroids/steroids.db
+      - PORT=3501
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3501/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+  web:
+    image: unlikeotherai/steroids-web:latest
+    container_name: steroids-web
+    ports:
+      - "3500:3500"
+    environment:
+      - VITE_API_URL=http://localhost:3501
+    restart: unless-stopped
+    depends_on:
+      - api
 ```
 
 > **Note:** The API reads from the global database (`~/.steroids/steroids.db`) for project registry and runner state, while project-specific data comes from the mounted `.steroids` directory.
