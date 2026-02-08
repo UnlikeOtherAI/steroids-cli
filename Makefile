@@ -45,8 +45,17 @@ test:
 lint:
 	npm run lint
 
-# Launch WebUI and API locally
+# Launch WebUI and API locally (stops existing, rebuilds, starts fresh)
 launch:
+	@echo "Stopping existing services..."
+	-@pkill -f "steroids-api" 2>/dev/null || true
+	-@pkill -f "vite.*WebUI" 2>/dev/null || true
+	-@lsof -ti:3500 -ti:3501 | xargs kill -9 2>/dev/null || true
+	@sleep 1
+	@echo "Building API..."
+	@cd API && npm run build
+	@echo "Building WebUI..."
+	@cd WebUI && npm run build
 	@echo "Starting Steroids API..."
 	@cd API && npm start &
 	@sleep 2
