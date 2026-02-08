@@ -24,6 +24,7 @@ import {
 } from './sections-commands.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
+import { ErrorCode, getExitCode } from '../cli/errors.js';
 
 const HELP = generateHelp({
   command: 'sections',
@@ -118,7 +119,7 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
       console.log(HELP);
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.INVALID_ARGUMENTS));
   }
 }
 
@@ -286,7 +287,7 @@ EXAMPLES:
       const section = getSection(db, values.section);
       if (!section) {
         console.error(`Error: Section not found: ${values.section}`);
-        process.exit(1);
+        process.exit(getExitCode(ErrorCode.SECTION_NOT_FOUND));
       }
       sections = [section];
     }

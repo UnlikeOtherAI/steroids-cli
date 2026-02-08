@@ -30,6 +30,7 @@ import { getCurrentCommitSha } from '../git/status.js';
 import { hasActiveRunnerForProject } from '../runners/wakeup.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
+import { ErrorCode, getExitCode } from '../cli/errors.js';
 
 const HELP = generateHelp({
   command: 'loop',
@@ -107,7 +108,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     // Validate project path exists
     if (!existsSync(projectPath)) {
       console.error(`Error: Path does not exist: ${projectPath}`);
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
     }
 
     // Validate it's a directory, not a file
@@ -115,11 +116,11 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
       const stats = statSync(projectPath);
       if (!stats.isDirectory()) {
         console.error(`Error: Path is not a directory: ${projectPath}`);
-        process.exit(1);
+        process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
       }
     } catch (error) {
       console.error(`Error: Cannot access path: ${projectPath}`);
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
     }
 
     // Validate it's a steroids project
@@ -127,7 +128,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
       console.error(`Error: Not a steroids project: ${projectPath}`);
       console.error(`  Missing: ${steroidsDbPath}`);
       console.error('  Run "steroids init" in that directory first.');
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
     }
 
     // Change to project directory
@@ -184,7 +185,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
               console.error(`  ${s.id.substring(0, 8)}  ${s.name}`);
             }
           }
-          process.exit(1);
+          process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
         }
 
         // Check if section is skipped (Phase 0.6 feature)
@@ -192,7 +193,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
           console.error(`Error: Section "${section.name}" is currently skipped`);
           console.error('');
           console.error(`Run 'steroids sections unskip "${section.name}"' to re-enable it.`);
-          process.exit(1);
+          process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
         }
 
         focusedSectionId = section.id;
@@ -204,7 +205,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
         } else {
           console.error('Error: Failed to resolve section');
         }
-        process.exit(1);
+        process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
       }
     }
 

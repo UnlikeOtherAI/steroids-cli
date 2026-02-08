@@ -26,7 +26,7 @@ import {
   type TaskStatus,
 } from '../database/queries.js';
 import { outputJson as outputEnvelope, outputJsonError, createOutput } from '../cli/output.js';
-import { ErrorCode } from '../cli/errors.js';
+import { ErrorCode, getExitCode } from '../cli/errors.js';
 import { generateHelp } from '../cli/help.js';
 
 const HELP = generateHelp({
@@ -569,7 +569,7 @@ EXAMPLES:
       } else {
         console.error(`Task not found: ${identifier}`);
       }
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
     const actor = values.model
@@ -650,7 +650,7 @@ OPTIONS:
 
     if (!task) {
       out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
     approveTask(db, task.id, values.model, values.notes);
@@ -712,7 +712,7 @@ OPTIONS:
 
     if (!task) {
       out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
     const result = rejectTask(db, task.id, values.model, values.notes);
@@ -794,7 +794,7 @@ EXAMPLES:
 
     if (!task) {
       out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
     const actor = values.model
@@ -874,7 +874,7 @@ OPTIONS:
 
     if (!task) {
       out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
     const entries = getTaskAudit(db, task.id);
