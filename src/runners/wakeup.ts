@@ -2,27 +2,27 @@
  * Cron wake-up command for restarting stale/dead runners
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { checkLockStatus, removeLock, isProcessAlive } from './lock.js';
+import { checkLockStatus, removeLock } from './lock.js';
 import { openGlobalDatabase } from './global-db.js';
 import { findStaleRunners } from './heartbeat.js';
+import { getRegisteredProjects } from './projects.js';
 
 export interface WakeupOptions {
   quiet?: boolean;
   dryRun?: boolean;
-  projectPaths?: string[];
 }
 
 export interface WakeupResult {
-  action: 'none' | 'started' | 'restarted' | 'cleaned';
+  action: 'none' | 'started' | 'restarted' | 'cleaned' | 'would_start';
   reason: string;
   runnerId?: string;
   pid?: number;
   staleRunners?: number;
   pendingTasks?: number;
+  projectPath?: string;
 }
 
 /**
@@ -55,37 +55,24 @@ function projectHasPendingWork(projectPath: string): boolean {
 }
 
 /**
- * Scan directories for projects with pending work
+ * Check if there's an active runner for a specific project
  */
-function findProjectsWithWork(basePaths: string[]): string[] {
-  const projects: string[] = [];
+function hasActiveRunnerForProject(projectPath: string): boolean {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db
+      .prepare(
+        `SELECT 1 FROM runners
+         WHERE project_path = ?
+         AND status != 'stopped'
+         AND heartbeat_at > datetime('now', '-5 minutes')`
+      )
+      .get(projectPath) as { 1: number } | undefined;
 
-  for (const basePath of basePaths) {
-    const expandedPath = basePath.replace(/^~/, homedir());
-    if (!existsSync(expandedPath)) continue;
-
-    // Check if base path itself is a project
-    if (projectHasPendingWork(expandedPath)) {
-      projects.push(expandedPath);
-    }
-
-    // Check subdirectories (1 level deep)
-    try {
-      const entries = readdirSync(expandedPath, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory() && !entry.name.startsWith('.')) {
-          const subPath = join(expandedPath, entry.name);
-          if (projectHasPendingWork(subPath)) {
-            projects.push(subPath);
-          }
-        }
-      }
-    } catch {
-      // Ignore permission errors
-    }
+    return row !== undefined;
+  } finally {
+    close();
   }
-
-  return projects;
 }
 
 /**
@@ -126,9 +113,10 @@ function startRunner(projectPath?: string): { pid: number } | null {
 /**
  * Main wake-up function
  * Called by cron every minute to ensure runners are healthy
+ * Uses the global project registry to check all registered projects
  */
 export function wakeup(options: WakeupOptions = {}): WakeupResult {
-  const { quiet = false, dryRun = false, projectPaths = [] } = options;
+  const { quiet = false, dryRun = false } = options;
 
   const log = (msg: string): void => {
     if (!quiet) console.log(msg);
@@ -184,11 +172,42 @@ export function wakeup(options: WakeupOptions = {}): WakeupResult {
     }
   }
 
-  // Determine project paths to check
-  const pathsToCheck =
-    projectPaths.length > 0 ? projectPaths : [process.cwd()];
+  // Step 5: Get all registered projects from global registry
+  const registeredProjects = getRegisteredProjects(false); // enabled only
 
-  const projectsWithWork = findProjectsWithWork(pathsToCheck);
+  if (registeredProjects.length === 0) {
+    log('No registered projects found');
+    log('Run "steroids projects add <path>" to register a project');
+    return {
+      action: 'none',
+      reason: 'No registered projects',
+      pendingTasks: 0,
+    };
+  }
+
+  log(`Checking ${registeredProjects.length} registered project(s)...`);
+
+  // Step 6: Find projects with pending work
+  const projectsWithWork: string[] = [];
+
+  for (const project of registeredProjects) {
+    // Skip if project directory doesn't exist
+    if (!existsSync(project.path)) {
+      log(`Skipping ${project.path}: directory not found`);
+      continue;
+    }
+
+    // Skip if project already has an active runner
+    if (hasActiveRunnerForProject(project.path)) {
+      log(`Skipping ${project.path}: runner already active`);
+      continue;
+    }
+
+    // Check for pending work
+    if (projectHasPendingWork(project.path)) {
+      projectsWithWork.push(project.path);
+    }
+  }
 
   if (projectsWithWork.length === 0) {
     log('No projects with pending tasks found');
@@ -199,25 +218,28 @@ export function wakeup(options: WakeupOptions = {}): WakeupResult {
     };
   }
 
-  // Step 5: Start a new runner
+  // Step 7: Start a runner for the first project with work
+  const projectPath = projectsWithWork[0];
   log(`Found ${projectsWithWork.length} project(s) with work`);
-  log(`Starting runner for: ${projectsWithWork[0]}`);
+  log(`Starting runner for: ${projectPath}`);
 
   if (dryRun) {
     return {
-      action: 'started',
-      reason: `Would start runner for ${projectsWithWork[0]} (dry-run)`,
+      action: 'would_start',
+      reason: `Would start runner for ${projectPath} (dry-run)`,
       pendingTasks: projectsWithWork.length,
+      projectPath,
     };
   }
 
-  const result = startRunner(projectsWithWork[0]);
+  const result = startRunner(projectPath);
   if (result) {
     return {
       action: 'started',
-      reason: `Started runner for ${projectsWithWork[0]}`,
+      reason: `Started runner for ${projectPath}`,
       pid: result.pid,
       pendingTasks: projectsWithWork.length,
+      projectPath,
     };
   }
 
@@ -230,7 +252,7 @@ export function wakeup(options: WakeupOptions = {}): WakeupResult {
 /**
  * Check if wake-up is needed without taking action
  */
-export function checkWakeupNeeded(projectPaths: string[] = []): {
+export function checkWakeupNeeded(): {
   needed: boolean;
   reason: string;
 } {
@@ -256,14 +278,20 @@ export function checkWakeupNeeded(projectPaths: string[] = []): {
     return { needed: true, reason: 'Zombie lock needs cleanup' };
   }
 
-  const pathsToCheck =
-    projectPaths.length > 0 ? projectPaths : [process.cwd()];
-  const projectsWithWork = findProjectsWithWork(pathsToCheck);
+  // Check registered projects
+  const registeredProjects = getRegisteredProjects(false);
+  let projectsWithWork = 0;
 
-  if (projectsWithWork.length > 0) {
+  for (const project of registeredProjects) {
+    if (existsSync(project.path) && projectHasPendingWork(project.path)) {
+      projectsWithWork++;
+    }
+  }
+
+  if (projectsWithWork > 0) {
     return {
       needed: true,
-      reason: `${projectsWithWork.length} project(s) have pending tasks`,
+      reason: `${projectsWithWork} project(s) have pending tasks`,
     };
   }
 

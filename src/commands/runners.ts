@@ -380,7 +380,6 @@ OPTIONS:
   const result = wakeup({
     quiet: values.quiet,
     dryRun: values['dry-run'],
-    projectPaths: [process.cwd()],
   });
 
   if (values.json) {

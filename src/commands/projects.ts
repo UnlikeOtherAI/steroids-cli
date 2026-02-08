@@ -1,0 +1,429 @@
+/**
+ * steroids projects - Manage global project registry
+ */
+
+import { parseArgs } from 'node:util';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { GlobalFlags } from '../cli/flags.js';
+import { createOutput } from '../cli/output.js';
+import { colors, markers } from '../cli/colors.js';
+import {
+  getRegisteredProjects,
+  registerProject,
+  unregisterProject,
+  enableProject,
+  disableProject,
+  pruneProjects,
+  getRegisteredProject,
+} from '../runners/projects.js';
+
+const HELP = `
+steroids projects - Manage global project registry
+
+USAGE:
+  steroids projects <subcommand> [options]
+
+SUBCOMMANDS:
+  list                List all registered projects
+  add <path>          Register a project
+  remove <path>       Unregister a project
+  enable <path>       Enable a project (include in wakeup)
+  disable <path>      Disable a project (skip in wakeup)
+  prune               Remove projects that no longer exist
+
+OPTIONS:
+  -a, --all           Include disabled projects (list only)
+  -h, --help          Show help
+
+DESCRIPTION:
+  The global project registry tracks all steroids projects on your system.
+  The runner wakeup system uses this registry to monitor and restart runners
+  for projects with pending work.
+
+EXAMPLES:
+  steroids projects list
+  steroids projects list --all
+  steroids projects add ~/code/my-app
+  steroids projects remove ~/old-project
+  steroids projects disable ~/code/on-hold
+  steroids projects enable ~/code/on-hold
+  steroids projects prune
+`;
+
+export async function projectsCommand(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'projects', flags });
+
+  const { values, positionals } = parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean', short: 'h', default: false },
+      all: { type: 'boolean', short: 'a', default: false },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help || flags.help) {
+    out.log(HELP);
+    return;
+  }
+
+  if (positionals.length === 0) {
+    out.log(HELP);
+    return;
+  }
+
+  const subcommand = positionals[0];
+
+  switch (subcommand) {
+    case 'list':
+      await listProjects(out, values.all as boolean, flags);
+      break;
+
+    case 'add':
+      if (positionals.length < 2) {
+        out.error('INVALID_ARGUMENTS', 'Missing required argument: <path>');
+        out.log('Usage: steroids projects add <path>');
+        process.exit(1);
+      }
+      await addProject(out, positionals[1], flags);
+      break;
+
+    case 'remove':
+      if (positionals.length < 2) {
+        out.error('INVALID_ARGUMENTS', 'Missing required argument: <path>');
+        out.log('Usage: steroids projects remove <path>');
+        process.exit(1);
+      }
+      await removeProject(out, positionals[1], flags);
+      break;
+
+    case 'enable':
+      if (positionals.length < 2) {
+        out.error('INVALID_ARGUMENTS', 'Missing required argument: <path>');
+        out.log('Usage: steroids projects enable <path>');
+        process.exit(1);
+      }
+      await enableProjectCmd(out, positionals[1], flags);
+      break;
+
+    case 'disable':
+      if (positionals.length < 2) {
+        out.error('INVALID_ARGUMENTS', 'Missing required argument: <path>');
+        out.log('Usage: steroids projects disable <path>');
+        process.exit(1);
+      }
+      await disableProjectCmd(out, positionals[1], flags);
+      break;
+
+    case 'prune':
+      await pruneProjectsCmd(out, flags);
+      break;
+
+    default:
+      out.error('INVALID_ARGUMENTS', `Unknown subcommand: ${subcommand}`);
+      out.log('Run "steroids projects --help" for usage information.');
+      process.exit(1);
+  }
+}
+
+async function listProjects(
+  out: ReturnType<typeof createOutput>,
+  includeDisabled: boolean,
+  flags: GlobalFlags
+): Promise<void> {
+  const projects = getRegisteredProjects(includeDisabled);
+
+  if (flags.json) {
+    out.success({
+      projects: projects.map((p) => ({
+        path: p.path,
+        name: p.name,
+        enabled: p.enabled,
+        registered_at: p.registered_at,
+        last_seen_at: p.last_seen_at,
+      })),
+      count: projects.length,
+    });
+    return;
+  }
+
+  if (projects.length === 0) {
+    out.log('No registered projects.');
+    out.log('');
+    out.log('Run "steroids init" in a project directory to register it.');
+    return;
+  }
+
+  out.log('');
+  out.log(colors.bold('Registered Projects:'));
+  out.log('');
+
+  for (const project of projects) {
+    const status = project.enabled ? colors.green('✓ enabled') : colors.dim('○ disabled');
+    const name = project.name ? colors.cyan(project.name) : colors.dim('(unnamed)');
+
+    out.log(`  ${status}  ${name}`);
+    out.log(`     ${colors.dim(project.path)}`);
+    out.log(`     ${colors.dim(`Last seen: ${formatDate(project.last_seen_at)}`)}`);
+    out.log('');
+  }
+
+  out.log(colors.dim(`Total: ${projects.length} project(s)`));
+}
+
+async function addProject(
+  out: ReturnType<typeof createOutput>,
+  pathArg: string,
+  flags: GlobalFlags
+): Promise<void> {
+  const projectPath = resolve(pathArg);
+
+  // Validate project exists
+  if (!existsSync(projectPath)) {
+    out.error('PROJECT_NOT_FOUND', `Directory does not exist: ${projectPath}`);
+    process.exit(1);
+  }
+
+  // Check if it's a steroids project
+  const steroidsDbPath = `${projectPath}/.steroids/steroids.db`;
+  if (!existsSync(steroidsDbPath)) {
+    out.error('NOT_STEROIDS_PROJECT', `Not a steroids project: ${projectPath}`);
+    out.log('');
+    out.log('Run "steroids init" in that directory first.');
+    process.exit(1);
+  }
+
+  if (flags.dryRun) {
+    out.log(colors.yellow('Dry run: Would register project'));
+    out.log(`Path: ${projectPath}`);
+    return;
+  }
+
+  // Check if already registered
+  const existing = getRegisteredProject(projectPath);
+  if (existing) {
+    if (flags.json) {
+      out.success({
+        message: 'Project already registered',
+        path: projectPath,
+        name: existing.name,
+        alreadyRegistered: true,
+      });
+    } else {
+      out.log(markers.info('Project already registered'));
+      out.log(`Path: ${colors.cyan(projectPath)}`);
+      if (existing.name) {
+        out.log(`Name: ${colors.cyan(existing.name)}`);
+      }
+    }
+    return;
+  }
+
+  // Register the project
+  registerProject(projectPath);
+
+  if (flags.json) {
+    out.success({
+      message: 'Project registered successfully',
+      path: projectPath,
+    });
+  } else {
+    out.log('');
+    out.log(markers.success('Project registered successfully!'));
+    out.log(`Path: ${colors.cyan(projectPath)}`);
+    out.log('');
+    out.log('The runner wakeup system will now monitor this project.');
+  }
+}
+
+async function removeProject(
+  out: ReturnType<typeof createOutput>,
+  pathArg: string,
+  flags: GlobalFlags
+): Promise<void> {
+  const projectPath = resolve(pathArg);
+
+  // Check if project is registered
+  const existing = getRegisteredProject(projectPath);
+  if (!existing) {
+    out.error('PROJECT_NOT_REGISTERED', `Project not registered: ${projectPath}`);
+    process.exit(1);
+  }
+
+  if (flags.dryRun) {
+    out.log(colors.yellow('Dry run: Would unregister project'));
+    out.log(`Path: ${projectPath}`);
+    return;
+  }
+
+  // Remove the project
+  unregisterProject(projectPath);
+
+  if (flags.json) {
+    out.success({
+      message: 'Project unregistered successfully',
+      path: projectPath,
+    });
+  } else {
+    out.log('');
+    out.log(markers.success('Project unregistered successfully!'));
+    out.log(`Path: ${colors.cyan(projectPath)}`);
+    out.log('');
+    out.log('The runner wakeup system will no longer monitor this project.');
+  }
+}
+
+async function enableProjectCmd(
+  out: ReturnType<typeof createOutput>,
+  pathArg: string,
+  flags: GlobalFlags
+): Promise<void> {
+  const projectPath = resolve(pathArg);
+
+  // Check if project is registered
+  const existing = getRegisteredProject(projectPath);
+  if (!existing) {
+    out.error('PROJECT_NOT_REGISTERED', `Project not registered: ${projectPath}`);
+    out.log('');
+    out.log('Run "steroids projects add <path>" to register it first.');
+    process.exit(1);
+  }
+
+  if (existing.enabled) {
+    if (flags.json) {
+      out.success({
+        message: 'Project already enabled',
+        path: projectPath,
+        alreadyEnabled: true,
+      });
+    } else {
+      out.log(markers.info('Project already enabled'));
+      out.log(`Path: ${colors.cyan(projectPath)}`);
+    }
+    return;
+  }
+
+  if (flags.dryRun) {
+    out.log(colors.yellow('Dry run: Would enable project'));
+    out.log(`Path: ${projectPath}`);
+    return;
+  }
+
+  // Enable the project
+  enableProject(projectPath);
+
+  if (flags.json) {
+    out.success({
+      message: 'Project enabled successfully',
+      path: projectPath,
+    });
+  } else {
+    out.log('');
+    out.log(markers.success('Project enabled successfully!'));
+    out.log(`Path: ${colors.cyan(projectPath)}`);
+    out.log('');
+    out.log('The runner wakeup system will now monitor this project.');
+  }
+}
+
+async function disableProjectCmd(
+  out: ReturnType<typeof createOutput>,
+  pathArg: string,
+  flags: GlobalFlags
+): Promise<void> {
+  const projectPath = resolve(pathArg);
+
+  // Check if project is registered
+  const existing = getRegisteredProject(projectPath);
+  if (!existing) {
+    out.error('PROJECT_NOT_REGISTERED', `Project not registered: ${projectPath}`);
+    out.log('');
+    out.log('Run "steroids projects add <path>" to register it first.');
+    process.exit(1);
+  }
+
+  if (!existing.enabled) {
+    if (flags.json) {
+      out.success({
+        message: 'Project already disabled',
+        path: projectPath,
+        alreadyDisabled: true,
+      });
+    } else {
+      out.log(markers.info('Project already disabled'));
+      out.log(`Path: ${colors.cyan(projectPath)}`);
+    }
+    return;
+  }
+
+  if (flags.dryRun) {
+    out.log(colors.yellow('Dry run: Would disable project'));
+    out.log(`Path: ${projectPath}`);
+    return;
+  }
+
+  // Disable the project
+  disableProject(projectPath);
+
+  if (flags.json) {
+    out.success({
+      message: 'Project disabled successfully',
+      path: projectPath,
+    });
+  } else {
+    out.log('');
+    out.log(markers.success('Project disabled successfully!'));
+    out.log(`Path: ${colors.cyan(projectPath)}`);
+    out.log('');
+    out.log('The runner wakeup system will skip this project until re-enabled.');
+  }
+}
+
+async function pruneProjectsCmd(
+  out: ReturnType<typeof createOutput>,
+  flags: GlobalFlags
+): Promise<void> {
+  if (flags.dryRun) {
+    out.log(colors.yellow('Dry run: Would prune stale projects'));
+    return;
+  }
+
+  const removed = pruneProjects();
+
+  if (flags.json) {
+    out.success({
+      message: `Pruned ${removed} project(s)`,
+      removed,
+    });
+  } else {
+    out.log('');
+    if (removed === 0) {
+      out.log(markers.success('No stale projects found.'));
+    } else {
+      out.log(markers.success(`Pruned ${removed} project(s) that no longer exist.`));
+    }
+  }
+}
+
+/**
+ * Format a date string for display
+ */
+function formatDate(dateStr: string): string {
+  try {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  } catch {
+    return dateStr;
+  }
+}

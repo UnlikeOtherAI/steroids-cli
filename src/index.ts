@@ -26,6 +26,7 @@ import { disputeCommand } from './commands/disputes.js';
 import { purgeCommand } from './commands/purge.js';
 import { gitCommand } from './commands/git.js';
 import { aboutCommand } from './commands/about.js';
+import { projectsCommand } from './commands/projects.js';
 
 // Read version from package.json - search up from dist folder
 function getVersion(): string {
@@ -59,6 +60,7 @@ COMMANDS:
   init              Initialize steroids in current directory
   sections          Manage task sections
   tasks             Manage tasks
+  projects          Manage global project registry
   dispute           Manage coder/reviewer disputes
   loop              Run the orchestrator loop
   runners           Manage runner daemons
@@ -195,6 +197,9 @@ async function main(): Promise<void> {
         break;
       case 'git':
         await gitCommand(commandArgs, flags);
+        break;
+      case 'projects':
+        await projectsCommand(commandArgs, flags);
         break;
       default:
         if (flags.json) {

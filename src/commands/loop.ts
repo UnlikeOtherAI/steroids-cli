@@ -5,7 +5,7 @@ import type { GlobalFlags } from '../cli/flags.js';
  */
 
 import { parseArgs } from 'node:util';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { openDatabase } from '../database/connection.js';
 import { getTask, updateTaskStatus, approveTask, rejectTask } from '../database/queries.js';
@@ -74,12 +74,25 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     const projectPath = resolve(values.project as string);
     const steroidsDbPath = join(projectPath, '.steroids', 'steroids.db');
 
-    // Validate project exists and has steroids database
+    // Validate project path exists
     if (!existsSync(projectPath)) {
-      console.error(`Error: Directory does not exist: ${projectPath}`);
+      console.error(`Error: Path does not exist: ${projectPath}`);
       process.exit(1);
     }
 
+    // Validate it's a directory, not a file
+    try {
+      const stats = statSync(projectPath);
+      if (!stats.isDirectory()) {
+        console.error(`Error: Path is not a directory: ${projectPath}`);
+        process.exit(1);
+      }
+    } catch (error) {
+      console.error(`Error: Cannot access path: ${projectPath}`);
+      process.exit(1);
+    }
+
+    // Validate it's a steroids project
     if (!existsSync(steroidsDbPath)) {
       console.error(`Error: Not a steroids project: ${projectPath}`);
       console.error(`  Missing: ${steroidsDbPath}`);
@@ -89,8 +102,12 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
 
     // Change to project directory
     process.chdir(projectPath);
-    console.log(`Switched to project: ${projectPath}`);
-    console.log('');
+
+    // Only show message if not in dry-run mode (for scripting consistency)
+    if (!values['dry-run']) {
+      console.log(`Switched to project: ${projectPath}`);
+      console.log('');
+    }
   }
 
   const projectPath = process.cwd();
