@@ -95,20 +95,37 @@ All CLIs are independent and can be used standalone.
 
 **NEVER develop features directly in this project.** Use the Steroids CLI to manage all work.
 
+**Before ANY development work:**
 ```bash
-# BAD: Just start coding a feature
-# "Let me implement the watch command..."
+# 1. Build the latest version
+npm run build
 
-# GOOD: Use the tool to manage work
-steroids about                           # Understand the system
-steroids tasks list                      # See pending tasks
-steroids sections list                   # See task sections
-steroids tasks update <id> --status in_progress  # Claim a task
-# ... do the work ...
-steroids tasks update <id> --status review       # Submit for review
+# 2. Verify CLI works
+node dist/index.js --version
+node dist/index.js tasks list
+
+# 3. Launch the automated loop and WATCH it
+node dist/index.js loop
+# Or use the watch command for real-time monitoring:
+node dist/index.js watch
 ```
 
-**Why?**
+**Why build first?**
+- The CLI must be runnable to orchestrate work
+- You can't use broken tools to build tools
+- Watching the loop helps debug issues in real-time
+- Compilation errors must be fixed before automation can run
+
+**The development workflow:**
+```bash
+npm run build                            # Compile latest code
+node dist/index.js about                 # Understand the system
+node dist/index.js tasks list            # See pending tasks
+node dist/index.js loop                  # Let automation handle it
+# WATCH the output - debug issues as they arise
+```
+
+**Why use automation instead of manual coding?**
 - Steroids is designed to orchestrate AI development work
 - Using the tool tests the tool (dogfooding)
 - Tasks have specifications that must be followed
@@ -116,7 +133,7 @@ steroids tasks update <id> --status review       # Submit for review
 - Skipping the process bypasses review and quality gates
 
 **The only direct work allowed:**
-- Bug fixes blocking the CLI itself
+- Bug fixes blocking the CLI itself (can't run loop if CLI is broken)
 - Documentation updates to CLAUDE.md
 - Emergency patches (must be reviewed afterward)
 
