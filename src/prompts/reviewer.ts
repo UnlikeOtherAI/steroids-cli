@@ -161,7 +161,12 @@ The coder included these notes when submitting for review:
 
 > ${submissionNotes}
 
-**Review these notes carefully** - the coder may be pointing to existing work or asking for guidance.
+**CRITICAL: If the coder claims work already exists:**
+1. **DO NOT reject just because the diff is empty or only shows version bumps**
+2. If a commit hash is mentioned, run \`git show <hash>\` to verify the work
+3. Check if the files/functionality described actually exist in the codebase
+4. If the existing work fulfills the specification: **APPROVE**
+5. If gaps remain: specify exactly what's missing, don't ask for re-implementation
 `
     : '';
 
@@ -263,6 +268,8 @@ Use sparingly. Most issues should be resolved via reject/fix cycle.
 2. **Be specific in rejection notes** - vague feedback wastes cycles
 3. **Approve if it works** - don't reject for style preferences
 4. **You MUST run one of the commands above** to record your decision
+5. **Verify coder's claims** - if coder says work exists in a commit, CHECK IT before rejecting
+6. **Empty diff ≠ no work** - work may exist in earlier commits the coder referenced
 
 If you do NOT run a command, the task will remain in review and you will be invoked again.
 
