@@ -20,6 +20,265 @@ In monorepo projects, different teams or components (API, mobile app, web fronte
 3. **Accelerated single-section work**
    - Multiple coders on independent tasks within the same section
 
+## Project Structure Discovery
+
+Before enabling multi-runner, help the user define their monorepo structure. LLM analyzes the codebase and suggests component boundaries.
+
+### The Setup Flow
+
+```bash
+$ steroids init --monorepo
+
+Analyzing project structure...
+
+📁 Detected Monorepo Structure:
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  /apps                                                          │
+│  ├── api/              → Backend API (Node.js/Express)          │
+│  ├── admin/            → Admin Dashboard (React)                │
+│  ├── web/              → Landing Page (Next.js)                 │
+│  └── mobile/           → Mobile App (React Native)              │
+│                                                                 │
+│  /packages                                                      │
+│  ├── shared-types/     → TypeScript types (SHARED)              │
+│  ├── ui-components/    → Component library (SHARED)             │
+│  └── utils/            → Utility functions (SHARED)             │
+│                                                                 │
+│  /infrastructure                                                │
+│  └── terraform/        → Infrastructure as Code                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+🔗 Detected Dependencies:
+  • api         → shared-types, utils
+  • admin       → shared-types, ui-components, utils
+  • web         → shared-types, ui-components
+  • mobile      → shared-types, ui-components
+
+⚠️  Shared Packages:
+  Changes to shared-types, ui-components, or utils affect multiple apps.
+  Recommend: Run these tasks with exclusive lock.
+
+Create sections from this structure? [Y/n]
+```
+
+### Auto-Generated Sections
+
+Based on the analysis, Steroids creates sections:
+
+```bash
+$ steroids sections list
+
+SECTIONS
+──────────────────────────────────────────────────────────────────
+ID        NAME                    PATH              ISOLATED  TASKS
+──────────────────────────────────────────────────────────────────
+a1b2c3d4  API                     apps/api/**       ✓         0
+e5f6g7h8  Admin Dashboard         apps/admin/**     ✓         0
+i9j0k1l2  Landing Page            apps/web/**       ✓         0
+m3n4o5p6  Mobile App              apps/mobile/**    ✓         0
+q7r8s9t0  Shared Types            packages/shared-* ⚠ EXCL    0
+u1v2w3x4  UI Components           packages/ui-*     ⚠ EXCL    0
+y5z6a7b8  Infrastructure          infrastructure/** ✓         0
+```
+
+- **ISOLATED (✓):** Can run in parallel with other isolated sections
+- **EXCLUSIVE (⚠):** When active, no other runners can run
+
+### How LLM Discovers Structure
+
+**Input to analyzer:**
+```typescript
+interface ProjectAnalysisInput {
+  directoryTree: string;           // Output of `tree` or `find`
+  packageJsons: PackageJson[];     // All package.json files found
+  workspaceConfig?: string;        // npm/yarn/pnpm workspace config
+  tsConfigs?: string[];            // TypeScript configs (show references)
+  dockerfiles?: string[];          // Dockerfile locations
+  readmes?: string[];              // README content for context
+}
+```
+
+**Analyzer prompt:**
+```
+Analyze this monorepo structure and identify:
+
+1. COMPONENTS: Independent applications that could be developed in parallel
+   - Look for: apps/, packages/, services/, modules/ directories
+   - Look for: separate package.json files
+   - Look for: Docker containers, deployment configs
+
+2. SHARED CODE: Packages/modules used by multiple components
+   - Look for: packages/shared*, packages/common*, libs/
+   - Check package.json dependencies for internal references
+   - TypeScript project references
+
+3. DEPENDENCY GRAPH: Which components depend on which shared code
+   - Parse package.json dependencies
+   - Check import statements in entry files
+   - TypeScript references
+
+4. BOUNDARIES: Suggest isolation boundaries for parallel development
+   - Components with no shared dependencies → fully parallel
+   - Components sharing code → need coordination
+   - Shared packages → exclusive access recommended
+
+Output as JSON:
+{
+  "components": [
+    {
+      "name": "API",
+      "path": "apps/api",
+      "type": "backend",
+      "framework": "express",
+      "dependencies": ["shared-types", "utils"],
+      "canRunParallel": true
+    }
+  ],
+  "sharedPackages": [
+    {
+      "name": "shared-types",
+      "path": "packages/shared-types",
+      "usedBy": ["api", "admin", "web", "mobile"],
+      "exclusive": true
+    }
+  ],
+  "dependencyGraph": { ... },
+  "suggestedSections": [ ... ]
+}
+```
+
+### Task Assignment
+
+When adding tasks, LLM suggests the appropriate section based on the spec:
+
+```bash
+$ steroids tasks add "Add user authentication endpoint" --auto-section
+
+Analyzing task specification...
+
+📍 Suggested Section: API
+   Reason: Task mentions "endpoint", likely modifies apps/api/
+
+   Files likely affected:
+   • apps/api/src/routes/auth.ts
+   • apps/api/src/middleware/auth.ts
+   • packages/shared-types/src/user.ts (SHARED!)
+
+   ⚠️  This task touches shared-types, which affects:
+   • Admin Dashboard
+   • Mobile App
+
+   Options:
+   [1] Add to API section (run when shared-types is free)
+   [2] Add to Shared Types section (exclusive)
+   [3] Specify section manually
+
+   Choice [1]:
+```
+
+### Structure Configuration File
+
+Store the discovered structure in `.steroids/structure.yaml`:
+
+```yaml
+# .steroids/structure.yaml
+# Auto-generated by `steroids init --monorepo`
+# Edit to customize component boundaries
+
+version: 1
+type: monorepo
+
+components:
+  - name: API
+    paths:
+      - apps/api/**
+    dependencies:
+      - shared-types
+      - utils
+    isolation: parallel
+
+  - name: Admin Dashboard
+    paths:
+      - apps/admin/**
+    dependencies:
+      - shared-types
+      - ui-components
+      - utils
+    isolation: parallel
+
+  - name: Mobile App
+    paths:
+      - apps/mobile/**
+    dependencies:
+      - shared-types
+      - ui-components
+    isolation: parallel
+
+shared:
+  - name: shared-types
+    paths:
+      - packages/shared-types/**
+    usedBy: [API, Admin Dashboard, Landing Page, Mobile App]
+    isolation: exclusive
+
+  - name: ui-components
+    paths:
+      - packages/ui-components/**
+    usedBy: [Admin Dashboard, Landing Page, Mobile App]
+    isolation: exclusive
+
+# Rules for task auto-assignment
+taskRouting:
+  patterns:
+    - match: "endpoint|route|API|backend"
+      section: API
+    - match: "admin|dashboard|backoffice"
+      section: Admin Dashboard
+    - match: "mobile|iOS|Android|React Native"
+      section: Mobile App
+    - match: "landing|marketing|SEO"
+      section: Landing Page
+    - match: "type|interface|schema"
+      section: shared-types
+```
+
+### Re-analyze Command
+
+As the project evolves, re-run analysis:
+
+```bash
+$ steroids structure analyze
+
+Comparing current structure to .steroids/structure.yaml...
+
+Changes detected:
+  + New directory: apps/docs/  (not mapped to any section)
+  + New package: packages/analytics/
+  ~ Modified: apps/api/ now depends on packages/analytics/
+
+Suggestions:
+  1. Create new section "Documentation" for apps/docs/
+  2. Create new section "Analytics" for packages/analytics/ (SHARED)
+  3. Update API section dependencies
+
+Apply suggestions? [Y/n]
+```
+
+### Why This Matters for Multi-Runner
+
+With a defined structure:
+
+| Without Structure | With Structure |
+|-------------------|----------------|
+| User guesses which sections are safe | System knows isolation boundaries |
+| Conflicts discovered at runtime | Conflicts prevented by design |
+| Manual task assignment | Auto-suggested sections |
+| Unclear shared dependencies | Explicit shared package rules |
+
+**The key insight:** Monorepos will become more popular with AI-assisted development. By understanding the structure upfront, Steroids can safely parallelize work across components while protecting shared code.
+
 ## Conflict Categories
 
 ### 1. File Conflicts (CRITICAL)
