@@ -601,6 +601,16 @@ Examples:
   steroids loop --dry-run                    # Preview without executing
 ```
 
+### Project Path Behavior
+
+When `--project <path>` is specified:
+1. Changes to the specified project directory before starting
+2. Validates that the path exists and contains `.steroids/steroids.db`
+3. Runs the loop in that project's context
+4. Useful for cron jobs and multi-project orchestration
+
+**Note:** Without `--project`, the loop runs in the current working directory.
+
 ### Section Focus Behavior
 
 When `--section` is specified:
