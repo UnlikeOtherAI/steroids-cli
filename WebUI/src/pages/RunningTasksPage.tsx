@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { runnersApi, ApiError } from '../services/api';
 import { ActiveTask } from '../types';
 import { Badge } from '../components/atoms/Badge';
@@ -29,6 +30,7 @@ function formatTimeAgo(dateStr: string | null): string {
 }
 
 export const RunningTasksPage: React.FC = () => {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<ActiveTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,12 +96,14 @@ export const RunningTasksPage: React.FC = () => {
           {tasks.map((task, index) => (
             <div
               key={`${task.runner_id}-${task.current_task_id}-${index}`}
-              className="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
+              className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 cursor-pointer hover:border-blue-300 transition-colors"
+              onClick={() => navigate(`/task/${task.current_task_id}?project=${encodeURIComponent(task.project_path)}`)}
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3">
                     <h3 className="text-lg font-semibold text-gray-900">
+                      <i className="fa-solid fa-arrow-up-right-from-square text-xs text-gray-400 mr-2"></i>
                       {task.current_task_id}
                     </h3>
                     <Badge variant="info">In Progress</Badge>

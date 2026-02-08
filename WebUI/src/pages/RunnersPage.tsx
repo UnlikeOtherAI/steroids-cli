@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { runnersApi, ApiError } from '../services/api';
 import { Runner } from '../types';
 import { Badge } from '../components/atoms/Badge';
@@ -36,6 +37,7 @@ function formatTimeAgo(dateStr: string | null): string {
 }
 
 export const RunnersPage: React.FC = () => {
+  const navigate = useNavigate();
   const [runners, setRunners] = useState<Runner[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,9 +135,13 @@ export const RunnersPage: React.FC = () => {
                     </p>
                   )}
 
-                  {runner.current_task_id && (
-                    <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                  {runner.current_task_id && runner.project_path && (
+                    <div
+                      className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100 cursor-pointer hover:bg-blue-100 transition-colors"
+                      onClick={() => navigate(`/task/${runner.current_task_id}?project=${encodeURIComponent(runner.project_path!)}`)}
+                    >
                       <p className="text-sm text-blue-800">
+                        <i className="fa-solid fa-arrow-up-right-from-square text-xs mr-2"></i>
                         <span className="font-medium">Current Task:</span>{' '}
                         {runner.current_task_id}
                       </p>

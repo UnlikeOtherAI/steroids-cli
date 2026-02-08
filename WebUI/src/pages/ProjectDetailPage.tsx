@@ -219,7 +219,13 @@ export const ProjectDetailPage: React.FC = () => {
         <p>Registered: {new Date(project.registered_at).toLocaleString()}</p>
         <p>Last seen: {new Date(project.last_seen_at).toLocaleString()}</p>
         {project.runner?.current_task_id && (
-          <p className="mt-2">Current Task: {project.runner.current_task_id}</p>
+          <p
+            className="mt-2 cursor-pointer text-blue-600 hover:text-blue-800"
+            onClick={() => navigate(`/task/${project.runner!.current_task_id}?project=${encodeURIComponent(project.path)}`)}
+          >
+            <i className="fa-solid fa-arrow-up-right-from-square text-xs mr-1"></i>
+            Current Task: {project.runner.current_task_id}
+          </p>
         )}
       </div>
     </div>

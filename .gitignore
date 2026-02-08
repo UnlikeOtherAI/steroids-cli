@@ -41,3 +41,4 @@ coverage/
 
 # Local steroids data
 .steroids/
+Monitor/.build/
