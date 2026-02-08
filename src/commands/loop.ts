@@ -107,7 +107,11 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
 
     // Validate project path exists
     if (!existsSync(projectPath)) {
-      console.error(`Error: Path does not exist: ${projectPath}`);
+      if (flags.json) {
+        out.error(ErrorCode.CONFIG_ERROR, `Path does not exist: ${projectPath}`, { path: projectPath });
+      } else {
+        console.error(`Error: Path does not exist: ${projectPath}`);
+      }
       process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
     }
 
@@ -115,27 +119,43 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     try {
       const stats = statSync(projectPath);
       if (!stats.isDirectory()) {
-        console.error(`Error: Path is not a directory: ${projectPath}`);
+        if (flags.json) {
+          out.error(ErrorCode.CONFIG_ERROR, `Path is not a directory: ${projectPath}`, { path: projectPath });
+        } else {
+          console.error(`Error: Path is not a directory: ${projectPath}`);
+        }
         process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
       }
     } catch (error) {
-      console.error(`Error: Cannot access path: ${projectPath}`);
+      if (flags.json) {
+        out.error(ErrorCode.CONFIG_ERROR, `Cannot access path: ${projectPath}`, { path: projectPath });
+      } else {
+        console.error(`Error: Cannot access path: ${projectPath}`);
+      }
       process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
     }
 
     // Validate it's a steroids project
     if (!existsSync(steroidsDbPath)) {
-      console.error(`Error: Not a steroids project: ${projectPath}`);
-      console.error(`  Missing: ${steroidsDbPath}`);
-      console.error('  Run "steroids init" in that directory first.');
-      process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
+      if (flags.json) {
+        out.error(ErrorCode.NOT_INITIALIZED, `Not a steroids project: ${projectPath}`, {
+          path: projectPath,
+          missing: steroidsDbPath,
+          hint: 'Run "steroids init" in that directory first.',
+        });
+      } else {
+        console.error(`Error: Not a steroids project: ${projectPath}`);
+        console.error(`  Missing: ${steroidsDbPath}`);
+        console.error('  Run "steroids init" in that directory first.');
+      }
+      process.exit(getExitCode(ErrorCode.NOT_INITIALIZED));
     }
 
     // Change to project directory
     process.chdir(projectPath);
 
     // Only show message if not in dry-run mode (for scripting consistency)
-    if (!flags.dryRun) {
+    if (!flags.dryRun && !flags.json) {
       console.log(`Switched to project: ${projectPath}`);
       console.log('');
     }
@@ -145,12 +165,19 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
 
   // Check if a runner is already active for this project
   if (hasActiveRunnerForProject(projectPath)) {
-    console.error('Error: A runner is already active for this project');
-    console.error('  Project: ' + projectPath);
-    console.error('');
-    console.error('Only one runner per project is allowed.');
-    console.error('Use "steroids runners list" to see active runners.');
-    process.exit(1);
+    if (flags.json) {
+      out.error(ErrorCode.RESOURCE_LOCKED, 'A runner is already active for this project', {
+        project: projectPath,
+        hint: 'Only one runner per project is allowed. Use "steroids runners list" to see active runners.',
+      });
+    } else {
+      console.error('Error: A runner is already active for this project');
+      console.error('  Project: ' + projectPath);
+      console.error('');
+      console.error('Only one runner per project is allowed.');
+      console.error('Use "steroids runners list" to see active runners.');
+    }
+    process.exit(getExitCode(ErrorCode.RESOURCE_LOCKED));
   }
 
   const { db, close } = openDatabase();
@@ -174,25 +201,40 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
         }
 
         if (!section) {
-          console.error(`Error: Section not found: ${sectionInput}`);
-          console.error('');
-          console.error('Available sections:');
           const sections = listSections(db);
-          if (sections.length === 0) {
-            console.error('  (no sections defined)');
+          if (flags.json) {
+            out.error(ErrorCode.SECTION_NOT_FOUND, `Section not found: ${sectionInput}`, {
+              sectionId: sectionInput,
+              availableSections: sections.map(s => ({ id: s.id.substring(0, 8), name: s.name })),
+            });
           } else {
-            for (const s of sections) {
-              console.error(`  ${s.id.substring(0, 8)}  ${s.name}`);
+            console.error(`Error: Section not found: ${sectionInput}`);
+            console.error('');
+            console.error('Available sections:');
+            if (sections.length === 0) {
+              console.error('  (no sections defined)');
+            } else {
+              for (const s of sections) {
+                console.error(`  ${s.id.substring(0, 8)}  ${s.name}`);
+              }
             }
           }
-          process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
+          process.exit(getExitCode(ErrorCode.SECTION_NOT_FOUND));
         }
 
         // Check if section is skipped (Phase 0.6 feature)
         if (section.skipped === 1) {
-          console.error(`Error: Section "${section.name}" is currently skipped`);
-          console.error('');
-          console.error(`Run 'steroids sections unskip "${section.name}"' to re-enable it.`);
+          if (flags.json) {
+            out.error(ErrorCode.CONFIG_ERROR, `Section "${section.name}" is currently skipped`, {
+              sectionId: section.id,
+              sectionName: section.name,
+              hint: `Run 'steroids sections unskip "${section.name}"' to re-enable it.`,
+            });
+          } else {
+            console.error(`Error: Section "${section.name}" is currently skipped`);
+            console.error('');
+            console.error(`Run 'steroids sections unskip "${section.name}"' to re-enable it.`);
+          }
           process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
         }
 
@@ -200,10 +242,11 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
         focusedSectionName = section.name;
       } catch (error) {
         // Handle ambiguous prefix error from getSection()
-        if (error instanceof Error) {
-          console.error(`Error: ${error.message}`);
+        const errorMessage = error instanceof Error ? error.message : 'Failed to resolve section';
+        if (flags.json) {
+          out.error(ErrorCode.CONFIG_ERROR, errorMessage, { sectionInput });
         } else {
-          console.error('Error: Failed to resolve section');
+          console.error(`Error: ${errorMessage}`);
         }
         process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
       }

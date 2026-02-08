@@ -116,10 +116,16 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
     case 'graph':
       await showGraph(subArgs, flags);
       break;
-    default:
-      console.error(`Unknown subcommand: ${subcommand}`);
-      console.log(HELP);
+    default: {
+      const out = createOutput({ command: 'sections', subcommand, flags });
+      if (flags.json) {
+        out.error(ErrorCode.INVALID_ARGUMENTS, `Unknown subcommand: ${subcommand}`);
+      } else {
+        console.error(`Unknown subcommand: ${subcommand}`);
+        console.log(HELP);
+      }
       process.exit(getExitCode(ErrorCode.INVALID_ARGUMENTS));
+    }
   }
 }
 
@@ -286,7 +292,13 @@ EXAMPLES:
     if (values.section) {
       const section = getSection(db, values.section);
       if (!section) {
-        console.error(`Error: Section not found: ${values.section}`);
+        if (flags.json) {
+          out.error(ErrorCode.SECTION_NOT_FOUND, `Section not found: ${values.section}`, {
+            sectionId: values.section,
+          });
+        } else {
+          console.error(`Error: Section not found: ${values.section}`);
+        }
         process.exit(getExitCode(ErrorCode.SECTION_NOT_FOUND));
       }
       sections = [section];

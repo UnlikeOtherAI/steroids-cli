@@ -152,7 +152,7 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
         console.error(`Unknown subcommand: ${subcommand}`);
         console.log(HELP);
       }
-      process.exit(1);
+      process.exit(getExitCode(ErrorCode.INVALID_ARGUMENTS));
   }
 }
 
@@ -288,9 +288,16 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
     if (values.section) {
       const section = getSection(db, values.section);
       if (!section) {
-        console.error(`Section not found: ${values.section}`);
-        console.error('Use "steroids sections list" to see available sections.');
-        process.exit(1);
+        if (outputJson) {
+          outputJsonError('tasks', 'list', ErrorCode.SECTION_NOT_FOUND, `Section not found: ${values.section}`, {
+            sectionId: values.section,
+            hint: 'Use "steroids sections list" to see available sections.',
+          });
+        } else {
+          console.error(`Section not found: ${values.section}`);
+          console.error('Use "steroids sections list" to see available sections.');
+        }
+        process.exit(getExitCode(ErrorCode.SECTION_NOT_FOUND));
       }
       sectionId = section.id;
     }
