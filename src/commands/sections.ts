@@ -4,6 +4,10 @@ import type { GlobalFlags } from '../cli/flags.js';
  */
 
 import { parseArgs } from 'node:util';
+import { tmpdir } from 'node:os';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { execSync } from 'node:child_process';
 import { openDatabase } from '../database/connection.js';
 import {
   createSection,
@@ -15,6 +19,9 @@ import {
   removeSectionDependency,
   getSectionDependencies,
   getPendingDependencies,
+  listTasks,
+  STATUS_MARKERS,
+  type TaskStatus,
 } from '../database/queries.js';
 
 const HELP = `
@@ -435,6 +442,12 @@ async function showGraph(args: string[]): Promise<void> {
     options: {
       help: { type: 'boolean', short: 'h', default: false },
       json: { type: 'boolean', short: 'j', default: false },
+      mermaid: { type: 'boolean', default: false },
+      output: { type: 'string' },  // png or svg
+      open: { type: 'boolean', short: 'o', default: false },
+      tasks: { type: 'boolean', default: false },
+      status: { type: 'string' },  // active, pending, etc.
+      section: { type: 'string' },  // section ID filter
     },
     allowPositionals: false,
   });
@@ -447,11 +460,21 @@ USAGE:
   steroids sections graph [options]
 
 OPTIONS:
-  -j, --json    Output as JSON
-  -h, --help    Show help
+  -j, --json           Output as JSON
+  --mermaid            Output Mermaid flowchart syntax
+  --output <format>    Generate image file (png or svg)
+  -o, --open           Auto-open generated file
+  --tasks              Include tasks within sections
+  --status <status>    Filter tasks by status (pending, active, etc.)
+  --section <id>       Show only specified section
+  -h, --help           Show help
 
 EXAMPLES:
   steroids sections graph
+  steroids sections graph --mermaid
+  steroids sections graph --output png -o
+  steroids sections graph --tasks --status active
+  steroids sections graph --section abc123 --tasks
 `);
     return;
   }

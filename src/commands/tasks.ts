@@ -194,7 +194,7 @@ async function listAllTasks(args: string[]): Promise<void> {
       return;
     }
 
-    console.log('TASKS');
+    console.log(`TASKS (Project: ${process.cwd()})`);
     console.log('─'.repeat(80));
     console.log(
       'STATUS  TITLE                                                   REJ  ID'
