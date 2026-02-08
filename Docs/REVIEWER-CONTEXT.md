@@ -59,6 +59,30 @@ Do NOT reject this task for issues that are explicitly listed as separate tasks 
 ...
 ```
 
+## Configuration
+
+### Section Task Limit
+
+To prevent prompt bloat in large sections, the number of tasks shown is limited:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `MAX_SECTION_TASKS` | 15 | Maximum tasks to show in reviewer prompt |
+
+When a section has more tasks than the limit:
+- Only the first 15 tasks are shown
+- A note indicates how many more exist: `... and 5 more tasks`
+- Current task is always included regardless of limit
+
+**Future Enhancement:** Make configurable via `steroids.config.json`:
+```json
+{
+  "reviewer": {
+    "maxSectionTasks": 15
+  }
+}
+```
+
 ## DO NOT REVERT
 
 This code is **essential infrastructure** for the review system. Without it:
