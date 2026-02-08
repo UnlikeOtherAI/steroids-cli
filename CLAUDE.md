@@ -58,6 +58,40 @@ steroids loop
 
 The Makefile does steps 2-3: `make build`
 
+### Debug Stuck Runners (CRITICAL)
+
+**When a runner appears stuck, ALWAYS investigate why.** Don't just restart - find the root cause.
+
+**Debugging steps:**
+```bash
+# 1. Check runner status
+steroids runners list
+
+# 2. Check what task is active
+steroids tasks --status active
+
+# 3. Check if coder/reviewer process is running
+ps aux | grep -E "claude|codex" | grep -v grep
+
+# 4. Check task audit trail
+steroids tasks audit <task-id>
+
+# 5. If runner registered but no process running, check the daemon
+ps aux | grep <runner-pid>
+
+# 6. Run loop in foreground to see errors
+steroids runners stop --all
+steroids loop --once
+```
+
+**Common issues:**
+- Daemon registered but not running loop (skeleton code)
+- Coder/reviewer process crashed
+- Task stuck in state that doesn't match any action
+- Database locked
+
+**Always document the root cause when found and create a fix.**
+
 ### Docker Image Releases (WebUI/API)
 
 **Release a new Docker image version with every WebUI or API change.**

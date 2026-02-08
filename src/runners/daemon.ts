@@ -7,6 +7,7 @@ import { openGlobalDatabase } from './global-db.js';
 import { acquireLock, releaseLock, checkLockStatus } from './lock.js';
 import { createHeartbeatManager } from './heartbeat.js';
 import { hasActiveRunnerForProject } from './wakeup.js';
+import { runOrchestratorLoop } from './orchestrator-loop.js';
 
 export type RunnerStatus = 'idle' | 'running' | 'stopping';
 
@@ -65,6 +66,37 @@ export function updateRunnerStatus(
          WHERE id = ?`
       ).run(status, runnerId);
     }
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Update runner heartbeat timestamp
+ */
+export function updateRunnerHeartbeat(runnerId: string): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare(
+      `UPDATE runners SET heartbeat_at = datetime('now') WHERE id = ?`
+    ).run(runnerId);
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Update runner's current task
+ */
+export function updateRunnerCurrentTask(
+  runnerId: string,
+  taskId: string | null
+): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare(
+      `UPDATE runners SET current_task_id = ?, heartbeat_at = datetime('now') WHERE id = ?`
+    ).run(taskId, runnerId);
   } finally {
     close();
   }
@@ -183,15 +215,31 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
   console.log(`Runner started (ID: ${runnerId}, PID: ${process.pid})`);
   updateRunnerStatus(runnerId, 'running');
 
-  // The actual task processing loop would be implemented here
-  // For now, we just keep the daemon alive
-  console.log('Runner is idle, waiting for tasks...');
+  // Track if shutdown was requested
+  let shutdownRequested = false;
 
-  // Keep process alive
-  // In real implementation, this would be the task processing loop
-  await new Promise(() => {
-    // This promise never resolves - daemon runs until killed
-  });
+  // Run the orchestrator loop
+  try {
+    await runOrchestratorLoop({
+      projectPath: effectiveProjectPath,
+      shouldStop: () => shutdownRequested,
+      onIteration: (iteration) => {
+        // Update heartbeat on each iteration
+        updateRunnerHeartbeat(runnerId);
+      },
+      onTaskStart: (taskId) => {
+        updateRunnerCurrentTask(runnerId, taskId);
+      },
+      onTaskComplete: () => {
+        updateRunnerCurrentTask(runnerId, null);
+      },
+    });
+  } catch (error) {
+    console.error('Loop error:', error);
+  }
+
+  // Cleanup and exit
+  shutdown('completed');
 }
 
 /**
