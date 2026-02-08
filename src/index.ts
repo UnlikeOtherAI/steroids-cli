@@ -19,6 +19,8 @@ import { gcCommand } from './commands/gc.js';
 import { completionCommand } from './commands/completion.js';
 import { locksCommand } from './commands/locks.js';
 import { disputeCommand } from './commands/disputes.js';
+import { purgeCommand } from './commands/purge.js';
+import { gitCommand } from './commands/git.js';
 
 const VERSION = '0.1.0';
 
@@ -41,6 +43,8 @@ COMMANDS:
   backup            Manage backups
   logs              View invocation logs
   gc                Garbage collection
+  purge             Purge old data
+  git               Git integration commands
   completion        Generate shell completions
   locks             Manage task and section locks
 
@@ -117,6 +121,12 @@ async function main(): Promise<void> {
         break;
       case 'dispute':
         await disputeCommand(commandArgs);
+        break;
+      case 'purge':
+        await purgeCommand(commandArgs);
+        break;
+      case 'git':
+        await gitCommand(commandArgs);
         break;
       default:
         console.error(`Unknown command: ${command}`);
