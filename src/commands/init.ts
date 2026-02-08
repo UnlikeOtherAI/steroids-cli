@@ -119,8 +119,16 @@ export async function initCommand(args: string[], flags: GlobalFlags): Promise<v
   out.verbose('Initializing Steroids...');
 
   if (flags.dryRun) {
-    out.log(colors.yellow('Dry run: Would initialize Steroids'));
-    out.log(`Database would be created at: ${dbPath}`);
+    if (flags.json) {
+      out.success({
+        message: 'Dry run: Would initialize Steroids',
+        database: dbPath,
+        dryRun: true,
+      });
+    } else {
+      out.log(colors.yellow('Dry run: Would initialize Steroids'));
+      out.log(`Database would be created at: ${dbPath}`);
+    }
     return;
   }
 
