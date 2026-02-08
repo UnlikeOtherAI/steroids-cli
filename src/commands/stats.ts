@@ -12,45 +12,51 @@ import {
   getActivityCount,
   purgeActivity,
 } from '../runners/activity-log.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids stats - Global activity statistics
+const HELP = generateHelp({
+  command: 'stats',
+  description: 'Global activity statistics',
+  details: `View activity statistics across all registered projects for a given time range.
+Shows completed, failed, skipped, partial, and disputed tasks with success rates.`,
+  usage: [
+    'steroids stats [time-range] [options]',
+    'steroids stats purge [time-range] [options]',
+  ],
+  subcommands: [
+    { name: '(default)', args: '[time-range]', description: 'Show stats for time range' },
+    { name: 'purge', args: '[time-range]', description: 'Purge old activity log entries' },
+  ],
+  options: [
+    { long: 'force', description: 'Required for purging all entries (purge, no time range)' },
+  ],
+  examples: [
+    { command: 'steroids stats', description: 'Stats for past 12 hours' },
+    { command: 'steroids stats 24', description: 'Stats for past 24 hours' },
+    { command: 'steroids stats 60m', description: 'Stats for past 60 minutes' },
+    { command: 'steroids stats 3d', description: 'Stats for past 3 days' },
+    { command: 'steroids stats 30d', description: 'Stats for past month' },
+    { command: 'steroids stats --json', description: 'JSON output' },
+    { command: 'steroids stats purge 30d', description: 'Keep last 30 days, delete older' },
+    { command: 'steroids stats purge 7d', description: 'Keep last 7 days' },
+    { command: 'steroids stats purge --force', description: 'Delete ALL entries' },
+  ],
+  related: [
+    { command: 'steroids tasks', description: 'Manage tasks' },
+    { command: 'steroids projects', description: 'Manage projects' },
+  ],
+  sections: [
+    {
+      title: 'TIME RANGE FORMAT',
+      content: `<number>     Hours (default unit)
+<number>h    Hours
+<number>m    Minutes
+<number>d    Days
 
-USAGE:
-  steroids stats [time-range] [options]
-  steroids stats purge [time-range] [options]
-
-TIME RANGE FORMAT:
-  <number>              Hours (default unit)
-  <number>h             Hours
-  <number>m             Minutes
-  <number>d             Days
-
-  Default: 12 hours
-
-SUBCOMMANDS:
-  (none)            Show stats for time range (default)
-  purge             Purge old activity log entries
-
-STATS OPTIONS:
-  -h, --help        Show help
-  -j, --json        Output as JSON
-
-PURGE OPTIONS:
-  --force           Required for purging all entries (no time range)
-
-EXAMPLES:
-  steroids stats               # Stats for past 12 hours
-  steroids stats 24            # Stats for past 24 hours
-  steroids stats 60m           # Stats for past 60 minutes
-  steroids stats 3d            # Stats for past 3 days
-  steroids stats 30d           # Stats for past month
-  steroids stats --json        # JSON output
-
-  steroids stats purge 30d     # Keep last 30 days, delete older
-  steroids stats purge 7d      # Keep last 7 days
-  steroids stats purge --force # Delete ALL entries
-`;
+Default: 12 hours`,
+    },
+  ],
+});
 
 /**
  * Parse time range string into hours

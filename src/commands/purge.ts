@@ -20,6 +20,7 @@ import {
 import { join } from 'node:path';
 import { openDatabase, isInitialized } from '../database/connection.js';
 import type Database from 'better-sqlite3';
+import { generateHelp } from '../cli/help.js';
 
 const STEROIDS_DIR = '.steroids';
 const LOGS_DIR = 'logs';
@@ -34,39 +35,41 @@ interface PurgeResult {
   logFiles: number;
 }
 
-const HELP = `
-steroids purge - Purge old data
-
-USAGE:
-  steroids purge <subcommand> [options]
-
-SUBCOMMANDS:
-  tasks                 Purge completed tasks
-  ids                   Purge orphaned IDs
-  logs                  Purge old logs
-  all                   Purge everything
-
-COMMON OPTIONS:
-  --dry-run             Preview without making changes
-  --yes                 Skip confirmation prompt
-  --keep-audit          Preserve audit trail
-
-TASKS OPTIONS:
-  --older-than <dur>    Purge tasks older than duration (e.g., 30d)
-  --backup              Backup before purge
-
-LOGS OPTIONS:
-  --older-than <dur>    Purge logs older than duration (e.g., 7d)
-
-EXAMPLES:
-  steroids purge tasks --older-than 30d --dry-run
-  steroids purge ids
-  steroids purge logs --older-than 7d
-  steroids purge all --yes --backup
-`;
+const HELP = generateHelp({
+  command: 'purge',
+  description: 'Purge old data',
+  details: 'Remove completed tasks, orphaned IDs, and old log files to free up space and clean the database.',
+  usage: [
+    'steroids purge <subcommand> [options]',
+  ],
+  subcommands: [
+    { name: 'tasks', description: 'Purge completed tasks' },
+    { name: 'ids', description: 'Purge orphaned IDs' },
+    { name: 'logs', description: 'Purge old logs' },
+    { name: 'all', description: 'Purge everything' },
+  ],
+  options: [
+    { long: 'older-than', description: 'Purge data older than duration (tasks, logs)', values: '<dur> (e.g., 30d, 7d)' },
+    { short: 'y', long: 'yes', description: 'Skip confirmation prompt' },
+    { long: 'keep-audit', description: 'Preserve audit trail (tasks)' },
+    { long: 'backup', description: 'Backup before purge (tasks, all)' },
+  ],
+  examples: [
+    { command: 'steroids purge tasks --older-than 30d --dry-run', description: 'Preview purging old tasks' },
+    { command: 'steroids purge tasks --older-than 30d --yes --backup', description: 'Purge tasks with backup' },
+    { command: 'steroids purge ids', description: 'Clean orphaned IDs' },
+    { command: 'steroids purge logs --older-than 7d', description: 'Remove logs older than 7 days' },
+    { command: 'steroids purge all --yes --backup', description: 'Purge everything with backup' },
+  ],
+  related: [
+    { command: 'steroids gc', description: 'Garbage collection' },
+    { command: 'steroids backup', description: 'Manage backups' },
+  ],
+});
 
 export async function purgeCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
+  // Check global help flag
+  if (flags.help || args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;
   }

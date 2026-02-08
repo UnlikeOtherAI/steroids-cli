@@ -10,6 +10,7 @@ import { readdirSync, statSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { openDatabase, isInitialized } from '../database/connection.js';
 import { listTasks } from '../database/queries.js';
+import { generateHelp } from '../cli/help.js';
 
 // Project type detection files
 const PROJECT_MARKERS: Record<string, string[]> = {
@@ -33,40 +34,44 @@ interface ProjectInfo {
   hasSteroids: boolean;
 }
 
-const HELP = `
-steroids scan - Scan directory for projects
-
-USAGE:
-  steroids scan [directory] [options]
-
-ARGUMENTS:
-  directory           Directory to scan (default: current directory)
-
-OPTIONS:
-  --filter <type>     Filter by project type: node, python, rust, go, ruby
-  --sort <field>      Sort by: name, type, health, tasks (default: name)
-  --limit <n>         Limit number of results
-  --has-tasks         Only show projects with pending tasks
-  --depth <n>         Scan depth (default: 1)
-  -j, --json          Output as JSON
-  -h, --help          Show help
-
-PROJECT TYPES:
-  node                package.json
-  python              pyproject.toml, setup.py, requirements.txt
-  rust                Cargo.toml
-  go                  go.mod
-  ruby                Gemfile
-  elixir              mix.exs
-  java                pom.xml, build.gradle
-  dotnet              *.csproj, *.sln
-
-EXAMPLES:
-  steroids scan ~/Projects
-  steroids scan ~/Projects --filter node --sort health
-  steroids scan ~/Projects --has-tasks --limit 10
-  steroids scan . --depth 2
-`;
+const HELP = generateHelp({
+  command: 'scan',
+  description: 'Scan directory for projects',
+  details: 'Detects project types, shows health scores, and identifies pending tasks.',
+  usage: [
+    'steroids scan [directory] [options]',
+  ],
+  options: [
+    { long: 'filter', description: 'Filter by project type', values: 'node | python | rust | go | ruby | elixir | java | dotnet' },
+    { long: 'sort', description: 'Sort by field', values: 'name | type | health | tasks', default: 'name' },
+    { long: 'limit', description: 'Limit number of results', values: '<n>' },
+    { long: 'has-tasks', description: 'Only show projects with pending tasks' },
+    { long: 'depth', description: 'Scan depth', values: '<n>', default: '1' },
+  ],
+  examples: [
+    { command: 'steroids scan ~/Projects', description: 'Scan Projects directory' },
+    { command: 'steroids scan ~/Projects --filter node --sort health', description: 'Scan for Node.js projects, sorted by health' },
+    { command: 'steroids scan ~/Projects --has-tasks --limit 10', description: 'Show 10 projects with pending tasks' },
+    { command: 'steroids scan . --depth 2', description: 'Scan 2 levels deep' },
+  ],
+  related: [
+    { command: 'steroids projects', description: 'Manage project registry' },
+    { command: 'steroids init', description: 'Initialize steroids' },
+  ],
+  sections: [
+    {
+      title: 'PROJECT TYPES',
+      content: `node      package.json
+python    pyproject.toml, setup.py, requirements.txt
+rust      Cargo.toml
+go        go.mod
+ruby      Gemfile
+elixir    mix.exs
+java      pom.xml, build.gradle
+dotnet    *.csproj, *.sln`,
+    },
+  ],
+});
 
 export async function scanCommand(args: string[], flags: GlobalFlags): Promise<void> {
   // Check global help flag first
