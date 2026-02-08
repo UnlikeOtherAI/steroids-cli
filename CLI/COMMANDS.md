@@ -459,13 +459,16 @@ Usage: steroids sections [options]
        steroids sections update <id> [options]
        steroids sections remove <id> [options]
        steroids sections reorder [options]
+       steroids sections skip <id|name> [options]
+       steroids sections unskip <id|name> [options]
 
 Arguments:
   name                      Section name
-  id                        Section GUID
+  id                        Section GUID (or partial match)
 
 List Options:
   --include-tasks           Include task count for each section
+  --all                     Include skipped sections (hidden by default)
 
 Add Options:
   --position <n>            Position in ordering (default: append)
@@ -483,8 +486,12 @@ Reorder Options:
   --id <id>                 Section ID to move
   --position <n>            New position
 
+Skip/Unskip Options:
+  (none)                    Section is identified by ID or name
+
 Examples:
-  steroids sections                                  # List all sections
+  steroids sections                                  # List active sections
+  steroids sections --all                            # Include skipped sections
   steroids sections --include-tasks                  # Show task counts
   steroids sections add "Phase 1 - Backend"          # Add new section
   steroids sections add "Phase 2" --position 2       # Insert at position
@@ -492,7 +499,24 @@ Examples:
   steroids sections remove abc123                    # Remove empty section
   steroids sections remove abc123 --force            # Remove with tasks
   steroids sections reorder --id abc123 --position 1 # Move to first
+  steroids sections skip "Phase 3"                   # Skip section (defer work)
+  steroids sections skip abc123                      # Skip by ID
+  steroids sections unskip "Phase 3"                 # Re-enable section
 ```
+
+### Section Skip Behavior
+
+When a section is marked as **skipped**:
+
+1. **Task selection ignores it** - The orchestrator loop will not pull tasks from skipped sections
+2. **Hidden by default** - `steroids sections list` hides skipped sections (use `--all` to show)
+3. **Tasks remain intact** - Tasks are not deleted or modified, just deferred
+4. **Visual indicator** - Skipped sections show `[SKIPPED]` marker in listings
+
+Use cases:
+- Future development phases not ready to start
+- Temporarily parking work on a feature
+- Focusing the loop on specific priorities
 
 ---
 
