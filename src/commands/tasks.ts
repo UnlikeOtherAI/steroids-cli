@@ -24,6 +24,8 @@ import {
   type Task,
   type TaskStatus,
 } from '../database/queries.js';
+import { outputJson as outputEnvelope, outputJsonError } from '../cli/output.js';
+import { ErrorCode } from '../cli/errors.js';
 
 const HELP = `
 steroids tasks - Manage tasks
@@ -231,7 +233,11 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
     }
 
     if (outputJson) {
-      console.log(JSON.stringify(allTasks, null, 2));
+      outputEnvelope('tasks', 'list', {
+        tasks: allTasks,
+        total: allTasks.length,
+        filter: { status: statusFilter, global: true },
+      });
       return;
     }
 
@@ -306,7 +312,11 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
     }
 
     if (outputJson) {
-      console.log(JSON.stringify(tasks, null, 2));
+      outputEnvelope('tasks', 'list', {
+        tasks,
+        total: tasks.length,
+        filter: { status: statusFilter, section: sectionId, search: values.search },
+      });
       return;
     }
 
@@ -393,7 +403,7 @@ EXAMPLE:
     }
 
     if (outputJson) {
-      console.log(JSON.stringify({ ...counts, total }, null, 2));
+      outputEnvelope('tasks', 'stats', { counts, total });
       return;
     }
 
@@ -480,7 +490,7 @@ EXAMPLES:
     });
 
     if (values.json) {
-      console.log(JSON.stringify(task, null, 2));
+      outputEnvelope('tasks', 'add', { task });
     } else {
       console.log(`Task created: ${task.title}`);
       console.log(`  ID: ${task.id}`);
