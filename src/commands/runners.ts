@@ -21,7 +21,10 @@ import { checkLockStatus, isProcessAlive } from '../runners/lock.js';
 import { wakeup, checkWakeupNeeded } from '../runners/wakeup.js';
 import { cronStatus, cronInstall, cronUninstall } from '../runners/cron.js';
 import { openDatabase } from '../database/connection.js';
-import { getSection, getSectionByName, listSections } from '../database/queries.js';
+import { getSection, getSectionByName, listSections, getTask, listTasks, type Task } from '../database/queries.js';
+import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
+import { getRegisteredProjects } from '../runners/projects.js';
 
 const HELP = `
 steroids runners - Manage runner daemons
@@ -33,7 +36,7 @@ SUBCOMMANDS:
   start               Start runner daemon
   stop                Stop runner(s)
   status              Show runner status
-  list                List all runners
+  list                List all runners (use --tree for detailed view)
   logs                View daemon crash/output logs
   wakeup              Check and restart stale runners
   cron                Manage cron job
@@ -46,6 +49,9 @@ START OPTIONS:
 STOP OPTIONS:
   --id <id>           Stop specific runner by ID
   --all               Stop all runners
+
+LIST OPTIONS:
+  --tree              Show tree view with projects, runners, and tasks
 
 LOGS OPTIONS:
   <pid>               Show logs for specific PID
@@ -73,6 +79,7 @@ EXAMPLES:
   steroids runners stop                     # Stop current runner
   steroids runners status                   # Show status
   steroids runners list                     # List all runners (all projects)
+  steroids runners list --tree              # Tree view with tasks
   steroids runners list --json              # List all runners as JSON
   steroids runners logs                     # List available daemon logs
   steroids runners logs 12345               # View logs for PID 12345
@@ -105,7 +112,7 @@ export async function runnersCommand(args: string[], flags: GlobalFlags): Promis
       await runStatus(subArgs);
       break;
     case 'list':
-      await runList(subArgs);
+      await runList(subArgs, flags);
       break;
     case 'logs':
       await runLogs(subArgs);
@@ -459,17 +466,17 @@ OPTIONS:
   }
 }
 
-async function runList(args: string[]): Promise<void> {
+async function runList(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      json: { type: 'boolean', short: 'j', default: false },
+      tree: { type: 'boolean', short: 't', default: false },
     },
     allowPositionals: false,
   });
 
-  if (values.help) {
+  if (values.help || flags.help) {
     console.log(`
 steroids runners list - List all runners
 
@@ -477,15 +484,22 @@ USAGE:
   steroids runners list [options]
 
 OPTIONS:
-  -j, --json          Output as JSON
+  -t, --tree          Show tree view with tasks
+  -j, --json          Output as JSON (global flag)
   -h, --help          Show help
 `);
     return;
   }
 
+  // Tree view mode
+  if (values.tree) {
+    await runListTree(flags.json);
+    return;
+  }
+
   const runners = listRunners();
 
-  if (values.json) {
+  if (flags.json) {
     // For JSON output, enrich with section names if available
     const enrichedRunners = runners.map((runner) => {
       if (!runner.section_id || !runner.project_path) {
@@ -558,6 +572,200 @@ OPTIONS:
     console.log(`   Your current project: ${currentProject}`);
     console.log('   DO NOT modify files in other projects. Each runner works only on its own project.');
     console.log('─'.repeat(120));
+  }
+}
+
+/**
+ * Tree view of runners grouped by project with their current tasks
+ */
+async function runListTree(json: boolean): Promise<void> {
+  const runners = listRunners();
+  const projects = getRegisteredProjects(false);
+
+  // Build project info map
+  interface ProjectInfo {
+    path: string;
+    name: string;
+    runners: Runner[];
+    activeTasks: Task[];
+  }
+
+  const projectMap = new Map<string, ProjectInfo>();
+
+  // Initialize with all registered projects
+  for (const project of projects) {
+    projectMap.set(project.path, {
+      path: project.path,
+      name: project.name || basename(project.path),
+      runners: [],
+      activeTasks: [],
+    });
+  }
+
+  // Add runners to their projects
+  for (const runner of runners) {
+    const projectPath = runner.project_path;
+    if (!projectPath) continue;
+
+    if (!projectMap.has(projectPath)) {
+      projectMap.set(projectPath, {
+        path: projectPath,
+        name: basename(projectPath),
+        runners: [],
+        activeTasks: [],
+      });
+    }
+
+    const info = projectMap.get(projectPath)!;
+    info.runners.push(runner);
+  }
+
+  // Fetch active tasks for each project
+  for (const [projectPath, info] of projectMap) {
+    const dbPath = `${projectPath}/.steroids/steroids.db`;
+    if (!existsSync(dbPath)) continue;
+
+    try {
+      const { db, close } = openDatabase(projectPath);
+      try {
+        const inProgress = listTasks(db, { status: 'in_progress' });
+        const review = listTasks(db, { status: 'review' });
+        info.activeTasks = [...inProgress, ...review];
+      } finally {
+        close();
+      }
+    } catch {
+      // Skip inaccessible projects
+    }
+  }
+
+  // JSON output
+  if (json) {
+    const output = Array.from(projectMap.values()).map((info) => ({
+      project: info.path,
+      name: info.name,
+      runners: info.runners.map((r) => ({
+        id: r.id,
+        status: r.status,
+        pid: r.pid,
+        currentTaskId: r.current_task_id,
+        alive: r.pid ? isProcessAlive(r.pid) : false,
+      })),
+      activeTasks: info.activeTasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+      })),
+    }));
+    console.log(JSON.stringify({ projects: output }, null, 2));
+    return;
+  }
+
+  // Text tree view
+  const projectList = Array.from(projectMap.values());
+  const currentProject = process.cwd();
+
+  if (projectList.length === 0) {
+    console.log('No registered projects.');
+    return;
+  }
+
+  console.log('');
+  console.log('RUNNERS TREE');
+  console.log('═'.repeat(80));
+
+  for (let i = 0; i < projectList.length; i++) {
+    const info = projectList[i];
+    const isLast = i === projectList.length - 1;
+    const isCurrent = info.path === currentProject;
+    const currentMarker = isCurrent ? ' ← (current)' : '';
+
+    console.log('');
+    console.log(`📁 ${info.name}${currentMarker}`);
+    console.log(`   ${info.path}`);
+
+    if (info.runners.length === 0) {
+      console.log('   └─ (no runners)');
+    } else {
+      for (let j = 0; j < info.runners.length; j++) {
+        const runner = info.runners[j];
+        const isLastRunner = j === info.runners.length - 1;
+        const runnerPrefix = isLastRunner ? '└─' : '├─';
+        const childPrefix = isLastRunner ? '   ' : '│  ';
+
+        const alive = runner.pid && isProcessAlive(runner.pid);
+        const statusIcon = alive ? '🟢' : '🔴';
+        const statusText = alive ? runner.status : 'dead';
+        const pidText = runner.pid ? ` PID ${runner.pid}` : '';
+
+        console.log(`   ${runnerPrefix} ${statusIcon} Runner ${runner.id.substring(0, 8)} (${statusText}${pidText})`);
+
+        // Show section if focused
+        if (runner.section_id && runner.project_path) {
+          try {
+            const { db, close } = openDatabase(runner.project_path);
+            try {
+              const section = getSection(db, runner.section_id);
+              if (section) {
+                console.log(`   ${childPrefix}    Section: ${section.name}`);
+              }
+            } finally {
+              close();
+            }
+          } catch {
+            // Ignore section fetch errors
+          }
+        }
+
+        // Show current task if available
+        if (runner.current_task_id && runner.project_path) {
+          try {
+            const { db, close } = openDatabase(runner.project_path);
+            try {
+              const task = getTask(db, runner.current_task_id);
+              if (task) {
+                const statusMarker = task.status === 'in_progress' ? '🔧' : '👁️';
+                console.log(`   ${childPrefix}    ${statusMarker} ${task.title.substring(0, 50)}`);
+                console.log(`   ${childPrefix}       [${task.status}] ${task.id.substring(0, 8)}`);
+              }
+            } finally {
+              close();
+            }
+          } catch {
+            console.log(`   ${childPrefix}    Task: ${runner.current_task_id.substring(0, 8)}`);
+          }
+        } else if (alive) {
+          console.log(`   ${childPrefix}    (idle - no task)`);
+        }
+      }
+    }
+
+    // Show other active tasks not being worked on by runners
+    const runnerTaskIds = new Set(info.runners.map((r) => r.current_task_id).filter(Boolean));
+    const unassignedTasks = info.activeTasks.filter((t) => !runnerTaskIds.has(t.id));
+
+    if (unassignedTasks.length > 0) {
+      console.log('   │');
+      console.log('   └─ 📋 Queued active tasks:');
+      for (const task of unassignedTasks.slice(0, 5)) {
+        const statusIcon = task.status === 'in_progress' ? '🔧' : '👁️';
+        console.log(`      ${statusIcon} ${task.title.substring(0, 45)} [${task.status}]`);
+      }
+      if (unassignedTasks.length > 5) {
+        console.log(`      ... and ${unassignedTasks.length - 5} more`);
+      }
+    }
+  }
+
+  console.log('');
+  console.log('═'.repeat(80));
+
+  // Multi-project warning
+  const activeProjects = projectList.filter((p) => p.runners.length > 0);
+  if (activeProjects.length > 1) {
+    console.log('');
+    console.log('⚠️  MULTI-PROJECT: Multiple projects have active runners.');
+    console.log('   Each runner works ONLY on its own project.');
   }
 }
 
