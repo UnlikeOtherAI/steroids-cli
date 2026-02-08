@@ -191,6 +191,118 @@ export function hasDependenciesMet(
   return pendingDeps.length === 0;
 }
 
+/**
+ * Set the priority of a section
+ * Priority range: 0 (highest) to 100 (lowest), default is 50
+ */
+export function setSectionPriority(
+  db: Database.Database,
+  sectionId: string,
+  priority: number
+): void {
+  if (priority < 0 || priority > 100) {
+    throw new Error('Priority must be between 0 and 100');
+  }
+
+  const result = db
+    .prepare('UPDATE sections SET priority = ? WHERE id = ?')
+    .run(priority, sectionId);
+
+  if (result.changes === 0) {
+    throw new Error(`Section not found: ${sectionId}`);
+  }
+}
+
+/**
+ * Add a dependency between sections
+ * Makes sectionId depend on dependsOnSectionId
+ */
+export function addSectionDependency(
+  db: Database.Database,
+  sectionId: string,
+  dependsOnSectionId: string
+): SectionDependency {
+  const id = uuidv4();
+
+  try {
+    db.prepare(
+      `INSERT INTO section_dependencies (id, section_id, depends_on_section_id)
+       VALUES (?, ?, ?)`
+    ).run(id, sectionId, dependsOnSectionId);
+
+    return {
+      id,
+      section_id: sectionId,
+      depends_on_section_id: dependsOnSectionId,
+      created_at: new Date().toISOString(),
+    };
+  } catch (error: any) {
+    if (error.message?.includes('UNIQUE constraint')) {
+      throw new Error('This dependency already exists');
+    }
+    if (error.message?.includes('FOREIGN KEY constraint')) {
+      throw new Error('One or both section IDs are invalid');
+    }
+    throw error;
+  }
+}
+
+/**
+ * Remove a dependency between sections
+ */
+export function removeSectionDependency(
+  db: Database.Database,
+  sectionId: string,
+  dependsOnSectionId: string
+): void {
+  const result = db
+    .prepare(
+      `DELETE FROM section_dependencies
+       WHERE section_id = ? AND depends_on_section_id = ?`
+    )
+    .run(sectionId, dependsOnSectionId);
+
+  if (result.changes === 0) {
+    throw new Error('Dependency not found');
+  }
+}
+
+/**
+ * Get all dependencies for a section
+ */
+export function getSectionDependencies(
+  db: Database.Database,
+  sectionId: string
+): Section[] {
+  return db
+    .prepare(
+      `SELECT s.*
+       FROM sections s
+       INNER JOIN section_dependencies sd ON s.id = sd.depends_on_section_id
+       WHERE sd.section_id = ?
+       ORDER BY s.position ASC`
+    )
+    .all(sectionId) as Section[];
+}
+
+/**
+ * Get all sections that depend on a given section
+ */
+export function getSectionDependents(
+  db: Database.Database,
+  sectionId: string
+): Section[] {
+  return db
+    .prepare(
+      `SELECT s.*
+       FROM sections s
+       INNER JOIN section_dependencies sd ON s.id = sd.section_id
+       WHERE sd.depends_on_section_id = ?
+       ORDER BY s.position ASC`
+    )
+    .all(sectionId) as Section[];
+}
+
 // ============ Task Operations ============
 
 export function createTask(
