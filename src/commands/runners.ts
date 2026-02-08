@@ -382,21 +382,42 @@ OPTIONS:
     return;
   }
 
-  const result = wakeup({
+  const results = wakeup({
     quiet: values.quiet || flags.quiet || values.json || flags.json,
     dryRun: flags.dryRun,
   });
 
   if (values.json || flags.json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({ results }, null, 2));
     return;
   }
 
   if (!values.quiet && !flags.quiet) {
-    console.log(`Action: ${result.action}`);
-    console.log(`Reason: ${result.reason}`);
-    if (result.pid) {
-      console.log(`PID: ${result.pid}`);
+    // Summarize results
+    const started = results.filter(r => r.action === 'started').length;
+    const cleaned = results.filter(r => r.action === 'cleaned').length;
+    const wouldStart = results.filter(r => r.action === 'would_start').length;
+
+    if (started > 0) {
+      console.log(`Started ${started} runner(s)`);
+    }
+    if (cleaned > 0) {
+      console.log(`Cleaned ${cleaned} stale runner(s)`);
+    }
+    if (wouldStart > 0) {
+      console.log(`Would start ${wouldStart} runner(s) (dry-run)`);
+    }
+    if (started === 0 && cleaned === 0 && wouldStart === 0) {
+      console.log('No action needed');
+    }
+
+    // Show per-project details
+    for (const result of results) {
+      if (result.projectPath) {
+        const status = result.action === 'started' ? '✓' :
+                       result.action === 'would_start' ? '~' : '-';
+        console.log(`  ${status} ${result.projectPath}: ${result.reason}`);
+      }
     }
   }
 }

@@ -114,37 +114,23 @@ function startRunner(projectPath?: string): { pid: number } | null {
 /**
  * Main wake-up function
  * Called by cron every minute to ensure runners are healthy
- * Uses the global project registry to check all registered projects
+ * Iterates over ALL registered projects and starts runners as needed
+ * Returns per-project results
  */
-export function wakeup(options: WakeupOptions = {}): WakeupResult {
+export function wakeup(options: WakeupOptions = {}): WakeupResult[] {
   const { quiet = false, dryRun = false } = options;
+  const results: WakeupResult[] = [];
 
   const log = (msg: string): void => {
     if (!quiet) console.log(msg);
   };
 
-  // Step 1: Check lock status
-  const lockStatus = checkLockStatus();
-
-  if (lockStatus.locked && lockStatus.pid) {
-    // Step 2: Check if runner is healthy (has recent heartbeat)
-    const { db, close } = openGlobalDatabase();
-    try {
-      const staleRunners = findStaleRunners(db);
-
-      if (staleRunners.length === 0) {
-        // Runner is active and healthy
-        log(`Runner is healthy (PID: ${lockStatus.pid})`);
-        return {
-          action: 'none',
-          reason: 'Runner is active and healthy',
-          pid: lockStatus.pid,
-        };
-      }
-
-      // Step 3: Runner is stale - kill it
+  // Step 1: Clean up stale runners first
+  const { db, close } = openGlobalDatabase();
+  try {
+    const staleRunners = findStaleRunners(db);
+    if (staleRunners.length > 0) {
       log(`Found ${staleRunners.length} stale runner(s), cleaning up...`);
-
       if (!dryRun) {
         for (const runner of staleRunners) {
           if (runner.pid) {
@@ -152,20 +138,19 @@ export function wakeup(options: WakeupOptions = {}): WakeupResult {
           }
           db.prepare('DELETE FROM runners WHERE id = ?').run(runner.id);
         }
-        removeLock();
       }
-
-      return {
+      results.push({
         action: 'cleaned',
         reason: `Cleaned ${staleRunners.length} stale runner(s)`,
         staleRunners: staleRunners.length,
-      };
-    } finally {
-      close();
+      });
     }
+  } finally {
+    close();
   }
 
-  // Step 4: No active runner - check for pending work
+  // Step 2: Clean zombie lock if present
+  const lockStatus = checkLockStatus();
   if (lockStatus.isZombie && lockStatus.pid) {
     log(`Found zombie lock (PID: ${lockStatus.pid}), cleaning...`);
     if (!dryRun) {
@@ -173,81 +158,95 @@ export function wakeup(options: WakeupOptions = {}): WakeupResult {
     }
   }
 
-  // Step 5: Get all registered projects from global registry
+  // Step 3: Get all registered projects from global registry
   const registeredProjects = getRegisteredProjects(false); // enabled only
 
   if (registeredProjects.length === 0) {
     log('No registered projects found');
     log('Run "steroids projects add <path>" to register a project');
-    return {
+    results.push({
       action: 'none',
       reason: 'No registered projects',
       pendingTasks: 0,
-    };
+    });
+    return results;
   }
 
   log(`Checking ${registeredProjects.length} registered project(s)...`);
 
-  // Step 6: Find projects with pending work
-  const projectsWithWork: string[] = [];
-
+  // Step 4: Check each project and start runners as needed
   for (const project of registeredProjects) {
     // Skip if project directory doesn't exist
     if (!existsSync(project.path)) {
       log(`Skipping ${project.path}: directory not found`);
+      results.push({
+        action: 'none',
+        reason: 'Directory not found',
+        projectPath: project.path,
+      });
       continue;
     }
 
     // Skip if project already has an active runner
     if (hasActiveRunnerForProject(project.path)) {
       log(`Skipping ${project.path}: runner already active`);
+      results.push({
+        action: 'none',
+        reason: 'Runner already active',
+        projectPath: project.path,
+      });
       continue;
     }
 
     // Check for pending work
-    if (projectHasPendingWork(project.path)) {
-      projectsWithWork.push(project.path);
+    if (!projectHasPendingWork(project.path)) {
+      log(`Skipping ${project.path}: no pending tasks`);
+      results.push({
+        action: 'none',
+        reason: 'No pending tasks',
+        projectPath: project.path,
+      });
+      continue;
+    }
+
+    // Start runner for this project
+    log(`Starting runner for: ${project.path}`);
+
+    if (dryRun) {
+      results.push({
+        action: 'would_start',
+        reason: `Would start runner (dry-run)`,
+        projectPath: project.path,
+      });
+      continue;
+    }
+
+    const startResult = startRunner(project.path);
+    if (startResult) {
+      results.push({
+        action: 'started',
+        reason: `Started runner`,
+        pid: startResult.pid,
+        projectPath: project.path,
+      });
+    } else {
+      results.push({
+        action: 'none',
+        reason: 'Failed to start runner',
+        projectPath: project.path,
+      });
     }
   }
 
-  if (projectsWithWork.length === 0) {
-    log('No projects with pending tasks found');
-    return {
+  // If no specific results, add a summary
+  if (results.length === 0) {
+    results.push({
       action: 'none',
-      reason: 'No pending tasks',
-      pendingTasks: 0,
-    };
+      reason: 'No action needed',
+    });
   }
 
-  // Step 7: Start a runner for the first project with work
-  const projectPath = projectsWithWork[0];
-  log(`Found ${projectsWithWork.length} project(s) with work`);
-  log(`Starting runner for: ${projectPath}`);
-
-  if (dryRun) {
-    return {
-      action: 'would_start',
-      reason: `Would start runner for ${projectPath} (dry-run)`,
-      pendingTasks: projectsWithWork.length,
-      projectPath,
-    };
-  }
-
-  const result = startRunner(projectPath);
-  if (result) {
-    return {
-      action: 'started',
-      reason: `Started runner for ${projectPath}`,
-      pid: result.pid,
-      pendingTasks: projectsWithWork.length,
-      projectPath,
-    };
-  }
-
-  return {
-    action: 'none',
-    reason: 'Failed to start runner',
-  };
+  return results;
 }
 
 /**
