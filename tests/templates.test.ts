@@ -2,7 +2,7 @@
  * Template Parser Tests
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import {
   parseTemplate,
   parseTemplateObject,

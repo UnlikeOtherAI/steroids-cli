@@ -2,7 +2,7 @@
  * Script Runner Tests
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '@jest/globals';
 import { parseTimeout, validateScriptConfig, type ScriptHookConfig } from '../src/hooks/script-runner.js';
 
 describe('parseTimeout', () => {
