@@ -88,7 +88,7 @@ Use 'graph' subcommand to visualize the dependency tree.`,
 });
 
 export async function sectionsCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
+  if (args.length === 0 || args[0] === '-h' || args[0] === '--help' || flags.help) {
     console.log(HELP);
     return;
   }
@@ -98,19 +98,19 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
 
   switch (subcommand) {
     case 'add':
-      await addSection(subArgs);
+      await addSection(subArgs, flags);
       break;
     case 'list':
       await listAllSections(subArgs, flags);
       break;
     case 'priority':
-      await setPriority(subArgs);
+      await setPriority(subArgs, flags);
       break;
     case 'depends-on':
-      await addDependency(subArgs);
+      await addDependency(subArgs, flags);
       break;
     case 'no-depends-on':
-      await removeDependency(subArgs);
+      await removeDependency(subArgs, flags);
       break;
     case 'graph':
       await showGraph(subArgs, flags);
