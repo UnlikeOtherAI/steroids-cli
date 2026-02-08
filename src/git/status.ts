@@ -84,3 +84,81 @@ export function isGitRepo(projectPath: string = process.cwd()): boolean {
     return false;
   }
 }
+
+/**
+ * Find the commit hash for a task by searching commit messages
+ * Returns the most recent commit that mentions the task title
+ */
+export function findTaskCommit(
+  projectPath: string,
+  taskTitle: string
+): string | null {
+  try {
+    // Search last 20 commits for one mentioning the task
+    const log = execSync('git log --oneline -20', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    // Look for commit message containing key words from task title
+    const titleWords = taskTitle.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const lines = log.trim().split('\n');
+
+    for (const line of lines) {
+      const [hash, ...messageParts] = line.split(' ');
+      const message = messageParts.join(' ').toLowerCase();
+
+      // Check if at least 2 significant words match
+      let matches = 0;
+      for (const word of titleWords) {
+        if (message.includes(word)) matches++;
+      }
+      if (matches >= 2 || (titleWords.length <= 2 && matches >= 1)) {
+        return hash;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get the diff of a specific commit
+ */
+export function getCommitDiff(
+  projectPath: string,
+  commitHash: string
+): string {
+  try {
+    return execSync(`git show ${commitHash} --stat --patch`, {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: 10 * 1024 * 1024,
+    });
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Get files changed in a specific commit
+ */
+export function getCommitFiles(
+  projectPath: string,
+  commitHash: string
+): string[] {
+  try {
+    const output = execSync(`git show --name-only --pretty=format: ${commitHash}`, {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return output.trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}

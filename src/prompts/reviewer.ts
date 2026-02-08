@@ -113,13 +113,13 @@ You MUST choose ONE of these actions:
 ### APPROVE (implementation is correct)
 If the code correctly implements the specification:
 \`\`\`bash
-steroids tasks approve ${task.id} --model ${reviewerModel}
+steroids tasks approve ${task.id} --model opus
 \`\`\`
 
 ### REJECT (needs changes)
 If there are issues that must be fixed:
 \`\`\`bash
-steroids tasks reject ${task.id} --model ${reviewerModel} --notes "specific feedback"
+steroids tasks reject ${task.id} --model opus --notes "specific feedback"
 \`\`\`
 Be specific in your notes. The coder will use them to fix the issues.
 This will be rejection #${task.rejection_count + 1}.
@@ -127,7 +127,7 @@ This will be rejection #${task.rejection_count + 1}.
 ### APPROVE WITH NOTE (minor issues, not blocking)
 If you have minor concerns but the implementation is acceptable:
 \`\`\`bash
-steroids tasks approve ${task.id} --model ${reviewerModel} --notes "Minor: prefer X over Y"
+steroids tasks approve ${task.id} --model opus --notes "Minor: prefer X over Y"
 \`\`\`
 This approves the task but logs your feedback. The coder may address it later or ignore it.
 
