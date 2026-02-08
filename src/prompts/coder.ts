@@ -124,8 +124,8 @@ Before running \`steroids tasks update ${taskId} --status review\`, verify:
 
 - [ ] Each file:line mentioned above has been edited
 - [ ] The specific type/code changes requested have been made
-- [ ] The project's build command passes
-- [ ] The project's test command passes with adequate coverage
+- [ ] The project builds successfully (if applicable)
+- [ ] Tests pass (if the project has tests)
 - [ ] You tested the specific scenarios mentioned in the rejection
 
 **DO NOT claim "implementation complete" or "all tests pass" without addressing EVERY point above.**
@@ -328,10 +328,10 @@ If approved, the task moves to skipped/partial status and the runner continues t
    - Do NOT read, write, or modify any files in .steroids/
    - This includes .db, .yaml, and .yml files
 
-2. **BUILD AND TESTS MUST PASS before submitting**
-   - Run the project's build command
-   - Run the project's test command
-   - Fix any errors until BOTH pass
+2. **BUILD MUST PASS before submitting**
+   - Run the project's build command (if applicable)
+   - Run tests (if the project has them)
+   - Fix any errors before submitting
    - **Do NOT submit for review if build OR tests fail**
 
 3. **Use CLI for status updates**
@@ -370,9 +370,9 @@ If approved, the task moves to skipped/partial status and the runner continues t
 **The reviewer will run \`git show <hash>\` to verify. Be precise about which commit.**
 
 ### If you implemented new work:
-1. **Run the build command** for this project type (npm run build, cargo build, go build, make, etc.)
-2. **Run the test command** for this project type (npm test, cargo test, go test, pytest, etc.)
-3. **Fix any errors** until BOTH build and tests pass
+1. **Run the build command** for this project type (if applicable)
+2. **Run tests** if the project has them
+3. **Fix any errors** before proceeding
 4. **Commit your work** with a meaningful commit message:
    \`\`\`bash
    git add <your-changed-files>
