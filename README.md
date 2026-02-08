@@ -1,260 +1,366 @@
 # Steroids
 
-**A developer command center for managing multiple software projects with confidence.**
+**Spec-driven, autonomous software development — with a built-in coder/reviewer loop.**
 
-Steroids is a development tool for power developers who refuse to let their projects become unmaintainable slop. It provides a unified dashboard and CLI for tracking tasks, monitoring health, and maintaining architectural integrity across your entire portfolio of projects.
+Steroids is an AI-powered task orchestration system that automates software development through a strict *implement → review → fix* workflow. You define work in markdown specification files, group them into sections (features/phases), and Steroids runs the loop until tasks are done — or a dispute is raised.
 
-Built for developers who believe in:
-- **Testable code** over "it works on my machine"
-- **Clean architecture** over vibe coding
-- **Maintainable structures** over quick hacks
-- **Developer experience** over feature bloat
+> **A developer command center for managing multiple software projects with confidence.**
+
+---
+
+## Table of Contents
+
+* [Why Steroids](#why-steroids)
+* [Who It's For](#who-its-for)
+* [How It Works](#how-it-works)
+* [Key Features](#key-features)
+* [Project Structure](#project-structure)
+* [Quickstart](#quickstart)
+* [CLI Commands](#cli-commands)
+* [Runner Daemon](#runner-daemon)
+* [Web Dashboard](#web-dashboard)
+* [Configuration](#configuration)
+* [Quality & Safety](#quality--safety)
+* [The Suite](#the-suite)
+* [Roadmap](#roadmap)
+* [Contributing](#contributing)
+* [License](#license)
+* [Credits](#credits)
+
+---
+
+## Why Steroids
+
+Most AI coding tools optimize for speed. Steroids optimizes for **repeatable delivery**:
+
+* **Specs are the source of truth** — not chat vibes.
+* **Coder and reviewer are separated** by design.
+* **Nothing progresses without review approval.**
+* **Endless loops are prevented** via dispute escalation (after 15 rejections).
+* Built for **hands-off runs** — overnight or while you focus elsewhere.
+
+Steroids is for power developers who refuse to let their projects become unmaintainable slop.
+
+---
+
+## Who It's For
+
+Steroids is for software teams and solo developers who want to delegate routine development work to AI while maintaining quality control.
+
+It's especially useful for:
+
+1. Breaking down large projects into small, spec-driven tasks that AI can execute reliably
+2. Enforcing consistent code review standards through an automated reviewer
+3. Running development work in the background while you focus on higher-level decisions
+
+The coder/reviewer separation ensures work is checked before being accepted, and the dispute mechanism escalates genuinely hard problems to humans rather than spinning endlessly.
+
+---
+
+## How It Works
+
+Steroids runs an autonomous loop per task:
+
+1. **You write specs** in markdown files (tasks grouped into sections/phases).
+2. A **coder AI** implements the task strictly according to the spec.
+3. A **reviewer AI** evaluates:
+   * Does it match the spec?
+   * Does the build pass? Do tests pass?
+   * Is it maintainable and architecturally sound?
+4. If **rejected**, feedback is appended and the task goes back to the coder.
+5. If **approved**, Steroids commits, pushes, and moves to the next task.
+6. After **15 rejections**, Steroids raises a **dispute** (human attention required).
+
+```
+pending → in_progress → review → completed
+              ↑           │
+              │           ↓ (rejected)
+              └───────────┘
+```
+
+---
+
+## Key Features
+
+* **Markdown specs** as the contract (task definitions, acceptance criteria, constraints)
+* **Sections/phases** to organize features and execution order
+* **Coder/Reviewer loop** with strict approval gating
+* **Dispute escalation** after 15 rejections to avoid infinite churn
+* **CLI-first workflow** for power users and automation
+* **Background runner daemon** to process tasks without babysitting
+* **Multi-project support** with global project registry
+* **Web dashboard** for monitoring progress across projects
+* *(Planned)* **Mac menu bar companion** for real-time status at a glance
+
+---
+
+## Project Structure
+
+A typical repo using Steroids:
+
+```
+my-project/
+├── .steroids/
+│   ├── steroids.db        # Task state, sections, audit logs
+│   └── config.yaml        # Project configuration
+├── specs/
+│   ├── auth.md            # Specification files
+│   ├── billing.md
+│   └── dashboard.md
+├── AGENTS.md              # Guidelines for AI agents
+└── src/                   # Your code
+```
+
+> **Specs are stable, state is generated.** The `.steroids/` directory contains the SQLite database tracking all task state.
+
+---
+
+## Quickstart
+
+### 1. Install
+
+```bash
+# Clone the repository
+git clone https://github.com/UnlikeOtherAI/steroids-cli.git
+cd steroids-cli
+
+# Install dependencies and build
+npm install
+npm run build
+
+# Link globally
+npm link
+```
+
+### 2. Initialize in a project
+
+```bash
+cd ~/Projects/my-app
+steroids init
+```
+
+This creates `.steroids/` with the database and default config.
+
+### 3. Create sections and tasks
+
+```bash
+# Add a section (feature/phase)
+steroids sections add "Phase 1: User Authentication"
+
+# Add tasks with specs
+steroids tasks add "Implement login endpoint" \
+  --section <section-id> \
+  --source specs/auth.md
+```
+
+### 4. Run the loop
+
+```bash
+# Interactive loop (foreground)
+steroids loop
+
+# Or start background daemon
+steroids runners start --detach
+```
+
+Steroids processes tasks in order, looping coder/reviewer until completion or dispute.
+
+---
+
+## CLI Commands
+
+### Core Commands
+
+| Command | Description |
+|---------|-------------|
+| `steroids init` | Initialize Steroids in current directory |
+| `steroids about` | Explain what Steroids is (for LLMs discovering the tool) |
+| `steroids loop` | Run the coder/reviewer loop interactively |
+| `steroids loop --once` | Run one iteration only |
+
+### Task Management
+
+| Command | Description |
+|---------|-------------|
+| `steroids tasks list` | List pending tasks |
+| `steroids tasks list --status all` | List all tasks with status |
+| `steroids tasks list --status active` | Show in_progress + review tasks |
+| `steroids tasks add <title> --section <id> --source <file>` | Add a new task |
+| `steroids tasks update <id> --status review` | Submit task for review |
+| `steroids tasks approve <id> --model <model>` | Approve a task |
+| `steroids tasks reject <id> --model <model> --notes "..."` | Reject with feedback |
+| `steroids tasks audit <id>` | View task audit trail |
+
+### Section Management
+
+| Command | Description |
+|---------|-------------|
+| `steroids sections list` | List all sections |
+| `steroids sections add <name>` | Create a new section |
+
+### Runner Management
+
+| Command | Description |
+|---------|-------------|
+| `steroids runners list` | List active runners |
+| `steroids runners start` | Start runner in foreground |
+| `steroids runners start --detach` | Start runner in background |
+| `steroids runners stop --all` | Stop all runners |
+| `steroids runners wakeup` | Check and start runners for projects with pending work |
+
+### Project Registry
+
+| Command | Description |
+|---------|-------------|
+| `steroids projects list` | List registered projects |
+| `steroids projects add <path>` | Register a project |
+| `steroids projects remove <path>` | Unregister a project |
+| `steroids projects prune` | Remove stale project entries |
+
+### Configuration
+
+| Command | Description |
+|---------|-------------|
+| `steroids config show` | Display current configuration |
+| `steroids config init` | Initialize config with defaults |
+
+---
+
+## Runner Daemon
+
+Steroids includes a runner daemon for background processing:
+
+```bash
+# Start in background
+steroids runners start --detach
+
+# Check status
+steroids runners list
+
+# Stop all runners
+steroids runners stop --all
+```
+
+The daemon:
+- Picks up pending tasks automatically
+- Updates heartbeat for health monitoring
+- Pushes approved work to git
+- Continues until all tasks complete or shutdown signal received
+
+---
+
+## Web Dashboard
+
+Steroids includes a web dashboard for visual monitoring:
+
+```bash
+# Using Docker Compose
+docker-compose up -d
+
+# Access at
+# Web UI: http://localhost:3500
+# API: http://localhost:3501
+```
+
+### Features
+
+- **Multi-project view** — See all registered projects
+- **Task queues** — Pending, in-progress, review, completed
+- **Runner status** — Active daemons with heartbeat
+- **Audit trails** — Full history of task state changes
+
+---
+
+## Configuration
+
+### Project Config (`.steroids/config.yaml`)
+
+```yaml
+ai:
+  coder:
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+  reviewer:
+    provider: openai
+    model: codex
+
+output:
+  format: table
+  colors: true
+
+quality:
+  tests:
+    required: true
+    minCoverage: 80
+```
+
+### Global Config (`~/.steroids/config.yaml`)
+
+Same schema — acts as default, overridden by project config.
+
+### Environment Variables
+
+```bash
+ANTHROPIC_API_KEY=...        # For Claude models
+OPENAI_API_KEY=...           # For OpenAI models
+
+STEROIDS_JSON=1              # Output as JSON
+STEROIDS_QUIET=1             # Minimal output
+STEROIDS_VERBOSE=1           # Detailed output
+STEROIDS_NO_COLOR=1          # Disable colors
+```
+
+---
+
+## Quality & Safety
+
+Steroids is built for developers who believe in:
+
+* **Testable code** over "it works on my machine"
+* **Clean architecture** over vibe coding
+* **Maintainable structures** over quick hacks
+* **Developer experience** over feature bloat
+
+The coder is required to:
+- Run build before submitting for review
+- Run tests before submitting for review
+- Fix errors until both pass
+
+The reviewer verifies:
+- Implementation matches the spec
+- Build and tests pass
+- Code follows project conventions
 
 ---
 
 ## The Suite
 
 ### Steroids CLI
+The main task orchestration CLI. Manages tasks, sections, runners, and the coder/reviewer loop.
 
-The main task management CLI. Tracks tasks across projects, coordinates LLM agents with locking, and triggers scripts/webhooks on completion events. File-based storage, no database required.
+### Monitor *(Planned)*
+Mac menu bar companion app for real-time status at a glance across multiple projects.
 
-### Pump
+### Pump *(Planned)*
+Data gathering CLI using Google APIs (Gemini, Search). Grounds LLM responses with real-time data.
 
-Data gathering CLI using Google APIs (Gemini, Search). Grounds LLM responses with real-time data and reduces costs by preprocessing with cheaper APIs before expensive model calls.
-
-### Iron
-
-Documentation scaffolding wizard. Interactive CLI that guides you through setting up CLAUDE.md, AGENTS.md, README templates, and architecture decision records for new projects.
-
-### WebUI
-
-Visual dashboard for monitoring projects, tasks, and runner status. Browse configs, view audit trails, and manage hooks through a web interface.
+### Iron *(Planned)*
+Documentation scaffolding wizard. Interactive CLI for setting up CLAUDE.md, AGENTS.md, and architecture docs.
 
 ---
 
-## Installation
+## Roadmap
 
-```bash
-# Clone the repository
-git clone https://github.com/unlikeother/steroids.git
-cd steroids
-
-# Install dependencies
-pnpm install
-
-# Start development
-pnpm dev
-```
-
-### Prerequisites
-
-- Node.js 20 LTS or higher
-- pnpm 9+
-- Git 2.40+
-
-### Quick Start
-
-```bash
-# Initialize Steroids in your projects directory
-steroids init
-
-# Scan for projects
-steroids scan ~/Projects
-
-# View all tasks across projects
-steroids tasks
-
-# Check system health
-steroids health
-
-# Launch the web UI
-steroids serve
-```
-
----
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `steroids init` | Initialize Steroids with Git setup |
-| `steroids scan [path]` | Scan directory for projects |
-| `steroids tasks` | List tasks across all projects |
-| `steroids tasks --project <name>` | List tasks for specific project |
-| `steroids tasks update <id>` | Update task status |
-| `steroids health` | Show system health overview |
-| `steroids config init` | Initialize configuration file |
-| `steroids config show` | Display current configuration |
-| `steroids serve` | Launch WebUI server |
-
-### Examples
-
-```bash
-# Scan with JSON output
-steroids scan ~/Projects --json
-
-# Filter tasks by status
-steroids tasks --status pending
-
-# Verbose health check
-steroids health --verbose
-
-# Serve on custom port
-steroids serve --port 8080
-```
-
----
-
-## Web UI
-
-The Steroids WebUI provides a visual dashboard for managing your projects:
-
-### Features
-
-- **Dashboard** - Overview of all projects with health scores
-- **Project Grid** - Visual cards with status indicators
-- **Task Management** - Cross-project task view with inline editing
-- **Health Monitoring** - Real-time project health metrics
-- **Activity Feed** - Recent commits, deploys, and task updates
-- **AGENTS.md Viewer** - View project guidelines directly
-- **Dark Mode** - Full light/dark theme support
-- **Keyboard Shortcuts** - `⌘K` command palette, vim-style navigation
-
-### Access
-
-```bash
-# Start the server
-steroids serve
-
-# Open in browser
-open http://localhost:3000
-```
-
----
-
-## Configuration
-
-Steroids uses a YAML configuration file:
-
-```yaml
-# ~/.steroids/config.yaml
-
-projects:
-  basePath: ~/Projects          # Root directory to scan
-  scanInterval: 5m              # How often to rescan
-  ignored:                      # Directories to skip
-    - node_modules
-    - .git
-    - dist
-    - build
-
-output:
-  format: table                 # table | json
-  colors: true                  # Enable colored output
-  verbose: false                # Show detailed output
-
-webui:
-  port: 3000                    # Server port
-  host: localhost               # Server host
-```
-
-### Environment Variables
-
-Steroids CLI supports environment variables for configuration. See [Environment Variables Documentation](./Docs/ENVIRONMENT_VARIABLES.md) for complete details.
-
-```bash
-# Output control
-STEROIDS_JSON=1                 # Output as JSON
-STEROIDS_QUIET=1                # Minimal output
-STEROIDS_VERBOSE=1              # Detailed output
-STEROIDS_NO_COLOR=1             # Disable colors
-NO_COLOR=1                      # Standard no-color flag
-
-# Configuration
-STEROIDS_CONFIG=/path/to/config.yaml
-STEROIDS_TIMEOUT=30s            # Command timeout
-
-# Behavior
-STEROIDS_NO_HOOKS=1             # Skip hook execution
-STEROIDS_AUTO_MIGRATE=1         # Auto-apply migrations
-
-# Automatically detected
-CI=1                            # CI environment (set by CI systems)
-```
-
----
-
-## Development
-
-### Setup
-
-```bash
-# Clone and install
-git clone https://github.com/unlikeother/steroids.git
-cd steroids
-pnpm install
-
-# Start development (all services)
-pnpm dev
-
-# Or start individual services
-pnpm dev:web      # Web frontend only
-pnpm dev:cli      # CLI in watch mode
-```
-
-### Testing
-
-```bash
-# Run all tests
-pnpm test
-
-# Run with coverage
-pnpm test:coverage
-
-# Run E2E tests
-pnpm test:e2e
-
-# Run specific test file
-pnpm test src/domain/entities/Project.test.ts
-```
-
-### Building
-
-```bash
-# Build all packages
-pnpm build
-
-# Lint code
-pnpm lint
-
-# Type check
-pnpm typecheck
-```
-
----
-
-## Architecture
-
-Steroids follows clean architecture principles with clear separation between:
-
-- **Domain Layer** - Business entities and logic
-- **Application Layer** - Use cases and orchestration
-- **Infrastructure Layer** - External integrations
-- **Presentation Layer** - UI and API routes
-
-### Documentation
-
-- [CLAUDE.md](./CLAUDE.md) - Global coding standards
-- [CLI Architecture](./CLI/ARCHITECTURE.md) - Command-line architecture
-- [Environment Variables](./Docs/ENVIRONMENT_VARIABLES.md) - Environment variable reference
-- [Pump](./Pump/README.md) - Data gathering CLI
-- [Iron](./Iron/README.md) - Documentation scaffolding CLI
-- [WebUI Architecture](./WebUI/ARCHITECTURE.md) - Dashboard architecture
-- [Code Quality](./Docs/CODE_QUALITY.md) - The 50 rules
-- [Security](./Docs/SECURITY.md) - Security practices
-- [Deployment](./Docs/DEPLOYMENT.md) - Deployment guide
-- [Testing](./Docs/TESTING.md) - Testing guide
-- [Contributing](./Docs/CONTRIBUTING.md) - Contribution guidelines
+- [x] Core CLI with task/section management
+- [x] Coder/Reviewer loop with dispute escalation
+- [x] Background runner daemon
+- [x] Multi-project registry
+- [x] Web dashboard (basic)
+- [ ] Mac menu bar app
+- [ ] Interactive config wizard
+- [ ] Section priorities and dependencies
+- [ ] Provider adapters (multi-vendor coder/reviewer)
+- [ ] Token accounting and budgets
 
 ---
 
@@ -274,7 +380,7 @@ See [CONTRIBUTING.md](./Docs/CONTRIBUTING.md) for detailed guidelines.
 
 ## License
 
-MIT License - see [LICENSE](./LICENSE) for details.
+MIT License — see [LICENSE](./LICENSE) for details.
 
 ---
 
@@ -283,8 +389,6 @@ MIT License - see [LICENSE](./LICENSE) for details.
 Created by [UnlikeOther.ai](https://unlikeother.ai)
 
 **Author:** Ondrej Rafaj ([@rafiki270](https://github.com/rafiki270))
-
----
 
 <p align="center">
   <em>Made with love in Scotland.</em>
