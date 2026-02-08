@@ -4,7 +4,9 @@
 
 ## Overview
 
-The Steroids WebUI is a developer dashboard built with React, Vite, and Fastify, using SSR for performance. It provides visibility into projects, tasks, and system health.
+The Steroids WebUI is a developer dashboard built with React and Vite (CSR), with a separate Fastify API backend. It provides full administrative control over projects, tasks, runners, disputes, and system configuration.
+
+**Key Principle: The WebUI must allow complete administration of everything in the Steroids system.**
 
 ---
 
@@ -12,387 +14,428 @@ The Steroids WebUI is a developer dashboard built with React, Vite, and Fastify,
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| Frontend | React 19 + Vite | UI framework with SSR support |
+| Frontend | React 19 + Vite | CSR UI framework |
 | Styling | Tailwind CSS 4.x | Utility-first CSS with theming |
 | State | React Context + TanStack Query | Local + server state |
-| Backend | Fastify | API server with file-based storage |
+| Backend | Fastify | REST API server |
 | Real-time | WebSocket | Live updates |
+| Container | Docker | Deployment |
 | Package Manager | pnpm | Monorepo support |
-
----
-
-## Layer Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Presentation Layer                        │
-│  Components, Pages, Layouts, Hooks                               │
-├─────────────────────────────────────────────────────────────────┤
-│                        Application Layer                         │
-│  Services, State Management, API Clients                         │
-├─────────────────────────────────────────────────────────────────┤
-│                          Domain Layer                            │
-│  Entities, Value Objects, Domain Services, Repositories         │
-├─────────────────────────────────────────────────────────────────┤
-│                       Infrastructure Layer                       │
-│  Database, External APIs, File System, WebSocket                │
-└─────────────────────────────────────────────────────────────────┘
-```
 
 ---
 
 ## Directory Structure
 
 ```
-WebUI/
-├── packages/
-│   ├── api/                          # Backend (Fastify)
-│   │   ├── src/
-│   │   │   ├── domain/               # Domain Layer
-│   │   │   │   ├── entities/
-│   │   │   │   │   ├── Project.ts
-│   │   │   │   │   ├── Task.ts
-│   │   │   │   │   ├── HealthCheck.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   ├── value-objects/
-│   │   │   │   │   ├── ProjectStatus.ts
-│   │   │   │   │   ├── TaskPriority.ts
-│   │   │   │   │   ├── HealthScore.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   ├── repositories/
-│   │   │   │   │   ├── IProjectRepository.ts
-│   │   │   │   │   ├── ITaskRepository.ts
-│   │   │   │   │   ├── IHealthRepository.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   └── services/
-│   │   │   │       ├── ProjectDomainService.ts
-│   │   │   │       ├── TaskDomainService.ts
-│   │   │   │       ├── HealthDomainService.ts
-│   │   │   │       └── index.ts
-│   │   │   │
-│   │   │   ├── application/          # Application Layer
-│   │   │   │   ├── use-cases/
-│   │   │   │   │   ├── projects/
-│   │   │   │   │   │   ├── ListProjectsUseCase.ts
-│   │   │   │   │   │   ├── GetProjectUseCase.ts
-│   │   │   │   │   │   ├── SyncProjectUseCase.ts
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   ├── tasks/
-│   │   │   │   │   │   ├── ListTasksUseCase.ts
-│   │   │   │   │   │   ├── UpdateTaskUseCase.ts
-│   │   │   │   │   │   ├── SyncTasksUseCase.ts
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   └── health/
-│   │   │   │   │       ├── GetHealthOverviewUseCase.ts
-│   │   │   │   │       ├── RunHealthCheckUseCase.ts
-│   │   │   │   │       └── index.ts
-│   │   │   │   ├── dto/
-│   │   │   │   │   ├── ProjectDTO.ts
-│   │   │   │   │   ├── TaskDTO.ts
-│   │   │   │   │   ├── HealthDTO.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   └── mappers/
-│   │   │   │       ├── ProjectMapper.ts
-│   │   │   │       ├── TaskMapper.ts
-│   │   │   │       └── index.ts
-│   │   │   │
-│   │   │   ├── infrastructure/       # Infrastructure Layer
-│   │   │   │   ├── persistence/
-│   │   │   │   │   ├── file/
-│   │   │   │   │   │   ├── FileProjectRepository.ts
-│   │   │   │   │   │   ├── FileTaskRepository.ts
-│   │   │   │   │   │   ├── FileHealthRepository.ts
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   └── in-memory/
-│   │   │   │   │       ├── InMemoryProjectRepository.ts
-│   │   │   │   │       ├── InMemoryTaskRepository.ts
-│   │   │   │   │       └── index.ts
-│   │   │   │   ├── filesystem/
-│   │   │   │   │   ├── ProjectScanner.ts
-│   │   │   │   │   ├── TodoParser.ts
-│   │   │   │   │   ├── AgentsParser.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   ├── git/
-│   │   │   │   │   ├── GitClient.ts
-│   │   │   │   │   ├── GitActivityService.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   └── websocket/
-│   │   │   │       ├── WebSocketServer.ts
-│   │   │   │       ├── EventBroadcaster.ts
-│   │   │   │       └── index.ts
-│   │   │   │
-│   │   │   ├── presentation/         # Presentation Layer (API)
-│   │   │   │   ├── routes/
-│   │   │   │   │   ├── projects/
-│   │   │   │   │   │   ├── listProjects.ts
-│   │   │   │   │   │   ├── getProject.ts
-│   │   │   │   │   │   ├── syncProject.ts
-│   │   │   │   │   │   ├── schemas.ts
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   ├── tasks/
-│   │   │   │   │   │   ├── listTasks.ts
-│   │   │   │   │   │   ├── updateTask.ts
-│   │   │   │   │   │   ├── schemas.ts
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   └── health/
-│   │   │   │   │       ├── getHealth.ts
-│   │   │   │   │       ├── schemas.ts
-│   │   │   │   │       └── index.ts
-│   │   │   │   ├── middleware/
-│   │   │   │   │   ├── errorHandler.ts
-│   │   │   │   │   ├── requestLogger.ts
-│   │   │   │   │   ├── cors.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   └── plugins/
-│   │   │   │       ├── storagePlugin.ts
-│   │   │   │       ├── websocketPlugin.ts
-│   │   │   │       └── index.ts
-│   │   │   │
-│   │   │   ├── config/
-│   │   │   │   ├── storage.ts
-│   │   │   │   ├── server.ts
-│   │   │   │   ├── environment.ts
-│   │   │   │   └── index.ts
-│   │   │   │
-│   │   │   ├── container/            # Dependency Injection
-│   │   │   │   ├── Container.ts
-│   │   │   │   ├── bindings.ts
-│   │   │   │   └── index.ts
-│   │   │   │
-│   │   │   └── main.ts               # Entry point
-│   │   │
-│   │   └── tests/
-│   │       ├── unit/
-│   │       ├── integration/
-│   │       └── fixtures/
-│   │
-│   ├── web/                          # Frontend (React)
-│   │   ├── src/
-│   │   │   ├── domain/               # Domain Layer
-│   │   │   │   ├── entities/
-│   │   │   │   │   ├── Project.ts
-│   │   │   │   │   ├── Task.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   └── value-objects/
-│   │   │   │       ├── ProjectStatus.ts
-│   │   │   │       └── index.ts
-│   │   │   │
-│   │   │   ├── application/          # Application Layer
-│   │   │   │   ├── services/
-│   │   │   │   │   ├── ProjectService.ts
-│   │   │   │   │   ├── TaskService.ts
-│   │   │   │   │   ├── HealthService.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   ├── stores/
-│   │   │   │   │   ├── projectStore.ts
-│   │   │   │   │   ├── taskStore.ts
-│   │   │   │   │   ├── themeStore.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   └── hooks/
-│   │   │   │       ├── useProjects.ts
-│   │   │   │       ├── useTasks.ts
-│   │   │   │       ├── useHealth.ts
-│   │   │   │       ├── useTheme.ts
-│   │   │   │       ├── useWebSocket.ts
-│   │   │   │       └── index.ts
-│   │   │   │
-│   │   │   ├── infrastructure/       # Infrastructure Layer
-│   │   │   │   ├── api/
-│   │   │   │   │   ├── ApiClient.ts
-│   │   │   │   │   ├── ProjectApi.ts
-│   │   │   │   │   ├── TaskApi.ts
-│   │   │   │   │   ├── HealthApi.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   ├── websocket/
-│   │   │   │   │   ├── WebSocketClient.ts
-│   │   │   │   │   ├── EventHandler.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   └── storage/
-│   │   │   │       ├── LocalStorage.ts
-│   │   │   │       ├── ThemeStorage.ts
-│   │   │   │       └── index.ts
-│   │   │   │
-│   │   │   ├── presentation/         # Presentation Layer
-│   │   │   │   ├── components/
-│   │   │   │   │   ├── atoms/
-│   │   │   │   │   │   ├── Button/
-│   │   │   │   │   │   │   ├── Button.tsx
-│   │   │   │   │   │   │   ├── Button.test.tsx
-│   │   │   │   │   │   │   ├── Button.styles.ts
-│   │   │   │   │   │   │   └── index.ts
-│   │   │   │   │   │   ├── Badge/
-│   │   │   │   │   │   ├── Input/
-│   │   │   │   │   │   ├── Checkbox/
-│   │   │   │   │   │   ├── Skeleton/
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   ├── molecules/
-│   │   │   │   │   │   ├── StatusBadge/
-│   │   │   │   │   │   ├── ProgressRing/
-│   │   │   │   │   │   ├── MetricCard/
-│   │   │   │   │   │   ├── SearchInput/
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   ├── organisms/
-│   │   │   │   │   │   ├── ProjectCard/
-│   │   │   │   │   │   ├── TaskList/
-│   │   │   │   │   │   ├── TaskItem/
-│   │   │   │   │   │   ├── HealthMatrix/
-│   │   │   │   │   │   ├── ActivityFeed/
-│   │   │   │   │   │   ├── CommandPalette/
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   ├── templates/
-│   │   │   │   │   │   ├── DashboardLayout/
-│   │   │   │   │   │   ├── ProjectLayout/
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   └── index.ts
-│   │   │   │   │
-│   │   │   │   ├── pages/
-│   │   │   │   │   ├── Dashboard/
-│   │   │   │   │   │   ├── Dashboard.tsx
-│   │   │   │   │   │   ├── DashboardWidgets.tsx
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   ├── Projects/
-│   │   │   │   │   │   ├── ProjectList.tsx
-│   │   │   │   │   │   ├── ProjectDetail.tsx
-│   │   │   │   │   │   ├── ProjectTasks.tsx
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   ├── Tasks/
-│   │   │   │   │   │   ├── TasksPage.tsx
-│   │   │   │   │   │   ├── TaskFilters.tsx
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   ├── Health/
-│   │   │   │   │   │   ├── HealthPage.tsx
-│   │   │   │   │   │   └── index.ts
-│   │   │   │   │   └── Settings/
-│   │   │   │   │       ├── SettingsPage.tsx
-│   │   │   │   │       └── index.ts
-│   │   │   │   │
-│   │   │   │   ├── contexts/
-│   │   │   │   │   ├── ThemeContext.tsx
-│   │   │   │   │   ├── FilterContext.tsx
-│   │   │   │   │   ├── WebSocketContext.tsx
-│   │   │   │   │   └── index.ts
-│   │   │   │   │
-│   │   │   │   └── providers/
-│   │   │   │       ├── AppProviders.tsx
-│   │   │   │       └── index.ts
-│   │   │   │
-│   │   │   ├── config/
-│   │   │   │   ├── routes.ts
-│   │   │   │   ├── theme.ts
-│   │   │   │   ├── constants.ts
-│   │   │   │   └── index.ts
-│   │   │   │
-│   │   │   └── main.tsx
-│   │   │
-│   │   ├── server/                   # SSR Server
-│   │   │   ├── entry-server.tsx
-│   │   │   ├── entry-client.tsx
-│   │   │   ├── dev-server.ts
-│   │   │   ├── prod-server.ts
-│   │   │   └── render.ts
-│   │   │
-│   │   └── tests/
-│   │       ├── unit/
-│   │       ├── integration/
-│   │       └── e2e/
-│   │
-│   └── shared/                       # Shared Package
-│       ├── src/
-│       │   ├── types/
-│       │   │   ├── project.ts
-│       │   │   ├── task.ts
-│       │   │   ├── health.ts
-│       │   │   ├── api.ts
-│       │   │   └── index.ts
-│       │   ├── enums/
-│       │   │   ├── ProjectCategory.ts
-│       │   │   ├── ProjectStatus.ts
-│       │   │   ├── TaskStatus.ts
-│       │   │   ├── TaskPriority.ts
-│       │   │   ├── HealthStatus.ts
-│       │   │   └── index.ts
-│       │   ├── utils/
-│       │   │   ├── validation.ts
-│       │   │   ├── formatting.ts
-│       │   │   ├── dates.ts
-│       │   │   └── index.ts
-│       │   └── constants/
-│       │       ├── api.ts
-│       │       ├── limits.ts
-│       │       └── index.ts
-│       └── tests/
+/WebUI                           # React Frontend (CSR)
+├── src/
+│   ├── components/              # Reusable UI components
+│   │   ├── atoms/               # Basic elements (Button, Input)
+│   │   ├── molecules/           # Combinations (StatusBadge, MetricCard)
+│   │   ├── organisms/           # Complex sections (TaskList, RunnerCard)
+│   │   └── layouts/             # Page layouts (MainLayout, DetailLayout)
+│   ├── pages/                   # One page per route
+│   ├── hooks/                   # Custom React hooks
+│   ├── services/                # API clients
+│   ├── stores/                  # State management
+│   ├── types/                   # TypeScript types
+│   └── main.tsx                 # Entry point
+├── public/
+├── Dockerfile
+├── vite.config.ts
+└── package.json
+
+/API                             # Fastify Backend
+├── src/
+│   ├── routes/                  # API endpoints
+│   │   ├── tasks/
+│   │   ├── sections/
+│   │   ├── runners/
+│   │   ├── disputes/
+│   │   ├── config/
+│   │   ├── locks/
+│   │   ├── health/
+│   │   ├── logs/
+│   │   └── system/
+│   ├── services/                # Business logic
+│   ├── middleware/              # Auth, logging, CORS
+│   ├── websocket/               # Real-time events
+│   └── main.ts                  # Entry point
+├── Dockerfile
+└── package.json
+
+/docker-compose.yml              # Orchestrates web + api
+/Makefile                        # Development commands
 ```
 
 ---
 
-## Component Design (Atomic)
+## UI Design Principles (CRITICAL)
 
-### Hierarchy
+### 1. Single Responsibility Pages
+
+**Each page does ONE thing.** No pages with mixed functionalities.
 
 ```
-atoms/        → Basic UI elements (Button, Input, Badge)
-molecules/    → Combinations of atoms (StatusBadge, MetricCard)
-organisms/    → Complex UI sections (ProjectCard, TaskList)
-templates/    → Page layouts (DashboardLayout)
-pages/        → Full pages composed of templates + organisms
+BAD:  /tasks - Lists tasks AND allows editing AND shows details
+GOOD: /tasks - Lists tasks only
+      /tasks/:id - Shows task details only
+      /tasks/:id/edit - Edits task only
 ```
 
-### Component Structure
+### 2. Click to Navigate
 
-Each component folder contains:
+**Lists are navigation, not inline editing.**
+
+```tsx
+// BAD: Inline editing in list
+<TaskList>
+  {tasks.map(task => (
+    <TaskRow>
+      <EditableTitle />
+      <StatusDropdown />
+      <DeleteButton />
+    </TaskRow>
+  ))}
+</TaskList>
+
+// GOOD: Click to navigate to detail page
+<TaskList>
+  {tasks.map(task => (
+    <TaskRow onClick={() => navigate(`/tasks/${task.id}`)}>
+      <TaskTitle />
+      <TaskStatus />
+    </TaskRow>
+  ))}
+</TaskList>
 ```
-Button/
-├── Button.tsx        # Component implementation
-├── Button.test.tsx   # Unit tests
-├── Button.styles.ts  # Tailwind variants (if complex)
-└── index.ts          # Public export
+
+### 3. Reusable Components
+
+**Split components for maximum reuse.**
+
+```
+atoms/           → Button, Input, Badge, Skeleton, Icon
+molecules/       → StatusBadge, MetricCard, SearchInput, Pagination
+organisms/       → TaskCard, RunnerCard, DisputeCard, LogViewer
+layouts/         → MainLayout, DetailLayout, FormLayout
+pages/           → Composed of layouts + organisms
+```
+
+### 4. Component File Structure
+
+```
+TaskCard/
+├── TaskCard.tsx        # Component implementation
+├── TaskCard.test.tsx   # Unit tests
+├── TaskCard.types.ts   # TypeScript interfaces
+└── index.ts            # Public export
 ```
 
 ---
 
-## SSR Implementation
+## Page Structure
 
-### Entry Points
+### Dashboard
+- `/` - Overview with key metrics (task counts, runner status, health)
 
-```typescript
-// server/entry-server.tsx
-export function render(url: string, initialData: AppData): string {
-  return renderToString(
-    <StaticRouter location={url}>
-      <App initialData={initialData} />
-    </StaticRouter>
-  );
-}
+### Tasks
+- `/tasks` - Task list with filters (status, section)
+- `/tasks/new` - Create new task
+- `/tasks/:id` - Task detail view (info, audit trail, logs)
+- `/tasks/:id/edit` - Edit task (status, priority, notes)
 
-// server/entry-client.tsx
-const initialData = window.__INITIAL_DATA__;
-delete window.__INITIAL_DATA__;
+### Sections
+- `/sections` - Section list
+- `/sections/new` - Create new section
+- `/sections/:id` - Section detail (tasks in section)
+- `/sections/:id/edit` - Edit section
 
-hydrateRoot(
-  document.getElementById('root')!,
-  <BrowserRouter>
-    <App initialData={initialData} />
-  </BrowserRouter>
-);
+### Runners
+- `/runners` - Runner list with status
+- `/runners/:id` - Runner detail (logs, current task)
+- `/runners/:id/logs` - Full log viewer
+
+### Disputes
+- `/disputes` - Dispute list (open, resolved)
+- `/disputes/:id` - Dispute detail (positions, resolution)
+- `/disputes/:id/resolve` - Resolution form
+
+### Configuration
+- `/config` - Config overview
+- `/config/edit` - Edit configuration
+- `/config/providers` - AI provider settings
+
+### Locks
+- `/locks` - Active locks overview (task and section locks)
+- `/locks/tasks` - Task lock details
+- `/locks/sections` - Section lock details
+
+### Logs
+- `/logs` - Log browser with filters
+- `/logs/:id` - Individual log detail
+- `/logs/tail` - Live log tailing (real-time stream)
+
+### Health
+- `/health` - Health overview
+- `/health/:check` - Individual health check detail
+
+### System
+- `/system` - System status (version, uptime)
+- `/system/backup` - Backup management
+- `/system/restore` - Restore from backup
+- `/system/migrations` - Migration status
+- `/system/gc` - Garbage collection management
+- `/system/purge` - Data purge management
+- `/system/hooks` - Hook configuration
+- `/system/cron` - Scheduled task management (wakeup, auto-restart)
+
+---
+
+## API Endpoints
+
+### Tasks
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/tasks` | List tasks (filterable, paginated) |
+| POST | `/api/tasks` | Create new task |
+| GET | `/api/tasks/:id` | Get task detail |
+| PATCH | `/api/tasks/:id` | Update task |
+| POST | `/api/tasks/:id/approve` | Approve task |
+| POST | `/api/tasks/:id/reject` | Reject task |
+| DELETE | `/api/tasks/:id` | Delete task |
+| GET | `/api/tasks/:id/audit` | Get task audit trail |
+
+### Sections
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/sections` | List sections |
+| GET | `/api/sections/:id` | Get section detail |
+| POST | `/api/sections` | Create section |
+| PATCH | `/api/sections/:id` | Update section |
+| DELETE | `/api/sections/:id` | Delete section |
+
+### Runners
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/runners` | List runners |
+| GET | `/api/runners/:id` | Get runner detail |
+| POST | `/api/runners/start` | Start runner |
+| POST | `/api/runners/:id/stop` | Stop runner |
+| POST | `/api/runners/:id/restart` | Restart runner |
+| GET | `/api/runners/:id/logs` | Get runner logs |
+| GET | `/api/runners/:id/logs/tail` | Stream logs in real-time (SSE) |
+
+### Disputes
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/disputes` | List disputes |
+| GET | `/api/disputes/:id` | Get dispute detail |
+| POST | `/api/disputes` | Create dispute |
+| POST | `/api/disputes/:id/resolve` | Resolve dispute |
+
+### Configuration
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/config` | Get configuration |
+| PATCH | `/api/config` | Update configuration |
+| GET | `/api/config/schema` | Get config schema |
+| GET | `/api/config/providers` | List AI provider settings |
+| PATCH | `/api/config/providers` | Update AI provider settings |
+
+### Locks
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/locks` | List all active locks |
+| GET | `/api/locks/tasks` | List task locks |
+| GET | `/api/locks/sections` | List section locks |
+| DELETE | `/api/locks/tasks/:id` | Force release task lock |
+| DELETE | `/api/locks/sections/:id` | Force release section lock |
+| DELETE | `/api/locks/stale` | Clean up stale locks |
+
+### Health
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Get health status |
+| POST | `/api/health/check` | Run health check |
+
+### Logs
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/logs` | List logs (filterable) |
+| GET | `/api/logs/:id` | Get log content |
+| DELETE | `/api/logs` | Purge old logs |
+
+### System
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/system/status` | Get system status |
+| POST | `/api/system/backup` | Create backup |
+| GET | `/api/system/backups` | List backups |
+| POST | `/api/system/restore` | Restore backup |
+| GET | `/api/system/migrations` | Migration status |
+| POST | `/api/system/migrate` | Run migrations |
+| GET | `/api/system/gc` | Get GC status and stats |
+| POST | `/api/system/gc` | Run garbage collection |
+| GET | `/api/system/purge` | Get purge status |
+| POST | `/api/system/purge` | Run data purge |
+| GET | `/api/system/hooks` | List configured hooks |
+| PUT | `/api/system/hooks` | Update hook configuration |
+| GET | `/api/system/cron` | Get cron/wakeup settings |
+| PUT | `/api/system/cron` | Update cron/wakeup settings |
+| POST | `/api/system/wakeup` | Trigger manual wakeup |
+
+### WebSocket
+| Event | Direction | Payload |
+|-------|-----------|---------|
+| `task:created` | Server → Client | `{ id, title, status, sectionId }` |
+| `task:updated` | Server → Client | `{ id, status, ... }` |
+| `task:deleted` | Server → Client | `{ id }` |
+| `section:created` | Server → Client | `{ id, name, position }` |
+| `section:updated` | Server → Client | `{ id, name, position }` |
+| `section:deleted` | Server → Client | `{ id }` |
+| `runner:started` | Server → Client | `{ id, pid, projectPath }` |
+| `runner:updated` | Server → Client | `{ id, status, task }` |
+| `runner:stopped` | Server → Client | `{ id, exitCode }` |
+| `dispute:created` | Server → Client | `{ id, taskId, type }` |
+| `dispute:resolved` | Server → Client | `{ id, resolution, winner }` |
+| `config:updated` | Server → Client | `{ key, value }` |
+| `health:changed` | Server → Client | `{ score, checks }` |
+| `log:appended` | Server → Client | `{ runnerId, line }` |
+| `gc:started` | Server → Client | `{ timestamp }` |
+| `gc:completed` | Server → Client | `{ removed, duration }` |
+| `purge:started` | Server → Client | `{ timestamp }` |
+| `purge:completed` | Server → Client | `{ removed, duration }` |
+| `backup:created` | Server → Client | `{ id, path, size }` |
+
+---
+
+## Docker Configuration
+
+### Ports
+- **3500** - Web UI (React frontend)
+- **3501** - API (Fastify backend)
+
+### Docker Hub
+- **Organization**: `unlikeotherai` (primary)
+- **Fallback**: `rafiki270` (if org unavailable)
+- **Images**:
+  - `unlikeotherai/steroids-web:latest`
+  - `unlikeotherai/steroids-api:latest`
+
+### docker-compose.yml
+
+```yaml
+version: '3.8'
+services:
+  web:
+    image: unlikeotherai/steroids-web:latest
+    ports:
+      - "3500:3500"
+    environment:
+      - API_URL=http://api:3501
+    depends_on:
+      - api
+
+  api:
+    image: unlikeotherai/steroids-api:latest
+    ports:
+      - "3501:3501"
+    volumes:
+      - ~/.steroids:/root/.steroids
+      - ./.steroids:/app/.steroids
+    environment:
+      - NODE_ENV=production
 ```
 
-### Data Hydration
+---
 
-```typescript
-// server/prod-server.ts
-app.get('*', async (req, res) => {
-  const initialData = await loadRouteData(req.path);
-  const html = render(req.url, initialData);
+## Makefile
 
-  const finalHtml = template
-    .replace('<!--app-html-->', html)
-    .replace(
-      '<!--app-data-->',
-      `<script>window.__INITIAL_DATA__ = ${JSON.stringify(initialData)}</script>`
-    );
+```makefile
+.PHONY: help launch build push
 
-  res.send(finalHtml);
-});
+# Default target - show help
+help:
+	@echo "Steroids WebUI Development"
+	@echo ""
+	@echo "Usage:"
+	@echo "  make launch    - Launch web and API in development mode"
+	@echo "  make build     - Build Docker images"
+	@echo "  make push      - Push images to Docker Hub"
+	@echo "  make clean     - Clean build artifacts"
+	@echo ""
+
+# Launch development environment
+launch:
+	@echo "Starting Steroids WebUI..."
+	docker-compose up --build
+
+# Build production images
+build:
+	docker build -t unlikeotherai/steroids-web:latest ./WebUI
+	docker build -t unlikeotherai/steroids-api:latest ./API
+
+# Push to Docker Hub
+push: build
+	docker push unlikeotherai/steroids-web:latest
+	docker push unlikeotherai/steroids-api:latest
+
+# Clean up
+clean:
+	docker-compose down -v
+	rm -rf WebUI/dist API/dist
+```
+
+---
+
+## CLI Integration
+
+### `steroids ui launch`
+
+Launches the WebUI in a Docker container.
+
+```bash
+steroids ui launch [options]
+
+Options:
+  --detach              Run in background
+  --port <port>         Web UI port (default: 3500)
+  --api-port <port>     API port (default: 3501)
+  --no-pull             Skip pulling latest image
+  -h, --help            Show help
+
+Examples:
+  steroids ui launch                    # Launch with latest image
+  steroids ui launch --detach           # Run in background
+  steroids ui launch --port 8080        # Custom port
+```
+
+**Behavior:**
+1. Check for latest image: `docker pull unlikeotherai/steroids-web:latest`
+2. Start containers via docker-compose
+3. Open browser to `http://localhost:3500`
+4. Stream logs (unless `--detach`)
+
+### `steroids ui stop`
+
+Stops the WebUI containers.
+
+```bash
+steroids ui stop
+```
+
+### `steroids ui status`
+
+Shows WebUI container status.
+
+```bash
+steroids ui status
+
+Output:
+  Web UI: Running (http://localhost:3500)
+  API:    Running (http://localhost:3501)
+  Uptime: 2h 15m
 ```
 
 ---
@@ -421,76 +464,6 @@ app.get('*', async (req, res) => {
 }
 ```
 
-### Theme Context
-
-```typescript
-// contexts/ThemeContext.tsx
-type Theme = 'light' | 'dark' | 'system';
-
-export function ThemeProvider({ children }: PropsWithChildren) {
-  const [theme, setTheme] = useState<Theme>(() =>
-    localStorage.getItem('theme') as Theme ?? 'system'
-  );
-
-  const resolved = theme === 'system'
-    ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-    : theme;
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', resolved === 'dark');
-    localStorage.setItem('theme', theme);
-  }, [theme, resolved]);
-
-  return (
-    <ThemeContext.Provider value={{ theme, resolved, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
-}
-```
-
----
-
-## API Design
-
-### Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/projects` | List projects (paginated, filterable) |
-| GET | `/api/projects/:slug` | Get single project |
-| POST | `/api/projects/:slug/sync` | Sync project from filesystem |
-| GET | `/api/tasks` | List all tasks |
-| GET | `/api/projects/:slug/tasks` | List project tasks |
-| PATCH | `/api/tasks/:id` | Update task status |
-| GET | `/api/health` | System health overview |
-| WS | `/ws` | Real-time updates |
-
-### Response Format
-
-```typescript
-interface ApiResponse<T> {
-  data: T;
-  pagination?: {
-    page: number;
-    pageSize: number;
-    total: number;
-    pages: number;
-  };
-}
-```
-
----
-
-## WebSocket Events
-
-| Event | Direction | Payload |
-|-------|-----------|---------|
-| `project:updated` | Server → Client | `{ id, status, healthScore }` |
-| `task:updated` | Server → Client | `{ id, status }` |
-| `health:changed` | Server → Client | `{ projectId, status }` |
-| `subscribe` | Client → Server | `{ channels: string[] }` |
-
 ---
 
 ## Testing Strategy
@@ -502,12 +475,12 @@ interface ApiResponse<T> {
 
 ### Integration Tests
 - Test API routes with test database
-- Test repository implementations
+- Test WebSocket events
 
 ### E2E Tests (Playwright)
 - Critical user flows
+- Navigation patterns
 - Theme switching
-- Task management
 
 ---
 
@@ -515,7 +488,15 @@ interface ApiResponse<T> {
 
 | Metric | Target |
 |--------|--------|
-| First Contentful Paint | < 1.0s |
-| Time to Interactive | < 2.5s |
-| Largest Contentful Paint | < 2.0s |
-| Bundle Size (gzipped) | < 150KB |
+| First Contentful Paint | < 1.5s |
+| Time to Interactive | < 3.0s |
+| Largest Contentful Paint | < 2.5s |
+| Bundle Size (gzipped) | < 200KB |
+
+---
+
+## Related Documentation
+
+- [CLAUDE.md](../CLAUDE.md) - Coding standards and release workflow
+- [CLI/COMMANDS.md](../CLI/COMMANDS.md) - CLI reference
+- [API/README.md](../API/README.md) - API documentation

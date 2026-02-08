@@ -422,38 +422,130 @@ Drill into a category:
 
 ---
 
-## `steroids serve`
+## `steroids sections`
 
-Launch the WebUI server.
+Manage task sections (groups of related tasks).
 
 ```
-Usage: steroids serve [options]
-       steroids serve start [options]
-       steroids serve stop
-       steroids serve restart
-       steroids serve status
+Usage: steroids sections [options]
+       steroids sections add <name> [options]
+       steroids sections update <id> [options]
+       steroids sections remove <id> [options]
+       steroids sections reorder [options]
 
-Options:
-  -p, --port <port>         Server port (default: 3000)
-  -H, --host <host>         Server host (default: localhost)
-  --open                    Open browser automatically
-  --no-open                 Don't open browser
-  --watch                   Reload on file changes
-  --base-path <path>        Base path for scanning projects
+Arguments:
+  name                      Section name
+  id                        Section GUID
 
-Background Mode:
-  -d, --detach              Run server in background
-  --pid-file <path>         Write PID to file (with --detach)
-  --log-file <path>         Log output to file (with --detach)
+List Options:
+  --include-tasks           Include task count for each section
+
+Add Options:
+  --position <n>            Position in ordering (default: append)
+  --description <text>      Section description
+
+Update Options:
+  --name <name>             New section name
+  --position <n>            New position
+
+Remove Options:
+  --force                   Remove even if section has tasks
+  --reassign <id>           Move tasks to another section
+
+Reorder Options:
+  --id <id>                 Section ID to move
+  --position <n>            New position
 
 Examples:
-  steroids serve                                     # Start on localhost:3000
-  steroids serve --port 8080 --open                  # Custom port, open browser
-  steroids serve start --detach                      # Background mode
-  steroids serve stop                                # Stop background server
-  steroids serve restart                             # Restart server
-  steroids serve status                              # Check if running
-  steroids serve --base-path ~/Projects              # Serve multiple projects
+  steroids sections                                  # List all sections
+  steroids sections --include-tasks                  # Show task counts
+  steroids sections add "Phase 1 - Backend"          # Add new section
+  steroids sections add "Phase 2" --position 2       # Insert at position
+  steroids sections update abc123 --name "Phase 1"   # Rename section
+  steroids sections remove abc123                    # Remove empty section
+  steroids sections remove abc123 --force            # Remove with tasks
+  steroids sections reorder --id abc123 --position 1 # Move to first
+```
+
+---
+
+## `steroids ui`
+
+Launch and manage the WebUI Docker container.
+
+```
+Usage: steroids ui <subcommand> [options]
+
+Subcommands:
+  steroids ui launch         Start WebUI containers
+  steroids ui stop           Stop WebUI containers
+  steroids ui status         Check container status
+  steroids ui logs           View container logs
+
+Launch Options:
+  --detach                  Run in background
+  --port <port>             Web UI port (default: 3500)
+  --api-port <port>         API port (default: 3501)
+  --no-pull                 Skip pulling latest image
+
+Logs Options:
+  --follow                  Follow log output
+  --service <svc>           Service: web | api (default: both)
+
+Docker Images:
+  unlikeotherai/steroids-web:latest
+  unlikeotherai/steroids-api:latest
+
+Behavior:
+  1. Pulls latest Docker images (unless --no-pull)
+  2. Starts containers via docker-compose
+  3. Opens browser to http://localhost:3500
+  4. Streams logs (unless --detach)
+
+Examples:
+  steroids ui launch                                 # Launch with latest image
+  steroids ui launch --detach                        # Run in background
+  steroids ui launch --port 8080                     # Custom port
+  steroids ui stop                                   # Stop all containers
+  steroids ui status                                 # Check container status
+  steroids ui logs --follow                          # Follow logs
+```
+
+---
+
+## `steroids watch`
+
+Real-time terminal dashboard showing automation status.
+
+```
+Usage: steroids watch [options]
+
+Options:
+  --refresh <ms>            Refresh interval in milliseconds (default: 1000)
+  --no-logs                 Hide log output panel
+  --compact                 Minimal single-line status
+  -j, --json                Output as JSON stream (for piping)
+
+Keyboard Controls (interactive mode):
+  q                         Quit watch mode
+  p                         Pause/resume refresh
+  r                         Force refresh now
+  l                         Toggle log panel visibility
+  t                         Show detailed task info
+  ↑/↓                       Scroll log history
+
+Compact Mode Output:
+  [ACTIVE] Task: a1b2c3d4 (CODER 2/15) | P:12 I:1 R:0 C:45 | 2h15m
+
+JSON Mode Output:
+  Outputs newline-delimited JSON for each refresh cycle.
+
+Examples:
+  steroids watch                                     # Interactive dashboard
+  steroids watch --refresh 500                       # Faster refresh
+  steroids watch --compact                           # Single line for tmux
+  steroids watch --json | jq '.task.status'          # Pipe to jq
+  steroids watch --no-logs                           # Status only
 ```
 
 ---
