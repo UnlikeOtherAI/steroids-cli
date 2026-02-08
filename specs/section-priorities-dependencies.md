@@ -174,3 +174,54 @@ steroids sections graph --tasks --status active    # Only show in_progress/revie
 steroids sections graph --tasks --status pending   # Only show pending
 steroids sections graph --section <id>             # Only show one section
 ```
+
+---
+
+# Model Discovery from Provider APIs
+
+## Overview
+Model names should be fetched dynamically from provider endpoints, not hardcoded.
+
+## Provider Endpoints
+
+### OpenAI / Codex
+```
+GET https://api.openai.com/v1/models
+Authorization: Bearer $OPENAI_API_KEY
+```
+
+### Anthropic / Claude
+```
+GET https://api.anthropic.com/v1/models
+x-api-key: $ANTHROPIC_API_KEY
+```
+
+## Implementation
+
+### `steroids ai models` command
+```bash
+steroids ai models                    # List all available models from all providers
+steroids ai models --provider openai  # List OpenAI models only
+steroids ai models --provider claude  # List Anthropic models only
+```
+
+### Model validation
+- On startup, validate configured models exist
+- Cache model list (refresh daily or on demand)
+- Warn if configured model not found in provider's list
+
+### Config with validated models
+```yaml
+ai:
+  coder:
+    provider: anthropic
+    model: claude-sonnet-4-20250514  # Validated against API
+  reviewer:
+    provider: openai
+    model: gpt-5.3-codex             # Validated against API
+```
+
+### Fallback behavior
+- If API unreachable, use cached model list
+- If no cache, allow configured model (assume valid)
+- Log warning when validation skipped
