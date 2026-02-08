@@ -35,17 +35,24 @@ EXAMPLES:
 
 // All steroids commands and their subcommands for completion
 const COMMANDS = {
+  about: [],
+  llm: [],
   init: [],
-  sections: ['add', 'list', 'remove', 'rename'],
-  tasks: ['add', 'update', 'approve', 'reject', 'audit', 'list'],
-  loop: ['start', 'stop', 'status'],
-  runners: ['list', 'start', 'stop', 'status', 'logs'],
-  config: ['show', 'set', 'reset', 'edit'],
+  sections: ['add', 'list', 'priority', 'depends-on', 'no-depends-on', 'graph'],
+  tasks: ['add', 'list', 'update', 'approve', 'reject', 'skip', 'audit'],
+  loop: [],
+  runners: ['list', 'start', 'stop', 'status', 'logs', 'wakeup', 'cron'],
+  config: ['init', 'show', 'get', 'set', 'validate', 'path', 'edit', 'browse'],
   health: [],
   scan: [],
   backup: ['create', 'restore', 'list', 'clean'],
   logs: ['show', 'list', 'tail', 'purge'],
   gc: [],
+  disputes: ['create', 'list', 'show', 'resolve', 'log'],
+  purge: ['tasks', 'ids', 'logs', 'all'],
+  git: ['status', 'push', 'retry', 'log'],
+  projects: ['list', 'add', 'remove', 'enable', 'disable', 'prune'],
+  locks: ['list', 'show', 'release', 'cleanup'],
   completion: ['bash', 'zsh', 'fish', 'install'],
 };
 
@@ -286,6 +293,8 @@ async function installCompletion(): Promise<void> {
 
 function getCommandDescription(cmd: string): string {
   const descriptions: Record<string, string> = {
+    about: 'Explain what Steroids is',
+    llm: 'Compact instructions for LLM agents',
     init: 'Initialize steroids in current directory',
     sections: 'Manage task sections',
     tasks: 'Manage tasks',
@@ -297,6 +306,11 @@ function getCommandDescription(cmd: string): string {
     backup: 'Manage backups',
     logs: 'View invocation logs',
     gc: 'Garbage collection',
+    disputes: 'Manage coder/reviewer disputes',
+    purge: 'Purge old data',
+    git: 'Git integration commands',
+    projects: 'Manage global project registry',
+    locks: 'Manage task and section locks',
     completion: 'Generate shell completions',
   };
   return descriptions[cmd] || cmd;
@@ -307,21 +321,19 @@ function getSubcommandDescription(cmd: string, sub: string): string {
     sections: {
       add: 'Add a new section',
       list: 'List sections',
-      remove: 'Remove a section',
-      rename: 'Rename a section',
+      priority: 'Set section priority',
+      'depends-on': 'Add section dependency',
+      'no-depends-on': 'Remove section dependency',
+      graph: 'Show dependency graph',
     },
     tasks: {
       add: 'Add a new task',
+      list: 'List tasks',
       update: 'Update task status',
       approve: 'Approve a task',
       reject: 'Reject a task',
+      skip: 'Skip external setup task',
       audit: 'View task audit trail',
-      list: 'List tasks',
-    },
-    loop: {
-      start: 'Start the loop',
-      stop: 'Stop the loop',
-      status: 'Show loop status',
     },
     runners: {
       list: 'List runners',
@@ -329,12 +341,18 @@ function getSubcommandDescription(cmd: string, sub: string): string {
       stop: 'Stop a runner',
       status: 'Show runner status',
       logs: 'View runner logs',
+      wakeup: 'Check and start runners for projects with work',
+      cron: 'Manage cron job for auto-wakeup',
     },
     config: {
+      init: 'Create configuration file',
       show: 'Show configuration',
+      get: 'Get configuration value',
       set: 'Set configuration value',
-      reset: 'Reset to defaults',
+      validate: 'Validate configuration',
+      path: 'Show config file paths',
       edit: 'Edit configuration file',
+      browse: 'Open configuration browser',
     },
     backup: {
       create: 'Create a backup',
@@ -347,6 +365,39 @@ function getSubcommandDescription(cmd: string, sub: string): string {
       list: 'List log files',
       tail: 'Tail logs',
       purge: 'Purge old logs',
+    },
+    disputes: {
+      create: 'Create a dispute',
+      list: 'List disputes',
+      show: 'Show dispute details',
+      resolve: 'Resolve a dispute',
+      log: 'Log minor disagreement',
+    },
+    purge: {
+      tasks: 'Purge completed tasks',
+      ids: 'Purge task ID history',
+      logs: 'Purge old logs',
+      all: 'Purge all purgeable data',
+    },
+    git: {
+      status: 'Show git status',
+      push: 'Push pending commits',
+      retry: 'Retry failed pushes',
+      log: 'View git push log',
+    },
+    projects: {
+      list: 'List registered projects',
+      add: 'Register a project',
+      remove: 'Unregister a project',
+      enable: 'Enable a project',
+      disable: 'Disable a project',
+      prune: 'Remove stale entries',
+    },
+    locks: {
+      list: 'List active locks',
+      show: 'Show lock details',
+      release: 'Release a lock',
+      cleanup: 'Clean stale locks',
     },
     completion: {
       bash: 'Generate bash completion',

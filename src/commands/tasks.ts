@@ -77,7 +77,7 @@ APPROVE/REJECT OPTIONS:
 SKIP OPTIONS:
   --notes           Reason for skipping (e.g., "Cloud SQL - manual setup")
   --model           Model identifying the skip (required for LLM actors)
-  -p, --partial     Mark as partial (coded some, rest needs human action)
+  --partial         Mark as partial (coded some, rest needs human action)
 
 STATUS MARKERS:
   [ ] pending       Not started
@@ -650,7 +650,7 @@ async function skipTaskCmd(args: string[]): Promise<void> {
       json: { type: 'boolean', short: 'j', default: false },
       model: { type: 'string' },
       notes: { type: 'string' },
-      partial: { type: 'boolean', short: 'p', default: false },
+      partial: { type: 'boolean', default: false },
     },
     allowPositionals: true,
   });
@@ -665,7 +665,7 @@ USAGE:
 OPTIONS:
   --model <model>   Model identifying the skip (required for LLM actors)
   --notes <text>    Reason for skipping (e.g., "Cloud SQL - marked SKIP in spec")
-  -p, --partial     Mark as partial (coded what we could, rest is external)
+  --partial         Mark as partial (coded what we could, rest is external)
   -j, --json        Output as JSON
   -h, --help        Show help
 

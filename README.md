@@ -180,6 +180,8 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 |---------|-------------|
 | `steroids init` | Initialize Steroids in current directory |
 | `steroids about` | Explain what Steroids is (for LLMs discovering the tool) |
+| `steroids llm` | Compact instructions for LLM agents (call when context lost) |
+| `steroids llm --context` | Include current project context (active tasks, runners) |
 | `steroids loop` | Run the coder/reviewer loop interactively |
 | `steroids loop --once` | Run one iteration only |
 
@@ -285,11 +287,11 @@ docker-compose up -d
 ```yaml
 ai:
   coder:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
+    provider: claude
+    model: claude-sonnet-4
   reviewer:
-    provider: openai
-    model: codex
+    provider: claude
+    model: claude-sonnet-4
 
 output:
   format: table

@@ -36,12 +36,13 @@ USAGE:
 
 SUBCOMMANDS:
   init              Create configuration file
-  show              Display merged configuration
+  show [key]        Display merged configuration or specific nested value
   get <key>         Get a configuration value
   set <key> <value> Set a configuration value
   validate          Validate configuration syntax
   path              Show configuration file paths
   edit              Open config in $EDITOR
+  browse            Interactive configuration browser
 
 INIT OPTIONS:
   --template <name>   Template: minimal | standard | full (default: standard)
@@ -69,6 +70,7 @@ EXAMPLES:
   steroids config init --template minimal        # Minimal config (AI only)
   steroids config init --global                  # Create global config
   steroids config show                           # Show merged config
+  steroids config show quality.tests             # Show specific nested value
   steroids config show --json                    # As JSON
   steroids config get ai.coder.model             # Get value
   steroids config set ai.coder.model opus        # Set value
@@ -125,7 +127,7 @@ async function runInit(args: string[]): Promise<void> {
     options: {
       help: { type: 'boolean', short: 'h', default: false },
       json: { type: 'boolean', short: 'j', default: false },
-      template: { type: 'string', short: 't', default: 'standard' },
+      template: { type: 'string', default: 'standard' },
       global: { type: 'boolean', default: false },
       force: { type: 'boolean', default: false },
     },
@@ -201,7 +203,7 @@ OPTIONS:
 }
 
 async function runShow(args: string[]): Promise<void> {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
@@ -209,7 +211,7 @@ async function runShow(args: string[]): Promise<void> {
       global: { type: 'boolean', default: false },
       local: { type: 'boolean', default: false },
     },
-    allowPositionals: false,
+    allowPositionals: true,
   });
 
   if (values.help) {
@@ -217,13 +219,21 @@ async function runShow(args: string[]): Promise<void> {
 steroids config show - Display configuration
 
 USAGE:
-  steroids config show [options]
+  steroids config show [key] [options]
+
+ARGUMENTS:
+  [key]               Optional nested path (e.g., quality.tests)
 
 OPTIONS:
   --global            Show only global config
   --local             Show only project config
   -j, --json          Output as JSON
   -h, --help          Show help
+
+EXAMPLES:
+  steroids config show                    # Show all config
+  steroids config show quality.tests      # Show specific nested value
+  steroids config show --json             # Show all as JSON
 `);
     return;
   }
@@ -238,10 +248,26 @@ OPTIONS:
     config = loadConfig();
   }
 
+  // If a key path is provided, show only that nested value
+  let displayValue: unknown = config;
+  if (positionals.length > 0) {
+    const key = positionals[0];
+    displayValue = getConfigValue(config as SteroidsConfig, key);
+
+    if (displayValue === undefined) {
+      console.error(`Key not found: ${key}`);
+      process.exit(1);
+    }
+  }
+
   if (values.json) {
-    console.log(JSON.stringify(config, null, 2));
+    console.log(JSON.stringify(displayValue, null, 2));
   } else {
-    console.log(stringify(config, { indent: 2 }));
+    if (typeof displayValue === 'object' && displayValue !== null) {
+      console.log(stringify(displayValue, { indent: 2 }));
+    } else {
+      console.log(String(displayValue));
+    }
   }
 }
 
