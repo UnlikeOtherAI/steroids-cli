@@ -29,17 +29,16 @@ export function isHeartbeatStale(
   db: Database.Database,
   runnerId: string
 ): boolean {
-  const runner = db
-    .prepare('SELECT heartbeat_at FROM runners WHERE id = ?')
-    .get(runnerId) as { heartbeat_at: string } | undefined;
+  // Use SQLite's datetime comparison to avoid JavaScript/SQLite format issues
+  const result = db
+    .prepare(
+      `SELECT 1 FROM runners
+       WHERE id = ? AND heartbeat_at >= datetime('now', '-5 minutes')`
+    )
+    .get(runnerId) as { 1: number } | undefined;
 
-  if (!runner) {
-    return true;
-  }
-
-  const heartbeatTime = new Date(runner.heartbeat_at).getTime();
-  const now = Date.now();
-  return now - heartbeatTime > STALE_TIMEOUT_MS;
+  // If no row returned, either runner doesn't exist or heartbeat is stale
+  return result === undefined;
 }
 
 /**
@@ -48,14 +47,15 @@ export function isHeartbeatStale(
 export function findStaleRunners(
   db: Database.Database
 ): Array<{ id: string; pid: number | null; heartbeat_at: string }> {
-  const cutoff = new Date(Date.now() - STALE_TIMEOUT_MS).toISOString();
-
+  // Use SQLite's datetime function to avoid timestamp format mismatches
+  // JavaScript ISO format ("2026-02-08T22:28:49.000Z") differs from
+  // SQLite datetime format ("2026-02-08 22:33:49"), breaking string comparison
   return db
     .prepare(
       `SELECT id, pid, heartbeat_at FROM runners
-       WHERE heartbeat_at < ? AND status != 'idle'`
+       WHERE heartbeat_at < datetime('now', '-5 minutes') AND status != 'idle'`
     )
-    .all(cutoff) as Array<{ id: string; pid: number | null; heartbeat_at: string }>;
+    .all() as Array<{ id: string; pid: number | null; heartbeat_at: string }>;
 }
 
 /**
