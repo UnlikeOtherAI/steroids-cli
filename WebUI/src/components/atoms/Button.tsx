@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'accent';
   size?: 'sm' | 'md' | 'lg';
 }
 
@@ -12,12 +12,14 @@ export const Button: React.FC<ButtonProps> = ({
   children,
   ...props
 }) => {
-  const baseClasses = 'rounded font-medium transition-colors disabled:opacity-50';
+  const baseClasses = 'rounded-full font-medium transition-all duration-150 disabled:opacity-50';
 
   const variantClasses = {
-    primary: 'bg-blue-600 text-white hover:bg-blue-700',
-    secondary: 'bg-gray-200 text-gray-800 hover:bg-gray-300',
-    danger: 'bg-red-600 text-white hover:bg-red-700',
+    primary: 'bg-accent text-white hover:bg-accent-hover shadow-pill',
+    secondary: 'bg-bg-elevated text-text-primary hover:shadow-card shadow-pill',
+    danger: 'bg-danger text-white hover:opacity-90',
+    ghost: 'bg-transparent text-text-secondary hover:text-text-primary hover:bg-bg-surface2',
+    accent: 'bg-accent text-white hover:bg-accent-hover shadow-pill',
   };
 
   const sizeClasses = {

@@ -418,6 +418,7 @@ make stop-ui
 
 ## Related Documentation
 
+- [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md) - Design tokens, colors, components, and layout patterns
 - [CLAUDE.md](../CLAUDE.md) - Coding standards and release workflow
 - [CLI/COMMANDS.md](../CLI/COMMANDS.md) - CLI reference
 - [API/README.md](../API/README.md) - API documentation

@@ -9,6 +9,7 @@
     "test": "echo 'No tests yet' && exit 0"
   },
   "dependencies": {
+    "@heroicons/react": "^2.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.22.0"
@@ -17,6 +18,9 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.1",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5.3.3",
     "vite": "^5.1.0"
   }

@@ -1,79 +1,42 @@
-import { Routes, Route, Link } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { DashboardPage } from './pages/DashboardPage';
-import { ProjectSelector } from './components/molecules/ProjectSelector';
+import { AppShell } from './components/layouts';
 import { useProject } from './contexts/ProjectContext';
 import './App.css';
 
 function App() {
   const { selectedProject, setSelectedProject } = useProject();
+  const location = useLocation();
+
+  const getPageTitle = () => {
+    switch (location.pathname) {
+      case '/': return 'Dashboard';
+      case '/projects': return 'Projects';
+      case '/tasks': return 'Tasks';
+      case '/settings': return 'Settings';
+      default: return 'Dashboard';
+    }
+  };
 
   return (
-    <div className="app">
-      <header className="app-header" style={{
-        padding: '1rem 2rem',
-        borderBottom: '1px solid #e5e7eb',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: 'white'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
-          <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 'bold' }}>
-            Steroids Dashboard
-          </h1>
-          <nav style={{ display: 'flex', gap: '1rem' }}>
-            <Link to="/" style={{ textDecoration: 'none', color: '#4B5563' }}>
-              Dashboard
-            </Link>
-            <Link to="/projects" style={{ textDecoration: 'none', color: '#4B5563' }}>
-              All Projects
-            </Link>
-          </nav>
-        </div>
-        <div>
-          <ProjectSelector
-            selectedProject={selectedProject}
-            onSelectProject={setSelectedProject}
-          />
-        </div>
-      </header>
-      <main className="app-main" style={{ backgroundColor: '#f9fafb', minHeight: 'calc(100vh - 73px)' }}>
-        <Routes>
-          <Route
-            path="/"
-            element={
-              selectedProject ? (
-                <DashboardPage project={selectedProject} />
-              ) : (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  height: '400px',
-                  flexDirection: 'column',
-                  gap: '1rem'
-                }}>
-                  <p style={{ fontSize: '1.25rem', color: '#6B7280' }}>
-                    Select a project to view its dashboard
-                  </p>
-                  <Link
-                    to="/projects"
-                    style={{
-                      color: '#2563EB',
-                      textDecoration: 'underline'
-                    }}
-                  >
-                    View all projects
-                  </Link>
-                </div>
-              )
-            }
-          />
-          <Route path="/projects" element={<ProjectsPage />} />
-        </Routes>
-      </main>
-    </div>
+    <AppShell title={getPageTitle()} project={selectedProject}>
+      <Routes>
+        <Route path="/" element={
+          selectedProject ? (
+            <DashboardPage project={selectedProject} />
+          ) : (
+            <div className="flex items-center justify-center h-[400px] flex-col gap-4">
+              <p className="text-xl text-text-secondary">Select a project to view its dashboard</p>
+              <a href="/projects" className="text-accent hover:text-accent-hover underline">View all projects</a>
+            </div>
+          )
+        } />
+        <Route path="/projects" element={<ProjectsPage />} />
+        <Route path="/tasks" element={<div className="p-8"><p className="text-text-secondary">Tasks page coming soon...</p></div>} />
+        <Route path="/settings" element={<div className="p-8"><p className="text-text-secondary">Settings page coming soon...</p></div>} />
+      </Routes>
+    </AppShell>
   );
 }
 
