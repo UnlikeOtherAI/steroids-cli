@@ -39,6 +39,7 @@ export interface Section {
   id: string;
   name: string;
   position: number;
+  skipped?: number;  // 0 = active, 1 = skipped (added by migration 003)
   created_at: string;
 }
 

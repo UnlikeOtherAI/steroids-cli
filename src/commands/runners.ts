@@ -230,6 +230,20 @@ OPTIONS:
         process.exit(1);
       }
 
+      // Check if section is skipped (Phase 0.6 feature)
+      if (section.skipped === 1) {
+        const errorMsg = `Section "${section.name}" is currently skipped`;
+        if (values.json) {
+          console.log(JSON.stringify({ success: false, error: errorMsg }));
+        } else {
+          console.error(`Error: ${errorMsg}`);
+          console.error('');
+          console.error(`Run 'steroids sections unskip "${section.name}"' to re-enable it.`);
+        }
+        close();
+        process.exit(1);
+      }
+
       focusedSectionId = section.id;
     } finally {
       close();

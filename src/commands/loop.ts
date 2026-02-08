@@ -172,6 +172,14 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
           process.exit(1);
         }
 
+        // Check if section is skipped (Phase 0.6 feature)
+        if (section.skipped === 1) {
+          console.error(`Error: Section "${section.name}" is currently skipped`);
+          console.error('');
+          console.error(`Run 'steroids sections unskip "${section.name}"' to re-enable it.`);
+          process.exit(1);
+        }
+
         focusedSectionId = section.id;
         focusedSectionName = section.name;
       } catch (error) {
