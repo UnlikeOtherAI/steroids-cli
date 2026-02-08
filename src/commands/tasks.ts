@@ -4,7 +4,10 @@ import type { GlobalFlags } from '../cli/flags.js';
  */
 
 import { parseArgs } from 'node:util';
+import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import { openDatabase } from '../database/connection.js';
+import { getRegisteredProjects } from '../runners/projects.js';
 import {
   createTask,
   listTasks,
@@ -45,7 +48,8 @@ LIST OPTIONS:
                     Values: pending, in_progress, review, completed,
                             disputed, failed, active, all
                     'active' = in_progress + review (tasks being worked on)
-  --section <id>    Filter by section ID
+  -g, --global      List tasks across ALL registered projects
+  --section <id>    Filter by section ID (local project only)
   --search          Search in task titles
   -j, --json        Output as JSON
   -h, --help        Show this help
@@ -130,6 +134,11 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
   }
 }
 
+interface TaskWithProject extends Task {
+  project_path?: string;
+  project_name?: string;
+}
+
 async function listAllTasks(args: string[]): Promise<void> {
   // Check for help flag first (parseArgs doesn't always handle -h well)
   if (args.includes('-h') || args.includes('--help')) {
@@ -145,6 +154,7 @@ async function listAllTasks(args: string[]): Promise<void> {
       status: { type: 'string', short: 's', default: 'pending' },
       section: { type: 'string' },
       search: { type: 'string' },
+      global: { type: 'boolean', short: 'g', default: false },
     },
     allowPositionals: false,
   });
@@ -154,6 +164,94 @@ async function listAllTasks(args: string[]): Promise<void> {
     return;
   }
 
+  const statusFilter = values.status as string;
+  const isGlobalQuery = values.global as boolean;
+
+  // For --global flag, query all registered projects
+  if (isGlobalQuery) {
+    const allTasks: TaskWithProject[] = [];
+    const projects = getRegisteredProjects(false); // enabled only
+
+    for (const project of projects) {
+      const dbPath = `${project.path}/.steroids/steroids.db`;
+      if (!existsSync(dbPath)) continue;
+
+      try {
+        const { db, close } = openDatabase(project.path);
+        try {
+          let tasks: Task[];
+          if (statusFilter === 'active') {
+            const inProgress = listTasks(db, { status: 'in_progress', search: values.search });
+            const review = listTasks(db, { status: 'review', search: values.search });
+            tasks = [...inProgress, ...review];
+          } else {
+            tasks = listTasks(db, { status: statusFilter as TaskStatus | 'all', search: values.search });
+          }
+
+          const projectName = project.name || basename(project.path);
+          for (const task of tasks) {
+            allTasks.push({
+              ...task,
+              project_path: project.path,
+              project_name: projectName,
+            });
+          }
+        } finally {
+          close();
+        }
+      } catch {
+        // Skip projects with inaccessible databases
+      }
+    }
+
+    if (values.json) {
+      console.log(JSON.stringify(allTasks, null, 2));
+      return;
+    }
+
+    if (allTasks.length === 0) {
+      console.log(`No ${statusFilter} tasks found across all projects.`);
+      return;
+    }
+
+    const statusLabel = statusFilter.toUpperCase();
+    console.log(`${statusLabel} TASKS (All Projects)`);
+    console.log('─'.repeat(100));
+    console.log(
+      'STATUS  PROJECT                    TITLE                                        REJ  ID'
+    );
+    console.log('─'.repeat(100));
+
+    for (const task of allTasks) {
+      const marker = STATUS_MARKERS[task.status];
+      const shortId = task.id.substring(0, 8);
+      const projectName = (task.project_name || 'unknown').substring(0, 22).padEnd(22);
+      const title = task.title.length > 40
+        ? task.title.substring(0, 37) + '...'
+        : task.title.padEnd(40);
+      const rej = task.rejection_count > 0
+        ? String(task.rejection_count).padStart(3)
+        : '  -';
+      console.log(`${marker}     ${projectName}   ${title}  ${rej}  ${shortId}`);
+    }
+
+    console.log('─'.repeat(100));
+    console.log(`Total: ${allTasks.length} active task(s) across ${projects.length} project(s)`);
+
+    // Multi-project warning
+    if (projects.length > 1) {
+      const currentProject = process.cwd();
+      console.log('');
+      console.log('─'.repeat(100));
+      console.log('⚠️  MULTI-PROJECT WARNING');
+      console.log(`   Your current project: ${currentProject}`);
+      console.log('   DO NOT modify files in other projects. Each runner works only on its own project.');
+      console.log('─'.repeat(100));
+    }
+    return;
+  }
+
+  // Non-global query: use current project only
   const { db, close } = openDatabase();
   try {
     let sectionId: string | undefined;
@@ -168,10 +266,7 @@ async function listAllTasks(args: string[]): Promise<void> {
       sectionId = section.id;
     }
 
-    // Handle 'active' as a special status (in_progress + review)
-    let statusFilter = values.status as string;
     let tasks: Task[];
-
     if (statusFilter === 'active') {
       const inProgress = listTasks(db, { status: 'in_progress', sectionId, search: values.search });
       const review = listTasks(db, { status: 'review', sectionId, search: values.search });

@@ -4,10 +4,6 @@ import type { GlobalFlags } from '../cli/flags.js';
  */
 
 import { parseArgs } from 'node:util';
-import { tmpdir } from 'node:os';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
-import { execSync } from 'node:child_process';
 import { openDatabase } from '../database/connection.js';
 import {
   createSection,
@@ -23,6 +19,7 @@ import {
   STATUS_MARKERS,
   type TaskStatus,
 } from '../database/queries.js';
+import { generateMermaidSyntax, generateImageFromMermaid } from './sections-graph.js';
 
 const HELP = `
 steroids sections - Manage task sections
@@ -481,16 +478,15 @@ EXAMPLES:
 
   const { db, close } = openDatabase();
   try {
-    const sections = listSections(db);
-
-    if (values.json) {
-      const graph = sections.map((s) => ({
-        ...s,
-        dependencies: getSectionDependencies(db, s.id),
-        pending_dependencies: getPendingDependencies(db, s.id),
-      }));
-      console.log(JSON.stringify(graph, null, 2));
-      return;
+    // Filter sections if --section specified
+    let sections = listSections(db);
+    if (values.section) {
+      const section = getSection(db, values.section);
+      if (!section) {
+        console.error(`Error: Section not found: ${values.section}`);
+        process.exit(1);
+      }
+      sections = [section];
     }
 
     if (sections.length === 0) {
@@ -498,20 +494,67 @@ EXAMPLES:
       return;
     }
 
-    // Build dependency graph (simple ASCII tree)
-    const sectionsWithDeps = sections.map(s => ({
-      section: s,
-      dependencies: getSectionDependencies(db, s.id),
-      pendingDeps: getPendingDependencies(db, s.id),
-    }));
+    // Build dependency graph with tasks if requested
+    const sectionsWithDeps = sections.map(s => {
+      const deps = getSectionDependencies(db, s.id);
+      const pendingDeps = getPendingDependencies(db, s.id);
+      let tasks: any[] = [];
 
-    // Find root sections (no dependencies)
+      if (values.tasks) {
+        const taskFilter: any = { sectionId: s.id };
+        if (values.status) {
+          if (values.status === 'active') {
+            // Active means in_progress or review
+            tasks = listTasks(db, { sectionId: s.id }).filter(
+              t => t.status === 'in_progress' || t.status === 'review'
+            );
+          } else {
+            taskFilter.status = values.status as TaskStatus;
+            tasks = listTasks(db, taskFilter);
+          }
+        } else {
+          tasks = listTasks(db, taskFilter);
+        }
+      }
+
+      return {
+        section: s,
+        dependencies: deps,
+        pendingDeps,
+        tasks,
+      };
+    });
+
+    // Handle JSON output
+    if (values.json) {
+      const graph = sectionsWithDeps.map((s) => ({
+        ...s.section,
+        dependencies: s.dependencies,
+        pending_dependencies: s.pendingDeps,
+        tasks: s.tasks,
+      }));
+      console.log(JSON.stringify(graph, null, 2));
+      return;
+    }
+
+    // Handle Mermaid output
+    if (values.mermaid || values.output) {
+      const mermaidSyntax = generateMermaidSyntax(sectionsWithDeps, values.tasks || false);
+
+      if (values.output) {
+        await generateImageFromMermaid(mermaidSyntax, values.output, values.open || false);
+      } else {
+        console.log(mermaidSyntax);
+      }
+      return;
+    }
+
+    // Default: ASCII tree output
     const rootSections = sectionsWithDeps.filter(s => s.dependencies.length === 0);
 
     console.log('SECTION DEPENDENCY GRAPH');
     console.log('─'.repeat(90));
 
-    // Print each root and its descendants
     const printed = new Set<string>();
 
     function printSection(sectionId: string, indent: string = '', isLast: boolean = true) {
@@ -526,6 +569,17 @@ EXAMPLES:
       const prefix = indent + (isLast ? '└─> ' : '├─> ');
 
       console.log(`${prefix}${item.section.name} (priority: ${priority})${blocked}`);
+
+      // Print tasks if requested
+      if (values.tasks && item.tasks.length > 0) {
+        const taskIndent = indent + (isLast ? '    ' : '│   ');
+        item.tasks.forEach((task, idx) => {
+          const marker = STATUS_MARKERS[task.status as TaskStatus] || '[ ]';
+          const rejections = task.rejection_count > 0 ? ` (${task.rejection_count} rejections)` : '';
+          const taskPrefix = taskIndent + (idx === item.tasks.length - 1 ? '└─ ' : '├─ ');
+          console.log(`${taskPrefix}${marker} ${task.title}${rejections}`);
+        });
+      }
 
       // Find sections that depend on this one
       const dependents = sectionsWithDeps.filter(s =>
