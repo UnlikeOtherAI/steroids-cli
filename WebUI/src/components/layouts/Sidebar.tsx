@@ -24,7 +24,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ projectName, onClose }) => {
   ];
 
   return (
-    <aside className="w-60 bg-sidebar flex flex-col min-h-full rounded-l-xl">
+    <aside className="w-60 bg-sidebar flex flex-col h-full min-h-screen lg:min-h-full lg:rounded-l-xl">
       <div className="px-6 py-8 flex items-start justify-between">
         <div>
           <h1 className="text-xl font-bold text-text-inverse">Steroids</h1>

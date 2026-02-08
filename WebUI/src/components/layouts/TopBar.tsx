@@ -1,27 +1,38 @@
 import React from 'react';
-import { MagnifyingGlassIcon, BellIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, BellIcon, Bars3Icon } from '@heroicons/react/24/outline';
 import { Project } from '../../types';
 
 interface TopBarProps {
   title?: string;
   project?: Project | null;
+  onMenuClick?: () => void;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({ title = 'Dashboard', project }) => {
+export const TopBar: React.FC<TopBarProps> = ({ title = 'Dashboard', project, onMenuClick }) => {
   const projectName = project?.name || project?.path.split('/').pop() || 'Select Project';
 
   return (
-    <header className="h-[72px] flex items-center justify-between px-8 bg-bg-surface">
-      <h2 className="text-2xl font-bold text-text-primary">{title}</h2>
-      <div className="flex items-center gap-4">
-        <div className="relative">
+    <header className="h-[72px] flex items-center justify-between px-4 md:px-8 bg-bg-surface">
+      <div className="flex items-center gap-3">
+        {/* Burger menu - visible on mobile only */}
+        <button
+          onClick={onMenuClick}
+          className="lg:hidden p-2 rounded-lg hover:bg-bg-surface2 text-text-primary"
+        >
+          <Bars3Icon className="w-6 h-6" />
+        </button>
+        <h2 className="text-xl md:text-2xl font-bold text-text-primary">{title}</h2>
+      </div>
+      <div className="flex items-center gap-2 md:gap-4">
+        {/* Search - hidden on small screens */}
+        <div className="relative hidden md:block">
           <MagnifyingGlassIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-text-muted" />
           <input type="text" placeholder="Search tasks..." className="input-search w-64" />
         </div>
-        <button className="btn-pill p-3"><BellIcon className="w-5 h-5" /></button>
+        <button className="btn-pill p-2 md:p-3"><BellIcon className="w-5 h-5" /></button>
         <div className="btn-pill flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-success" />
-          <span className="text-sm font-medium truncate max-w-[150px]">{projectName}</span>
+          <span className="text-sm font-medium truncate max-w-[100px] md:max-w-[150px] hidden sm:inline">{projectName}</span>
         </div>
       </div>
     </header>
