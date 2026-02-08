@@ -3,6 +3,7 @@
  */
 
 export * from './activity';
+export * from './runner';
 
 export interface Project {
   path: string;

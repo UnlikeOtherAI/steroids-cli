@@ -9,6 +9,10 @@ import {
   ActivityStatsResponse,
   ActivityListResponse,
   ActivityStatusType,
+  Runner,
+  RunnersListResponse,
+  ActiveTask,
+  ActiveTasksResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3501';
@@ -141,5 +145,23 @@ export const activityApi = {
       url += `&limit=${options.limit}`;
     }
     return fetchJson<ActivityListResponse>(url);
+  },
+};
+
+export const runnersApi = {
+  /**
+   * List all runners
+   */
+  async list(): Promise<Runner[]> {
+    const response = await fetchJson<RunnersListResponse>('/api/runners');
+    return response.runners;
+  },
+
+  /**
+   * Get active tasks being worked on by runners
+   */
+  async getActiveTasks(): Promise<ActiveTask[]> {
+    const response = await fetchJson<ActiveTasksResponse>('/api/runners/active-tasks');
+    return response.tasks;
   },
 };

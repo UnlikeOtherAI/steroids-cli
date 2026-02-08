@@ -7,6 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import projectsRouter from './routes/projects.js';
 import activityRouter from './routes/activity.js';
+import runnersRouter from './routes/runners.js';
 
 const app = express();
 const PORT = process.env.PORT || 3501;
@@ -24,6 +25,7 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api', projectsRouter);
 app.use('/api', activityRouter);
+app.use('/api', runnersRouter);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -49,6 +51,8 @@ app.get('/', (req, res) => {
       'POST /api/projects/disable',
       'POST /api/projects/prune',
       'GET /api/activity?hours=<hours>&project=<path>',
+      'GET /api/runners',
+      'GET /api/runners/active-tasks',
     ],
   });
 });

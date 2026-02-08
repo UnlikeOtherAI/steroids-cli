@@ -1,12 +1,10 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Project } from '../../types';
 import { Badge } from '../atoms/Badge';
 
 interface ProjectCardProps {
   project: Project;
-  onEnable?: (path: string) => void;
-  onDisable?: (path: string) => void;
-  onRemove?: (path: string) => void;
 }
 
 function truncateMiddle(str: string, maxLen: number = 40): string {
@@ -18,12 +16,9 @@ function truncateMiddle(str: string, maxLen: number = 40): string {
   return str.slice(0, frontChars) + ellipsis + str.slice(-backChars);
 }
 
-export const ProjectCard: React.FC<ProjectCardProps> = ({
-  project,
-  onEnable,
-  onDisable,
-  onRemove,
-}) => {
+export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
+  const navigate = useNavigate();
+
   const getRunnerStatus = () => {
     if (!project.runner) return 'No Runner';
     return project.runner.status.charAt(0).toUpperCase() + project.runner.status.slice(1);
@@ -37,14 +32,21 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     return 'default';
   };
 
+  const handleClick = () => {
+    navigate(`/project/${encodeURIComponent(project.path)}`);
+  };
+
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
+    <div
+      onClick={handleClick}
+      className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
+    >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
           <h3 className="text-lg font-semibold text-gray-900 truncate">
             {project.name || project.path.split('/').pop() || 'Project'}
           </h3>
-          <p className="text-xs text-gray-400 mt-1 font-mono cursor-help" title={project.path}>
+          <p className="text-xs text-gray-400 mt-1 font-mono" title={project.path}>
             {truncateMiddle(project.path, 35)}
           </p>
         </div>
@@ -77,32 +79,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         </div>
       )}
 
-      <div className="flex gap-2 pt-3 border-t border-gray-100">
-        {project.enabled ? (
-          <button
-            onClick={() => onDisable?.(project.path)}
-            className="text-sm text-gray-600 hover:text-gray-900"
-          >
-            Disable
-          </button>
-        ) : (
-          <button
-            onClick={() => onEnable?.(project.path)}
-            className="text-sm text-blue-600 hover:text-blue-800"
-          >
-            Enable
-          </button>
-        )}
-        <span className="text-gray-300">|</span>
-        <button
-          onClick={() => onRemove?.(project.path)}
-          className="text-sm text-red-600 hover:text-red-800"
-        >
-          Remove
-        </button>
-      </div>
-
-      <div className="text-xs text-gray-400 mt-2">
+      <div className="text-xs text-gray-400">
         Last seen: {new Date(project.last_seen_at).toLocaleString()}
       </div>
     </div>
