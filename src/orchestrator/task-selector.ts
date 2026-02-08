@@ -195,7 +195,19 @@ export function selectNextTaskWithLock(
 }
 
 /**
- * Find next task, skipping locked ones
+ * Helper to check if a task's section has met dependencies
+ */
+function canSelectTask(db: Database.Database, task: Task): boolean {
+  if (!task.section_id) {
+    // Tasks without a section are always allowed
+    return true;
+  }
+  // Check if section has all dependencies met
+  return hasDependenciesMet(db, task.section_id);
+}
+
+/**
+ * Find next task, skipping locked ones and tasks in sections with unmet dependencies
  */
 function findNextTaskSkippingLocked(
   db: Database.Database,
@@ -218,7 +230,7 @@ function findNextTaskSkippingLocked(
     .all(...sectionParams) as Task[];
 
   for (const task of reviewTasks) {
-    if (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId)) {
+    if (canSelectTask(db, task) && (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId))) {
       return { task, action: 'review' };
     }
   }
@@ -234,7 +246,7 @@ function findNextTaskSkippingLocked(
     .all(...sectionParams) as Task[];
 
   for (const task of inProgressTasks) {
-    if (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId)) {
+    if (canSelectTask(db, task) && (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId))) {
       const rejectionNotes = task.rejection_count > 0
         ? getLastRejectionNotes(db, task.id) ?? undefined
         : undefined;
@@ -253,7 +265,7 @@ function findNextTaskSkippingLocked(
     .all(...sectionParams) as Task[];
 
   for (const task of pendingTasks) {
-    if (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId)) {
+    if (canSelectTask(db, task) && (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId))) {
       return { task, action: 'start' };
     }
   }
