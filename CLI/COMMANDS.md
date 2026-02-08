@@ -520,6 +520,60 @@ Use cases:
 
 ---
 
+## `steroids projects`
+
+Manage the global project registry for multi-project monitoring.
+
+```
+Usage: steroids projects <subcommand> [options]
+
+Subcommands:
+  list                List all registered projects
+  add <path>          Register a project
+  remove <path>       Unregister a project
+  enable <path>       Enable a project (include in wakeup)
+  disable <path>      Disable a project (skip in wakeup)
+  prune               Remove projects that no longer exist
+
+Options:
+  -a, --all           Include disabled projects (list only)
+  -h, --help          Show help
+
+Examples:
+  steroids projects list                         # List enabled projects
+  steroids projects list --all                   # Include disabled projects
+  steroids projects list --json                  # JSON output
+  steroids projects add ~/code/my-app            # Register a project
+  steroids projects remove ~/old-project         # Unregister a project
+  steroids projects disable ~/code/on-hold       # Disable project (skip wakeup)
+  steroids projects enable ~/code/on-hold        # Re-enable project
+  steroids projects prune                        # Remove stale projects
+```
+
+### Global Project Registry
+
+The global project registry is stored in `~/.steroids/steroids.db` and tracks all steroids projects across your system. This enables:
+
+- **Multi-project monitoring** - The wakeup system can restart runners for any registered project
+- **Centralized management** - View and control all projects from one place
+- **Automatic registration** - Projects are registered automatically when you run `steroids init`
+
+### Project States
+
+- **Enabled** - Project is monitored by the wakeup system
+- **Disabled** - Project remains registered but is skipped during wakeup
+
+### Prune Behavior
+
+The `prune` command removes projects that:
+- No longer exist on disk
+- Are missing the `.steroids` directory
+- Are missing the `.steroids/steroids.db` file
+
+This keeps the registry clean as projects are moved or deleted.
+
+---
+
 ## `steroids loop`
 
 Run the orchestrator loop (coder/reviewer cycle).
@@ -528,8 +582,10 @@ Run the orchestrator loop (coder/reviewer cycle).
 Usage: steroids loop [options]
 
 Options:
+  --project <path>      Run loop for specific project directory
   --section <id|name>   Focus on a specific section only
   --max-iterations <n>  Maximum iterations before stopping
+  --once                Run one iteration only (don't loop)
   --dry-run             Preview what would run without executing
   -v, --verbose         Detailed output
   -j, --json            Output as JSON
@@ -537,9 +593,11 @@ Options:
 
 Examples:
   steroids loop                              # Run until all tasks complete
+  steroids loop --project ~/code/myapp       # Run loop for specific project
   steroids loop --section "Phase 2"          # Focus on specific section
   steroids loop --section fd1f               # Focus by section ID prefix
   steroids loop --max-iterations 5           # Run at most 5 iterations
+  steroids loop --once                       # Run one iteration only
   steroids loop --dry-run                    # Preview without executing
 ```
 
