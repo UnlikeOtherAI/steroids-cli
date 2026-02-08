@@ -302,6 +302,153 @@ Task D (modifies: shared/types.ts) ──> Blocked by Task C
 - Complex implementation
 - Coder may touch unexpected files
 
+### Option D: LLM-Based Conflict Analysis (Recommended)
+
+Use AI to analyze tasks and provide conflict recommendations - advisory, not enforced.
+
+**Philosophy:** Don't hard-block the user. Analyze potential conflicts and surface recommendations. User decides whether to proceed.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  MULTI-RUNNER ANALYSIS                                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  You want to start runners for:                                 │
+│    • Section: API (12 pending tasks)                            │
+│    • Section: Mobile (8 pending tasks)                          │
+│                                                                 │
+│  ⚠️  POTENTIAL CONFLICTS DETECTED                               │
+│                                                                 │
+│  File Conflicts (2 tasks):                                      │
+│    • Task api-auth overlaps with mobile-auth                    │
+│      Both modify: shared/types/user.ts                          │
+│      Risk: MEDIUM - type changes may conflict                   │
+│                                                                 │
+│  Build Conflicts:                                               │
+│    • Both sections depend on 'shared' package                   │
+│      Risk: LOW - if builds are serialized                       │
+│      Risk: HIGH - if builds run concurrently                    │
+│                                                                 │
+│  Recommendations:                                               │
+│    1. Run api-auth before starting Mobile runner                │
+│    2. Or: Move shared/types tasks to dedicated section          │
+│    3. Or: Proceed anyway (conflicts will be caught at review)   │
+│                                                                 │
+│  [Proceed Anyway]  [Adjust Sections]  [Cancel]                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+
+1. **User requests multi-runner setup**
+   ```bash
+   steroids runners analyze --sections "API,Mobile"
+   # or
+   steroids runners start --section API --analyze-conflicts
+   ```
+
+2. **Conflict Analyzer runs** (can use Claude or Codex)
+   - Reads task specifications for all pending tasks in requested sections
+   - Analyzes file paths mentioned in specs
+   - Checks for overlapping dependencies
+   - Considers build/test requirements
+   - Evaluates timing (which tasks might run concurrently)
+
+3. **LLM produces conflict report**
+   ```typescript
+   interface ConflictAnalysis {
+     canRunInParallel: boolean;  // Overall assessment
+     confidence: 'high' | 'medium' | 'low';
+
+     fileConflicts: {
+       taskA: string;
+       taskB: string;
+       files: string[];
+       risk: 'high' | 'medium' | 'low';
+       reason: string;
+     }[];
+
+     buildConflicts: {
+       description: string;
+       risk: 'high' | 'medium' | 'low';
+       mitigation: string;
+     }[];
+
+     recommendations: string[];
+
+     safeParallelGroups: string[][];  // Tasks that CAN safely run together
+   }
+   ```
+
+4. **User reviews and decides**
+   - Proceed with all runners
+   - Adjust task order/sections
+   - Run sequentially instead
+
+**Analyzer Prompt (simplified):**
+
+```
+You are analyzing tasks for potential conflicts in a multi-runner setup.
+
+SECTION A TASKS:
+${sectionATasks.map(t => t.spec).join('\n---\n')}
+
+SECTION B TASKS:
+${sectionBTasks.map(t => t.spec).join('\n---\n')}
+
+PROJECT STRUCTURE:
+${directoryTree}
+
+Analyze for:
+1. FILE CONFLICTS - Tasks that might modify the same files
+2. BUILD CONFLICTS - Shared dependencies, build artifacts, test resources
+3. LOGICAL CONFLICTS - Tasks that depend on each other's output
+4. TIMING RISKS - What if these tasks run at the exact same time?
+
+For each conflict found, rate risk (high/medium/low) and suggest mitigation.
+
+Provide your analysis as JSON matching this schema:
+${conflictAnalysisSchema}
+```
+
+**Benefits:**
+- No rigid rules - AI understands context
+- Catches non-obvious conflicts (e.g., "Task A changes the user model, Task B assumes old model shape")
+- User stays in control
+- Improves over time with better prompts
+- Can run both Claude and Codex for higher confidence
+
+**When to run analysis:**
+- `steroids runners start --section X` when another runner is active
+- `steroids runners analyze` explicit analysis command
+- Optionally: automatically before each task pickup in multi-runner mode
+
+**Analysis cost:**
+- One LLM call per analysis request
+- Could cache results if tasks haven't changed
+- Fast models (Haiku/GPT-4-mini) sufficient for analysis
+
+**Example analysis session:**
+
+```bash
+$ steroids runners analyze --sections "API,Mobile,Web"
+
+Analyzing 28 tasks across 3 sections...
+
+✓ API ↔ Mobile: Safe to parallelize (no conflicts detected)
+⚠ API ↔ Web: 2 potential conflicts
+  • api/middleware/auth.ts used by both
+  • shared/config.ts modified by both
+✓ Mobile ↔ Web: Safe to parallelize (no conflicts detected)
+
+Recommendation:
+  Run API and Mobile in parallel.
+  Run Web after API completes (or move web-auth to API section).
+
+Proceed with API + Mobile? [Y/n]
+```
+
 ## Implementation Phases
 
 ### Phase 1: Section-Based Isolation (Simple)
@@ -455,20 +602,58 @@ async function preApprovalCheck(task: Task): Promise<ConflictResult> {
 
 ## Recommendation
 
-**Start with Phase 1 (Section-Based Isolation)** because:
+**Combine Section-Based Isolation with LLM Conflict Analysis:**
 
-1. Already partially implemented (`--section` flag exists)
-2. Low risk - sections are natural isolation boundaries
-3. No new infrastructure needed
-4. Good fit for monorepo team structure
+### Step 1: Allow multi-section runners (no hard blocks)
 
-**Rules for Phase 1:**
-- One runner per section (enforced)
-- Sections map to directories/components
-- "Shared" section runs exclusively
-- Git operations serialized globally
+Don't prevent the user from starting multiple runners. Instead:
+- Warn if potential conflicts detected
+- Provide recommendations
+- Let user decide
 
-This gives 80% of the benefit with 20% of the complexity. Phase 2 and 3 can be added based on real-world feedback.
+### Step 2: Add `steroids runners analyze` command
+
+Before starting parallel runners, user can run analysis:
+```bash
+steroids runners analyze --sections "API,Mobile,Web"
+```
+
+This invokes LLM to:
+1. Read all pending task specs in those sections
+2. Identify potential file/build/logic conflicts
+3. Output recommendations (not enforcement)
+
+### Step 3: Optional automatic analysis
+
+When starting a second runner while one is active:
+```bash
+$ steroids runners start --section Mobile --detach
+
+⚠️  Another runner is active (section: API)
+
+Running conflict analysis...
+✓ No conflicts detected between API and Mobile sections.
+
+Proceed? [Y/n]
+```
+
+**Why this approach:**
+
+| Aspect | Hard Rules | LLM Analysis |
+|--------|-----------|--------------|
+| Flexibility | Low - rigid zones | High - context-aware |
+| False positives | Many - blocks safe work | Few - understands intent |
+| User control | Low - system decides | High - user decides |
+| Maintenance | High - rules need updates | Low - prompt evolves |
+| Cost | Free | ~$0.01-0.05 per analysis |
+
+**Implementation priority:**
+
+1. **Phase 1:** Section isolation + manual multi-runner (user takes responsibility)
+2. **Phase 2:** `steroids runners analyze` command with LLM analysis
+3. **Phase 3:** Auto-analysis on runner start (optional, configurable)
+
+The key insight: **Don't block, advise.** Users know their codebase better than any rule system. Give them information to make good decisions.
 
 ## Related Specs
 
