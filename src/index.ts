@@ -66,8 +66,6 @@ COMMANDS:
   dispute           Manage coder/reviewer disputes
   loop              Run the orchestrator loop
   runners           Manage runner daemons
-  watch             Real-time status dashboard
-  ui                Manage WebUI Docker container
   config            Manage configuration
   health            Check project health
   scan              Scan directory for projects

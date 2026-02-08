@@ -30,10 +30,11 @@ steroids tasks - Manage tasks
 USAGE:
   steroids tasks [options]
   steroids tasks add <title> [options]
-  steroids tasks update <title|id> [options]
-  steroids tasks approve <id> [options]
-  steroids tasks reject <id> [options]
-  steroids tasks audit <id>
+  steroids tasks update <id|title> [options]
+  steroids tasks approve <id|title> [options]
+  steroids tasks reject <id|title> [options]
+  steroids tasks skip <id|title> [options]
+  steroids tasks audit <id|title>
 
 SUBCOMMANDS:
   (none)            List tasks (default)
@@ -49,6 +50,7 @@ LIST OPTIONS:
                     Values: pending, in_progress, review, completed,
                             disputed, failed, skipped, partial, active, all
                     'active' = in_progress + review (tasks being worked on)
+                    'failed' = exceeded 15 rejections, needs human help
                     'skipped' = external setup, needs human action
                     'partial' = some coded, rest needs human action
   -g, --global      List tasks across ALL registered projects
@@ -73,6 +75,7 @@ APPROVE/REJECT OPTIONS:
 SKIP OPTIONS:
   --notes           Reason for skipping (e.g., "Cloud SQL - manual setup")
   --model           Model identifying the skip (required for LLM actors)
+  -p, --partial     Mark as partial (coded some, rest needs human action)
 
 STATUS MARKERS:
   [ ] pending       Not started
