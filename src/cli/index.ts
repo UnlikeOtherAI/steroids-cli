@@ -10,3 +10,4 @@ export * from './errors.js';
 export * from './interactive.js';
 export * from './colors.js';
 export * from './env.js';
+export * from './help.js';
