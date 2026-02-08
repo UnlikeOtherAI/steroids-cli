@@ -82,7 +82,7 @@ steroids tasks approve <id> --model human   # approve manually
 steroids tasks reject <id> --model human --notes "reason"  # reject manually
 
 ### Restart failed task
-steroids tasks update <id> --status pending --actor human  # reset to pending
+steroids tasks update <id> --status pending --reset-rejections  # reset to pending with fresh count
 
 ### Skip external setup task
 steroids tasks skip <id> --notes "spec says SKIP, needs Cloud SQL setup"

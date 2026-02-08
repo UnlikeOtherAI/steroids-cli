@@ -14,6 +14,7 @@ import {
   getTask,
   getTaskByTitle,
   updateTaskStatus,
+  resetRejectionCount,
   approveTask,
   rejectTask,
   getTaskAudit,
@@ -64,9 +65,10 @@ ADD OPTIONS:
   --source <file>   Specification file (REQUIRED)
 
 UPDATE OPTIONS:
-  --status          New status: pending | in_progress | review | completed
-  --actor           Actor making the change
-  --model           Model identifier (for LLM actors)
+  --status            New status: pending | in_progress | review | completed
+  --reset-rejections  Reset rejection count to 0 (keeps audit history)
+  --actor             Actor making the change
+  --model             Model identifier (for LLM actors)
 
 APPROVE/REJECT OPTIONS:
   --model           Model performing the review (required)
@@ -425,6 +427,7 @@ async function updateTask(args: string[]): Promise<void> {
       actor: { type: 'string', default: 'human:cli' },
       model: { type: 'string' },
       notes: { type: 'string' },
+      'reset-rejections': { type: 'boolean', default: false },
     },
     allowPositionals: true,
   });
@@ -437,22 +440,24 @@ USAGE:
   steroids tasks update <title|id> [options]
 
 OPTIONS:
-  --status <status>   New status: pending | in_progress | review | completed
-  --actor <actor>     Actor making the change (default: human:cli)
-  --model <model>     Model identifier (for LLM actors)
-  --notes <text>      Notes for the reviewer (useful when submitting for review)
-  -j, --json          Output as JSON
-  -h, --help          Show help
+  --status <status>     New status: pending | in_progress | review | completed
+  --reset-rejections    Reset rejection count to 0 (keeps audit history)
+  --actor <actor>       Actor making the change (default: human:cli)
+  --model <model>       Model identifier (for LLM actors)
+  --notes <text>        Notes for the reviewer (useful when submitting for review)
+  -j, --json            Output as JSON
+  -h, --help            Show help
 
 EXAMPLES:
   steroids tasks update abc123 --status review
+  steroids tasks update abc123 --status pending --reset-rejections
   steroids tasks update abc123 --status review --notes "Found existing implementation at commit xyz"
 `);
     return;
   }
 
-  if (!values.status) {
-    console.error('Error: --status required');
+  if (!values.status && !values['reset-rejections']) {
+    console.error('Error: --status or --reset-rejections required');
     process.exit(1);
   }
 
@@ -475,15 +480,30 @@ EXAMPLES:
       ? `model:${values.model}`
       : values.actor ?? 'human:cli';
 
-    updateTaskStatus(db, task.id, values.status as TaskStatus, actor, values.notes as string | undefined);
+    let oldRejectionCount: number | undefined;
+
+    // Reset rejections if requested
+    if (values['reset-rejections']) {
+      oldRejectionCount = resetRejectionCount(db, task.id, actor, values.notes as string | undefined);
+    }
+
+    // Update status if provided
+    if (values.status) {
+      updateTaskStatus(db, task.id, values.status as TaskStatus, actor, values.notes as string | undefined);
+    }
 
     const updated = getTask(db, task.id);
 
     if (values.json) {
-      console.log(JSON.stringify(updated, null, 2));
+      console.log(JSON.stringify({ ...updated, rejectionReset: oldRejectionCount !== undefined }, null, 2));
     } else {
       console.log(`Task updated: ${task.title}`);
-      console.log(`  Status: ${task.status} → ${values.status}`);
+      if (values.status) {
+        console.log(`  Status: ${task.status} → ${values.status}`);
+      }
+      if (oldRejectionCount !== undefined) {
+        console.log(`  Rejections: ${oldRejectionCount} → 0 (reset)`);
+      }
     }
   } finally {
     close();

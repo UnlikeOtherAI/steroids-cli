@@ -492,6 +492,40 @@ export function updateTaskStatus(
   addAuditEntry(db, taskId, oldStatus, newStatus, actor, notes, commitSha);
 }
 
+/**
+ * Reset rejection count to 0 (keeps audit history)
+ * Use when manually restarting a task after spec changes
+ */
+export function resetRejectionCount(
+  db: Database.Database,
+  taskId: string,
+  actor: string,
+  notes?: string
+): number {
+  const task = getTask(db, taskId);
+  if (!task) {
+    throw new Error(`Task not found: ${taskId}`);
+  }
+
+  const oldCount = task.rejection_count;
+
+  db.prepare(
+    `UPDATE tasks SET rejection_count = 0, updated_at = datetime('now') WHERE id = ?`
+  ).run(taskId);
+
+  // Record in audit trail
+  addAuditEntry(
+    db,
+    taskId,
+    task.status,
+    task.status,
+    actor,
+    notes ?? `Rejection count reset from ${oldCount} to 0`
+  );
+
+  return oldCount;
+}
+
 export function approveTask(
   db: Database.Database,
   taskId: string,

@@ -181,6 +181,7 @@ List Options:
 
 Update Options:
   --status <status>         New status: pending | in_progress | completed | review
+  --reset-rejections        Reset rejection count to 0 (keeps audit history)
   --no-hooks                Don't trigger completion hooks
   --actor <actor>           Actor making the change (for audit trail)
   --model <model>           Model identifier when actor is LLM
