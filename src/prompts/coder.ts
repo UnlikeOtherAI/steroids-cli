@@ -160,7 +160,29 @@ Review relevant project files as needed for your implementation.
 ${rejectionSection}
 ---
 
-## Your Instructions
+## FIRST: Check If Work Is Already Done
+
+**Before implementing anything, check if the work already exists:**
+
+1. Search for files/code that match the specification requirements
+2. Run \`git log --oneline -20\` to see recent commits
+3. If the implementation already exists:
+   - Identify which commit contains the work
+   - Verify it matches the specification
+   - **Do NOT create duplicate code**
+   - Submit for review with a note identifying the existing commit
+
+\`\`\`bash
+# Example: If work exists in commit abc1234
+git log --oneline -20  # Find the commit
+git show abc1234       # Verify it matches spec
+# Then submit for review - no new commit needed
+steroids tasks update ${task.id} --status review
+\`\`\`
+
+---
+
+## Your Instructions (If Work Is NOT Already Done)
 
 1. Read the specification carefully
 2. Implement the feature/fix as specified
@@ -206,10 +228,33 @@ ${rejectionSection}
 
 **CRITICAL: You MUST verify the project builds AND tests pass before submitting for review.**
 
-1. **Detect and run the build command** for this project type (npm run build, cargo build, go build, make, etc.)
-2. **Detect and run the test command** for this project type (npm test, cargo test, go test, pytest, etc.)
+### If work already existed (you found it in step 1):
+1. Verify it matches the specification completely
+2. Run build and tests to confirm it works
+3. **Create a note for the reviewer** explaining what you found:
+   \`\`\`bash
+   # Commit a note or update existing docs to explain:
+   git commit --allow-empty -m "review: found existing implementation in commit <hash>
+
+   The task appears to be already implemented:
+   - Files: <list key files>
+   - Commit: <hash that added them>
+
+   Requesting review to confirm this fulfills the spec
+   or identify any gaps that still need work."
+   \`\`\`
+4. Submit for review:
+   \`\`\`bash
+   steroids tasks update ${task.id} --status review
+   \`\`\`
+
+**The reviewer will then verify if the existing work is sufficient or if more is needed.**
+
+### If you implemented new work:
+1. **Run the build command** for this project type (npm run build, cargo build, go build, make, etc.)
+2. **Run the test command** for this project type (npm test, cargo test, go test, pytest, etc.)
 3. **Fix any errors** until BOTH build and tests pass
-4. **Commit your work** with a meaningful commit message that describes what you implemented:
+4. **Commit your work** with a meaningful commit message:
    \`\`\`bash
    git add <your-changed-files>
    git commit -m "<type>: <descriptive message>"
