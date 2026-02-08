@@ -162,7 +162,30 @@ OPTIONS:
 
     try {
       // Try to resolve by ID (exact or prefix match)
-      let section = getSection(db, sectionInput);
+      let section;
+      try {
+        section = getSection(db, sectionInput);
+      } catch (err) {
+        // Handle ambiguous prefix error
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        if (values.json) {
+          console.log(JSON.stringify({ success: false, error: errorMsg }));
+        } else {
+          console.error(`Error: ${errorMsg}`);
+          console.error('');
+          console.error('Available sections:');
+          const sections = listSections(db);
+          if (sections.length === 0) {
+            console.error('  (no sections defined)');
+          } else {
+            for (const s of sections) {
+              console.error(`  ${s.id.substring(0, 8)}  ${s.name}`);
+            }
+          }
+        }
+        close();
+        process.exit(1);
+      }
 
       // If not found by ID, try by name
       if (!section) {
