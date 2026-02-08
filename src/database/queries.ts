@@ -12,7 +12,9 @@ export type TaskStatus =
   | 'review'
   | 'completed'
   | 'disputed'
-  | 'failed';
+  | 'failed'
+  | 'skipped'   // Fully external setup, nothing to code
+  | 'partial';  // Some coding done, rest needs external setup
 
 // Status markers for display
 export const STATUS_MARKERS: Record<TaskStatus, string> = {
@@ -22,6 +24,8 @@ export const STATUS_MARKERS: Record<TaskStatus, string> = {
   completed: '[x]',
   disputed: '[!]',
   failed: '[F]',
+  skipped: '[S]',   // Fully skipped - external setup required
+  partial: '[s]',   // Partial - coded what we could, rest is external
 };
 
 export interface Task {

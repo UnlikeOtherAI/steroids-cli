@@ -41,6 +41,7 @@ SUBCOMMANDS:
   update            Update task status
   approve           Approve a task (mark completed)
   reject            Reject a task (back to in_progress)
+  skip              Skip a task (external setup, manual action required)
   audit             View task audit trail
 
 LIST OPTIONS:
@@ -67,6 +68,10 @@ APPROVE/REJECT OPTIONS:
   --model           Model performing the review (required)
   --notes           Review notes/comments
 
+SKIP OPTIONS:
+  --notes           Reason for skipping (e.g., "Cloud SQL - manual setup")
+  --model           Model identifying the skip (required for LLM actors)
+
 STATUS MARKERS:
   [ ] pending       Not started
   [-] in_progress   Being worked on
@@ -74,6 +79,8 @@ STATUS MARKERS:
   [x] completed     Approved
   [!] disputed      Disagreement logged
   [F] failed        Exceeded 15 rejections
+  [S] skipped       Fully external - nothing to code
+  [s] partial       Coded what we could, rest is external
 
 EXAMPLES:
   steroids tasks
@@ -120,6 +127,9 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
       break;
     case 'reject':
       await rejectTaskCmd(subArgs);
+      break;
+    case 'skip':
+      await skipTaskCmd(subArgs);
       break;
     case 'audit':
       await auditTask(subArgs);
@@ -599,6 +609,94 @@ OPTIONS:
           console.log(`  Notes: ${values.notes}`);
         }
       }
+    }
+  } finally {
+    close();
+  }
+}
+
+async function skipTaskCmd(args: string[]): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean', short: 'h', default: false },
+      json: { type: 'boolean', short: 'j', default: false },
+      model: { type: 'string' },
+      notes: { type: 'string' },
+      partial: { type: 'boolean', short: 'p', default: false },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help || positionals.length === 0) {
+    console.log(`
+steroids tasks skip <id> - Skip a task (external setup required)
+
+USAGE:
+  steroids tasks skip <id> [options]
+
+OPTIONS:
+  --model <model>   Model identifying the skip (required for LLM actors)
+  --notes <text>    Reason for skipping (e.g., "Cloud SQL - marked SKIP in spec")
+  -p, --partial     Mark as partial (coded what we could, rest is external)
+  -j, --json        Output as JSON
+  -h, --help        Show help
+
+DESCRIPTION:
+  Use this when a task requires external/manual setup that cannot be automated:
+  - Cloud infrastructure (Cloud SQL, GKE, etc.)
+  - Manual account creation
+  - License procurement
+  - Hardware setup
+
+  The task spec should indicate "SKIP" or "MANUAL" for these tasks.
+
+  --partial: Use when you've implemented what you can, but the rest requires
+             external action (e.g., created deployment YAML but can't provision).
+
+EXAMPLES:
+  steroids tasks skip abc123 --notes "Cloud SQL - spec says SKIP"
+  steroids tasks skip abc123 --partial --notes "Created deployment, needs manual GKE setup"
+`);
+    return;
+  }
+
+  const identifier = positionals[0];
+  const newStatus = values.partial ? 'partial' : 'skipped';
+
+  const { db, close } = openDatabase();
+  try {
+    let task = getTask(db, identifier);
+    if (!task) {
+      task = getTaskByTitle(db, identifier);
+    }
+
+    if (!task) {
+      console.error(`Task not found: ${identifier}`);
+      process.exit(1);
+    }
+
+    const actor = values.model
+      ? `model:${values.model}`
+      : 'human:cli';
+
+    updateTaskStatus(db, task.id, newStatus as TaskStatus, actor, values.notes as string | undefined);
+
+    // Refresh task to get updated status
+    task = getTask(db, task.id)!;
+
+    if (values.json) {
+      console.log(JSON.stringify({ task, skipped: true, partial: values.partial }, null, 2));
+    } else {
+      const statusLabel = values.partial ? 'PARTIAL' : 'SKIPPED';
+      console.log(`Task ${statusLabel}: ${task.title}`);
+      console.log(`  Status: ${newStatus}`);
+      console.log(`  Actor: ${actor}`);
+      if (values.notes) {
+        console.log(`  Notes: ${values.notes}`);
+      }
+      console.log('');
+      console.log('  Task will not block the runner. Move on to the next task.');
     }
   } finally {
     close();

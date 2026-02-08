@@ -157,6 +157,7 @@ Usage: steroids tasks [options]
        steroids tasks add <title> [options]
        steroids tasks approve <id> [options]
        steroids tasks reject <id> [options]
+       steroids tasks skip <id> [options]
        steroids tasks audit <id>
 
 Arguments:
@@ -164,8 +165,11 @@ Arguments:
   id                        Task GUID
 
 List Options:
-  -s, --status <status>     Filter: pending | in_progress | completed | review | active | all
+  -s, --status <status>     Filter: pending | in_progress | completed | review |
+                                    skipped | partial | active | all
                             'active' = in_progress + review (tasks being worked on)
+                            'skipped' = external setup tasks needing human action
+                            'partial' = coded some, rest needs human action
                             Default: pending
   -g, --global              List tasks across ALL registered projects (not just current)
   --section <id>            Filter by section ID (local project only)
@@ -192,11 +196,18 @@ Approve/Reject Options:
   --notes <text>            Review notes/comments
   --source-check            Verify against sourceFile before approving
 
+Skip Options:
+  --notes <text>            Reason for skipping (what human action is needed)
+  --model <model>           Model identifying the skip (for LLM actors)
+  -p, --partial             Mark as partial (coded some, rest external)
+
 Task Status Markers:
   - [ ]  pending
   - [-]  in_progress
   - [x]  completed
   - [o]  review (ready for review)
+  - [S]  skipped (fully external - nothing to code)
+  - [s]  partial (coded what we could, rest is external)
 
 Default Behavior:
   'steroids tasks' with no flags shows all PENDING tasks from TODO.md.
@@ -230,6 +241,12 @@ Examples:
 
   # Reject a task back to pending
   steroids tasks reject a1b2c3d4-... --model claude-opus-4 --notes "Missing tests"
+
+  # Skip external setup task (spec says SKIP/MANUAL)
+  steroids tasks skip a1b2c3d4-... --notes "Cloud SQL - spec says SKIP, needs manual setup"
+
+  # Partial skip (coded deployment YAML, but cluster needs manual creation)
+  steroids tasks skip a1b2c3d4-... --partial --notes "Created deployment.yaml. GKE cluster needs manual setup."
 
   # View audit trail
   steroids tasks audit a1b2c3d4-...

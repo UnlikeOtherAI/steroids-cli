@@ -60,6 +60,11 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _type: 'string',
         _default: '',
       },
+      skipExternalSetup: {
+        _description: 'Auto-skip tasks marked as external/manual setup (Cloud SQL, etc.)',
+        _type: 'boolean',
+        _default: true,
+      },
     },
     reviewer: {
       _description: 'AI settings for code review',

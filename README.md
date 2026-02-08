@@ -76,7 +76,12 @@ pending → in_progress → review → completed
               ↑           │
               │           ↓ (rejected)
               └───────────┘
+                    │
+                    ↓ (external setup)
+               skipped/partial
 ```
+
+**External Setup:** Some tasks require human action (Cloud SQL, account creation, etc.). When the spec says SKIP or MANUAL, the coder can mark it as `skipped` (fully external) or `partial` (some coded, rest external). The runner moves on, and you'll see what needs manual action in `steroids llm --context`.
 
 ---
 
@@ -189,6 +194,8 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 | `steroids tasks update <id> --status review` | Submit task for review |
 | `steroids tasks approve <id> --model <model>` | Approve a task |
 | `steroids tasks reject <id> --model <model> --notes "..."` | Reject with feedback |
+| `steroids tasks skip <id> --notes "..."` | Skip external setup task |
+| `steroids tasks skip <id> --partial --notes "..."` | Partial skip (coded some, rest external) |
 | `steroids tasks audit <id>` | View task audit trail |
 
 ### Section Management

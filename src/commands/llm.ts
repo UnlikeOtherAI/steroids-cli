@@ -46,9 +46,11 @@ steroids tasks audit <id>               # view task spec, history, rejection not
 
 ### Manage Tasks
 steroids tasks update <id> --status <s> --actor model --model <m>
-  statuses: pending, in_progress, review, completed
+  statuses: pending, in_progress, review, completed, skipped, partial
 steroids tasks approve <id> --model <m> [--notes "msg"]     # mark completed
 steroids tasks reject <id> --model <m> --notes "feedback"   # back to pending
+steroids tasks skip <id> --notes "reason"                   # external setup, skip it
+steroids tasks skip <id> --partial --notes "reason"         # coded some, rest external
 
 ### Sections
 steroids sections list                  # list sections
@@ -82,11 +84,18 @@ steroids tasks reject <id> --model human --notes "reason"  # reject manually
 ### Restart failed task
 steroids tasks update <id> --status pending --actor human  # reset to pending
 
+### Skip external setup task
+steroids tasks skip <id> --notes "spec says SKIP, needs Cloud SQL setup"
+# Use when: spec says SKIP/MANUAL, requires cloud console, account creation, etc.
+# --partial: use if you coded some parts but rest needs human action
+
 ## TASK STATES
 - pending: waiting to be picked up
 - in_progress: coder is working on it
 - review: coder submitted, waiting for reviewer
 - completed: approved by reviewer
+- skipped: fully external (Cloud SQL, manual setup) - human must do
+- partial: some coded, rest external - human must complete
 - failed: exceeded 15 rejections, needs human intervention
 - disputed: coder/reviewer disagreement, needs human resolution
 
@@ -182,6 +191,48 @@ OPTIONS:
       }
       if (totalActive === 0) {
         console.log('  (none)');
+      }
+    } catch {
+      console.log('  (unknown)');
+    }
+
+    // Skipped tasks requiring manual action
+    console.log('');
+    console.log('Skipped tasks (need manual action):');
+    try {
+      const projects = getRegisteredProjects(false);
+      let totalSkipped = 0;
+      for (const project of projects) {
+        const dbPath = `${project.path}/.steroids/steroids.db`;
+        if (!existsSync(dbPath)) continue;
+
+        try {
+          const { db, close } = openDatabase(project.path);
+          try {
+            const skipped = listTasks(db, { status: 'skipped' });
+            const partial = listTasks(db, { status: 'partial' });
+            const allSkipped = [...skipped, ...partial];
+            const projName = project.name || basename(project.path);
+
+            for (const task of allSkipped) {
+              totalSkipped++;
+              const marker = task.status === 'skipped' ? '[S]' : '[s]';
+              console.log(`  ${marker} ${projName}: ${task.title.slice(0,50)} (${task.id.slice(0,8)})`);
+            }
+          } finally {
+            close();
+          }
+        } catch {
+          // Skip inaccessible projects
+        }
+      }
+      if (totalSkipped === 0) {
+        console.log('  (none - all tasks are automated)');
+      } else {
+        console.log('');
+        console.log('  [S] = Fully external (human must do entire task)');
+        console.log('  [s] = Partial (some coded, rest needs human)');
+        console.log('  Use: steroids tasks audit <id> to see what action is needed');
       }
     } catch {
       console.log('  (unknown)');

@@ -271,6 +271,23 @@ If you have minor concerns but the implementation is acceptable:
 steroids tasks approve ${task.id} --model codex --notes "Minor: your feedback here"
 \`\`\`
 
+### APPROVE SKIP (external setup required)
+If the coder requested a SKIP and it's legitimate:
+1. **Verify** the spec section says SKIP, MANUAL, or requires external action
+2. **Verify** the skip notes explain WHAT human action is needed
+3. If valid:
+\`\`\`bash
+steroids tasks skip ${task.id} --notes "Verified: spec says SKIP. Human must [action]. Approved to unblock pipeline."
+\`\`\`
+
+For **partial** skips (coder did some work, rest is external):
+1. **Review the code** the coder submitted - it must be correct
+2. **Verify** the external part truly cannot be automated
+3. If valid:
+\`\`\`bash
+steroids tasks skip ${task.id} --partial --notes "Code reviewed and correct. External setup verified as manual-only."
+\`\`\`
+
 ### REJECT (needs changes)
 If there are issues that must be fixed:
 \`\`\`bash
@@ -296,6 +313,8 @@ Use sparingly. Most issues should be resolved via reject/fix cycle.
 4. **You MUST run one of the commands above** to record your decision
 5. **Verify coder's claims** - if coder says work exists in a commit, CHECK IT before rejecting
 6. **Empty diff ≠ no work** - work may exist in earlier commits the coder referenced
+7. **SKIP requests are valid** - if spec says SKIP/manual, approve the skip to unblock the pipeline
+8. **Don't reject skips for infrastructure tasks** - Cloud SQL, GKE, etc. truly need human action
 
 If you do NOT run a command, the task will remain in review and you will be invoked again.
 

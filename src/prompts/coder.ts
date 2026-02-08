@@ -195,6 +195,48 @@ The reviewer will check the commit you reference. Be precise about the hash and 
 
 ---
 
+## SKIP / External Setup Tasks
+
+**BEFORE implementing, check if the spec section contains:**
+- \`> ⚠️ **SKIP**\` or \`> SKIP\`
+- "manual setup", "handled manually", "external setup"
+- Cloud infrastructure tasks (Cloud SQL, GKE, AWS, etc.) without automation scripts
+
+**If the task requires EXTERNAL action you cannot perform:**
+
+1. **Fully external** (e.g., "Create Cloud SQL instance" with no Terraform/scripts):
+   \`\`\`bash
+   steroids tasks skip ${task.id} --notes "SKIP REASON: Spec section marked '> ⚠️ SKIP'. WHAT'S NEEDED: Human must create Cloud SQL instance via GCP Console. BLOCKING: Tasks #31-#34 depend on this."
+   \`\`\`
+
+2. **Partial** (you coded some parts, rest needs human action):
+   - Implement what you can (deployment YAML, config files, etc.)
+   - Commit your work with a descriptive message
+   - Then:
+   \`\`\`bash
+   steroids tasks skip ${task.id} --partial --notes "DONE: Created deployment.yaml and service.yaml. NEEDS HUMAN: GKE cluster must be created manually. BLOCKING: Cannot deploy until cluster exists."
+   \`\`\`
+
+**Your skip notes MUST include:**
+- WHY it's being skipped (spec says SKIP, requires cloud console, etc.)
+- WHAT specific action a human needs to take
+- WHAT tasks are blocked until this is done (if known)
+
+**DO NOT:**
+- Flip checkboxes from [ ] to [x] without concrete evidence
+- Mark tasks complete that require human action you cannot verify
+- Get stuck in a loop trying to "complete" infrastructure tasks
+- Skip tasks that ARE codeable just because they're hard
+
+**The reviewer will verify:**
+1. The spec actually says SKIP/manual
+2. The skip reason is legitimate
+3. If partial, the coded work is correct
+
+If approved, the task moves to skipped/partial status and the runner continues to the next task.
+
+---
+
 ## CRITICAL RULES
 
 1. **NEVER touch .steroids/ directory**
