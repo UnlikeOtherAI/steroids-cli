@@ -17,6 +17,7 @@ import {
   getSection,
   getSectionByName,
   STATUS_MARKERS,
+  type Task,
   type TaskStatus,
 } from '../database/queries.js';
 
@@ -40,10 +41,14 @@ SUBCOMMANDS:
   audit             View task audit trail
 
 LIST OPTIONS:
-  -s, --status      Filter: pending | in_progress | review | completed | all
+  -s, --status      Filter by status (default: pending)
+                    Values: pending, in_progress, review, completed,
+                            disputed, failed, active, all
+                    'active' = in_progress + review (tasks being worked on)
   --section <id>    Filter by section ID
   --search          Search in task titles
   -j, --json        Output as JSON
+  -h, --help        Show this help
 
 ADD OPTIONS:
   --section <id>    Section ID (REQUIRED)
@@ -76,14 +81,15 @@ EXAMPLES:
 `;
 
 export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0) {
-    // Default: list pending tasks
-    await listAllTasks([]);
+  // Check global help flag (parsed by main CLI)
+  if (flags.help) {
+    console.log(HELP);
     return;
   }
 
-  if (args[0] === '-h' || args[0] === '--help') {
-    console.log(HELP);
+  if (args.length === 0) {
+    // Default: list pending tasks
+    await listAllTasks([]);
     return;
   }
 
@@ -125,6 +131,12 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
 }
 
 async function listAllTasks(args: string[]): Promise<void> {
+  // Check for help flag first (parseArgs doesn't always handle -h well)
+  if (args.includes('-h') || args.includes('--help')) {
+    console.log(HELP);
+    return;
+  }
+
   const { values } = parseArgs({
     args,
     options: {
@@ -156,11 +168,21 @@ async function listAllTasks(args: string[]): Promise<void> {
       sectionId = section.id;
     }
 
-    const tasks = listTasks(db, {
-      status: values.status as TaskStatus | 'all',
-      sectionId,
-      search: values.search,
-    });
+    // Handle 'active' as a special status (in_progress + review)
+    let statusFilter = values.status as string;
+    let tasks: Task[];
+
+    if (statusFilter === 'active') {
+      const inProgress = listTasks(db, { status: 'in_progress', sectionId, search: values.search });
+      const review = listTasks(db, { status: 'review', sectionId, search: values.search });
+      tasks = [...inProgress, ...review];
+    } else {
+      tasks = listTasks(db, {
+        status: statusFilter as TaskStatus | 'all',
+        sectionId,
+        search: values.search,
+      });
+    }
 
     if (values.json) {
       console.log(JSON.stringify(tasks, null, 2));
