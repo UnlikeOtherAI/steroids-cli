@@ -68,14 +68,55 @@ steroids sections list --deps
 2. Skip sections where any dependency has incomplete tasks
 3. Show [BLOCKED] indicator in section list
 
-## Mermaid Output
+## Graph Output
 
+### Default: ASCII art
+```bash
+steroids sections graph
+# Outputs ASCII dependency tree to stdout
+```
+
+### Mermaid syntax (for markdown/docs)
 ```bash
 steroids sections graph --mermaid
-# Outputs Mermaid flowchart syntax:
+# Outputs Mermaid flowchart syntax to stdout:
 # graph TD
 #     A[Phase 0.4] --> B[Phase 0.7]
 #     B --> C[Phase 0.8]
 ```
 
-Can be pasted into GitHub markdown, Notion, or any Mermaid renderer.
+### Image output (PNG/SVG)
+```bash
+steroids sections graph --output png
+steroids sections graph --output svg
+steroids sections graph --output png -o   # Generate AND open the file
+# Generates image file and outputs absolute path:
+# /tmp/steroids-sections-graph-1707412345.png
+```
+
+**Open flag (-o, --open):**
+- After generating, automatically open the file
+- macOS: `open <filepath>`
+- Linux: `xdg-open <filepath>`
+- Windows: `start <filepath>`
+
+**Implementation:**
+1. Check if `mmdc` (Mermaid CLI) is installed: `which mmdc`
+2. If not installed, prompt user:
+   ```
+   Mermaid CLI not found. Install it to generate images.
+   Run: npm install -g @mermaid-js/mermaid-cli
+   Install now? [y/N]
+   ```
+3. If user confirms, run `npm install -g @mermaid-js/mermaid-cli`
+4. Generate Mermaid syntax to temp file: `os.tmpdir()/steroids-graph-{timestamp}.mmd`
+5. Run: `mmdc -i {input.mmd} -o {output.png} -b transparent`
+6. Output absolute path to generated file
+7. Clean up the .mmd input file
+
+**File locations:**
+- Use `os.tmpdir()` for cross-platform temp directory
+- macOS: `/var/folders/.../T/` or `/tmp/`
+- Linux: `/tmp/`
+- Windows: `%TEMP%`
+- Filename: `steroids-sections-graph-{timestamp}.{png|svg}`
