@@ -126,7 +126,8 @@ OPTIONS:
   }
 
   // Check if we can start
-  const projectPath = values.project as string | undefined;
+  // Default to cwd if --project not specified, to ensure proper per-project tracking
+  const projectPath = (values.project as string | undefined) ?? process.cwd();
   const check = canStartDaemon(projectPath);
   if (!check.canStart && !check.reason?.includes('zombie')) {
     if (values.json) {
@@ -147,11 +148,8 @@ OPTIONS:
   }
 
   if (values.detach) {
-    // Spawn detached process
-    const spawnArgs = [process.argv[1], 'runners', 'start'];
-    if (projectPath) {
-      spawnArgs.push('--project', projectPath);
-    }
+    // Spawn detached process - always pass --project for proper tracking
+    const spawnArgs = [process.argv[1], 'runners', 'start', '--project', projectPath];
 
     const child = spawn(
       process.execPath,

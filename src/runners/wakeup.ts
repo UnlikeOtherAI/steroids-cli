@@ -90,14 +90,15 @@ function killProcess(pid: number): boolean {
 
 /**
  * Start a new runner daemon
+ * Uses 'steroids runners start --detach' so the runner registers in the global DB
+ * and updates heartbeat, allowing hasActiveRunnerForProject() to detect it
  */
-function startRunner(projectPath?: string): { pid: number } | null {
+function startRunner(projectPath: string): { pid: number } | null {
   try {
-    // Start steroids loop in background
-    const args = ['loop'];
-    if (projectPath) {
-      args.push('--project', projectPath);
-    }
+    // Use runners start --detach so the daemon registers itself in the global DB
+    // This is critical: hasActiveRunnerForProject() checks the runners table,
+    // and only the daemon (not loop directly) writes to that table
+    const args = ['runners', 'start', '--detach', '--project', projectPath];
 
     const child = spawn('steroids', args, {
       detached: true,

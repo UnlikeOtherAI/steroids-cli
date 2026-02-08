@@ -113,10 +113,13 @@ export function getRunner(runnerId: string): Runner | null {
  * This is the main entry point for background task processing
  */
 export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
+  // Compute effective project path - default to cwd if not specified
+  const effectiveProjectPath = options.projectPath ?? process.cwd();
+
   // Check if there's already an active runner for this specific project
-  if (options.projectPath && hasActiveRunnerForProject(options.projectPath)) {
+  if (hasActiveRunnerForProject(effectiveProjectPath)) {
     console.error(
-      `A runner is already active for project: ${options.projectPath}`
+      `A runner is already active for project: ${effectiveProjectPath}`
     );
     console.error('Only one runner per project is allowed.');
     process.exit(6); // Resource locked exit code
@@ -136,8 +139,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
     process.exit(6); // Resource locked exit code
   }
 
-  // Register runner
-  const { runnerId, close: closeDb } = registerRunner(options.projectPath);
+  // Register runner with effective project path
+  const { runnerId, close: closeDb } = registerRunner(effectiveProjectPath);
   const { db } = openGlobalDatabase();
 
   // Start heartbeat
@@ -199,11 +202,14 @@ export function canStartDaemon(projectPath?: string): {
   reason?: string;
   existingPid?: number;
 } {
+  // Default to cwd if not specified for consistent per-project tracking
+  const effectivePath = projectPath ?? process.cwd();
+
   // Check for project-specific runner first
-  if (projectPath && hasActiveRunnerForProject(projectPath)) {
+  if (hasActiveRunnerForProject(effectivePath)) {
     return {
       canStart: false,
-      reason: `A runner is already active for project: ${projectPath}`,
+      reason: `A runner is already active for project: ${effectivePath}`,
     };
   }
 
