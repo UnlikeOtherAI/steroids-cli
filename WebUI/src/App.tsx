@@ -6,7 +6,7 @@ import { useProject } from './contexts/ProjectContext';
 import './App.css';
 
 function App() {
-  const { selectedProject, setSelectedProject } = useProject();
+  const { selectedProject } = useProject();
   const location = useLocation();
 
   const getPageTitle = () => {
