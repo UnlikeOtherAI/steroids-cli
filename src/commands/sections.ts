@@ -64,7 +64,7 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
       await addSection(subArgs);
       break;
     case 'list':
-      await listAllSections(subArgs);
+      await listAllSections(subArgs, flags);
       break;
     case 'priority':
       await setPriority(subArgs);
@@ -85,7 +85,7 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
   }
 }
 
-async function listAllSections(args: string[]): Promise<void> {
+async function listAllSections(args: string[], globalFlags?: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -115,12 +115,15 @@ OPTIONS:
   try {
     const sections = listSections(db);
 
-    if (values.json) {
+    // Honor global --json flag or local -j/--json flag
+    const outputJson = values.json || globalFlags?.json;
+
+    if (outputJson) {
       const result = sections.map((s) => ({
         ...s,
         task_count: getSectionTaskCount(db, s.id),
+        pending_dependencies: getPendingDependencies(db, s.id),
         dependencies: values.deps ? getSectionDependencies(db, s.id) : undefined,
-        pending_dependencies: values.deps ? getPendingDependencies(db, s.id) : undefined,
       }));
       console.log(JSON.stringify(result, null, 2));
       return;
@@ -140,7 +143,7 @@ OPTIONS:
       );
     } else {
       console.log(
-        'ID        NAME                                          TASKS'
+        'ID        NAME                                    PRIORITY  TASKS'
       );
     }
     console.log('─'.repeat(90));
@@ -148,22 +151,22 @@ OPTIONS:
     for (const section of sections) {
       const taskCount = getSectionTaskCount(db, section.id);
       const shortId = section.id.substring(0, 8);
+      const pendingDeps = getPendingDependencies(db, section.id);
+      const priority = section.priority ?? 50;
+      const blocked = pendingDeps.length > 0 ? ' [BLOCKED]' : '';
 
       if (values.deps) {
         const deps = getSectionDependencies(db, section.id);
-        const pendingDeps = getPendingDependencies(db, section.id);
-        const priority = section.priority ?? 50;
         const depsDisplay = deps.length > 0
           ? deps.map(d => d.id.substring(0, 8)).join(', ')
           : '-';
-        const blocked = pendingDeps.length > 0 ? ' [BLOCKED]' : '';
 
         console.log(
           `${shortId}  ${section.name.padEnd(40)}  ${String(priority).padStart(3)}     ${String(taskCount).padStart(2)}     ${depsDisplay}${blocked}`
         );
       } else {
         console.log(
-          `${shortId}  ${section.name.padEnd(44)}  ${taskCount}`
+          `${shortId}  ${section.name.padEnd(38)}  ${String(priority).padStart(3)}     ${String(taskCount).padStart(2)}${blocked}`
         );
       }
     }
