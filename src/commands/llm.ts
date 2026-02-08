@@ -38,6 +38,7 @@ Runner daemon picks tasks and invokes appropriate LLM agents automatically.
 ## KEY COMMANDS
 
 ### View Tasks
+steroids tasks stats                    # task counts by status
 steroids tasks                          # pending tasks (current project)
 steroids tasks --status active          # in_progress+review (current project)
 steroids tasks --status active --global # active across ALL projects

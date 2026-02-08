@@ -39,6 +39,7 @@ USAGE:
 
 SUBCOMMANDS:
   (none)            List tasks (default)
+  stats             Show task counts by status
   add               Add a new task
   update            Update task status
   approve           Approve a task (mark completed)
@@ -125,6 +126,9 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
   const subArgs = args.slice(1);
 
   switch (subcommand) {
+    case 'stats':
+      await showStats(subArgs, flags);
+      break;
     case 'add':
       await addTask(subArgs);
       break;
@@ -332,6 +336,76 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
 
     console.log('─'.repeat(80));
     console.log(`Total: ${tasks.length} tasks`);
+  } finally {
+    close();
+  }
+}
+
+async function showStats(args: string[], globalFlags?: GlobalFlags): Promise<void> {
+  const { values } = parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean', short: 'h', default: false },
+      json: { type: 'boolean', short: 'j', default: false },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    console.log(`
+steroids tasks stats - Show task counts by status
+
+USAGE:
+  steroids tasks stats [options]
+
+OPTIONS:
+  -j, --json        Output as JSON
+  -h, --help        Show help
+
+EXAMPLE:
+  steroids tasks stats
+`);
+    return;
+  }
+
+  const outputJson = values.json || globalFlags?.json;
+
+  const { db, close } = openDatabase();
+  try {
+    const statuses: TaskStatus[] = [
+      'pending',
+      'in_progress',
+      'review',
+      'completed',
+      'disputed',
+      'failed',
+      'skipped',
+      'partial',
+    ];
+
+    const counts: Record<string, number> = {};
+    let total = 0;
+
+    for (const status of statuses) {
+      const tasks = listTasks(db, { status });
+      counts[status] = tasks.length;
+      total += tasks.length;
+    }
+
+    if (outputJson) {
+      console.log(JSON.stringify({ ...counts, total }, null, 2));
+      return;
+    }
+
+    console.log('TASK STATS');
+    console.log('─'.repeat(30));
+    for (const status of statuses) {
+      const count = counts[status];
+      const marker = STATUS_MARKERS[status];
+      console.log(`  ${marker} ${status.padEnd(12)}: ${count}`);
+    }
+    console.log('─'.repeat(30));
+    console.log(`  Total: ${total}`);
   } finally {
     close();
   }

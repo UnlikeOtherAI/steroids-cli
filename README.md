@@ -189,6 +189,7 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 
 | Command | Description |
 |---------|-------------|
+| `steroids tasks stats` | Show task counts by status |
 | `steroids tasks list` | List pending tasks |
 | `steroids tasks list --status all` | List all tasks with status |
 | `steroids tasks list --status active` | Show in_progress + review tasks |

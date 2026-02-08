@@ -39,7 +39,7 @@ const COMMANDS = {
   llm: [],
   init: [],
   sections: ['add', 'list', 'priority', 'depends-on', 'no-depends-on', 'graph'],
-  tasks: ['add', 'list', 'update', 'approve', 'reject', 'skip', 'audit'],
+  tasks: ['stats', 'add', 'list', 'update', 'approve', 'reject', 'skip', 'audit'],
   loop: [],
   runners: ['list', 'start', 'stop', 'status', 'logs', 'wakeup', 'cron'],
   config: ['init', 'show', 'get', 'set', 'validate', 'path', 'edit', 'browse'],
@@ -327,6 +327,7 @@ function getSubcommandDescription(cmd: string, sub: string): string {
       graph: 'Show dependency graph',
     },
     tasks: {
+      stats: 'Show task counts by status',
       add: 'Add a new task',
       list: 'List tasks',
       update: 'Update task status',
