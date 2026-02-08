@@ -201,19 +201,13 @@ async function runReviewerPhase(
     return;
   }
 
-  // Get current commit SHA for audit trail
-  const commitSha = getCurrentCommitSha(projectPath) ?? undefined;
+  // Re-read task to see what the reviewer decided
+  // (Codex runs steroids commands directly to update the database)
+  const updatedTask = getTask(db, task.id);
+  if (!updatedTask) return;
 
-  // Handle the decision from the reviewer output
-  // (Codex can't write to database, so we execute the decision here)
-  if (result.decision === 'approve') {
-    console.log('\n>>> Reviewer decision: APPROVE');
-    approveTask(db, task.id, 'codex', result.notes, commitSha);
-
+  if (updatedTask.status === 'completed') {
     console.log('\n✓ Task APPROVED');
-    if (commitSha) {
-      console.log(`Commit: ${commitSha.substring(0, 7)}`);
-    }
 
     // Push to git
     console.log('Pushing to git...');
@@ -224,31 +218,11 @@ async function runReviewerPhase(
     } else {
       console.warn('Push failed. Will stack and retry on next completion.');
     }
-  } else if (result.decision === 'reject') {
-    console.log('\n>>> Reviewer decision: REJECT');
-    const rejectResult = rejectTask(db, task.id, 'codex', result.notes, commitSha);
-
-    if (rejectResult.status === 'failed') {
-      console.log('\n✗ Task FAILED (exceeded 15 rejections)');
-      console.log('Human intervention required.');
-    } else {
-      console.log(`\n✗ Task REJECTED (${rejectResult.rejectionCount}/15)`);
-      if (commitSha) {
-        console.log(`Commit: ${commitSha.substring(0, 7)}`);
-      }
-      if (result.notes) {
-        console.log(`Notes: ${result.notes}`);
-      }
-      console.log('Returning to coder for fixes.');
-    }
-  } else if (result.decision === 'dispute') {
-    console.log('\n>>> Reviewer decision: DISPUTE');
-    updateTaskStatus(db, task.id, 'disputed', 'codex', result.notes, commitSha);
-
+  } else if (updatedTask.status === 'in_progress') {
+    console.log(`\n✗ Task REJECTED (${updatedTask.rejection_count}/15)`);
+    console.log('Returning to coder for fixes.');
+  } else if (updatedTask.status === 'disputed') {
     console.log('\n! Task DISPUTED');
-    if (result.notes) {
-      console.log(`Reason: ${result.notes}`);
-    }
     console.log('Pushing current work and moving to next task.');
 
     // Push even for disputed tasks
@@ -256,10 +230,35 @@ async function runReviewerPhase(
     if (pushResult.success) {
       console.log(`Pushed disputed work (${pushResult.commitHash})`);
     }
-  } else {
-    // No clear decision parsed from output
-    console.log('\nReviewer did not provide a clear decision. Will retry.');
-    console.log('Expected APPROVE, REJECT, or DISPUTE in output.');
+  } else if (updatedTask.status === 'failed') {
+    console.log('\n✗ Task FAILED (exceeded 15 rejections)');
+    console.log('Human intervention required.');
+  } else if (updatedTask.status === 'review') {
+    // Reviewer didn't run a command - check if we can parse the decision as fallback
+    if (result.decision) {
+      console.log(`\nReviewer indicated ${result.decision.toUpperCase()} but command may have failed.`);
+      console.log('Attempting fallback...');
+
+      const commitSha = getCurrentCommitSha(projectPath) ?? undefined;
+
+      if (result.decision === 'approve') {
+        approveTask(db, task.id, 'codex', result.notes, commitSha);
+        console.log('✓ Task APPROVED (via fallback)');
+
+        const pushResult = pushToRemote(projectPath);
+        if (pushResult.success) {
+          console.log(`Pushed successfully (${pushResult.commitHash})`);
+        }
+      } else if (result.decision === 'reject') {
+        rejectTask(db, task.id, 'codex', result.notes, commitSha);
+        console.log('✗ Task REJECTED (via fallback)');
+      } else if (result.decision === 'dispute') {
+        updateTaskStatus(db, task.id, 'disputed', 'codex', result.notes, commitSha);
+        console.log('! Task DISPUTED (via fallback)');
+      }
+    } else {
+      console.log('\nReviewer did not take action (status unchanged). Will retry.');
+    }
   }
 }
 

@@ -71,6 +71,7 @@ function parseReviewerDecision(output: string): { decision?: 'approve' | 'reject
 
 /**
  * Invoke Codex CLI with prompt
+ * Uses workspace-write sandbox with .steroids as writable root
  */
 async function invokeCodexCli(
   promptFile: string,
@@ -82,9 +83,11 @@ async function invokeCodexCli(
     let stderr = '';
     let timedOut = false;
 
-    // Codex CLI invocation using 'exec' subcommand for non-interactive mode
+    // Codex CLI invocation with sandbox permissions for .steroids directory
     const child = spawn('codex', [
       'exec',
+      '--sandbox', 'workspace-write',
+      '--add-dir', '.steroids',
       '-',  // Read prompt from stdin
     ], {
       cwd: process.cwd(),
