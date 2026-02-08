@@ -47,7 +47,9 @@ async function invokeClaudeCli(
     let timedOut = false;
 
     // Use -p flag for print mode with prompt from file
-    const child = spawn('claude', ['-p', `$(cat ${promptFile})`, '--model', 'claude-sonnet-4'], {
+    // Command must be a single string for shell substitution to work
+    const command = `claude -p "$(cat ${promptFile})" --model claude-sonnet-4`;
+    const child = spawn(command, {
       shell: true,
       cwd: process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],

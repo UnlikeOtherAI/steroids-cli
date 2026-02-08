@@ -48,7 +48,9 @@ async function invokeCodexCli(
     let timedOut = false;
 
     // Codex CLI invocation
-    const child = spawn('codex', ['--prompt', `$(cat ${promptFile})`], {
+    // Command must be a single string for shell substitution to work
+    const command = `codex --prompt "$(cat ${promptFile})"`;
+    const child = spawn(command, {
       shell: true,
       cwd: process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
