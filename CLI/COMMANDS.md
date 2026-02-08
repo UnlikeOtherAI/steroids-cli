@@ -164,8 +164,11 @@ Arguments:
   id                        Task GUID
 
 List Options:
-  -s, --status <status>     Filter: pending | in_progress | completed | review | all (default: pending)
-  --section <id>            Filter by section ID
+  -s, --status <status>     Filter: pending | in_progress | completed | review | active | all
+                            'active' = in_progress + review (tasks being worked on)
+                            Default: pending
+  -g, --global              List tasks across ALL registered projects (not just current)
+  --section <id>            Filter by section ID (local project only)
   --search <text>           Full-text search in task titles
   --file <path>             Only tasks from specific file (default: TODO.md)
   --sort <field>            Sort by: line | status | section (default: line)
@@ -199,9 +202,12 @@ Default Behavior:
   'steroids tasks' with no flags shows all PENDING tasks from TODO.md.
 
 Examples:
-  steroids tasks                                     # All pending tasks
+  steroids tasks                                     # All pending tasks (local project)
   steroids tasks --status all                        # All tasks regardless of status
-  steroids tasks --section abc123                     # Tasks in section abc123
+  steroids tasks --status active                     # In-progress + review tasks (local)
+  steroids tasks --status active --global            # Active tasks across ALL projects
+  steroids tasks --status pending --global           # Pending tasks across ALL projects
+  steroids tasks --section abc123                    # Tasks in section abc123
   steroids tasks --search "login"                    # Find tasks containing "login"
 
   steroids tasks update "Fix login bug" --status completed
@@ -572,6 +578,22 @@ The `prune` command removes projects that:
 
 This keeps the registry clean as projects are moved or deleted.
 
+### Multi-Project Warnings
+
+When multiple projects are registered, listing commands display warnings to help LLMs understand project boundaries:
+
+```
+⚠️  MULTI-PROJECT ENVIRONMENT
+   Your current project: /path/to/current/project
+   DO NOT modify files in other projects.
+   Each runner/coder works ONLY on its own project.
+```
+
+This warning appears in:
+- `steroids projects list` (when 2+ projects)
+- `steroids runners list` (when runners from 2+ projects)
+- `steroids tasks --global` (when showing tasks from multiple projects)
+
 ---
 
 ## `steroids loop`
@@ -679,6 +701,26 @@ steroids runners start --section "Phase 3: Frontend" --detach
 # Check status
 steroids runners list
 ```
+
+### Multi-Project Runners
+
+Different projects can run runners in parallel (one runner per project):
+
+```bash
+# In project A
+cd ~/code/project-a && steroids runners start --detach
+
+# In project B
+cd ~/code/project-b && steroids runners start --detach
+
+# List all runners across all projects
+steroids runners list
+```
+
+The `runners list` output shows:
+- **PROJECT** column with path to each project
+- **SECTION** column if runner is focused on a section
+- Multi-project warning when runners from different projects exist
 
 ---
 

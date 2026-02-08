@@ -50,13 +50,11 @@ Runners are stored globally (not per-project) in SQLite:
 ```
 ~/.steroids/
 ├── config.yaml
-├── steroids.db              # Global database (runner state)
+├── steroids.db              # Global database (runner state, projects)
 └── runners/
-    ├── lock/                # Singleton lock directory
-    │   └── pid              # PID of lock holder
     └── logs/
-        ├── runner-001.log
-        └── runner-002.log
+        ├── daemon-12345.log  # Log per daemon PID
+        └── daemon-67890.log
 ```
 
 ### Runner State (in `~/.steroids/steroids.db`)
@@ -67,19 +65,24 @@ CREATE TABLE runners (
     id TEXT PRIMARY KEY,                    -- UUID
     status TEXT NOT NULL DEFAULT 'idle',    -- idle, running, completed, failed
     pid INTEGER,
-    project_path TEXT,
+    project_path TEXT,                      -- Which project this runner works on
+    section_id TEXT,                        -- Optional: focused section
     current_task_id TEXT,
     started_at TEXT,
     heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Runner lock (singleton enforcement)
-CREATE TABLE runner_lock (
-    id INTEGER PRIMARY KEY CHECK (id = 1),  -- Only one row allowed
-    runner_id TEXT NOT NULL,
-    acquired_at TEXT NOT NULL DEFAULT (datetime('now'))
+-- Projects registry
+CREATE TABLE projects (
+    path TEXT PRIMARY KEY,
+    name TEXT,
+    registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    enabled INTEGER NOT NULL DEFAULT 1
 );
 ```
+
+**Per-project isolation:** Each project can have one active runner. Different projects can run in parallel.
 
 **Example runner query:**
 ```sql
@@ -144,29 +147,14 @@ steroids runners cron install
 
 ### Preventing Pile-Up
 
-Multiple safeguards prevent running multiple coordinators:
+Safeguards prevent running multiple runners on the same project:
 
-1. **Lock file**: Only one runner can hold `~/.steroids/runners/lock`
+1. **Per-project check**: `hasActiveRunnerForProject()` checks if a runner already exists for that project path
 2. **Heartbeat check**: Runners update heartbeat every 30 seconds
 3. **Zombie detection**: Runners with stale heartbeats (>5 min) are killed
 4. **PID validation**: Check if PID in state is still running
 
-```bash
-# Lock acquisition (atomic)
-if ! mkdir ~/.steroids/runners/lock 2>/dev/null; then
-  # Lock exists - check if holder is alive
-  PID=$(cat ~/.steroids/runners/lock/pid)
-  if kill -0 $PID 2>/dev/null; then
-    # Runner still alive
-    exit 0
-  else
-    # Zombie - clean up and proceed
-    rm -rf ~/.steroids/runners/lock
-    mkdir ~/.steroids/runners/lock
-  fi
-fi
-echo $$ > ~/.steroids/runners/lock/pid
-```
+**Note:** Multiple projects can run runners in parallel. Only one runner per project is allowed.
 
 ---
 
@@ -177,10 +165,17 @@ echo $$ > ~/.steroids/runners/lock/pid
 ```bash
 steroids runners list
 
-# Output:
-# ID                                    STATUS    PROJECT              TASK         STARTED
-# f47ac10b-58cc-4372-a567-0e02b2c3d479  running   my-project           Fix login    5m ago
-# a1b2c3d4-e5f6-7890-abcd-ef1234567890  idle      -                    -            -
+# Output (shows all runners across all projects):
+# RUNNERS
+# ────────────────────────────────────────────────────────────────────────────────
+# ID        STATUS      PID       PROJECT                    SECTION      HEARTBEAT
+# ────────────────────────────────────────────────────────────────────────────────
+# a47dd5a7  running     61623     /path/to/project-a         Phase 2      17:55:24
+# b945449a  running     28681     /path/to/project-b         -            17:44:27
+#
+# ⚠️  MULTI-PROJECT WARNING: 2 different projects have runners.
+#    Your current project: /path/to/project-a
+#    DO NOT modify files in other projects.
 
 # JSON output
 steroids runners list --json
