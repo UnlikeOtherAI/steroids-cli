@@ -2,6 +2,7 @@
  * Runner daemon - background process that executes tasks
  */
 
+import { resolve } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { openGlobalDatabase } from './global-db.js';
 import { createHeartbeatManager } from './heartbeat.js';
@@ -171,7 +172,8 @@ export function getRunner(runnerId: string): Runner | null {
  */
 export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
   // Compute effective project path - default to cwd if not specified
-  const effectiveProjectPath = options.projectPath ?? process.cwd();
+  // Always resolve to absolute path for consistent tracking
+  const effectiveProjectPath = resolve(options.projectPath ?? process.cwd());
 
   // Check if there's already an active runner for this specific project
   if (hasActiveRunnerForProject(effectiveProjectPath)) {
@@ -266,7 +268,8 @@ export function canStartDaemon(projectPath?: string): {
   existingPid?: number;
 } {
   // Default to cwd if not specified for consistent per-project tracking
-  const effectivePath = projectPath ?? process.cwd();
+  // Always resolve to absolute path
+  const effectivePath = resolve(projectPath ?? process.cwd());
 
   // Check for project-specific runner (one runner per project allowed)
   if (hasActiveRunnerForProject(effectivePath)) {

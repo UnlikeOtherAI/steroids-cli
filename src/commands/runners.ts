@@ -150,7 +150,8 @@ OPTIONS:
 
   // Check if we can start
   // Default to cwd if --project not specified, to ensure proper per-project tracking
-  const projectPath = (values.project as string | undefined) ?? process.cwd();
+  // Always resolve to absolute path for consistent tracking across processes
+  const projectPath = path.resolve((values.project as string | undefined) ?? process.cwd());
   const check = canStartDaemon(projectPath);
   if (!check.canStart && !check.reason?.includes('zombie')) {
     if (values.json) {
