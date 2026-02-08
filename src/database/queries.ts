@@ -49,6 +49,15 @@ export interface AuditEntry {
   to_status: string;
   actor: string;
   notes: string | null;
+  commit_sha: string | null;
+  created_at: string;
+}
+
+export interface RejectionEntry {
+  rejection_number: number;
+  commit_sha: string | null;
+  notes: string | null;
+  actor: string;
   created_at: string;
 }
 
@@ -335,6 +344,35 @@ export function getTaskAudit(
       'SELECT * FROM audit WHERE task_id = ? ORDER BY created_at ASC'
     )
     .all(taskId) as AuditEntry[];
+}
+
+/**
+ * Get rejection history for a task
+ * Returns entries where a review was rejected (review -> in_progress)
+ * Includes commit hash for easy reference
+ */
+export function getTaskRejections(
+  db: Database.Database,
+  taskId: string
+): RejectionEntry[] {
+  const rejections = db
+    .prepare(
+      `SELECT notes, commit_sha, actor, created_at
+       FROM audit
+       WHERE task_id = ?
+       AND from_status = 'review'
+       AND to_status = 'in_progress'
+       ORDER BY created_at ASC`
+    )
+    .all(taskId) as Array<{ notes: string | null; commit_sha: string | null; actor: string; created_at: string }>;
+
+  return rejections.map((r, index) => ({
+    rejection_number: index + 1,
+    commit_sha: r.commit_sha,
+    notes: r.notes,
+    actor: r.actor,
+    created_at: r.created_at,
+  }));
 }
 
 // ============ Dispute Operations ============

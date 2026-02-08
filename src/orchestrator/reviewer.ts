@@ -8,7 +8,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
-import { listTasks } from '../database/queries.js';
+import { listTasks, getTaskRejections } from '../database/queries.js';
 import { openDatabase } from '../database/connection.js';
 import {
   generateReviewerPrompt,
@@ -186,19 +186,30 @@ export async function invokeReviewer(
 
   // Fetch other tasks in the same section for context
   let sectionTasks: SectionTask[] = [];
-  if (task.section_id) {
-    try {
-      const { db, close } = openDatabase(projectPath);
+  let rejectionHistory: ReturnType<typeof getTaskRejections> = [];
+
+  try {
+    const { db, close } = openDatabase(projectPath);
+
+    // Get section tasks
+    if (task.section_id) {
       const allSectionTasks = listTasks(db, { sectionId: task.section_id });
       sectionTasks = allSectionTasks.map(t => ({
         id: t.id,
         title: t.title,
         status: t.status,
       }));
-      close();
-    } catch (error) {
-      console.warn('Could not fetch section tasks:', error);
     }
+
+    // Get rejection history - ALWAYS fetch this so reviewer can see past attempts
+    rejectionHistory = getTaskRejections(db, task.id);
+    if (rejectionHistory.length > 0) {
+      console.log(`Found ${rejectionHistory.length} previous rejection(s) for this task`);
+    }
+
+    close();
+  } catch (error) {
+    console.warn('Could not fetch task context:', error);
   }
 
   const context: ReviewerPromptContext = {
@@ -208,6 +219,7 @@ export async function invokeReviewer(
     gitDiff,
     modifiedFiles,
     sectionTasks,
+    rejectionHistory,
   };
 
   const prompt = generateReviewerPrompt(context);

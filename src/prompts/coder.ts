@@ -5,13 +5,14 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Task } from '../database/queries.js';
+import type { Task, RejectionEntry } from '../database/queries.js';
 
 export interface CoderPromptContext {
   task: Task;
   projectPath: string;
   previousStatus: string;
   rejectionNotes?: string;
+  rejectionHistory?: RejectionEntry[];  // Full rejection history
   gitStatus?: string;
   gitDiff?: string;
 }
@@ -57,37 +58,71 @@ function getSourceFileContent(
 }
 
 /**
- * Generate the coder prompt for a new task
+ * Format rejection history for coder
  */
-export function generateCoderPrompt(context: CoderPromptContext): string {
-  const { task, projectPath, previousStatus, rejectionNotes } = context;
+function formatRejectionHistoryForCoder(
+  taskId: string,
+  rejectionHistory?: RejectionEntry[],
+  latestNotes?: string
+): string {
+  if (!rejectionHistory || rejectionHistory.length === 0) {
+    return '';
+  }
 
-  const agentsMd = getAgentsMd(projectPath);
-  const sourceContent = getSourceFileContent(projectPath, task.source_file);
+  const historyLines = rejectionHistory.map(r => {
+    const commitRef = r.commit_sha ? ` (commit: ${r.commit_sha.substring(0, 7)})` : '';
+    const notes = r.notes || '(no detailed notes)';
+    return `### Rejection #${r.rejection_number}${commitRef}
+${notes}
+`;
+  });
 
-  // Build rejection section if applicable
-  let rejectionSection = '';
-  if (task.rejection_count > 0 && rejectionNotes) {
-    rejectionSection = `
+  const escalationNote = rejectionHistory.length >= 5
+    ? `
+**⚠️ HIGH REJECTION COUNT (${rejectionHistory.length})**
+Multiple attempts have been rejected. Before implementing:
+1. Read ALL the rejection notes above carefully
+2. Look for patterns - is the same issue being raised repeatedly?
+3. Use \`git show <commit-hash>\` to see what you tried before
+4. If the issue is unclear, the rejection notes should have specifics
+5. Consider if you're misunderstanding the specification
+`
+    : '';
+
+  return `
 ---
 
-## Previous Rejection Feedback
+## Rejection History
 
-The reviewer rejected your previous attempt with this feedback:
+**CRITICAL:** Review this history before implementing. Your past attempts were rejected for specific reasons.
+Use the commit hashes to examine what you tried: \`git show <hash>\`
+${escalationNote}
+${historyLines.join('\n')}
+---
 
-> ${rejectionNotes}
-
-You MUST address this feedback. This is rejection #${task.rejection_count} of 15.
+You MUST address the feedback above. This is rejection #${rejectionHistory.length} of 15.
 After 15 rejections, this task will require human intervention.
 
-If you believe the reviewer is wrong, you may dispute:
+If you believe the reviewer is fundamentally wrong about the specification, you may dispute:
 \`\`\`bash
-steroids dispute create ${task.id} --reason "explanation" --type coder
+steroids dispute create ${taskId} --reason "explanation" --type coder
 \`\`\`
 
 But only dispute if there's a genuine specification disagreement. Frivolous disputes will be deleted.
 `;
-  }
+}
+
+/**
+ * Generate the coder prompt for a new task
+ */
+export function generateCoderPrompt(context: CoderPromptContext): string {
+  const { task, projectPath, previousStatus, rejectionNotes, rejectionHistory } = context;
+
+  const agentsMd = getAgentsMd(projectPath);
+  const sourceContent = getSourceFileContent(projectPath, task.source_file);
+
+  // Build rejection section with full history
+  const rejectionSection = formatRejectionHistoryForCoder(task.id, rejectionHistory, rejectionNotes);
 
   return `# STEROIDS CODER TASK
 

@@ -5,7 +5,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Task } from '../database/queries.js';
+import type { Task, RejectionEntry } from '../database/queries.js';
 
 export interface SectionTask {
   id: string;
@@ -20,6 +20,7 @@ export interface ReviewerPromptContext {
   gitDiff: string;
   modifiedFiles: string[];
   sectionTasks?: SectionTask[];  // Other tasks in the same section
+  rejectionHistory?: RejectionEntry[];  // Past rejections with commit hashes
 }
 
 /**
@@ -48,6 +49,54 @@ function getSourceFileContent(
 
 // Maximum tasks to show in section context (prevents prompt bloat)
 const MAX_SECTION_TASKS = 15;
+
+/**
+ * Format rejection history for display
+ */
+function formatRejectionHistory(rejections?: RejectionEntry[]): string {
+  if (!rejections || rejections.length === 0) {
+    return `
+---
+
+## Rejection History
+
+No previous rejections. This is the first review.
+`;
+  }
+
+  const lines = rejections.map(r => {
+    const commitRef = r.commit_sha ? ` (commit: ${r.commit_sha.substring(0, 7)})` : '';
+    const notes = r.notes || '(no notes provided)';
+    return `### Rejection #${r.rejection_number}${commitRef}
+${notes}
+`;
+  });
+
+  const escalationNote = rejections.length >= 5
+    ? `
+**⚠️ HIGH REJECTION COUNT (${rejections.length})**
+The coder may be misunderstanding the feedback. Consider:
+- Providing file:line references with exact code snippets
+- Pointing to similar working patterns in the codebase
+- Explaining WHY the current approach doesn't work, not just WHAT is wrong
+- If the same issue keeps recurring, explain it from a different angle
+`
+    : '';
+
+  return `
+---
+
+## Rejection History
+
+**IMPORTANT:** Review this history carefully before making your decision.
+- Look for patterns: Is the same issue being raised repeatedly?
+- If an issue was raised before and not fixed, be MORE SPECIFIC about what exactly needs to change
+- Use commit hashes to examine previous attempts: \`git show <hash>\`
+- The coder only sees YOUR rejection notes - make them actionable
+${escalationNote}
+${lines.join('\n')}
+`;
+}
 
 /**
  * Format section tasks for display
@@ -98,7 +147,7 @@ ${lines.join('\n')}
  * Generate the reviewer prompt
  */
 export function generateReviewerPrompt(context: ReviewerPromptContext): string {
-  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks } = context;
+  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks, rejectionHistory } = context;
 
   const sourceContent = getSourceFileContent(projectPath, task.source_file);
 
@@ -125,8 +174,7 @@ You are a REVIEWER in an automated task execution system. Your job is to verify 
 **Status:** review (submitted by coder)
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-${formatSectionTasks(task.id, sectionTasks)}---
-
+${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}
 ## Original Specification
 
 From ${task.source_file ?? '(not specified)'}:

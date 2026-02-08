@@ -8,6 +8,8 @@ import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
+import { getTaskRejections } from '../database/queries.js';
+import { openDatabase } from '../database/connection.js';
 import {
   generateCoderPrompt,
   generateResumingCoderPrompt,
@@ -127,10 +129,24 @@ export async function invokeCoder(
   console.log(`Task ID: ${task.id}`);
   console.log(`${'='.repeat(60)}\n`);
 
+  // Fetch rejection history so coder can see past attempts
+  let rejectionHistory: ReturnType<typeof getTaskRejections> = [];
+  try {
+    const { db, close } = openDatabase(projectPath);
+    rejectionHistory = getTaskRejections(db, task.id);
+    if (rejectionHistory.length > 0) {
+      console.log(`Found ${rejectionHistory.length} previous rejection(s) - coder will see full history`);
+    }
+    close();
+  } catch (error) {
+    console.warn('Could not fetch rejection history:', error);
+  }
+
   const context: CoderPromptContext = {
     task,
     projectPath,
     previousStatus: task.status,
+    rejectionHistory,
   };
 
   let prompt: string;
