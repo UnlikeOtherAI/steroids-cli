@@ -10,6 +10,7 @@ import { existsSync, readdirSync, statSync, unlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { openDatabase, isInitialized } from '../database/connection.js';
 import type Database from 'better-sqlite3';
+import { generateHelp } from '../cli/help.js';
 
 const STEROIDS_DIR = '.steroids';
 const TEMP_DIR = 'tmp';
@@ -22,34 +23,34 @@ interface GcResult {
   vacuumedBytes: number;
 }
 
-const HELP = `
-steroids gc - Garbage collection
-
-USAGE:
-  steroids gc [options]
-
-OPTIONS:
-  --orphaned-ids        Clean orphaned task/section IDs only
-  --stale-runners       Clean stale runner entries only
-  --temp-files          Clean temp files only
-  --vacuum              Optimize database only
-  --dry-run             Preview without making changes
-  -j, --json            Output as JSON
-  -h, --help            Show help
-
-DESCRIPTION:
-  Performs garbage collection to clean up:
-  - Orphaned IDs (tasks/sections with invalid references)
-  - Stale runner entries (runners that are no longer active)
-  - Temp files (leftover temporary files)
-  - Database optimization (VACUUM to reclaim space)
-
-EXAMPLES:
-  steroids gc
-  steroids gc --dry-run
-  steroids gc --orphaned-ids
-  steroids gc --temp-files --vacuum
-`;
+const HELP = generateHelp({
+  command: 'gc',
+  description: 'Garbage collection',
+  details: `Performs garbage collection to clean up:
+- Orphaned IDs (tasks/sections with invalid references)
+- Stale runner entries (runners that are no longer active)
+- Temp files (leftover temporary files)
+- Database optimization (VACUUM to reclaim space)`,
+  usage: [
+    'steroids gc [options]',
+  ],
+  options: [
+    { long: 'orphaned-ids', description: 'Clean orphaned task/section IDs only' },
+    { long: 'stale-runners', description: 'Clean stale runner entries only' },
+    { long: 'temp-files', description: 'Clean temp files only' },
+    { long: 'vacuum', description: 'Optimize database only' },
+  ],
+  examples: [
+    { command: 'steroids gc', description: 'Run all cleanup operations' },
+    { command: 'steroids gc --dry-run', description: 'Preview without making changes' },
+    { command: 'steroids gc --orphaned-ids', description: 'Clean orphaned IDs only' },
+    { command: 'steroids gc --temp-files --vacuum', description: 'Clean temp files and optimize database' },
+  ],
+  related: [
+    { command: 'steroids purge', description: 'Purge old data' },
+    { command: 'steroids backup', description: 'Create backups' },
+  ],
+});
 
 export async function gcCommand(args: string[], flags: GlobalFlags): Promise<void> {
   // Check global help flag first

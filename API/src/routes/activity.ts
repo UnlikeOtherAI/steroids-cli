@@ -4,7 +4,13 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { getActivityStatsByProject, ProjectActivityStats } from '../../../src/runners/activity-log.js';
+import {
+  getActivityStatsByProject,
+  getActivityFiltered,
+  ProjectActivityStats,
+  ActivityStatus,
+  ActivityLogEntry,
+} from '../../../src/runners/activity-log.js';
 
 const router = Router();
 
@@ -149,6 +155,79 @@ router.get('/activity', (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get activity stats',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/activity/list
+ * Get activity log entries with optional filters
+ * Query params:
+ *   - hours: number (default: 24) - hours to look back
+ *   - status: string (optional) - filter by status (completed, failed, skipped, partial, disputed)
+ *   - project: string (optional) - filter by project path
+ *   - limit: number (optional) - max entries to return
+ */
+router.get('/activity/list', (req: Request, res: Response) => {
+  try {
+    const hoursParam = req.query.hours;
+    const statusParam = req.query.status as string | undefined;
+    const projectPath = req.query.project as string | undefined;
+    const limitParam = req.query.limit;
+
+    // Parse hours parameter (default: 24)
+    let hours = 24;
+    if (hoursParam !== undefined) {
+      const parsed = parseInt(hoursParam as string, 10);
+      if (isNaN(parsed) || parsed <= 0) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid hours parameter - must be a positive integer',
+        });
+        return;
+      }
+      hours = parsed;
+    }
+
+    // Validate status if provided
+    const validStatuses: ActivityStatus[] = ['completed', 'failed', 'skipped', 'partial', 'disputed'];
+    if (statusParam && !validStatuses.includes(statusParam as ActivityStatus)) {
+      res.status(400).json({
+        success: false,
+        error: `Invalid status - must be one of: ${validStatuses.join(', ')}`,
+      });
+      return;
+    }
+
+    // Parse limit
+    let limit: number | undefined;
+    if (limitParam !== undefined) {
+      const parsed = parseInt(limitParam as string, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        limit = parsed;
+      }
+    }
+
+    const entries = getActivityFiltered({
+      hoursAgo: hours,
+      status: statusParam as ActivityStatus | undefined,
+      projectPath,
+      limit,
+    });
+
+    res.json({
+      success: true,
+      hours,
+      status: statusParam || 'all',
+      entries,
+      count: entries.length,
+    });
+  } catch (error) {
+    console.error('Error getting activity list:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get activity list',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

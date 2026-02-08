@@ -2,7 +2,14 @@
  * API service for communicating with Steroids API
  */
 
-import { Project, ProjectsListResponse, ActivityStats, ActivityStatsResponse } from '../types';
+import {
+  Project,
+  ProjectsListResponse,
+  ActivityStats,
+  ActivityStatsResponse,
+  ActivityListResponse,
+  ActivityStatusType,
+} from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3501';
 
@@ -112,5 +119,27 @@ export const activityApi = {
     }
     const response = await fetchJson<ActivityStatsResponse>(url);
     return response.stats;
+  },
+
+  /**
+   * Get filtered activity log entries
+   */
+  async list(options: {
+    hours: number;
+    status?: ActivityStatusType;
+    projectPath?: string;
+    limit?: number;
+  }): Promise<ActivityListResponse> {
+    let url = `/api/activity/list?hours=${options.hours}`;
+    if (options.status) {
+      url += `&status=${options.status}`;
+    }
+    if (options.projectPath) {
+      url += `&project=${encodeURIComponent(options.projectPath)}`;
+    }
+    if (options.limit) {
+      url += `&limit=${options.limit}`;
+    }
+    return fetchJson<ActivityListResponse>(url);
   },
 };

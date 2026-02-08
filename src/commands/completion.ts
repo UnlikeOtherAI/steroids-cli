@@ -13,25 +13,34 @@ import { parseArgs } from 'node:util';
 import { existsSync, appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids completion - Generate shell completion scripts
-
-USAGE:
-  steroids completion <shell>
-
-SUBCOMMANDS:
-  bash                Generate bash completion script
-  zsh                 Generate zsh completion script
-  fish                Generate fish completion script
-  install             Auto-install for current shell
-
-EXAMPLES:
-  steroids completion bash >> ~/.bashrc
-  steroids completion zsh >> ~/.zshrc
-  steroids completion fish > ~/.config/fish/completions/steroids.fish
-  steroids completion install
-`;
+const HELP = generateHelp({
+  command: 'completion',
+  description: 'Generate shell completion scripts',
+  details: 'Auto-completion enables tab-completion for steroids commands and flags in your shell.',
+  usage: [
+    'steroids completion <shell>',
+  ],
+  subcommands: [
+    { name: 'bash', description: 'Generate bash completion script' },
+    { name: 'zsh', description: 'Generate zsh completion script' },
+    { name: 'fish', description: 'Generate fish completion script' },
+    { name: 'install', description: 'Auto-install for current shell' },
+  ],
+  examples: [
+    { command: 'steroids completion bash >> ~/.bashrc', description: 'Add bash completion to .bashrc' },
+    { command: 'steroids completion zsh >> ~/.zshrc', description: 'Add zsh completion to .zshrc' },
+    { command: 'steroids completion fish > ~/.config/fish/completions/steroids.fish', description: 'Create fish completion file' },
+    { command: 'steroids completion install', description: 'Auto-detect shell and install' },
+  ],
+  related: [
+    { command: 'steroids --help', description: 'Show main help' },
+  ],
+  showGlobalOptions: false,
+  showEnvVars: false,
+  showExitCodes: false,
+});
 
 // All steroids commands and their subcommands for completion
 const COMMANDS = {
@@ -70,7 +79,8 @@ const GLOBAL_FLAGS = [
 ];
 
 export async function completionCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
+  // Check global help flag
+  if (flags.help || args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;
   }

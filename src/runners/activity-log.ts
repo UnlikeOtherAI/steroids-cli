@@ -65,6 +65,51 @@ export function getActivitySince(hoursAgo: number = 12): ActivityLogEntry[] {
 }
 
 /**
+ * Query activity log with optional filters
+ */
+export function getActivityFiltered(options: {
+  hoursAgo?: number;
+  status?: ActivityStatus;
+  projectPath?: string;
+  limit?: number;
+}): ActivityLogEntry[] {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (options.hoursAgo) {
+      conditions.push(`created_at >= datetime('now', ? || ' hours')`);
+      params.push(`-${options.hoursAgo}`);
+    }
+
+    if (options.status) {
+      conditions.push(`final_status = ?`);
+      params.push(options.status);
+    }
+
+    if (options.projectPath) {
+      conditions.push(`project_path = ?`);
+      params.push(options.projectPath);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limitClause = options.limit ? `LIMIT ${options.limit}` : '';
+
+    return db
+      .prepare(
+        `SELECT * FROM activity_log
+         ${whereClause}
+         ORDER BY created_at DESC
+         ${limitClause}`
+      )
+      .all(...params) as ActivityLogEntry[];
+  } finally {
+    close();
+  }
+}
+
+/**
  * Stats aggregated by project
  */
 export interface ProjectActivityStats {

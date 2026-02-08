@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Project, ActivityStats, TimeRangeOption, TIME_RANGE_OPTIONS } from '../types';
+import { useNavigate } from 'react-router-dom';
+import { Project, ActivityStats, TimeRangeOption, TIME_RANGE_OPTIONS, ActivityStatusType } from '../types';
 import { StatTile } from '../components/molecules/StatTile';
 import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
 import { activityApi, projectsApi } from '../services/api';
@@ -18,6 +19,7 @@ interface AggregateStats {
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
+  const navigate = useNavigate();
   const [selectedRange, setSelectedRange] = useState<TimeRangeOption>(TIME_RANGE_OPTIONS[1]); // Default: 24h
   const [activityStats, setActivityStats] = useState<ActivityStats | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
@@ -28,7 +30,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
     setActivityLoading(true);
     setActivityError(null);
     try {
-      // If project is provided, get project-specific stats; otherwise get aggregate
       const stats = await activityApi.getStats(selectedRange.hours, project?.path);
       setActivityStats(stats);
     } catch (err) {
@@ -39,7 +40,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
   }, [selectedRange.hours, project?.path]);
 
   const fetchAggregateStats = useCallback(async () => {
-    if (project) return; // Skip if viewing a specific project
+    if (project) return;
     try {
       const projects = await projectsApi.list(false);
       const aggregate: AggregateStats = {
@@ -79,6 +80,76 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
     }, 5000);
     return () => clearInterval(interval);
   }, [fetchActivityStats, fetchAggregateStats]);
+
+  const navigateToActivity = (status: ActivityStatusType) => {
+    navigate(`/activity?status=${status}&hours=${selectedRange.hours}`);
+  };
+
+  function renderActivityStats() {
+    return (
+      <>
+        {activityLoading && !activityStats && (
+          <div className="text-center py-4 text-text-muted">Loading activity stats...</div>
+        )}
+
+        {activityError && (
+          <div className="text-center py-4 text-danger">{activityError}</div>
+        )}
+
+        {activityStats && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+              <StatTile
+                label="Completed"
+                value={activityStats.completed}
+                variant="success"
+                onClick={() => navigateToActivity('completed')}
+              />
+              <StatTile
+                label="Failed"
+                value={activityStats.failed}
+                variant="danger"
+                onClick={() => navigateToActivity('failed')}
+              />
+              <StatTile
+                label="Skipped"
+                value={activityStats.skipped}
+                variant="warning"
+                onClick={() => navigateToActivity('skipped')}
+              />
+              <StatTile
+                label="Partial"
+                value={activityStats.partial}
+                variant="info"
+                onClick={() => navigateToActivity('partial')}
+              />
+              <StatTile
+                label="Disputed"
+                value={activityStats.disputed}
+                variant="default"
+                onClick={() => navigateToActivity('disputed')}
+              />
+            </div>
+            <div className="flex items-center gap-6 text-sm text-text-secondary">
+              <div>
+                <span className="font-medium text-text-primary">{activityStats.tasks_per_hour}</span> tasks/hour
+              </div>
+              <div>
+                <span className="font-medium text-text-primary">{activityStats.success_rate}%</span> success rate
+              </div>
+              <div className="text-text-muted">
+                {activityStats.total} total in last {selectedRange.label}
+              </div>
+            </div>
+          </>
+        )}
+
+        {!activityLoading && !activityError && activityStats && activityStats.total === 0 && (
+          <div className="text-center py-2 text-text-muted">No activity in the selected time range</div>
+        )}
+      </>
+    );
+  }
 
   // Project-specific view
   if (project) {
@@ -178,65 +249,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
     ? Math.round((aggregateStats.completed / totalTasks) * 100)
     : 0;
 
-  function renderActivityStats() {
-    return (
-      <>
-        {activityLoading && !activityStats && (
-          <div className="text-center py-4 text-text-muted">Loading activity stats...</div>
-        )}
-
-        {activityError && (
-          <div className="text-center py-4 text-danger">{activityError}</div>
-        )}
-
-        {activityStats && (
-          <>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-              <StatTile label="Completed" value={activityStats.completed} variant="success" />
-              <StatTile label="Failed" value={activityStats.failed} variant="danger" />
-              <StatTile label="Skipped" value={activityStats.skipped} variant="warning" />
-              <StatTile label="Partial" value={activityStats.partial} variant="info" />
-              <StatTile label="Disputed" value={activityStats.disputed} variant="default" />
-            </div>
-            <div className="flex items-center gap-6 text-sm text-text-secondary">
-              <div>
-                <span className="font-medium text-text-primary">{activityStats.tasks_per_hour}</span> tasks/hour
-              </div>
-              <div>
-                <span className="font-medium text-text-primary">{activityStats.success_rate}%</span> success rate
-              </div>
-              <div className="text-text-muted">
-                {activityStats.total} total in last {selectedRange.label}
-              </div>
-            </div>
-          </>
-        )}
-
-        {!activityLoading && !activityError && activityStats && activityStats.total === 0 && (
-          <div className="text-center py-2 text-text-muted">No activity in the selected time range</div>
-        )}
-      </>
-    );
-  }
-
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <div className="card p-6 mb-6">
         <h1 className="text-3xl font-bold text-text-primary mb-2">Steroids Dashboard</h1>
         <p className="text-text-muted">Overview of all projects</p>
-        {aggregateStats && (
-          <div className="flex items-center gap-6 mt-4 p-4 bg-bg-surface rounded-lg">
-            <div>
-              <div className="text-sm text-text-secondary">Projects</div>
-              <div className="text-2xl font-bold text-text-primary">{aggregateStats.projectCount}</div>
-            </div>
-            <div>
-              <div className="text-sm text-text-secondary">Active Runners</div>
-              <div className="text-2xl font-bold text-success">{aggregateStats.runningRunners}</div>
-            </div>
-          </div>
-        )}
       </div>
+
+      {aggregateStats && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div
+            className="card p-6 cursor-pointer hover:bg-bg-surface2 transition-colors"
+            onClick={() => navigate('/projects')}
+          >
+            <div className="text-sm text-text-secondary mb-2">Projects</div>
+            <div className="text-4xl font-bold text-text-primary">{aggregateStats.projectCount}</div>
+            <div className="text-xs text-text-muted mt-1">Click to view all projects</div>
+          </div>
+          <div
+            className="card p-6 cursor-pointer hover:bg-bg-surface2 transition-colors"
+            onClick={() => navigate('/runners')}
+          >
+            <div className="text-sm text-text-secondary mb-2">Active Runners</div>
+            <div className="text-4xl font-bold text-success">{aggregateStats.runningRunners}</div>
+            <div className="text-xs text-text-muted mt-1">Click to view runners</div>
+          </div>
+        </div>
+      )}
 
       <div className="card p-6 mb-6">
         <div className="flex items-center justify-between mb-4">

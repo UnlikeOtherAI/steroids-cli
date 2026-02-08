@@ -34,67 +34,71 @@ import {
   type DisputeType,
   type DisputeReason,
 } from '../disputes/index.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids dispute - Manage disputes
-
-USAGE:
-  steroids dispute [command] [options]
-
-COMMANDS:
-  (none)              List open disputes (default)
-  create <task-id>    Create a new dispute
-  list                List disputes
-  show <id>           Show dispute details
-  resolve <id>        Resolve a dispute
-  log <task-id>       Log minor disagreement without blocking
-
-CREATE OPTIONS:
-  --reason <reason>   Reason: architecture, specification, approach, requirements, style, security, scope, other
-  --type <type>       Type: major, minor, coder, reviewer (default: coder)
-  --position <text>   Your position/argument
-  --model <model>     Model that raised the dispute
-
-LIST OPTIONS:
-  --stale             Show only stale disputes (open > timeout days)
-  --all               Include resolved disputes
-  --status <status>   Filter: open, resolved, all
-  -j, --json          Output as JSON
-
-SHOW OPTIONS:
-  -j, --json          Output as JSON
-
-RESOLVE OPTIONS:
-  --decision <decision>  Who wins: coder, reviewer, custom
-  --notes <text>         Resolution notes
-
-LOG OPTIONS:
-  --minor             Log minor disagreement (doesn't change task status)
-  --notes <text>      Disagreement notes
-
-DISPUTE TYPES:
-  major     Serious disagreement, can block loop if configured
-  minor     Logged disagreement, continues with coder's implementation
-  coder     Coder disputes reviewer's rejection
-  reviewer  Reviewer raises concern
-
-DISPUTE REASONS:
-  architecture   Architectural disagreement
-  specification  Spec ambiguity or conflict
-  approach       Different valid approaches
-  requirements   Unclear requirements
-  style          Style/convention disagreement
-  security       Security concern
-  scope          Scope disagreement
-  other          Other reason (custom text)
-
-EXAMPLES:
-  steroids dispute create abc123 --type coder --reason architecture --position "JWT is better"
-  steroids dispute list --stale
-  steroids dispute show abc123
-  steroids dispute resolve abc123 --decision coder --notes "JWT is acceptable"
-  steroids dispute log abc123 --minor --notes "Style preference logged"
-`;
+const HELP = generateHelp({
+  command: 'dispute',
+  description: 'Manage coder/reviewer disputes',
+  details: `Create, view, and resolve disputes when coder and reviewer disagree.
+Disputes can be major (blocking) or minor (logged for reference).
+Use this when automation needs human decision on architectural or approach disagreements.`,
+  usage: [
+    'steroids dispute [options]',
+    'steroids dispute <subcommand> [args] [options]',
+  ],
+  subcommands: [
+    { name: '(default)', description: 'List open disputes' },
+    { name: 'list', description: 'List disputes with filters' },
+    { name: 'create', args: '<task-id>', description: 'Create a new dispute' },
+    { name: 'show', args: '<id>', description: 'Show dispute details' },
+    { name: 'resolve', args: '<id>', description: 'Resolve a dispute' },
+    { name: 'log', args: '<task-id>', description: 'Log minor disagreement without blocking' },
+  ],
+  options: [
+    { long: 'reason', description: 'Dispute reason (create)', values: 'architecture | specification | approach | requirements | style | security | scope | other' },
+    { long: 'type', description: 'Dispute type (create)', values: 'major | minor | coder | reviewer', default: 'coder' },
+    { long: 'position', description: 'Your position/argument (create)', values: '<text>' },
+    { long: 'model', description: 'Model identifier (create)', values: '<model>' },
+    { long: 'stale', description: 'Show only stale disputes (list)' },
+    { long: 'all', description: 'Include resolved disputes (list)' },
+    { long: 'status', description: 'Filter by status (list)', values: 'open | resolved | all' },
+    { long: 'decision', description: 'Resolution decision (resolve)', values: 'coder | reviewer | custom' },
+    { long: 'notes', description: 'Notes or comments', values: '<text>' },
+    { long: 'minor', description: 'Log as minor disagreement (log)' },
+  ],
+  examples: [
+    { command: 'steroids dispute', description: 'List open disputes' },
+    { command: 'steroids dispute list --stale', description: 'Show disputes older than timeout' },
+    { command: 'steroids dispute create abc123 --type coder --reason architecture --position "JWT is better"', description: 'Create coder dispute' },
+    { command: 'steroids dispute show abc123', description: 'View dispute details' },
+    { command: 'steroids dispute resolve abc123 --decision coder --notes "JWT is acceptable"', description: 'Resolve in favor of coder' },
+    { command: 'steroids dispute log abc123 --minor --notes "Style preference logged"', description: 'Log minor disagreement' },
+  ],
+  related: [
+    { command: 'steroids tasks', description: 'Manage tasks' },
+    { command: 'steroids loop', description: 'Run automated development loop' },
+  ],
+  sections: [
+    {
+      title: 'DISPUTE TYPES',
+      content: `major     Serious disagreement, can block loop if configured
+minor     Logged disagreement, continues with coder's implementation
+coder     Coder disputes reviewer's rejection
+reviewer  Reviewer raises concern`,
+    },
+    {
+      title: 'DISPUTE REASONS',
+      content: `architecture   Architectural disagreement
+specification  Spec ambiguity or conflict
+approach       Different valid approaches
+requirements   Unclear requirements
+style          Style/convention disagreement
+security       Security concern
+scope          Scope disagreement
+other          Other reason (custom text)`,
+    },
+  ],
+});
 
 export async function disputeCommand(args: string[], flags: GlobalFlags): Promise<void> {
   // Check global help flag first

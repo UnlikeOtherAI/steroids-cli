@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { isGitRepo, getGitStatus, hasUncommittedChanges } from '../git/status.js';
 import { openDatabase, isInitialized } from '../database/connection.js';
 import { getTask, listTasks } from '../database/queries.js';
+import { generateHelp } from '../cli/help.js';
 
 const STEROIDS_DIR = '.steroids';
 const PUSH_STATE_FILE = 'push-state.json';
@@ -27,39 +28,44 @@ interface PushState {
   pending: boolean;
 }
 
-const HELP = `
-steroids git - Git integration commands
-
-USAGE:
-  steroids git <subcommand> [options]
-
-SUBCOMMANDS:
-  status                Show git status with task context
-  push                  Push with retry logic
-  retry                 Retry failed push
-  log                   Show commit log with task links
-
-STATUS OPTIONS:
-  --full                Show full status output
-
-PUSH OPTIONS:
-  --force               Force push (use with caution)
-  --retries <n>         Number of retry attempts (default: 3)
-
-LOG OPTIONS:
-  --limit <n>           Number of commits to show (default: 10)
-  --with-tasks          Only show commits with task references
-
-EXAMPLES:
-  steroids git status
-  steroids git push
-  steroids git push --force
-  steroids git retry
-  steroids git log --limit 5
-`;
+const HELP = generateHelp({
+  command: 'git',
+  description: 'Git integration commands',
+  details: 'Enhanced git commands with task context, retry logic, and push state tracking.',
+  usage: [
+    'steroids git <subcommand> [options]',
+  ],
+  subcommands: [
+    { name: 'status', description: 'Show git status with task context' },
+    { name: 'push', description: 'Push with retry logic' },
+    { name: 'retry', description: 'Retry failed push' },
+    { name: 'log', description: 'Show commit log with task links' },
+  ],
+  options: [
+    { long: 'full', description: 'Show full status output (status)' },
+    { long: 'force', description: 'Force push (use with caution) (push)' },
+    { long: 'retries', description: 'Number of retry attempts (push)', values: '<n>', default: '3' },
+    { long: 'limit', description: 'Number of commits to show (log)', values: '<n>', default: '10' },
+    { long: 'with-tasks', description: 'Only show commits with task references (log)' },
+  ],
+  examples: [
+    { command: 'steroids git status', description: 'Show git status with current task' },
+    { command: 'steroids git status --full', description: 'Show full git status' },
+    { command: 'steroids git push', description: 'Push with retry logic' },
+    { command: 'steroids git push --force', description: 'Force push (use with caution)' },
+    { command: 'steroids git retry', description: 'Retry failed push' },
+    { command: 'steroids git log --limit 5', description: 'Show last 5 commits' },
+    { command: 'steroids git log --with-tasks', description: 'Show commits with task references' },
+  ],
+  related: [
+    { command: 'steroids tasks', description: 'Manage tasks' },
+    { command: 'steroids loop', description: 'Run automation loop' },
+  ],
+});
 
 export async function gitCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
+  // Check global help flag
+  if (flags.help || args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;
   }

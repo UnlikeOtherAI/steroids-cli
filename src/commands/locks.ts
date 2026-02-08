@@ -21,45 +21,50 @@ import {
   cleanupAllExpiredLocks,
   formatCleanupResultJson,
 } from '../locking/cleanup.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids locks - Manage task and section locks
-
-USAGE:
-  steroids locks [options]
-  steroids locks list [options]
-  steroids locks show <task_id|section_id> [options]
-  steroids locks release <task_id|section_id> [options]
-  steroids locks cleanup [options]
-
-SUBCOMMANDS:
-  (none)            List all locks (default)
-  list              List all current locks
-  show              Show details of a specific lock
-  release           Force release a lock (admin only)
-  cleanup           Release all expired locks
-
-OPTIONS:
-  --type <type>     Filter by type: task | section | all (default: all)
-  --force           Force release lock (required for release)
-  --dry-run         Show what would be cleaned without doing it
-  -j, --json        Output as JSON
-  -h, --help        Show help
-
-EXIT CODES:
-  0                 Success
-  4                 Lock not found
-  5                 Permission denied (missing --force)
-  6                 Task/section is locked by another runner
-
-EXAMPLES:
-  steroids locks
-  steroids locks list --type task
-  steroids locks show abc123
-  steroids locks release abc123 --force
-  steroids locks cleanup
-  steroids locks cleanup --dry-run
-`;
+const HELP = generateHelp({
+  command: 'locks',
+  description: 'Manage task and section locks',
+  details: 'View and manage locks that prevent concurrent work on tasks and sections. Locks are acquired by runners and expire automatically.',
+  usage: [
+    'steroids locks [options]',
+    'steroids locks <subcommand> [args] [options]',
+  ],
+  subcommands: [
+    { name: '(default)', description: 'List all locks' },
+    { name: 'list', description: 'List all current locks' },
+    { name: 'show', args: '<task_id|section_id>', description: 'Show details of a specific lock' },
+    { name: 'release', args: '<task_id|section_id>', description: 'Force release a lock (admin only)' },
+    { name: 'cleanup', description: 'Release all expired locks' },
+  ],
+  options: [
+    { long: 'type', description: 'Filter by type (list)', values: 'task | section | all', default: 'all' },
+    { long: 'force', description: 'Force release lock (required for release)' },
+  ],
+  examples: [
+    { command: 'steroids locks', description: 'List all locks' },
+    { command: 'steroids locks list --type task', description: 'List task locks only' },
+    { command: 'steroids locks show abc123', description: 'Show lock details' },
+    { command: 'steroids locks release abc123 --force', description: 'Force release a lock' },
+    { command: 'steroids locks cleanup', description: 'Clean expired locks' },
+    { command: 'steroids locks cleanup --dry-run', description: 'Preview cleanup without doing it' },
+  ],
+  related: [
+    { command: 'steroids runners', description: 'Manage runners' },
+    { command: 'steroids tasks', description: 'Manage tasks' },
+  ],
+  sections: [
+    {
+      title: 'EXIT CODES',
+      content: `0  Success
+4  Lock not found
+5  Permission denied (missing --force)
+6  Task/section is locked by another runner`,
+    },
+  ],
+  showExitCodes: false,
+});
 
 export async function locksCommand(args: string[], flags: GlobalFlags): Promise<void> {
   // Check global help flag first

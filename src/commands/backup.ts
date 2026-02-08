@@ -23,6 +23,7 @@ import {
 import { join, basename } from 'node:path';
 import { isInitialized, getDbPath } from '../database/connection.js';
 import { parseDuration } from '../cli/flags.js';
+import { generateHelp } from '../cli/help.js';
 
 const STEROIDS_DIR = '.steroids';
 const BACKUP_DIR = 'backup';
@@ -37,38 +38,40 @@ interface BackupInfo {
   includes: string[];
 }
 
-const HELP = `
-steroids backup - Manage backups
-
-USAGE:
-  steroids backup <subcommand> [options]
-
-SUBCOMMANDS:
-  create                Create a new backup
-  restore <path>        Restore from a backup
-  list                  List available backups
-  clean                 Clean old backups
-
-CREATE OPTIONS:
-  --include-logs        Include log files in backup
-
-RESTORE OPTIONS:
-  --yes                 Skip confirmation prompt
-
-CLEAN OPTIONS:
-  --older-than <dur>    Remove backups older than duration (e.g., 30d, 7d)
-  --yes                 Skip confirmation prompt
-
-EXAMPLES:
-  steroids backup create
-  steroids backup create --include-logs
-  steroids backup list
-  steroids backup restore .steroids/backup/2024-01-15T10-30-00/
-  steroids backup clean --older-than 30d
-`;
+const HELP = generateHelp({
+  command: 'backup',
+  description: 'Backup and restore Steroids data',
+  details: `Create, restore, list, and clean backups of your Steroids database and configuration.
+Backups are stored in .steroids/backup/ and include timestamped snapshots.`,
+  usage: [
+    'steroids backup <subcommand> [options]',
+  ],
+  subcommands: [
+    { name: 'create', description: 'Create a new backup' },
+    { name: 'restore', args: '<path>', description: 'Restore from a backup' },
+    { name: 'list', description: 'List available backups' },
+    { name: 'clean', description: 'Clean old backups' },
+  ],
+  options: [
+    { long: 'include-logs', description: 'Include log files in backup (create)', },
+    { short: 'y', long: 'yes', description: 'Skip confirmation prompt (restore/clean)' },
+    { long: 'older-than', description: 'Remove backups older than duration (clean)', values: '<dur> (e.g., 30d, 7d, 2w)' },
+  ],
+  examples: [
+    { command: 'steroids backup create', description: 'Create backup of database and config' },
+    { command: 'steroids backup create --include-logs', description: 'Create backup including logs' },
+    { command: 'steroids backup list', description: 'List all backups' },
+    { command: 'steroids backup restore .steroids/backup/2024-01-15T10-30-00/', description: 'Restore from specific backup' },
+    { command: 'steroids backup clean --older-than 30d --yes', description: 'Remove backups older than 30 days' },
+  ],
+  related: [
+    { command: 'steroids init', description: 'Initialize Steroids project' },
+    { command: 'steroids purge', description: 'Permanently delete all data' },
+  ],
+});
 
 export async function backupCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
+  if (flags.help || args.length === 0) {
     console.log(HELP);
     return;
   }

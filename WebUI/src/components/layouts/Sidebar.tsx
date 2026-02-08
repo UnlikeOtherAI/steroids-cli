@@ -5,6 +5,7 @@ import {
   ClipboardDocumentListIcon,
   Cog6ToothIcon,
   FolderIcon,
+  PlayIcon,
 } from '@heroicons/react/24/outline';
 
 interface SidebarProps {
@@ -14,13 +15,14 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ projectName }) => {
   const navItems = [
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
+    { to: '/runners', icon: PlayIcon, label: 'Runners' },
     { to: '/tasks', icon: ClipboardDocumentListIcon, label: 'Tasks' },
     { to: '/projects', icon: FolderIcon, label: 'Projects' },
     { to: '/settings', icon: Cog6ToothIcon, label: 'Settings' },
   ];
 
   return (
-    <aside className="w-60 bg-sidebar flex flex-col min-h-full rounded-xl">
+    <aside className="w-60 bg-sidebar flex flex-col min-h-full rounded-l-xl">
       <div className="px-6 py-8">
         <h1 className="text-xl font-bold text-text-inverse">Steroids</h1>
         {projectName && (

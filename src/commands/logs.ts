@@ -22,6 +22,7 @@ import {
 import { join, basename } from 'node:path';
 import { openDatabase, isInitialized } from '../database/connection.js';
 import { getTask, getTaskByTitle } from '../database/queries.js';
+import { generateHelp } from '../cli/help.js';
 
 const STEROIDS_DIR = '.steroids';
 const LOGS_DIR = 'logs';
@@ -36,44 +37,45 @@ interface LogFile {
   size: number;
 }
 
-const HELP = `
-steroids logs - View invocation logs
-
-USAGE:
-  steroids logs <subcommand> [options]
-
-SUBCOMMANDS:
-  show <task-id>        View logs for a specific task
-  list                  List log files
-  tail                  Tail logs in real-time
-  purge                 Purge old logs
-
-SHOW OPTIONS:
-  --full                Show complete output (no truncation)
-  --attempt <n>         Show specific attempt number
-
-LIST OPTIONS:
-  --task <id>           Filter by task ID
-  --role <role>         Filter by role: coder, reviewer
-
-TAIL OPTIONS:
-  --follow              Continue watching for new entries
-  --lines <n>           Number of lines to show (default: 20)
-
-PURGE OPTIONS:
-  --older-than <dur>    Remove logs older than duration (e.g., 7d)
-  --yes                 Skip confirmation prompt
-
-EXAMPLES:
-  steroids logs show a1b2c3d4
-  steroids logs show a1b2c3d4 --full --attempt 2
-  steroids logs list --task abc123 --role coder
-  steroids logs tail --follow
-  steroids logs purge --older-than 7d
-`;
+const HELP = generateHelp({
+  command: 'logs',
+  description: 'View invocation logs',
+  details: 'View and manage logs from coder and reviewer invocations for each task.',
+  usage: [
+    'steroids logs <subcommand> [args] [options]',
+  ],
+  subcommands: [
+    { name: 'show', args: '<task-id>', description: 'View logs for a specific task' },
+    { name: 'list', description: 'List log files' },
+    { name: 'tail', description: 'Tail logs in real-time' },
+    { name: 'purge', description: 'Purge old logs' },
+  ],
+  options: [
+    { long: 'full', description: 'Show complete output (no truncation) (show)' },
+    { long: 'attempt', description: 'Show specific attempt number (show)', values: '<n>' },
+    { long: 'task', description: 'Filter by task ID (list)', values: '<id>' },
+    { long: 'role', description: 'Filter by role (list)', values: 'coder | reviewer' },
+    { short: 'f', long: 'follow', description: 'Continue watching for new entries (tail)' },
+    { long: 'lines', description: 'Number of lines to show (tail)', values: '<n>', default: '20' },
+    { long: 'older-than', description: 'Remove logs older than duration (purge)', values: '<dur> (e.g., 7d)' },
+    { short: 'y', long: 'yes', description: 'Skip confirmation prompt (purge)' },
+  ],
+  examples: [
+    { command: 'steroids logs show a1b2c3d4', description: 'View logs for task' },
+    { command: 'steroids logs show a1b2c3d4 --full --attempt 2', description: 'View full logs for attempt 2' },
+    { command: 'steroids logs list --task abc123 --role coder', description: 'List coder logs for task' },
+    { command: 'steroids logs tail --follow', description: 'Tail logs in real-time' },
+    { command: 'steroids logs purge --older-than 7d', description: 'Purge logs older than 7 days' },
+  ],
+  related: [
+    { command: 'steroids tasks audit', description: 'View task audit trail' },
+    { command: 'steroids gc', description: 'Garbage collection' },
+  ],
+});
 
 export async function logsCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
+  // Check global help flag
+  if (flags.help || args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;
   }

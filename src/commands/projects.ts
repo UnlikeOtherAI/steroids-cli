@@ -17,43 +17,45 @@ import {
   pruneProjects,
   getRegisteredProject,
 } from '../runners/projects.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids projects - Manage global project registry
+const HELP = generateHelp({
+  command: 'projects',
+  description: 'Manage global project registry',
+  details: `The global project registry tracks all steroids projects on your system.
+The runner wakeup system uses this registry to monitor and restart runners
+for projects with pending work.
 
-USAGE:
-  steroids projects <subcommand> [options]
-
-SUBCOMMANDS:
-  list                List all registered projects
-  add <path>          Register a project
-  remove <path>       Unregister a project
-  enable <path>       Enable a project (include in wakeup)
-  disable <path>      Disable a project (skip in wakeup)
-  prune               Remove projects that no longer exist
-
-OPTIONS:
-  -a, --all           Include disabled projects (list only)
-  -h, --help          Show help
-
-DESCRIPTION:
-  The global project registry tracks all steroids projects on your system.
-  The runner wakeup system uses this registry to monitor and restart runners
-  for projects with pending work.
-
-EXAMPLES:
-  steroids projects list
-  steroids projects list --all
-  steroids projects add ~/code/my-app
-  steroids projects remove ~/old-project
-  steroids projects disable ~/code/on-hold
-  steroids projects enable ~/code/on-hold
-  steroids projects prune
-
-NOTE:
-  When multiple projects are registered, a warning is displayed reminding
-  LLM agents to only work on their own project and not modify other projects.
-`;
+When multiple projects are registered, a warning is displayed reminding
+LLM agents to only work on their own project and not modify other projects.`,
+  usage: [
+    'steroids projects <subcommand> [args] [options]',
+  ],
+  subcommands: [
+    { name: 'list', description: 'List all registered projects' },
+    { name: 'add', args: '<path>', description: 'Register a project' },
+    { name: 'remove', args: '<path>', description: 'Unregister a project' },
+    { name: 'enable', args: '<path>', description: 'Enable a project (include in wakeup)' },
+    { name: 'disable', args: '<path>', description: 'Disable a project (skip in wakeup)' },
+    { name: 'prune', description: 'Remove projects that no longer exist' },
+  ],
+  options: [
+    { short: 'a', long: 'all', description: 'Include disabled projects (list only)' },
+  ],
+  examples: [
+    { command: 'steroids projects list', description: 'List enabled projects' },
+    { command: 'steroids projects list --all', description: 'List all projects (including disabled)' },
+    { command: 'steroids projects add ~/code/my-app', description: 'Register a project' },
+    { command: 'steroids projects remove ~/old-project', description: 'Unregister a project' },
+    { command: 'steroids projects disable ~/code/on-hold', description: 'Disable a project' },
+    { command: 'steroids projects enable ~/code/on-hold', description: 'Re-enable a project' },
+    { command: 'steroids projects prune', description: 'Remove stale entries' },
+  ],
+  related: [
+    { command: 'steroids runners wakeup', description: 'Check and start runners' },
+    { command: 'steroids scan', description: 'Scan for projects' },
+  ],
+});
 
 export async function projectsCommand(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'projects', flags });

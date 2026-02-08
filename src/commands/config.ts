@@ -27,61 +27,52 @@ import {
 } from '../config/validator.js';
 import { getCategories, getCategoryDescription } from '../config/schema.js';
 import { runBrowser } from '../config/browser.js';
+import { generateHelp } from '../cli/help.js';
 
-const HELP = `
-steroids config - Manage configuration
-
-USAGE:
-  steroids config <subcommand> [options]
-
-SUBCOMMANDS:
-  init              Create configuration file
-  show [key]        Display merged configuration or specific nested value
-  get <key>         Get a configuration value
-  set <key> <value> Set a configuration value
-  validate          Validate configuration syntax
-  path              Show configuration file paths
-  edit              Open config in $EDITOR
-  browse            Interactive configuration browser
-
-INIT OPTIONS:
-  --template <name>   Template: minimal | standard | full (default: standard)
-  --global            Create in ~/.steroids/ instead of project
-  --force             Overwrite existing config
-
-SHOW OPTIONS:
-  --global            Show only global config
-  --local             Show only project config
-
-SET OPTIONS:
-  --global            Set in global config
-  --local             Set in project config (default)
-
-EDIT OPTIONS:
-  --global            Edit global config
-  --local             Edit project config (default)
-
-GLOBAL OPTIONS:
-  -j, --json          Output as JSON
-  -h, --help          Show help
-
-EXAMPLES:
-  steroids config init                           # Create standard config
-  steroids config init --template minimal        # Minimal config (AI only)
-  steroids config init --global                  # Create global config
-  steroids config show                           # Show merged config
-  steroids config show quality.tests             # Show specific nested value
-  steroids config show --json                    # As JSON
-  steroids config get ai.coder.model             # Get value
-  steroids config set ai.coder.model opus        # Set value
-  steroids config set output.colors false --global
-  steroids config validate                       # Validate config
-  steroids config path                           # Show file paths
-  steroids config edit                           # Open in editor
-`;
+const HELP = generateHelp({
+  command: 'config',
+  description: 'Manage configuration',
+  details: 'Create, view, edit, and validate Steroids configuration files. Supports both global (~/.steroids/) and project-level (.steroids/) configs with hierarchical merging.',
+  usage: [
+    'steroids config <subcommand> [options]',
+  ],
+  subcommands: [
+    { name: 'init', description: 'Create configuration file' },
+    { name: 'show', args: '[key]', description: 'Display merged configuration or specific nested value' },
+    { name: 'get', args: '<key>', description: 'Get a configuration value' },
+    { name: 'set', args: '<key> <value>', description: 'Set a configuration value' },
+    { name: 'validate', description: 'Validate configuration syntax' },
+    { name: 'path', description: 'Show configuration file paths' },
+    { name: 'edit', description: 'Open config in $EDITOR' },
+    { name: 'browse', description: 'Interactive configuration browser' },
+  ],
+  options: [
+    { long: 'template', description: 'Config template (init)', values: 'minimal | standard | full', default: 'standard' },
+    { long: 'global', description: 'Use global config (~/.steroids/)' },
+    { long: 'local', description: 'Use project config (.steroids/)' },
+    { long: 'force', description: 'Overwrite existing config (init)' },
+  ],
+  examples: [
+    { command: 'steroids config init', description: 'Create standard config' },
+    { command: 'steroids config init --template minimal', description: 'Minimal config (AI only)' },
+    { command: 'steroids config init --global', description: 'Create global config' },
+    { command: 'steroids config show', description: 'Show merged config' },
+    { command: 'steroids config show quality.tests', description: 'Show specific nested value' },
+    { command: 'steroids config get ai.coder.model', description: 'Get value' },
+    { command: 'steroids config set ai.coder.model opus', description: 'Set value' },
+    { command: 'steroids config set output.colors false --global', description: 'Set in global config' },
+    { command: 'steroids config validate', description: 'Validate config' },
+    { command: 'steroids config path', description: 'Show file paths' },
+    { command: 'steroids config edit', description: 'Open in editor' },
+  ],
+  related: [
+    { command: 'steroids init', description: 'Initialize steroids in project' },
+  ],
+});
 
 export async function configCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
+  // Check global help flag
+  if (flags.help || args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
     return;
   }

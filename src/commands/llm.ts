@@ -10,6 +10,7 @@ import { getRegisteredProjects } from '../runners/projects.js';
 import { listRunners } from '../runners/daemon.js';
 import { openDatabase } from '../database/connection.js';
 import { listTasks } from '../database/queries.js';
+import { generateHelp } from '../cli/help.js';
 
 const LLM_INSTRUCTIONS = `# STEROIDS LLM QUICK REFERENCE
 
@@ -107,20 +108,34 @@ steroids tasks skip <id> --notes "spec says SKIP, needs Cloud SQL setup"
 - Each project isolated: own database, own runner
 `;
 
+const HELP = generateHelp({
+  command: 'llm',
+  description: 'Compact instructions for LLM agents',
+  details: 'Quick reference guide for AI agents working with Steroids. Shows key commands, task flow, and current context.',
+  usage: [
+    'steroids llm',
+    'steroids llm --context',
+  ],
+  options: [
+    { long: 'context', description: 'Include current project context (projects, runners, tasks)' },
+  ],
+  examples: [
+    { command: 'steroids llm', description: 'Show LLM quick reference' },
+    { command: 'steroids llm --context', description: 'Show reference with current context' },
+  ],
+  related: [
+    { command: 'steroids about', description: 'Explain what Steroids is' },
+    { command: 'steroids tasks', description: 'Manage tasks' },
+  ],
+  showGlobalOptions: false,
+  showEnvVars: false,
+  showExitCodes: false,
+});
+
 export async function llmCommand(args: string[], flags: GlobalFlags): Promise<void> {
   // Check for help
-  if (args.includes('-h') || args.includes('--help')) {
-    console.log(`
-steroids llm - Compact instructions for LLM agents
-
-USAGE:
-  steroids llm              # Show LLM instructions
-  steroids llm --context    # Include current context (project, runners, tasks)
-
-OPTIONS:
-  --context    Include current project context
-  -h, --help   Show this help
-`);
+  if (flags.help || args.includes('-h') || args.includes('--help')) {
+    console.log(HELP);
     return;
   }
 

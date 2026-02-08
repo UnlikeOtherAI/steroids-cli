@@ -40,3 +40,24 @@ export const TIME_RANGE_OPTIONS: TimeRangeOption[] = [
   { label: '1m', value: '1m', hours: 720 },
   { label: '1y', value: '1y', hours: 8760 },
 ];
+
+export type ActivityStatusType = 'completed' | 'failed' | 'skipped' | 'partial' | 'disputed';
+
+export interface ActivityLogEntry {
+  id: number;
+  project_path: string;
+  runner_id: string;
+  task_id: string;
+  task_title: string;
+  section_name: string | null;
+  final_status: ActivityStatusType;
+  created_at: string;
+}
+
+export interface ActivityListResponse {
+  success: boolean;
+  hours: number;
+  status: string;
+  entries: ActivityLogEntry[];
+  count: number;
+}
