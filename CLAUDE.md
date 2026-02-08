@@ -1,5 +1,18 @@
 # Steroids Coding Standards
 
+## Language & Project Agnostic (CRITICAL)
+
+**Steroids must work with ANY programming language and project type.**
+
+When writing prompts, scripts, or CLI features:
+- Do NOT hardcode `npm`, `cargo`, `go`, or any specific build tool
+- Use generic terms like "the project's build command" or "the project's test command"
+- Provide examples across languages (e.g., "npm test / pytest / cargo test") rather than assuming one
+- Configuration and hooks should support arbitrary shell commands
+- Never assume the project structure (package.json, Cargo.toml, etc.)
+
+Steroids manages tasks and runs coders/reviewers. It doesn't care what language the target project uses.
+
 ## Workflow (CRITICAL)
 
 **Commit and push after each turn.** Every time you complete a unit of work (a task, a fix, a feature), you MUST:

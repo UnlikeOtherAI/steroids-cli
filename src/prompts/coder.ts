@@ -124,8 +124,8 @@ Before running \`steroids tasks update ${taskId} --status review\`, verify:
 
 - [ ] Each file:line mentioned above has been edited
 - [ ] The specific type/code changes requested have been made
-- [ ] \`npm test\` passes
-- [ ] \`npm test -- --coverage\` shows >= 80% overall coverage
+- [ ] The project's build command passes
+- [ ] The project's test command passes with adequate coverage
 - [ ] You tested the specific scenarios mentioned in the rejection
 
 **DO NOT claim "implementation complete" or "all tests pass" without addressing EVERY point above.**
