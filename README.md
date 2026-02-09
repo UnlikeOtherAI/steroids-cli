@@ -10,14 +10,16 @@ Steroids is an AI-powered task orchestration system that automates software deve
 
 > **A developer command center for managing multiple software projects with confidence.**
 
-<p align="center">
-  <a href="Assets/Screenshots/Steroids Dashboard.png"><img src="Assets/Screenshots/Steroids Dashboard.png" alt="Dashboard" width="49%"></a>
-  <a href="Assets/Screenshots/Steroids Projects.png"><img src="Assets/Screenshots/Steroids Projects.png" alt="Projects" width="49%"></a>
-</p>
-<p align="center">
-  <a href="Assets/Screenshots/Steroids Config.png"><img src="Assets/Screenshots/Steroids Config.png" alt="Config" width="49%"></a>
-  <a href="Assets/Screenshots/Steroids Settings.png"><img src="Assets/Screenshots/Steroids Settings.png" alt="Settings" width="49%"></a>
-</p>
+<table align="center">
+  <tr>
+    <td valign="top"><a href="Assets/Screenshots/Steroids Dashboard.png"><img src="Assets/Screenshots/Steroids Dashboard.png" alt="Dashboard" width="100%"></a></td>
+    <td valign="top"><a href="Assets/Screenshots/Steroids Projects.png"><img src="Assets/Screenshots/Steroids Projects.png" alt="Projects" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td valign="top"><a href="Assets/Screenshots/Steroids Config.png"><img src="Assets/Screenshots/Steroids Config.png" alt="Config" width="100%"></a></td>
+    <td valign="top"><a href="Assets/Screenshots/Steroids Settings.png"><img src="Assets/Screenshots/Steroids Settings.png" alt="Settings" width="100%"></a></td>
+  </tr>
+</table>
 
 ---
 
