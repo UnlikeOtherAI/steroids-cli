@@ -51,6 +51,17 @@ This ensures every task completion is a deployable artifact and sections mark fe
 
 A release is NOT just a git tag. It must be a proper public release on both npm and GitHub with detailed release notes describing what changed.
 
+**Before ANY release, ALL tests must pass:**
+```bash
+# Run unit tests (426+ must pass, 2 known failures in providers-registry and invocation-logger are acceptable)
+npm test
+
+# Run migration tests (MANDATORY - verifies old databases migrate correctly AND fresh databases match)
+make test-migrations
+```
+
+**Do NOT publish if tests or migration tests fail.** Fix the issue first.
+
 **Complete release workflow:**
 ```bash
 # 1. Version bump (creates git tag)
