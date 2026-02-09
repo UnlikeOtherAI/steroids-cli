@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { TaskDetails, AuditEntry, TaskStatus } from '../types';
-import { tasksApi } from '../services/api';
+import { tasksApi, projectsApi } from '../services/api';
 import { Badge } from '../components/atoms/Badge';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
@@ -269,10 +269,23 @@ export const TaskDetailPage: React.FC = () => {
                 </span>
               )}
               {task.source_file && (
-                <span>
+                <button
+                  onClick={async () => {
+                    if (projectPath) {
+                      const fullPath = `${projectPath}/${task.source_file}`;
+                      try {
+                        await projectsApi.openFolder(fullPath);
+                      } catch (err) {
+                        console.error('Failed to open file:', err);
+                      }
+                    }
+                  }}
+                  className="hover:text-accent transition-colors"
+                >
                   <i className="fa-solid fa-file-code mr-1"></i>
                   {task.source_file}
-                </span>
+                  <i className="fa-solid fa-arrow-up-right-from-square text-xs ml-1"></i>
+                </button>
               )}
               {task.rejection_count > 0 && (
                 <span className="text-warning">
