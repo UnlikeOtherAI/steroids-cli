@@ -4,7 +4,7 @@
   "description": "Automated task execution system with coder/reviewer loop",
   "main": "dist/index.js",
   "bin": {
-    "steroids": "./dist/index.js"
+    "steroids": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
