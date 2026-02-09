@@ -496,10 +496,11 @@ router.post('/tasks/:taskId/restart', (req: Request, res: Response) => {
         return;
       }
 
-      if (task.status !== 'failed') {
+      // Block restart for tasks already in progress
+      if (task.status === 'in_progress' || task.status === 'review') {
         res.status(400).json({
           success: false,
-          error: `Cannot restart task in ${task.status} status. Only failed tasks can be restarted.`,
+          error: `Cannot restart task in ${task.status} status. Task is currently being worked on.`,
         });
         return;
       }
@@ -513,9 +514,9 @@ router.post('/tasks/:taskId/restart', (req: Request, res: Response) => {
 
       // Add audit entry
       db.prepare(
-        `INSERT INTO audit (task_id, from_status, to_status, actor, notes, created_at)
-         VALUES (?, 'failed', 'pending', 'webui:restart', 'Task restarted via WebUI', datetime('now'))`
-      ).run(taskId);
+        `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
+         VALUES (?, ?, 'pending', 'WebUI', 'human', 'Task restarted via WebUI', datetime('now'))`
+      ).run(taskId, task.status);
 
       res.json({
         success: true,

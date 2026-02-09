@@ -178,7 +178,19 @@ export const TaskDetailPage: React.FC = () => {
   }, [fetchTask]);
 
   const handleRestart = async () => {
-    if (!taskId || !projectPath || restarting) return;
+    if (!taskId || !projectPath || restarting || !task) return;
+
+    // Block restart for tasks already in progress
+    if (task.status === 'in_progress' || task.status === 'review') {
+      alert('Cannot restart a task that is already in progress or under review.');
+      return;
+    }
+
+    // Confirm for completed tasks
+    if (task.status === 'completed') {
+      const confirmed = confirm('Are you sure you want to restart this task? It has been completed successfully.');
+      if (!confirmed) return;
+    }
 
     setRestarting(true);
     try {
@@ -191,6 +203,9 @@ export const TaskDetailPage: React.FC = () => {
       setRestarting(false);
     }
   };
+
+  // Determine if restart button should be shown
+  const canRestart = task && !['in_progress', 'review'].includes(task.status);
 
   const handleOpenSourceFile = async () => {
     if (projectPath && task?.source_file) {
@@ -246,7 +261,7 @@ export const TaskDetailPage: React.FC = () => {
             <Badge variant={STATUS_VARIANTS[task.status]} className="text-base px-4 py-2">
               {STATUS_LABELS[task.status]}
             </Badge>
-            {task.status === 'failed' && (
+            {canRestart && (
               <button
                 onClick={handleRestart}
                 disabled={restarting}
