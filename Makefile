@@ -1,6 +1,6 @@
 # Steroids CLI Makefile
 
-.PHONY: build install clean test lint help restart launch stop-ui
+.PHONY: build install clean test lint help restart launch launch-detached stop-ui
 
 # Default target
 help:
@@ -14,8 +14,9 @@ help:
 	@echo "  make lint      - Run linter"
 	@echo ""
 	@echo "WebUI/API targets:"
-	@echo "  make launch    - Start WebUI and API locally"
-	@echo "  make stop-ui   - Stop WebUI and API"
+	@echo "  make launch          - Start WebUI and API (foreground, shows logs)"
+	@echo "  make launch-detached - Start WebUI and API (background, no output)"
+	@echo "  make stop-ui         - Stop WebUI and API"
 
 # Build CLI and link globally
 build:
@@ -45,7 +46,7 @@ test:
 lint:
 	npm run lint
 
-# Launch WebUI and API locally (stops existing, rebuilds, starts fresh)
+# Launch WebUI and API in foreground (shows logs, Ctrl+C to stop)
 launch:
 	@echo "Stopping existing services..."
 	-@pkill -f "steroids-api" 2>/dev/null || true
@@ -56,17 +57,43 @@ launch:
 	@cd API && npm run build
 	@echo "Building WebUI..."
 	@cd WebUI && npm run build
-	@echo "Starting Steroids API..."
-	@cd API && npm start &
-	@sleep 2
-	@echo "Starting Steroids WebUI..."
-	@cd WebUI && npm run dev &
-	@sleep 2
 	@echo ""
-	@echo "Steroids Dashboard running:"
+	@echo "Starting Steroids Dashboard (Ctrl+C to stop)..."
 	@echo "  WebUI: http://localhost:3500"
 	@echo "  API:   http://localhost:3501"
 	@echo ""
+	@bash -c '\
+		cleanup() { pkill -f "steroids-api" 2>/dev/null; pkill -f "vite.*WebUI" 2>/dev/null; exit 0; }; \
+		trap cleanup INT TERM; \
+		cd API && npm start & \
+		cd WebUI && npm run dev & \
+		wait \
+	'
+
+# Launch WebUI and API in background (detached, no terminal output)
+launch-detached:
+	@echo "Stopping existing services..."
+	-@pkill -f "steroids-api" 2>/dev/null || true
+	-@pkill -f "vite.*WebUI" 2>/dev/null || true
+	-@lsof -ti:3500 -ti:3501 | xargs kill -9 2>/dev/null || true
+	@sleep 1
+	@echo "Building API..."
+	@cd API && npm run build
+	@echo "Building WebUI..."
+	@cd WebUI && npm run build
+	@mkdir -p .steroids/logs
+	@echo "Starting Steroids API (detached)..."
+	@cd API && nohup npm start > ../.steroids/logs/api.log 2>&1 &
+	@sleep 2
+	@echo "Starting Steroids WebUI (detached)..."
+	@cd WebUI && nohup npm run dev > ../.steroids/logs/webui.log 2>&1 &
+	@sleep 2
+	@echo ""
+	@echo "Steroids Dashboard running (detached):"
+	@echo "  WebUI: http://localhost:3500"
+	@echo "  API:   http://localhost:3501"
+	@echo ""
+	@echo "Logs: .steroids/logs/api.log, .steroids/logs/webui.log"
 	@echo "Use 'make stop-ui' to stop"
 
 # Stop WebUI and API
