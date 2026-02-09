@@ -41,6 +41,12 @@ function formatTimestamp(iso: string): string {
   return date.toLocaleString();
 }
 
+// Strip GUID prefix from task title (format: "#<uuid>: <title>")
+function stripGuidPrefix(title: string): string {
+  const match = title.match(/^#[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\s*/i);
+  return match ? title.slice(match[0].length) : title;
+}
+
 function getActorIcon(actor: string): string {
   if (actor.toLowerCase().includes('coder')) return 'fa-code';
   if (actor.toLowerCase().includes('review')) return 'fa-magnifying-glass';
@@ -253,7 +259,7 @@ export const TaskDetailPage: React.FC = () => {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-text-primary mb-2">
-              {task.title}
+              {stripGuidPrefix(task.title)}
             </h1>
             <div className="flex items-center gap-3 text-sm text-text-muted">
               {task.section_name && (

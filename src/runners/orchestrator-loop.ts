@@ -145,6 +145,15 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
                   sectionName,
                   'disputed'
                 );
+              } else if (updatedTask.status === 'skipped' && options.runnerId) {
+                logActivity(
+                  projectPath,
+                  options.runnerId,
+                  task.id,
+                  task.title,
+                  sectionName,
+                  'skipped'
+                );
               }
             }
 
@@ -278,7 +287,9 @@ async function runReviewerPhase(
   const section = task.section_id ? getSection(db, task.section_id) : null;
   const sectionName = section?.name ?? null;
 
-  if (result.decision === 'approve') {
+  // Check actual task status in database - don't trust parsed decision alone
+  // The reviewer might say "APPROVE" but the command could fail
+  if (updatedTask.status === 'completed') {
     console.log('\n✓ Task APPROVED');
 
     // Get the commit message and SHA before pushing
@@ -317,6 +328,20 @@ async function runReviewerPhase(
         'completed',
         commitMessage,
         commitSha
+      );
+    }
+  } else if (updatedTask.status === 'skipped') {
+    console.log('\n⊘ Task SKIPPED');
+
+    // Log activity for skipped task
+    if (runnerId) {
+      logActivity(
+        projectPath,
+        runnerId,
+        task.id,
+        task.title,
+        sectionName,
+        'skipped'
       );
     }
   } else if (result.decision === 'reject') {

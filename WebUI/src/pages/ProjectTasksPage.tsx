@@ -25,6 +25,12 @@ const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'in
 // Queue statuses for "next to run" sorting (pending first, then in_progress, then review)
 const QUEUE_STATUSES = ['pending', 'in_progress', 'review', 'completed'];
 
+// Strip GUID prefix from task title (format: "#<uuid>: <title>")
+function stripGuidPrefix(title: string): string {
+  const match = title.match(/^#[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\s*/i);
+  return match ? title.slice(match[0].length) : title;
+}
+
 export const ProjectTasksPage: React.FC = () => {
   const { projectPath } = useParams<{ projectPath: string }>();
   const [searchParams] = useSearchParams();
@@ -186,7 +192,7 @@ export const ProjectTasksPage: React.FC = () => {
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-text-primary truncate">
                   <i className="fa-solid fa-arrow-up-right-from-square text-xs text-text-muted mr-2"></i>
-                  {task.title}
+                  {stripGuidPrefix(task.title)}
                 </div>
                 <div className="text-xs text-text-muted flex gap-2 mt-1">
                   {task.section_name && (

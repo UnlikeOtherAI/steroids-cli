@@ -30,6 +30,12 @@ function truncateMiddle(str: string, maxLen: number = 40): string {
   return str.slice(0, frontChars) + ellipsis + str.slice(-backChars);
 }
 
+// Strip GUID prefix from task title (format: "#<uuid>: <title>")
+function stripGuidPrefix(title: string): string {
+  const match = title.match(/^#[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\s*/i);
+  return match ? title.slice(match[0].length) : title;
+}
+
 export const ActivityListPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -174,7 +180,7 @@ export const ActivityListPage: React.FC = () => {
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-text-primary truncate">
                   <i className="fa-solid fa-arrow-up-right-from-square text-xs text-text-muted mr-2"></i>
-                  {entry.task_title}
+                  {stripGuidPrefix(entry.task_title)}
                 </div>
                 {entry.commit_message && (
                   <div className="text-sm text-text-secondary mt-1 flex items-center gap-2">
