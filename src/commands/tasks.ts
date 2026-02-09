@@ -541,6 +541,12 @@ EXAMPLES:
     console.log(`Status:          ${STATUS_MARKERS[task.status]} ${task.status}`);
     console.log(`Section:         ${section ? section.name : '(none)'}`);
     console.log(`Spec File:       ${task.source_file ?? '(not set)'}`);
+    if (task.file_path) {
+      const lineStr = task.file_line ? `:${task.file_line}` : '';
+      console.log(`File Anchor:     ${task.file_path}${lineStr}`);
+      console.log(`File Commit:     ${task.file_commit_sha?.substring(0, 7) ?? '(unknown)'}`);
+      console.log(`Content Hash:    ${task.file_content_hash?.substring(0, 12) ?? '(unknown)'}`);
+    }
     console.log(`Rejections:      ${task.rejection_count}/15`);
     console.log(`Created:         ${task.created_at}`);
     console.log(`Updated:         ${task.updated_at}`);
@@ -610,6 +616,8 @@ async function addTask(args: string[], flags: GlobalFlags): Promise<void> {
       help: { type: 'boolean', short: 'h', default: false },
       section: { type: 'string' },
       source: { type: 'string' },
+      file: { type: 'string' },
+      line: { type: 'string' },
     },
     allowPositionals: true,
   });
@@ -624,11 +632,14 @@ USAGE:
 OPTIONS:
   --section <id>        Section ID (REQUIRED)
   --source <file>       Specification file (REQUIRED)
+  --file <path>         Anchor task to a committed file
+  --line <number>       Line number in the anchored file (requires --file)
   -h, --help            Show help
 
 EXAMPLES:
   steroids tasks add "Implement login" --section abc123 --source docs/login-spec.md
   steroids tasks add "Fix bug" --section def456 --source specs/bugfix.md
+  steroids tasks add "Fix null check" --section abc123 --source spec.md --file src/utils.ts --line 42
 `);
     return;
   }
@@ -656,6 +667,65 @@ EXAMPLES:
     process.exit(2);
   }
 
+  // Validate --line requires --file
+  if (values.line && !values.file) {
+    out.error(ErrorCode.INVALID_ARGUMENTS, '--line requires --file', {
+      usage: 'steroids tasks add <title> --file <path> --line <number>',
+      hint: 'You cannot specify a line number without a file.',
+    });
+    process.exit(2);
+  }
+
+  // Parse and validate line number
+  let fileLine: number | undefined;
+  if (values.line) {
+    fileLine = parseInt(values.line, 10);
+    if (isNaN(fileLine) || fileLine < 1) {
+      out.error(ErrorCode.INVALID_ARGUMENTS, '--line must be a positive integer', {
+        provided: values.line,
+      });
+      process.exit(2);
+    }
+  }
+
+  // Resolve file anchor if --file is provided
+  let filePath: string | undefined;
+  let fileCommitSha: string | undefined;
+  let fileContentHash: string | undefined;
+
+  if (values.file) {
+    const { isFileTracked, isFileDirty, getFileLastCommit, getFileContentHash } = await import('../git/status.js');
+    const fullPath = resolve(process.cwd(), values.file);
+
+    if (!existsSync(fullPath)) {
+      out.error(ErrorCode.INVALID_ARGUMENTS, `File not found: ${values.file}`, {
+        file: values.file,
+        hint: 'The file must exist in the project directory.',
+      });
+      process.exit(2);
+    }
+
+    if (!isFileTracked(values.file)) {
+      out.error(ErrorCode.INVALID_ARGUMENTS, `File is not tracked by git: ${values.file}`, {
+        file: values.file,
+        hint: 'The file must be committed to the repository. Run: git add && git commit',
+      });
+      process.exit(2);
+    }
+
+    if (isFileDirty(values.file)) {
+      out.error(ErrorCode.INVALID_ARGUMENTS, `File has uncommitted changes: ${values.file}`, {
+        file: values.file,
+        hint: 'Commit your changes before anchoring a task to this file.',
+      });
+      process.exit(2);
+    }
+
+    filePath = values.file;
+    fileCommitSha = getFileLastCommit(values.file) ?? undefined;
+    fileContentHash = getFileContentHash(values.file) ?? undefined;
+  }
+
   const title = positionals.join(' ');
 
   const { db, close } = openDatabase();
@@ -672,6 +742,10 @@ EXAMPLES:
     const task = createTask(db, title, {
       sectionId: section.id,
       sourceFile: values.source,
+      filePath,
+      fileLine,
+      fileCommitSha,
+      fileContentHash,
     });
 
     // Trigger task.created hooks
@@ -689,6 +763,11 @@ EXAMPLES:
       out.log(`  Status: ${task.status}`);
       if (task.source_file) {
         out.log(`  Source: ${task.source_file}`);
+      }
+      if (task.file_path) {
+        const lineStr = task.file_line ? `:${task.file_line}` : '';
+        out.log(`  File: ${task.file_path}${lineStr}`);
+        out.log(`  Commit: ${task.file_commit_sha?.substring(0, 7) ?? 'unknown'}`);
       }
     }
   } finally {

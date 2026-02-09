@@ -34,6 +34,10 @@ export interface Task {
   status: TaskStatus;
   section_id: string | null;
   source_file: string | null;
+  file_path: string | null;
+  file_line: number | null;
+  file_commit_sha: string | null;
+  file_content_hash: string | null;
   rejection_count: number;
   created_at: string;
   updated_at: string;
@@ -376,15 +380,24 @@ export function createTask(
     sectionId?: string;
     sourceFile?: string;
     status?: TaskStatus;
+    filePath?: string;
+    fileLine?: number;
+    fileCommitSha?: string;
+    fileContentHash?: string;
   } = {}
 ): Task {
   const id = uuidv4();
   const status = options.status ?? 'pending';
 
   db.prepare(
-    `INSERT INTO tasks (id, title, status, section_id, source_file)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(id, title, status, options.sectionId ?? null, options.sourceFile ?? null);
+    `INSERT INTO tasks (id, title, status, section_id, source_file, file_path, file_line, file_commit_sha, file_content_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id, title, status,
+    options.sectionId ?? null, options.sourceFile ?? null,
+    options.filePath ?? null, options.fileLine ?? null,
+    options.fileCommitSha ?? null, options.fileContentHash ?? null
+  );
 
   // Add audit entry for creation
   addAuditEntry(db, id, null, status, 'human:cli');
@@ -395,6 +408,10 @@ export function createTask(
     status,
     section_id: options.sectionId ?? null,
     source_file: options.sourceFile ?? null,
+    file_path: options.filePath ?? null,
+    file_line: options.fileLine ?? null,
+    file_commit_sha: options.fileCommitSha ?? null,
+    file_content_hash: options.fileContentHash ?? null,
     rejection_count: 0,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

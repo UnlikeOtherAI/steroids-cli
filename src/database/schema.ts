@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     status TEXT NOT NULL DEFAULT 'pending',
     section_id TEXT REFERENCES sections(id),
     source_file TEXT,
+    file_path TEXT,
+    file_line INTEGER,
+    file_commit_sha TEXT,
+    file_content_hash TEXT,
     rejection_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -112,4 +116,6 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (2, '002_add_commi
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (3, '003_add_section_priority', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (4, '004_add_section_dependencies', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (5, '005_add_audit_actor_model', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (6, '006_add_task_invocations', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (7, '007_add_file_anchor', 'builtin');
 `;

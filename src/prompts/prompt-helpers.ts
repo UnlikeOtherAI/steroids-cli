@@ -269,3 +269,27 @@ steroids dispute create ${taskId} --reason "explanation" --type coder
 \`\`\`
 `;
 }
+
+/**
+ * Build a file anchor section for the prompt
+ * Directs the coder/reviewer to a specific file and line
+ */
+export function buildFileAnchorSection(task: Task): string {
+  if (!task.file_path) return '';
+
+  const lineRef = task.file_line ? `:${task.file_line}` : '';
+  const commitShort = task.file_commit_sha?.substring(0, 7) ?? 'unknown';
+
+  return `
+## FILE ANCHOR
+
+**This task is anchored to a specific location in the codebase:**
+
+- **File:** \`${task.file_path}${lineRef}\`
+${task.file_line ? `- **Line:** ${task.file_line}\n` : ''}- **Commit:** \`${commitShort}\`
+
+Start your investigation at this file${task.file_line ? ' and line' : ''}. Use \`git show ${commitShort}:${task.file_path}\` to see the version when this task was created.
+
+---
+`;
+}

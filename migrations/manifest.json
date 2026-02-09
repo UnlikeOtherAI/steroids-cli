@@ -1,6 +1,6 @@
 {
   "version": "0.2.0",
-  "latestDbVersion": 6,
+  "latestDbVersion": 7,
   "migrations": [
     {
       "id": 1,
@@ -49,6 +49,14 @@
       "description": "Add task_invocations table for per-task LLM prompt/response logging",
       "checksum": "",
       "cliVersion": "0.4.27"
+    },
+    {
+      "id": 7,
+      "name": "007_add_file_anchor",
+      "file": "007_add_file_anchor.sql",
+      "description": "Add file anchor columns (file_path, file_line, file_commit_sha, file_content_hash) to tasks table",
+      "checksum": "",
+      "cliVersion": "0.4.39"
     }
   ]
 }

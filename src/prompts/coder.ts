@@ -8,6 +8,7 @@ import {
   getAgentsMd,
   getSourceFileContent,
   buildFileScopeSection,
+  buildFileAnchorSection,
   formatRejectionHistoryForCoder,
 } from './prompt-helpers.js';
 
@@ -36,6 +37,7 @@ export function generateCoderPrompt(context: CoderPromptContext): string {
 
   // Build file scope section
   const fileScopeSection = buildFileScopeSection(task, sourceContent);
+  const fileAnchorSection = buildFileAnchorSection(task);
 
   return `# TASK: ${task.id.substring(0, 8)} - ${task.title}
 # Status: ${previousStatus} → in_progress | Rejections: ${task.rejection_count}/15
@@ -52,7 +54,7 @@ You are a CODER in an automated task execution system. Your job is to implement 
 **Title:** ${task.title}
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-${fileScopeSection}
+${fileScopeSection}${fileAnchorSection}
 ---
 
 ## Specification
@@ -267,6 +269,7 @@ export function generateResumingCoderPrompt(context: CoderPromptContext): string
   const { task, projectPath, gitStatus, gitDiff, rejectionHistory, coordinatorGuidance } = context;
 
   const sourceContent = getSourceFileContent(projectPath, task.source_file);
+  const fileAnchorSection = buildFileAnchorSection(task);
 
   // Build rejection section with full history and coordinator guidance (same as normal prompt)
   const rejectionSection = formatRejectionHistoryForCoder(task.id, rejectionHistory, undefined, coordinatorGuidance);
@@ -285,7 +288,7 @@ You are a CODER resuming work on a partially completed task.
 **Status:** in_progress (resuming)
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-
+${fileAnchorSection}
 ---
 
 ## Previous Work Detected

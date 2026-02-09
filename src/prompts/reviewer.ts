@@ -5,7 +5,7 @@
 
 import type { Task, RejectionEntry } from '../database/queries.js';
 import type { SteroidsConfig } from '../config/loader.js';
-import { getSourceFileContent } from './prompt-helpers.js';
+import { getSourceFileContent, buildFileAnchorSection } from './prompt-helpers.js';
 
 export interface SectionTask {
   id: string;
@@ -225,6 +225,7 @@ The coder included these notes when submitting for review:
     : '';
 
   const sourceContent = getSourceFileContent(projectPath, task.source_file);
+  const fileAnchorSection = buildFileAnchorSection(task);
 
   // Truncate diff if too long (max 20000 chars per spec)
   let diffContent = gitDiff;
@@ -251,7 +252,7 @@ You are a REVIEWER in an automated task execution system. Your job is to verify 
 **Title:** ${task.title}
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}${formatCoordinatorGuidance(coordinatorGuidance, coordinatorDecision)}
+${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}${formatCoordinatorGuidance(coordinatorGuidance, coordinatorDecision)}
 ## Original Specification
 
 From ${task.source_file ?? '(not specified)'}:
