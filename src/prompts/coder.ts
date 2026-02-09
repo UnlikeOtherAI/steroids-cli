@@ -99,17 +99,17 @@ ${notes}
 
 **YOU HAVE BEEN REJECTED ${rejectionHistory.length} TIMES FOR THE SAME ISSUES.**
 
-The reviewer has given you EXACT file:line references. You MUST:
-1. **Open each file mentioned** and go to the exact line number
-2. **Make the specific change requested** - do not improvise
-3. **Run the tests** to verify coverage meets 80%
-4. **Do NOT submit** until every issue below is addressed
+The reviewer has given you a checklist with checkboxes. You MUST:
+1. **Go through EACH checkbox item** in the rejection notes below
+2. **Fix the specific issue** mentioned in that checkbox
+3. **Verify the fix** works before moving to the next item
+4. **Do NOT submit** until you have addressed EVERY checkbox
 
 ---
 
 ## LATEST REJECTION${latestCommitRef}
 
-**READ THIS CAREFULLY - EVERY ISSUE MUST BE FIXED:**
+**THE CHECKBOXES BELOW ARE YOUR TODO LIST - ADDRESS EACH ONE:**
 
 ${latest.notes || '(no notes)'}
 
@@ -118,17 +118,25 @@ ${olderSummary}
 ${recentLines.length > 1 ? `## Previous Rejection (for context)\n\n${recentLines[0]}` : ''}
 ---
 
-## CHECKLIST BEFORE SUBMITTING
+## BEFORE SUBMITTING
 
-Before running \`steroids tasks update ${taskId} --status review\`, verify:
+**CRITICAL: Go through EACH checkbox from the rejection notes above:**
 
-- [ ] Each file:line mentioned above has been edited
-- [ ] The specific type/code changes requested have been made
-- [ ] The project builds successfully (if applicable)
-- [ ] Tests pass (if the project has tests)
-- [ ] You tested the specific scenarios mentioned in the rejection
+1. For each \`- [ ]\` item in the rejection:
+   - Open the file mentioned
+   - Make the exact change requested
+   - Verify the fix works
 
-**DO NOT claim "implementation complete" or "all tests pass" without addressing EVERY point above.**
+2. Run the build and tests:
+   - The project must build successfully
+   - Tests must pass (if the project has tests)
+
+3. Only THEN submit for review:
+   \`\`\`bash
+   steroids tasks update ${taskId} --status review
+   \`\`\`
+
+**DO NOT submit until you have addressed EVERY checkbox in the rejection notes.**
 
 If you believe the reviewer is wrong, dispute with:
 \`\`\`bash

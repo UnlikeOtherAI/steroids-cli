@@ -293,7 +293,24 @@ If there are issues that must be fixed:
 \`\`\`bash
 steroids tasks reject ${task.id} --model codex --notes "specific feedback for coder"
 \`\`\`
-Be specific in your notes. The coder will use them to fix the issues.
+
+**CRITICAL: Format rejection notes with checkboxes for EACH actionable item:**
+
+\`\`\`
+- [ ] Fix type error in src/foo.ts:42 - change \`string\` to \`number\`
+- [ ] Add missing null check in src/bar.ts:15 before accessing \`.data\`
+- [ ] Add unit test for the new \`processItem()\` function
+- [ ] Remove unused import on line 3
+\`\`\`
+
+**Why checkboxes?** The coder will use these to verify they've addressed EVERY issue before resubmitting. Each checkbox = one specific action.
+
+**Rules for rejection notes:**
+1. One checkbox per actionable item (not paragraphs of prose)
+2. Include file:line references where applicable
+3. Be specific about WHAT to change, not just WHAT is wrong
+4. Group related items logically
+
 This will be rejection #${task.rejection_count + 1}.
 
 ### DISPUTE (fundamental disagreement)
