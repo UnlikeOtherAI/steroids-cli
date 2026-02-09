@@ -62,6 +62,16 @@ make test-migrations
 
 **Do NOT publish if tests or migration tests fail.** Fix the issue first.
 
+### Test Your Own Output (CRITICAL)
+
+**Always verify your changes work by testing the actual output before releasing.**
+
+- **API changes**: Rebuild the API (`cd API && npm run build`), restart it, and `curl` the affected endpoints. Check the JSON response contains the correct data — don't assume it works because the code compiled.
+- **CLI changes**: Run `npm run build && npm link`, then execute the actual `steroids` command and verify the output.
+- **Web UI changes**: Reload the page in the browser and verify the fix is visible.
+
+**Never release a fix without seeing it work with your own eyes (or `curl`).** Compiling is not testing. A clean build does NOT mean the code does what you intended — you must verify the actual behavior by running the code and inspecting the output.
+
 **Complete release workflow:**
 ```bash
 # 1. Version bump (creates git tag)
