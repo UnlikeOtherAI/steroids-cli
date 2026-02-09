@@ -350,79 +350,6 @@ async function fetchClaudeModels(): Promise<FetchModelsResult> {
   }
 }
 
-/**
- * Fetch models from OpenAI API
- */
-async function fetchOpenAIModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  // Return fallback models if no API key (no error shown)
-  if (!apiKey) {
-    return { success: true, models: FALLBACK_MODELS.openai, source: 'fallback' };
-  }
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/models', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      return { success: false, models: FALLBACK_MODELS.openai, error: `API error: ${response.status}`, source: 'fallback' };
-    }
-
-    const data = await response.json() as { data: Array<{ id: string; created?: number }> };
-
-    // Filter to chat models
-    const chatModels = data.data.filter(
-      (m) =>
-        m.id.startsWith('gpt-4') ||
-        m.id.startsWith('gpt-3.5') ||
-        m.id.startsWith('o1') ||
-        m.id.startsWith('o3')
-    );
-
-    const models: APIModel[] = chatModels.map((m) => ({
-      id: m.id,
-      name: formatOpenAIModelName(m.id),
-    }));
-
-    // Sort by model family
-    models.sort((a, b) => {
-      const aScore = getOpenAIModelScore(a.id);
-      const bScore = getOpenAIModelScore(b.id);
-      if (aScore !== bScore) return aScore - bScore;
-      return a.id.localeCompare(b.id);
-    });
-
-    return { success: true, models, source: 'api' };
-  } catch (error) {
-    return { success: false, models: FALLBACK_MODELS.openai, error: error instanceof Error ? error.message : 'Unknown error', source: 'fallback' };
-  }
-}
-
-function formatOpenAIModelName(id: string): string {
-  if (id.startsWith('gpt-4o')) return `GPT-4o ${id.replace('gpt-4o', '').replace(/-/g, ' ').trim()}`.trim();
-  if (id.startsWith('gpt-4-turbo')) return 'GPT-4 Turbo';
-  if (id.startsWith('gpt-4')) return `GPT-4 ${id.replace('gpt-4', '').replace(/-/g, ' ').trim()}`.trim();
-  if (id.startsWith('gpt-3.5-turbo')) return 'GPT-3.5 Turbo';
-  if (id.startsWith('o1')) return `O1 ${id.replace('o1', '').replace(/-/g, ' ').trim()}`.trim();
-  if (id.startsWith('o3')) return `O3 ${id.replace('o3', '').replace(/-/g, ' ').trim()}`.trim();
-  return id;
-}
-
-function getOpenAIModelScore(id: string): number {
-  if (id.startsWith('o3')) return 0;
-  if (id.startsWith('o1')) return 1;
-  if (id.startsWith('gpt-4o')) return 2;
-  if (id.startsWith('gpt-4-turbo')) return 3;
-  if (id.startsWith('gpt-4')) return 4;
-  if (id.startsWith('gpt-3.5')) return 5;
-  return 6;
-}
 
 /**
  * Fetch models from Google AI (Gemini) API
@@ -490,24 +417,41 @@ async function fetchGeminiModels(): Promise<FetchModelsResult> {
 }
 
 // GET /api/ai/models/:provider - Get models for a provider
-// Uses static/fallback model lists - no API keys needed
-router.get('/ai/models/:provider', (req: Request, res: Response) => {
+// Tries to fetch from API first, falls back to static list
+router.get('/ai/models/:provider', async (req: Request, res: Response) => {
   const { provider } = req.params;
 
-  const models = FALLBACK_MODELS[provider];
-
-  if (!models) {
+  // Check if provider is valid
+  if (!FALLBACK_MODELS[provider]) {
     return res.status(400).json({
       success: false,
       error: `Unknown provider: ${provider}`,
     });
   }
 
+  let result: FetchModelsResult;
+
+  switch (provider) {
+    case 'claude':
+      result = await fetchClaudeModels();
+      break;
+    case 'gemini':
+      result = await fetchGeminiModels();
+      break;
+    case 'codex':
+      // Codex has no API to fetch models from
+      result = { success: true, models: FALLBACK_MODELS.codex, source: 'fallback' };
+      break;
+    default:
+      result = { success: true, models: FALLBACK_MODELS[provider], source: 'fallback' };
+  }
+
   res.json({
     success: true,
     provider,
-    source: 'static',
-    models,
+    source: result.source,
+    models: result.models,
+    ...(result.error && { error: result.error }),
   });
 });
 
