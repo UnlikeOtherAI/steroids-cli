@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { runnersApi, ApiError } from '../services/api';
-import { Runner } from '../types';
+import { runnersApi, tasksApi, ApiError } from '../services/api';
+import { Runner, TaskDetails } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
 
@@ -27,11 +27,26 @@ function formatTimeAgo(dateStr: string | null): string {
   return date.toLocaleDateString();
 }
 
+function getTaskStatusBadgeVariant(status: string) {
+  const s = status.toLowerCase();
+  if (s === 'completed') return 'success';
+  if (s === 'in_progress') return 'info';
+  if (s === 'review') return 'warning';
+  if (s === 'failed' || s === 'disputed') return 'danger';
+  return 'default';
+}
+
+function stripGuidPrefix(title: string): string {
+  const match = title.match(/^#[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\s*/i);
+  return match ? title.slice(match[0].length) : title;
+}
+
 export const RunnersPage: React.FC = () => {
   const navigate = useNavigate();
   const [runners, setRunners] = useState<Runner[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [taskDetails, setTaskDetails] = useState<Record<string, TaskDetails>>({});
 
   const loadRunners = async () => {
     try {
@@ -39,6 +54,27 @@ export const RunnersPage: React.FC = () => {
       setError(null);
       const data = await runnersApi.list();
       setRunners(data);
+
+      // Load task details for runners with current tasks
+      const taskPromises = data
+        .filter(r => r.current_task_id && r.project_path)
+        .map(async r => {
+          try {
+            const task = await tasksApi.getDetails(r.current_task_id!, r.project_path!);
+            return { taskId: r.current_task_id!, task };
+          } catch {
+            return null;
+          }
+        });
+
+      const results = await Promise.all(taskPromises);
+      const newTaskDetails: Record<string, TaskDetails> = {};
+      results.forEach(result => {
+        if (result) {
+          newTaskDetails[result.taskId] = result.task;
+        }
+      });
+      setTaskDetails(newTaskDetails);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load runners');
     } finally {
@@ -122,18 +158,79 @@ export const RunnersPage: React.FC = () => {
                     {runner.pid && <span className="ml-2">(PID {runner.pid})</span>}
                   </p>
 
-                  {runner.current_task_id && runner.project_path && (
-                    <div
-                      className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100 cursor-pointer hover:bg-blue-100 transition-colors"
-                      onClick={() => navigate(`/task/${runner.current_task_id}?project=${encodeURIComponent(runner.project_path!)}`)}
-                    >
-                      <p className="text-sm text-blue-800">
-                        <i className="fa-solid fa-arrow-up-right-from-square text-xs mr-2"></i>
-                        <span className="font-medium">Current Task:</span>{' '}
-                        {runner.current_task_title || runner.current_task_id.slice(0, 8)}
-                      </p>
-                    </div>
-                  )}
+                  {runner.current_task_id && runner.project_path && (() => {
+                    const task = taskDetails[runner.current_task_id];
+                    return (
+                      <div
+                        className="mt-4 p-4 bg-white rounded-lg border-2 border-gray-200 cursor-pointer hover:border-gray-300 transition-colors"
+                        onClick={() => navigate(`/task/${runner.current_task_id}?project=${encodeURIComponent(runner.project_path!)}`)}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <i className="fa-solid fa-tasks text-gray-400 flex-shrink-0"></i>
+                            <h4 className="font-semibold text-gray-900 truncate">
+                              {task ? stripGuidPrefix(task.title) : (runner.current_task_title || 'Task')}
+                            </h4>
+                          </div>
+                          <Badge variant={task ? getTaskStatusBadgeVariant(task.status) : 'default'}>
+                            {task ? task.status.replace('_', ' ') : 'Loading'}
+                          </Badge>
+                        </div>
+
+                        {task && (
+                          <div className="space-y-2 text-sm">
+                            {task.section_name && (
+                              <div className="flex items-center gap-2 text-gray-600">
+                                <i className="fa-solid fa-folder text-xs w-4"></i>
+                                <span className="font-medium">Section:</span>
+                                <span>{task.section_name}</span>
+                              </div>
+                            )}
+
+                            {task.source_file && (
+                              <div className="flex items-center gap-2 text-gray-600">
+                                <i className="fa-solid fa-file text-xs w-4"></i>
+                                <span className="font-medium">Spec:</span>
+                                <span className="truncate">{task.source_file}</span>
+                              </div>
+                            )}
+
+                            {task.file_path && (
+                              <div className="flex items-center gap-2 text-gray-600">
+                                <i className="fa-solid fa-code text-xs w-4"></i>
+                                <span className="font-medium">File:</span>
+                                <span className="truncate">{task.file_path}</span>
+                                {task.file_line && <span className="text-gray-500">:{task.file_line}</span>}
+                              </div>
+                            )}
+
+                            {task.rejection_count > 0 && (
+                              <div className="flex items-center gap-2 text-orange-600">
+                                <i className="fa-solid fa-exclamation-triangle text-xs w-4"></i>
+                                <span className="font-medium">Rejections:</span>
+                                <span>{task.rejection_count}</span>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-2 text-gray-500 text-xs pt-2 border-t border-gray-100">
+                              <i className="fa-solid fa-clock w-4"></i>
+                              <span>Updated {formatTimeAgo(task.updated_at)}</span>
+                              <span className="mx-1">•</span>
+                              <span className="text-gray-400">ID: {task.id.slice(0, 8)}</span>
+                              <i className="fa-solid fa-arrow-up-right-from-square ml-auto text-gray-400"></i>
+                            </div>
+                          </div>
+                        )}
+
+                        {!task && (
+                          <div className="text-sm text-gray-500">
+                            <i className="fa-solid fa-spinner fa-spin mr-2"></i>
+                            Loading task details...
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="text-right text-sm text-gray-500">
