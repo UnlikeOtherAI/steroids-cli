@@ -10,6 +10,8 @@ export interface AuditEntry {
   from_status: string | null;
   to_status: string;
   actor: string;
+  actor_type: 'human' | 'coder' | 'reviewer' | 'orchestrator' | null;
+  model: string | null;
   notes: string | null;
   commit_sha: string | null;
   created_at: string;

@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS audit (
     from_status TEXT,
     to_status TEXT NOT NULL,
     actor TEXT NOT NULL,
+    actor_type TEXT DEFAULT 'human',
+    model TEXT,
     notes TEXT,
     commit_sha TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))

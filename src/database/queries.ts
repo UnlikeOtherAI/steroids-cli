@@ -587,19 +587,46 @@ export function rejectTask(
 
 // ============ Audit Operations ============
 
+export interface AuditOptions {
+  notes?: string;
+  commitSha?: string;
+  actorType?: 'human' | 'coder' | 'reviewer' | 'orchestrator';
+  model?: string;
+}
+
 export function addAuditEntry(
   db: Database.Database,
   taskId: string,
   fromStatus: string | null,
   toStatus: string,
   actor: string,
-  notes?: string,
+  options?: AuditOptions | string,
   commitSha?: string
 ): void {
+  // Support legacy signature: addAuditEntry(db, taskId, from, to, actor, notes, commitSha)
+  if (typeof options === 'string' || options === undefined) {
+    const notes = options as string | undefined;
+    db.prepare(
+      `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, model, notes, commit_sha)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(taskId, fromStatus, toStatus, actor, 'human', null, notes ?? null, commitSha ?? null);
+    return;
+  }
+
+  // New signature with options object
   db.prepare(
-    `INSERT INTO audit (task_id, from_status, to_status, actor, notes, commit_sha)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(taskId, fromStatus, toStatus, actor, notes ?? null, commitSha ?? null);
+    `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, model, notes, commit_sha)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    taskId,
+    fromStatus,
+    toStatus,
+    actor,
+    options.actorType ?? 'human',
+    options.model ?? null,
+    options.notes ?? null,
+    options.commitSha ?? null
+  );
 }
 
 export function getTaskAudit(

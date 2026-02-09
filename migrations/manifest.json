@@ -1,6 +1,6 @@
 {
   "version": "0.2.0",
-  "latestDbVersion": 4,
+  "latestDbVersion": 5,
   "migrations": [
     {
       "id": 1,
@@ -33,6 +33,14 @@
       "description": "Add section_dependencies table for tracking section dependencies",
       "checksum": "",
       "cliVersion": "0.2.14"
+    },
+    {
+      "id": 5,
+      "name": "005_add_audit_actor_model",
+      "file": "005_add_audit_actor_model.sql",
+      "description": "Add actor_type and model columns to audit table for better tracking",
+      "checksum": "",
+      "cliVersion": "0.4.25"
     }
   ]
 }

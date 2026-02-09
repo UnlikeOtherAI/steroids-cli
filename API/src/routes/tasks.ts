@@ -29,6 +29,8 @@ interface AuditEntry {
   from_status: string | null;
   to_status: string;
   actor: string;
+  actor_type: string | null;
+  model: string | null;
   notes: string | null;
   commit_sha: string | null;
   created_at: string;
@@ -177,7 +179,7 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
       // Get audit trail
       const auditTrail = db
         .prepare(
-          `SELECT id, task_id, from_status, to_status, actor, notes, commit_sha, created_at
+          `SELECT id, task_id, from_status, to_status, actor, actor_type, model, notes, commit_sha, created_at
           FROM audit
           WHERE task_id = ?
           ORDER BY created_at ASC`
@@ -307,7 +309,7 @@ router.get('/tasks/:taskId/logs', (req: Request, res: Response) => {
       // Get audit entries with pagination
       const logs = db
         .prepare(
-          `SELECT id, task_id, from_status, to_status, actor, notes, commit_sha, created_at
+          `SELECT id, task_id, from_status, to_status, actor, actor_type, model, notes, commit_sha, created_at
           FROM audit
           WHERE task_id = ?
           ORDER BY created_at DESC

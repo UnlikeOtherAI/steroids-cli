@@ -48,12 +48,23 @@ function stripGuidPrefix(title: string): string {
   return match ? title.slice(match[0].length) : title;
 }
 
-function getActorIcon(actor: string): string {
-  if (actor.toLowerCase().includes('coder')) return 'fa-code';
-  if (actor.toLowerCase().includes('review')) return 'fa-magnifying-glass';
-  if (actor.toLowerCase().includes('loop')) return 'fa-arrows-rotate';
-  if (actor.toLowerCase().includes('user')) return 'fa-user';
-  return 'fa-robot';
+function getActorIcon(actorType: string | null): string {
+  switch (actorType) {
+    case 'coder': return 'fa-code';
+    case 'reviewer': return 'fa-magnifying-glass';
+    case 'orchestrator': return 'fa-arrows-rotate';
+    case 'human': return 'fa-user';
+    default: return 'fa-robot';
+  }
+}
+
+function getActorLabel(actorType: string | null, model: string | null): string {
+  const type = actorType || 'unknown';
+  const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+  if (model) {
+    return `${typeLabel} (${model})`;
+  }
+  return typeLabel;
 }
 
 interface AuditLogRowProps {
@@ -67,11 +78,11 @@ const AuditLogRow: React.FC<AuditLogRowProps> = ({ entry, isLatest, githubUrl })
     <div className={`p-4 border-l-4 ${isLatest ? 'border-accent bg-bg-surface' : 'border-border bg-bg-base'}`}>
       <div className="flex items-start gap-4">
         <div className="flex-shrink-0 w-8 h-8 rounded-full bg-bg-surface flex items-center justify-center">
-          <i className={`fa-solid ${getActorIcon(entry.actor)} text-text-muted text-sm`}></i>
+          <i className={`fa-solid ${getActorIcon(entry.actor_type)} text-text-muted text-sm`}></i>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-text-primary">{entry.actor}</span>
+            <span className="font-medium text-text-primary">{getActorLabel(entry.actor_type, entry.model)}</span>
             {entry.from_status && (
               <>
                 <span className="text-text-muted">changed status from</span>
