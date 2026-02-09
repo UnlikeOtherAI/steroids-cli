@@ -14,8 +14,8 @@ import {
   generateBatchReviewerPrompt,
   type ReviewerPromptContext,
   type BatchReviewerPromptContext,
-  type SectionTask,
 } from '../prompts/reviewer.js';
+import type { SectionTask } from '../prompts/prompt-helpers.js';
 import {
   getGitDiff,
   getModifiedFiles,

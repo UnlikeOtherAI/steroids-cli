@@ -5,13 +5,8 @@
 
 import type { Task, RejectionEntry } from '../database/queries.js';
 import type { SteroidsConfig } from '../config/loader.js';
-import { getSourceFileContent, buildFileAnchorSection } from './prompt-helpers.js';
-
-export interface SectionTask {
-  id: string;
-  title: string;
-  status: string;
-}
+import { getSourceFileContent, buildFileAnchorSection, formatSectionTasks } from './prompt-helpers.js';
+import type { SectionTask } from './prompt-helpers.js';
 
 export interface ReviewerPromptContext {
   task: Task;
@@ -26,9 +21,6 @@ export interface ReviewerPromptContext {
   coordinatorGuidance?: string;  // Guidance from coordinator after repeated rejections
   coordinatorDecision?: string;  // Coordinator's decision type
 }
-
-// Maximum tasks to show in section context (prevents prompt bloat)
-const MAX_SECTION_TASKS = 15;
 
 /**
  * Format rejection history for display
@@ -89,48 +81,6 @@ ${lines.join('\n')}
 /**
  * Format section tasks for display
  */
-function formatSectionTasks(currentTaskId: string, sectionTasks?: SectionTask[]): string {
-  if (!sectionTasks || sectionTasks.length <= 1) {
-    return '';
-  }
-
-  const statusEmoji: Record<string, string> = {
-    'pending': '⏳',
-    'in_progress': '🔄',
-    'review': '👀',
-    'completed': '✅',
-  };
-
-  const otherTasks = sectionTasks.filter(t => t.id !== currentTaskId);
-  const tasksToShow = otherTasks.slice(0, MAX_SECTION_TASKS);
-  const remainingCount = otherTasks.length - tasksToShow.length;
-
-  const lines = tasksToShow.map(t => {
-    const emoji = statusEmoji[t.status] || '❓';
-    const marker = t.status === 'completed' ? ' (done)' : t.status === 'pending' ? ' (pending)' : '';
-    return `- ${emoji} ${t.title}${marker}`;
-  });
-
-  if (remainingCount > 0) {
-    lines.push(`- ... and ${remainingCount} more task${remainingCount > 1 ? 's' : ''}`);
-  }
-
-  if (lines.length === 0) return '';
-
-  return `
----
-
-## Other Tasks in This Section
-
-**IMPORTANT:** The task you are reviewing is ONE of several tasks implementing this feature.
-Do NOT reject this task for issues that are explicitly listed as separate tasks below.
-Focus ONLY on whether THIS task's scope is correctly implemented.
-
-${lines.join('\n')}
-
-`;
-}
-
 /**
  * Format coordinator guidance for the reviewer
  * Makes coordinator decisions visible and enforceable by the reviewer
@@ -279,10 +229,26 @@ ${filesListFormatted}
 
 Answer these questions:
 1. Does the implementation match the specification?
-2. Are there bugs, security issues, or logic errors?
+2. Are there bugs or logic errors?
 3. Are tests present and adequate?
 4. Does code follow AGENTS.md guidelines?
 5. Are all files under 500 lines?
+
+## Security Review (MANDATORY)
+
+**You MUST check the coder's changes for security vulnerabilities.** Reject if any are found.
+
+Check for:
+- **Injection attacks**: SQL injection, command injection (shell commands built from user input), XSS, template injection
+- **Shell safety**: Prefer \`execFileSync\` (array args) over \`execSync\` (string interpolation) when passing user-controlled values
+- **Path traversal**: User-supplied file paths must be validated and confined to the project directory (no \`../\` escape)
+- **Secrets exposure**: No hardcoded API keys, tokens, passwords, or credentials in code or config files
+- **Unsafe deserialization**: No \`eval()\`, \`new Function()\`, or \`JSON.parse\` on untrusted input without validation
+- **Dependency risks**: New dependencies should be well-known and actively maintained; no typosquatting
+- **Permission escalation**: Code should not grant broader access than necessary (file permissions, API scopes, etc.)
+- **Information leakage**: Error messages and logs should not expose internal paths, stack traces, or sensitive data to end users
+
+If you find a security issue, **REJECT immediately** with a clear explanation and remediation steps. Security issues are never "minor".
 ${getTestCoverageInstructions(config, modifiedFiles)}
 ---
 

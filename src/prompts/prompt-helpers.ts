@@ -293,3 +293,56 @@ Start your investigation at this file${task.file_line ? ' and line' : ''}. Use \
 ---
 `;
 }
+
+export interface SectionTask {
+  id: string;
+  title: string;
+  status: string;
+}
+
+const MAX_SECTION_TASKS = 15;
+
+/**
+ * Format other tasks in the same section for context
+ */
+export function formatSectionTasks(currentTaskId: string, sectionTasks?: SectionTask[]): string {
+  if (!sectionTasks || sectionTasks.length <= 1) {
+    return '';
+  }
+
+  const statusEmoji: Record<string, string> = {
+    'pending': '\u23F3',
+    'in_progress': '\uD83D\uDD04',
+    'review': '\uD83D\uDC40',
+    'completed': '\u2705',
+  };
+
+  const otherTasks = sectionTasks.filter(t => t.id !== currentTaskId);
+  const tasksToShow = otherTasks.slice(0, MAX_SECTION_TASKS);
+  const remainingCount = otherTasks.length - tasksToShow.length;
+
+  const lines = tasksToShow.map(t => {
+    const emoji = statusEmoji[t.status] || '\u2753';
+    const marker = t.status === 'completed' ? ' (done)' : t.status === 'pending' ? ' (pending)' : '';
+    return `- ${emoji} ${t.title}${marker}`;
+  });
+
+  if (remainingCount > 0) {
+    lines.push(`- ... and ${remainingCount} more task${remainingCount > 1 ? 's' : ''}`);
+  }
+
+  if (lines.length === 0) return '';
+
+  return `
+---
+
+## Other Tasks in This Section
+
+**IMPORTANT:** The task you are reviewing is ONE of several tasks implementing this feature.
+Do NOT reject this task for issues that are explicitly listed as separate tasks below.
+Focus ONLY on whether THIS task's scope is correctly implemented.
+
+${lines.join('\n')}
+
+`;
+}
