@@ -1,6 +1,6 @@
 {
-  "version": "0.2.0",
-  "latestDbVersion": 7,
+  "version": "0.2.1",
+  "latestDbVersion": 8,
   "migrations": [
     {
       "id": 1,
@@ -57,6 +57,14 @@
       "description": "Add file anchor columns (file_path, file_line, file_commit_sha, file_content_hash) to tasks table",
       "checksum": "",
       "cliVersion": "0.4.39"
+    },
+    {
+      "id": 8,
+      "name": "008_add_section_skipped",
+      "file": "008_add_section_skipped.sql",
+      "description": "Add skipped column to sections table for excluding sections from runner",
+      "checksum": "",
+      "cliVersion": "0.4.51"
     }
   ]
 }

@@ -156,4 +156,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (4, '004_add_secti
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (5, '005_add_audit_actor_model', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (6, '006_add_task_invocations', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (7, '007_add_file_anchor', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (8, '008_add_section_skipped', 'builtin');
 `;

@@ -219,6 +219,36 @@ if [[ "$SECTIONS_COLS" != *"priority"* ]]; then
     exit 1
 fi
 
+# Check sections table has skipped
+if [[ "$SECTIONS_COLS" != *"skipped"* ]]; then
+    echo -e "${RED}FAILED: sections.skipped column missing${NC}"
+    exit 1
+fi
+
+# Check tasks table has file anchor columns
+TASKS_COLS=$(sqlite3 "$TEST_DB" "PRAGMA table_info(tasks);" | cut -d'|' -f2 | tr '\n' ',')
+echo "  tasks columns: $TASKS_COLS"
+
+if [[ "$TASKS_COLS" != *"file_path"* ]]; then
+    echo -e "${RED}FAILED: tasks.file_path column missing${NC}"
+    exit 1
+fi
+
+if [[ "$TASKS_COLS" != *"file_line"* ]]; then
+    echo -e "${RED}FAILED: tasks.file_line column missing${NC}"
+    exit 1
+fi
+
+if [[ "$TASKS_COLS" != *"file_commit_sha"* ]]; then
+    echo -e "${RED}FAILED: tasks.file_commit_sha column missing${NC}"
+    exit 1
+fi
+
+if [[ "$TASKS_COLS" != *"file_content_hash"* ]]; then
+    echo -e "${RED}FAILED: tasks.file_content_hash column missing${NC}"
+    exit 1
+fi
+
 # Check section_dependencies table exists
 TABLES=$(sqlite3 "$TEST_DB" ".tables")
 echo "  tables: $TABLES"
@@ -227,6 +257,58 @@ if [[ "$TABLES" != *"section_dependencies"* ]]; then
     echo -e "${RED}FAILED: section_dependencies table missing${NC}"
     exit 1
 fi
+
+# Check task_invocations table exists
+if [[ "$TABLES" != *"task_invocations"* ]]; then
+    echo -e "${RED}FAILED: task_invocations table missing${NC}"
+    exit 1
+fi
+
+# Verify task_invocations has expected columns
+INVOCATIONS_COLS=$(sqlite3 "$TEST_DB" "PRAGMA table_info(task_invocations);" | cut -d'|' -f2 | tr '\n' ',')
+echo "  task_invocations columns: $INVOCATIONS_COLS"
+
+if [[ "$INVOCATIONS_COLS" != *"rejection_number"* ]]; then
+    echo -e "${RED}FAILED: task_invocations.rejection_number column missing${NC}"
+    exit 1
+fi
+
+# Test: Fresh database (using SCHEMA_SQL) should also work and be up to date
+echo ""
+echo "Testing fresh database (SCHEMA_SQL path)..."
+FRESH_DIR="/tmp/steroids-fresh-test-$$"
+mkdir -p "$FRESH_DIR"
+cd "$FRESH_DIR"
+git init -q  # Required for steroids init
+steroids init -y --no-register 2>&1 | head -3
+FRESH_DB="$FRESH_DIR/.steroids/steroids.db"
+
+FRESH_MIGRATIONS=$(sqlite3 "$FRESH_DB" "SELECT COUNT(*) FROM _migrations;")
+echo "  Fresh DB migrations recorded: $FRESH_MIGRATIONS"
+
+if [ "$FRESH_MIGRATIONS" -ne 8 ]; then
+    echo -e "${RED}FAILED: Fresh database should have 8 migrations recorded, got $FRESH_MIGRATIONS${NC}"
+    rm -rf "$FRESH_DIR"
+    exit 1
+fi
+
+# Verify fresh DB has all the same columns
+FRESH_TASKS_COLS=$(sqlite3 "$FRESH_DB" "PRAGMA table_info(tasks);" | cut -d'|' -f2 | tr '\n' ',')
+if [[ "$FRESH_TASKS_COLS" != *"file_path"* ]]; then
+    echo -e "${RED}FAILED: Fresh DB tasks.file_path column missing${NC}"
+    rm -rf "$FRESH_DIR"
+    exit 1
+fi
+
+FRESH_SECTIONS_COLS=$(sqlite3 "$FRESH_DB" "PRAGMA table_info(sections);" | cut -d'|' -f2 | tr '\n' ',')
+if [[ "$FRESH_SECTIONS_COLS" != *"priority"* ]]; then
+    echo -e "${RED}FAILED: Fresh DB sections.priority column missing${NC}"
+    rm -rf "$FRESH_DIR"
+    exit 1
+fi
+
+echo -e "  ${GREEN}Fresh database schema matches migrated database${NC}"
+rm -rf "$FRESH_DIR"
 
 echo ""
 echo -e "${GREEN}=========================================="
