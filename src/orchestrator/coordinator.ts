@@ -16,13 +16,12 @@ import { logInvocation } from '../providers/invocation-logger.js';
 export interface CoordinatorResult {
   success: boolean;
   guidance: string;
-  shouldDispute: boolean;
-  disputeReason?: string;
+  decision: 'guide_coder' | 'override_reviewer' | 'narrow_scope';
 }
 
 /**
  * Generate the coordinator prompt
- * The coordinator reviews rejection history and provides guidance
+ * The coordinator reviews rejection history and MUST provide a path forward
  */
 function generateCoordinatorPrompt(
   task: Task,
@@ -37,12 +36,10 @@ ${r.notes || '(no notes)'}
 
   return `# COORDINATOR INTERVENTION
 
-You are a COORDINATOR in an automated task system. A task has been rejected ${rejectionHistory.length} times and needs your help to break a deadlock.
+You are a COORDINATOR in a fully automated task system with NO human in the loop.
+A task has been rejected ${rejectionHistory.length} times. You MUST provide a decision that moves the task forward.
 
-Your job is to:
-1. Analyze WHY the rejections keep happening
-2. Provide SPECIFIC, ACTIONABLE guidance to the coder
-3. If the reviewer's demands are impossible or out of scope, recommend a dispute
+**Your job is to MAKE A DECISION, not to escalate.** There is no human to escalate to.
 
 ---
 
@@ -63,40 +60,39 @@ ${rejectionSummary}
 
 ## Your Analysis
 
-Analyze the rejection history and answer these questions:
-
-1. **Is there a pattern?** Are the same issues being raised repeatedly?
-2. **Is the feedback achievable?** Can the coder actually do what the reviewer asks within this single task's scope?
-3. **Is there a scope mismatch?** Is the reviewer demanding work outside this task's scope (e.g., global coverage, unrelated files)?
-4. **Is there a design disagreement?** Are coder and reviewer operating on different architectural assumptions?
+1. **Is there a pattern?** Are the same issues raised repeatedly?
+2. **Is the feedback achievable?** Can the coder do what the reviewer asks within THIS task's scope?
+3. **Is there a scope mismatch?** Is the reviewer demanding work outside this task (e.g., global coverage)?
+4. **Is there a design disagreement?** Different architectural assumptions?
 
 ---
 
 ## Your Response Format
 
-Respond with EXACTLY this format:
+DECISION: (one of: guide_coder | override_reviewer | narrow_scope)
 
-DISPUTE: yes/no
-DISPUTE_REASON: (only if DISPUTE is yes) Brief reason for the dispute
+- **guide_coder** - The reviewer is right but the coder needs clearer direction
+- **override_reviewer** - The reviewer is asking for something out of scope or impossible; tell the coder what to ignore
+- **narrow_scope** - Both have valid points; narrow the task scope to what's achievable
 
 GUIDANCE:
 (Your specific guidance for the coder. Be concrete:
-- Which files to modify
-- What specific changes to make
-- What NOT to do
-- How to address the reviewer's actual concerns
-- If some reviewer demands are out of scope, explain which ones to ignore)
+- Which files to modify and what changes to make
+- What reviewer feedback to address vs what to ignore
+- If the reviewer demands global metrics, tell the coder to focus on task-scoped coverage only
+- If there's a design disagreement, pick an approach and commit to it
+- Give the coder a clear path to get this task approved)
 
 ---
 
 ## Rules
 
-- Be SPECIFIC - don't just say "fix the issues", say exactly what to fix
-- If the reviewer demands global project metrics from a single task, recommend DISPUTE
-- If there's a design disagreement, provide a clear direction
-- If the same feedback has appeared 3+ times unchanged, something is fundamentally wrong
-- Keep your guidance under 500 words
-- Focus on UNBLOCKING, not perfection
+- You MUST provide guidance that unblocks the task. "Try again" is not guidance.
+- If the reviewer demands global project metrics from a single task, tell the coder to ignore that demand
+- If there's a design disagreement, PICK ONE APPROACH and tell the coder to follow it
+- If the same feedback appeared 3+ times unchanged, the coder needs a fundamentally different approach - describe it
+- Keep guidance under 500 words
+- Focus on UNBLOCKING - the goal is to get this task approved on the next attempt
 `;
 }
 
@@ -104,17 +100,16 @@ GUIDANCE:
  * Parse the coordinator's response
  */
 function parseCoordinatorResponse(output: string): CoordinatorResult {
-  const shouldDispute = /DISPUTE:\s*yes/i.test(output);
-  const disputeMatch = output.match(/DISPUTE_REASON:\s*(.+?)(?:\n|$)/i);
   const guidanceMatch = output.match(/GUIDANCE:\s*([\s\S]+?)(?:---|$)/i);
+  const decisionMatch = output.match(/DECISION:\s*(\w+)/i);
 
   const guidance = guidanceMatch?.[1]?.trim() || output.trim();
+  const decision = decisionMatch?.[1]?.trim().toLowerCase() || 'guide_coder';
 
   return {
     success: true,
     guidance,
-    shouldDispute,
-    disputeReason: disputeMatch?.[1]?.trim(),
+    decision: decision as CoordinatorResult['decision'],
   };
 }
 
@@ -187,10 +182,7 @@ export async function invokeCoordinator(
 
     console.log(`\n${'='.repeat(60)}`);
     console.log('COORDINATOR RESULT');
-    console.log(`Should dispute: ${parsed.shouldDispute ? 'YES' : 'NO'}`);
-    if (parsed.shouldDispute) {
-      console.log(`Dispute reason: ${parsed.disputeReason}`);
-    }
+    console.log(`Decision: ${parsed.decision}`);
     console.log(`Guidance length: ${parsed.guidance.length} chars`);
     console.log(`${'='.repeat(60)}\n`);
 

@@ -77,6 +77,7 @@ export interface SteroidsConfig {
     timeoutDays?: number;
     autoCreateOnMaxRejections?: boolean;
     majorBlocksLoop?: boolean;
+    coordinatorCanDispute?: boolean;  // If true, coordinator can auto-dispute (stops loop). Default: false
   };
   projects?: {
     scanPaths?: string[];

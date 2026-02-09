@@ -441,23 +441,10 @@ async function runCoderPhase(
       const coordResult = await invokeCoordinator(task, rejectionHistory, projectPath);
 
       if (coordResult) {
-        if (coordResult.shouldDispute) {
-          // Coordinator recommends dispute - create it and move on
-          if (!jsonMode) {
-            console.log(`\nCoordinator recommends DISPUTE: ${coordResult.disputeReason}`);
-            console.log('Creating system dispute and moving to next task...');
-          }
-          updateTaskStatus(
-            db, task.id, 'disputed', 'system:coordinator',
-            `Coordinator intervention: ${coordResult.disputeReason}`
-          );
-          return;
-        }
-
-        // Pass guidance to coder
         coordinatorGuidance = coordResult.guidance;
         if (!jsonMode) {
-          console.log('\nCoordinator provided guidance for the coder.');
+          console.log(`\nCoordinator decision: ${coordResult.decision}`);
+          console.log('Coordinator provided guidance for the coder.');
         }
       }
     } catch (error) {
