@@ -35,6 +35,7 @@ import {
   triggerTaskCreated,
   triggerTaskUpdated,
   triggerTaskCompleted,
+  triggerTaskFailed,
   triggerSectionCompleted,
   triggerProjectCompleted,
   triggerHooksSafely,
@@ -847,6 +848,17 @@ OPTIONS:
     }
 
     const result = rejectTask(db, task.id, values.model, values.notes);
+
+    // Trigger task.failed hooks if task failed
+    if (result.status === 'failed') {
+      const failedTask = getTask(db, task.id);
+      if (!shouldSkipHooks(flags) && failedTask) {
+        await triggerHooksSafely(
+          () => triggerTaskFailed(failedTask, 15, { verbose: flags.verbose }),
+          { verbose: flags.verbose }
+        );
+      }
+    }
 
     out.success({ task, result });
     if (!flags.json) {
