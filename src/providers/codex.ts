@@ -42,9 +42,9 @@ const DEFAULT_TIMEOUT = 900_000;
 
 /**
  * Default invocation template for Codex CLI
- * Uses exec --full-auto with prompt from file
+ * Uses exec --full-auto with prompt from stdin (- means read from stdin)
  */
-const DEFAULT_INVOCATION_TEMPLATE = '{cli} exec --full-auto --prompt "$(cat {prompt_file})"';
+const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec --full-auto -';
 
 /**
  * Codex AI Provider implementation
