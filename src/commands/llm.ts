@@ -49,10 +49,18 @@ steroids tasks audit <id>               # view task spec, history, rejection not
 ### Add Tasks
 steroids tasks add "Title" --section <id> --source <spec-file>
 steroids tasks add "Title" --section <id> --source spec.md --file src/foo.ts --line 42
-  --file must be committed in git (auto-captures commit SHA + content hash)
-  --line requires --file
 steroids tasks add "Advisory note" --feedback
-  --feedback: creates task in skipped "Needs User Input" section (no --section/--source needed)
+
+Options:
+  --section <id>     Section to add the task to (required unless --feedback)
+  --source <file>    Specification markdown file (required unless --feedback)
+  --file <path>      Anchor task to a specific file in the codebase
+                     File must be committed in git (not dirty/untracked)
+                     Auto-captures: commit SHA of last change + content hash
+                     Coder/reviewer prompts will reference this exact location
+  --line <number>    Line number in the anchored file (requires --file)
+  --feedback         Add to skipped "Needs User Input" section for human review
+                     Skips --section and --source requirements
 
 ### Manage Tasks
 steroids tasks update <id> --status <s> --actor model --model <m>
