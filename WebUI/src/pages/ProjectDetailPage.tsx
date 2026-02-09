@@ -1,12 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { projectsApi, activityApi, ApiError } from '../services/api';
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  Cog6ToothIcon,
+  ArrowPathIcon,
+  CheckIcon,
+} from '@heroicons/react/24/outline';
+import { projectsApi, activityApi, configApi, ApiError, ConfigSchema } from '../services/api';
 import { Project, ActivityStats, TimeRangeOption } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
 import { Tooltip } from '../components/atoms/Tooltip';
 import { StatTile } from '../components/molecules/StatTile';
 import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
+import { SchemaForm } from '../components/settings/SchemaForm';
 
 export const ProjectDetailPage: React.FC = () => {
   const { projectPath } = useParams<{ projectPath: string }>();
@@ -16,6 +24,15 @@ export const ProjectDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedHours, setSelectedHours] = useState(24);
+
+  // Settings state
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSchema, setSettingsSchema] = useState<ConfigSchema | null>(null);
+  const [settingsConfig, setSettingsConfig] = useState<Record<string, unknown>>({});
+  const [settingsChanges, setSettingsChanges] = useState<Record<string, unknown>>({});
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsSaveStatus, setSettingsSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const decodedPath = projectPath ? decodeURIComponent(projectPath) : '';
 
@@ -50,9 +67,88 @@ export const ProjectDetailPage: React.FC = () => {
     }
   };
 
+  const loadSettings = useCallback(async () => {
+    if (!decodedPath) return;
+
+    setSettingsLoading(true);
+    try {
+      const [schemaData, configData] = await Promise.all([
+        configApi.getSchema(),
+        configApi.getConfig('project', decodedPath),
+      ]);
+      setSettingsSchema(schemaData);
+      setSettingsConfig(configData);
+      setSettingsChanges({});
+    } catch (err) {
+      console.error('Failed to load settings:', err);
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, [decodedPath]);
+
+  const handleSettingsChange = (path: string, value: unknown) => {
+    setSettingsChanges((prev) => ({ ...prev, [path]: value }));
+    setSettingsSaveStatus('idle');
+  };
+
+  const handleSettingsSave = async () => {
+    if (Object.keys(settingsChanges).length === 0) return;
+
+    setSettingsSaving(true);
+    try {
+      await configApi.setConfig(settingsChanges, 'project', decodedPath);
+      setSettingsSaveStatus('success');
+      // Merge changes into config
+      setSettingsConfig((prev) => {
+        const updated = { ...prev };
+        for (const [path, value] of Object.entries(settingsChanges)) {
+          const keys = path.split('.');
+          let current: Record<string, unknown> = updated;
+          for (let i = 0; i < keys.length - 1; i++) {
+            if (!current[keys[i]] || typeof current[keys[i]] !== 'object') {
+              current[keys[i]] = {};
+            }
+            current = current[keys[i]] as Record<string, unknown>;
+          }
+          current[keys[keys.length - 1]] = value;
+        }
+        return updated;
+      });
+      setSettingsChanges({});
+      setTimeout(() => setSettingsSaveStatus('idle'), 2000);
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+      setSettingsSaveStatus('error');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const getMergedSettingsValues = (): Record<string, unknown> => {
+    const merged = JSON.parse(JSON.stringify(settingsConfig));
+    for (const [path, value] of Object.entries(settingsChanges)) {
+      const keys = path.split('.');
+      let current: Record<string, unknown> = merged;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (!current[keys[i]] || typeof current[keys[i]] !== 'object') {
+          current[keys[i]] = {};
+        }
+        current = current[keys[i]] as Record<string, unknown>;
+      }
+      current[keys[keys.length - 1]] = value;
+    }
+    return merged;
+  };
+
   useEffect(() => {
     loadProject();
   }, [decodedPath]);
+
+  useEffect(() => {
+    if (settingsOpen && !settingsSchema) {
+      loadSettings();
+    }
+  }, [settingsOpen, settingsSchema, loadSettings]);
 
   useEffect(() => {
     loadStats();
@@ -219,6 +315,85 @@ export const ProjectDetailPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Project Settings */}
+      <div className="mb-8">
+        <button
+          onClick={() => setSettingsOpen(!settingsOpen)}
+          className="flex items-center gap-2 text-xl font-semibold text-gray-900 mb-4 hover:text-gray-700"
+        >
+          {settingsOpen ? (
+            <ChevronDownIcon className="w-5 h-5" />
+          ) : (
+            <ChevronRightIcon className="w-5 h-5" />
+          )}
+          <Cog6ToothIcon className="w-5 h-5" />
+          <span>Project Settings</span>
+        </button>
+
+        {settingsOpen && (
+          <div className="bg-gray-50 rounded-lg p-4">
+            <p className="text-sm text-gray-500 mb-4">
+              Project-specific settings override global settings. Stored in{' '}
+              <code className="text-xs bg-gray-200 px-1 py-0.5 rounded">
+                .steroids/config.yaml
+              </code>
+            </p>
+
+            {settingsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <ArrowPathIcon className="w-6 h-6 animate-spin text-gray-400" />
+              </div>
+            ) : settingsSchema ? (
+              <>
+                <SchemaForm
+                  schema={settingsSchema}
+                  values={getMergedSettingsValues()}
+                  onChange={handleSettingsChange}
+                />
+
+                <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200">
+                  <div className="flex items-center gap-2">
+                    {Object.keys(settingsChanges).length > 0 && (
+                      <span className="text-sm text-gray-500">
+                        {Object.keys(settingsChanges).length} unsaved change
+                        {Object.keys(settingsChanges).length !== 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {settingsSaveStatus === 'success' && (
+                      <span className="flex items-center gap-1 text-sm text-green-600">
+                        <CheckIcon className="w-4 h-4" />
+                        Saved
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleSettingsSave}
+                    disabled={Object.keys(settingsChanges).length === 0 || settingsSaving}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      Object.keys(settingsChanges).length > 0
+                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {settingsSaving ? (
+                      <span className="flex items-center gap-2">
+                        <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                        Saving...
+                      </span>
+                    ) : (
+                      'Save Changes'
+                    )}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="text-gray-500">No configuration schema available.</p>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="text-sm text-gray-500">
         <p>Registered: {new Date(project.registered_at).toLocaleString()}</p>

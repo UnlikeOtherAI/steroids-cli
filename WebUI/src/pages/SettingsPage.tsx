@@ -1,21 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Cog6ToothIcon,
-  GlobeAltIcon,
-  FolderIcon,
   ArrowPathIcon,
   CheckIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 import { configApi, ConfigSchema } from '../services/api';
 import { SchemaForm } from '../components/settings/SchemaForm';
-import { useProject } from '../contexts/ProjectContext';
-
-type Scope = 'global' | 'project';
 
 export const SettingsPage: React.FC = () => {
-  const { selectedProject } = useProject();
-  const [scope, setScope] = useState<Scope>('global');
   const [schema, setSchema] = useState<ConfigSchema | null>(null);
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [changes, setChanges] = useState<Record<string, unknown>>({});
@@ -24,9 +17,6 @@ export const SettingsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
-  const projectPath = selectedProject?.path;
-  const projectName = selectedProject?.name || projectPath?.split('/').pop();
-
   // Load schema and config
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -34,7 +24,7 @@ export const SettingsPage: React.FC = () => {
     try {
       const [schemaData, configData] = await Promise.all([
         configApi.getSchema(),
-        configApi.getConfig(scope, scope === 'project' ? projectPath : undefined),
+        configApi.getConfig('global'),
       ]);
       setSchema(schemaData);
       setConfig(configData);
@@ -44,7 +34,7 @@ export const SettingsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [scope, projectPath]);
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -63,11 +53,7 @@ export const SettingsPage: React.FC = () => {
     setSaving(true);
     setError(null);
     try {
-      await configApi.setConfig(
-        changes,
-        scope,
-        scope === 'project' ? projectPath : undefined
-      );
+      await configApi.setConfig(changes, 'global');
       setSaveStatus('success');
       // Merge changes into config
       setConfig((prev) => {
@@ -121,9 +107,9 @@ export const SettingsPage: React.FC = () => {
         <div className="flex items-center gap-3">
           <Cog6ToothIcon className="w-8 h-8 text-accent" />
           <div>
-            <h1 className="text-2xl font-bold text-text-primary">Settings</h1>
+            <h1 className="text-2xl font-bold text-text-primary">Global Settings</h1>
             <p className="text-sm text-text-muted">
-              Configure Steroids behavior and preferences
+              Configure Steroids behavior and preferences across all projects
             </p>
           </div>
         </div>
@@ -138,51 +124,13 @@ export const SettingsPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Scope Toggle */}
-      <div className="bg-bg-surface rounded-xl p-1 inline-flex mb-6">
-        <button
-          onClick={() => setScope('global')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-            scope === 'global'
-              ? 'bg-accent text-white'
-              : 'text-text-secondary hover:text-text-primary'
-          }`}
-        >
-          <GlobeAltIcon className="w-4 h-4" />
-          <span>Global</span>
-        </button>
-        <button
-          onClick={() => setScope('project')}
-          disabled={!projectPath}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-            scope === 'project'
-              ? 'bg-accent text-white'
-              : 'text-text-secondary hover:text-text-primary'
-          } ${!projectPath ? 'opacity-50 cursor-not-allowed' : ''}`}
-          title={projectPath ? `Project: ${projectName}` : 'Select a project first'}
-        >
-          <FolderIcon className="w-4 h-4" />
-          <span>{projectName || 'Project'}</span>
-        </button>
-      </div>
-
-      {/* Scope Description */}
+      {/* Location info */}
       <p className="text-sm text-text-muted mb-6">
-        {scope === 'global' ? (
-          <>
-            Global settings apply to all projects. Stored in{' '}
-            <code className="text-xs bg-bg-surface2 px-1 py-0.5 rounded">
-              ~/.steroids/config.yaml
-            </code>
-          </>
-        ) : (
-          <>
-            Project settings override global settings for this project. Stored in{' '}
-            <code className="text-xs bg-bg-surface2 px-1 py-0.5 rounded">
-              .steroids/config.yaml
-            </code>
-          </>
-        )}
+        Settings stored in{' '}
+        <code className="text-xs bg-bg-surface2 px-1 py-0.5 rounded">
+          ~/.steroids/config.yaml
+        </code>
+        . Project-specific overrides can be configured from each project's detail page.
       </p>
 
       {/* Error Alert */}
