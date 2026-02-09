@@ -100,7 +100,11 @@ export const ProjectDetailPage: React.FC = () => {
     setSectionsLoading(true);
     try {
       const response = await sectionsApi.listForProject(decodedPath);
-      setSections(response.sections);
+      // Sort sections alphabetically by name
+      const sortedSections = [...response.sections].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      );
+      setSections(sortedSections);
     } catch (err) {
       console.error('Failed to load sections:', err);
     } finally {
