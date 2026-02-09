@@ -85,12 +85,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ projectName, onClose }) => {
 
   return (
     <aside className="w-60 bg-sidebar flex flex-col h-full min-h-screen lg:min-h-full lg:rounded-l-xl">
-      <div className="px-6 py-8 flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-text-inverse">Steroids</h1>
-          {projectName && (
-            <p className="text-xs text-text-inverse/60 mt-1 truncate">{projectName}</p>
-          )}
+      <div className="px-6 py-6 flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <img src="/logo-hand.png" alt="Steroids" className="w-10 h-10" />
+          <div>
+            <h1 className="text-xl font-bold text-text-inverse">Steroids</h1>
+            {projectName && (
+              <p className="text-xs text-text-inverse/60 mt-0.5 truncate">{projectName}</p>
+            )}
+          </div>
         </div>
         {onClose && (
           <button

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Assets/logo.png" alt="Steroids Logo" width="200">
+</p>
+
 # Steroids
 
 **Spec-driven, autonomous software development — with a built-in coder/reviewer loop.**
