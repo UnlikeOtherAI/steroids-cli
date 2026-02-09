@@ -206,7 +206,7 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
               )}
             </button>
           </div>
-          <p className="text-xs text-text-muted mt-2">
+          <p className="text-xs text-text-secondary mt-2">
             Add this to your shell profile (~/.zshrc or ~/.bashrc), then restart the API.
           </p>
         </div>

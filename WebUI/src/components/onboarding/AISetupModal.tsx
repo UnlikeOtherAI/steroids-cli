@@ -214,7 +214,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
                 <i className={`fa-solid ${copiedCommand === `${role}-env` ? 'fa-check text-success' : 'fa-copy'}`}></i>
               </button>
             </div>
-            <p className="text-xs text-text-muted mt-2">
+            <p className="text-xs text-text-secondary mt-2">
               Add this to your shell profile (~/.zshrc or ~/.bashrc), then restart the API.
             </p>
           </div>
