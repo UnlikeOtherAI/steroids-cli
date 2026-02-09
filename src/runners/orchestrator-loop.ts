@@ -16,6 +16,7 @@ import { loadConfig } from '../config/loader.js';
 import { invokeReviewer, invokeReviewerBatch } from '../orchestrator/reviewer.js';
 import { listTasks } from '../database/queries.js';
 import { logActivity } from './activity-log.js';
+import { getRegisteredProject } from './projects.js';
 import { execSync } from 'node:child_process';
 
 function sleep(ms: number): Promise<void> {
@@ -54,6 +55,13 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       // Check if we should stop
       if (shouldStop?.()) {
         console.log('\nLoop stopped by signal');
+        break;
+      }
+
+      // Check if project has been disabled
+      const registeredProject = getRegisteredProject(projectPath);
+      if (registeredProject && !registeredProject.enabled) {
+        console.log('\nProject has been disabled. Stopping loop.');
         break;
       }
 
