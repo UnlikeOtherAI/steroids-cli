@@ -24,6 +24,7 @@ import {
   getSectionByName,
   listSections,
   getTaskInvocations,
+  getRecentTaskInvocations,
   getInvocationCount,
   getOrCreateFeedbackSection,
   STATUS_MARKERS,
@@ -527,7 +528,7 @@ EXAMPLES:
     // Get invocations if requested
     let invocations: TaskInvocation[] = [];
     if (showLogs) {
-      invocations = getTaskInvocations(db, task.id).slice(-limit);
+      invocations = getRecentTaskInvocations(db, task.id, limit);
     }
 
     // Get audit trail for rejection history
