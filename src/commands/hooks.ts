@@ -18,6 +18,8 @@ import {
   mergeHooks,
   filterHooksByEvent,
   type HookConfig,
+  type ScriptHookYaml,
+  type WebhookHookYaml,
 } from '../hooks/merge.js';
 import { HookOrchestrator } from '../hooks/orchestrator.js';
 import {
@@ -39,9 +41,12 @@ Project hooks can override or disable global hooks by name.`,
   ],
   subcommands: [
     { name: 'list', description: 'List all hooks (merged from global and project)' },
+    { name: 'add', args: '<name>', description: 'Add a new hook to project config' },
+    { name: 'remove', args: '<name>', description: 'Remove a hook from project config' },
     { name: 'validate', description: 'Validate hook configuration' },
     { name: 'test', args: '<event>', description: 'Test hooks for an event (dry run)' },
     { name: 'run', args: '<event>', description: 'Manually trigger hooks for an event' },
+    { name: 'logs', description: 'View hook execution history' },
   ],
   options: [
     { short: 'e', long: 'event', description: 'Filter hooks by event', values: '<event>' },
@@ -53,9 +58,13 @@ Project hooks can override or disable global hooks by name.`,
   examples: [
     { command: 'steroids hooks list', description: 'List all hooks (global + project merged)' },
     { command: 'steroids hooks list --event task.completed', description: 'Show hooks for task completion' },
+    { command: 'steroids hooks add notify --event task.completed --type script --command "./notify.sh"', description: 'Add a script hook' },
+    { command: 'steroids hooks add slack --event task.completed --type webhook --url "https://hooks.slack.com/..."', description: 'Add a webhook hook' },
+    { command: 'steroids hooks remove notify', description: 'Remove a hook by name' },
     { command: 'steroids hooks validate', description: 'Validate all hook configurations' },
     { command: 'steroids hooks test task.completed', description: 'Test task completion hooks' },
     { command: 'steroids hooks run project.completed', description: 'Manually trigger project completion hooks' },
+    { command: 'steroids hooks logs', description: 'View hook execution history' },
   ],
   related: [
     { command: 'steroids config browse', description: 'Edit hook configuration' },
@@ -84,6 +93,12 @@ export async function hooksCommand(args: string[], flags: GlobalFlags): Promise<
       case 'list':
         await listHooks(args.slice(1), flags);
         break;
+      case 'add':
+        await addHook(args.slice(1), flags);
+        break;
+      case 'remove':
+        await removeHook(args.slice(1), flags);
+        break;
       case 'validate':
         await validateHooks(args.slice(1), flags);
         break;
@@ -92,6 +107,9 @@ export async function hooksCommand(args: string[], flags: GlobalFlags): Promise<
         break;
       case 'run':
         await runHooks(args.slice(1), flags);
+        break;
+      case 'logs':
+        await viewLogs(args.slice(1), flags);
         break;
       default:
         console.error(`Unknown subcommand: ${subcommand}`);
@@ -388,4 +406,211 @@ async function runHooks(args: string[], flags: GlobalFlags): Promise<void> {
   if (failed > 0) {
     process.exit(getExitCode(ErrorCode.HOOK_FAILED));
   }
+}
+
+async function addHook(args: string[], flags: GlobalFlags): Promise<void> {
+  if (args.length === 0) {
+    throw new Error('Hook name required. Usage: steroids hooks add <name> [options]');
+  }
+
+  const parsed = parseArgs({
+    args: args.slice(1),
+    options: {
+      event: { type: 'string', short: 'e' },
+      type: { type: 'string', short: 't' },
+      command: { type: 'string' },
+      url: { type: 'string' },
+      method: { type: 'string' },
+      args: { type: 'string', multiple: true },
+      async: { type: 'boolean' },
+      timeout: { type: 'string' },
+      retry: { type: 'string' },
+      global: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  const name = args[0];
+  const event = parsed.values.event;
+  const type = parsed.values.type;
+
+  if (!event) {
+    throw new Error('Event is required. Use --event <event>');
+  }
+
+  if (!isValidHookEvent(event)) {
+    throw new Error(`Invalid event: ${event}`);
+  }
+
+  if (!type) {
+    throw new Error('Type is required. Use --type script or --type webhook');
+  }
+
+  if (type !== 'script' && type !== 'webhook') {
+    throw new Error(`Invalid type: ${type}. Must be 'script' or 'webhook'`);
+  }
+
+  const projectPath = process.cwd();
+  const configPath = parsed.values.global
+    ? getGlobalConfigPath()
+    : getProjectConfigPath(projectPath);
+
+  let config: Record<string, unknown>;
+  try {
+    config = loadConfigFile(configPath);
+  } catch {
+    config = {};
+  }
+
+  const hooks = (config.hooks as HookConfig[]) || [];
+
+  // Check if hook already exists
+  const existingIndex = hooks.findIndex((h) => h.name === name);
+  if (existingIndex >= 0) {
+    throw new Error(`Hook '${name}' already exists. Use 'steroids hooks remove ${name}' first.`);
+  }
+
+  // Build hook config
+  const newHook: Partial<HookConfig> = {
+    name,
+    event: event as HookEvent,
+    type: type as 'script' | 'webhook',
+    enabled: true,
+  };
+
+  if (type === 'script') {
+    const command = parsed.values.command;
+    if (!command) {
+      throw new Error('Command is required for script hooks. Use --command <cmd>');
+    }
+    (newHook as ScriptHookYaml).command = command;
+    if (parsed.values.args) {
+      (newHook as ScriptHookYaml).args = parsed.values.args;
+    }
+    if (parsed.values.async) {
+      (newHook as ScriptHookYaml).async = true;
+    }
+    if (parsed.values.timeout) {
+      (newHook as ScriptHookYaml).timeout = parsed.values.timeout;
+    }
+  } else {
+    const url = parsed.values.url;
+    if (!url) {
+      throw new Error('URL is required for webhook hooks. Use --url <url>');
+    }
+    (newHook as WebhookHookYaml).url = url;
+    if (parsed.values.method) {
+      (newHook as WebhookHookYaml).method = parsed.values.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    }
+    if (parsed.values.retry) {
+      (newHook as WebhookHookYaml).retry = parseInt(parsed.values.retry, 10);
+    }
+    if (parsed.values.timeout) {
+      (newHook as WebhookHookYaml).timeout = parsed.values.timeout;
+    }
+  }
+
+  hooks.push(newHook as HookConfig);
+  config.hooks = hooks;
+
+  // Write config file
+  const yaml = require('yaml');
+  const fs = require('node:fs');
+  const path = require('node:path');
+
+  // Ensure directory exists
+  const configDir = path.dirname(configPath);
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
+  }
+
+  fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
+
+  if (flags.json) {
+    outputJson('hooks', 'add', { hook: newHook });
+    return;
+  }
+
+  console.log(`✓ Hook '${name}' added to ${parsed.values.global ? 'global' : 'project'} config`);
+}
+
+async function removeHook(args: string[], flags: GlobalFlags): Promise<void> {
+  if (args.length === 0) {
+    throw new Error('Hook name required. Usage: steroids hooks remove <name>');
+  }
+
+  const parsed = parseArgs({
+    args: args.slice(1),
+    options: {
+      global: { type: 'boolean' },
+    },
+    allowPositionals: false,
+  });
+
+  const name = args[0];
+  const projectPath = process.cwd();
+  const configPath = parsed.values.global
+    ? getGlobalConfigPath()
+    : getProjectConfigPath(projectPath);
+
+  let config: Record<string, unknown>;
+  try {
+    config = loadConfigFile(configPath);
+  } catch {
+    throw new Error(`Config file not found: ${configPath}`);
+  }
+
+  const hooks = (config.hooks as HookConfig[]) || [];
+  const index = hooks.findIndex((h) => h.name === name);
+
+  if (index < 0) {
+    throw new Error(`Hook '${name}' not found in ${parsed.values.global ? 'global' : 'project'} config`);
+  }
+
+  const removed = hooks.splice(index, 1)[0];
+  config.hooks = hooks;
+
+  // Write config file
+  const yaml = require('yaml');
+  const fs = require('node:fs');
+  fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
+
+  if (flags.json) {
+    outputJson('hooks', 'remove', { removed });
+    return;
+  }
+
+  console.log(`✓ Hook '${name}' removed from ${parsed.values.global ? 'global' : 'project'} config`);
+}
+
+async function viewLogs(args: string[], flags: GlobalFlags): Promise<void> {
+  const parsed = parseArgs({
+    args,
+    options: {
+      follow: { type: 'boolean', short: 'f' },
+      limit: { type: 'string', short: 'n' },
+    },
+    allowPositionals: false,
+  });
+
+  // Hook logs are not yet implemented in the database
+  // This is a placeholder for future implementation
+
+  if (flags.json) {
+    outputJson('hooks', 'logs', {
+      logs: [],
+      message: 'Hook execution logging not yet implemented',
+    });
+    return;
+  }
+
+  console.log('Hook execution logging not yet implemented');
+  console.log('');
+  console.log('Future implementation will show:');
+  console.log('  - Hook execution history');
+  console.log('  - Success/failure status');
+  console.log('  - Execution duration');
+  console.log('  - Error messages');
+  console.log('');
+  console.log('For now, use --verbose flag with hook-triggering commands to see execution details.');
 }
