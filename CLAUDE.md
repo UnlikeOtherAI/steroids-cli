@@ -367,12 +367,12 @@ These rules apply to **ALL** Steroids components without exception.
 
 ## Architecture Documentation
 
-- [CLI Architecture](./CLI/ARCHITECTURE.md) - Main task management CLI
-- [Monitor](./Monitor/ARCHITECTURE.md) - Mac menu bar app (multi-project)
-- [Pump](./Pump/README.md) - Data gathering CLI (Google APIs, LLM grounding)
-- [Iron](./Iron/README.md) - Documentation scaffolding CLI
-- [WebUI Architecture](./WebUI/ARCHITECTURE.md) - Dashboard (ON HOLD)
-- [Code Quality](./Docs/CODE_QUALITY.md) - The 50 rules in detail
+- [CLI Architecture](./docs/cli/ARCHITECTURE.md) - Main task management CLI
+- [Monitor](./docs/web-ui/monitor/ARCHITECTURE.md) - Mac menu bar app (multi-project)
+- [Pump](./docs/cli/pump/README.md) - Data gathering CLI (Google APIs, LLM grounding)
+- [Iron](./docs/cli/iron/README.md) - Documentation scaffolding CLI
+- [WebUI Architecture](./docs/web-ui/ARCHITECTURE.md) - Dashboard (ON HOLD)
+- [Code Quality](./docs/project/CODE_QUALITY.md) - The 50 rules in detail
 
 ### The Suite: Pump Iron + Steroids
 
@@ -500,7 +500,7 @@ steroids logs list
 - Direct SQL bypasses the application layer
 - Debugging via CLI tests the actual user experience
 
-The only exception is during migration development or emergency recovery documented in [MIGRATIONS.md](./CLI/MIGRATIONS.md).
+The only exception is during migration development or emergency recovery documented in [MIGRATIONS.md](./docs/cli/MIGRATIONS.md).
 
 ### 1. File Size Limit
 
@@ -705,7 +705,7 @@ export enum HealthStatus {
 
 ## The 50 Rules
 
-See [CODE_QUALITY.md](./Docs/CODE_QUALITY.md) for the complete set of 50 coding rules covering:
+See [CODE_QUALITY.md](./docs/project/CODE_QUALITY.md) for the complete set of 50 coding rules covering:
 - Architecture & Structure (1-10)
 - Code Quality & Maintainability (11-20)
 - Testing & Reliability (21-30)
@@ -756,7 +756,7 @@ migrations/
 
 **Individual projects fetch migrations from GitHub via raw URLs.** The manifest MUST be accurate or migrations will fail.
 
-See [CLI/MIGRATIONS.md](./CLI/MIGRATIONS.md) for complete migration system documentation.
+See [docs/cli/MIGRATIONS.md](./docs/cli/MIGRATIONS.md) for complete migration system documentation.
 
 ---
 

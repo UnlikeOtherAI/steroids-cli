@@ -616,7 +616,7 @@ We welcome contributions that improve code quality and developer experience.
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-See [CONTRIBUTING.md](./Docs/CONTRIBUTING.md) for detailed guidelines.
+See [CONTRIBUTING.md](./docs/project/CONTRIBUTING.md) for detailed guidelines.
 
 ---
 
