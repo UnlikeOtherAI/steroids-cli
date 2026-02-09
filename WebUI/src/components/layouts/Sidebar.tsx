@@ -99,22 +99,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           </button>
         )}
       </div>
-      <nav className="flex-1 overflow-y-auto px-3 space-y-1">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            onClick={onClose}
-            className={({ isActive }) =>
-              isActive ? 'sidebar-item-active' : 'sidebar-item'
-            }
-          >
-            <item.icon className="w-5 h-5" />
-            <span>{item.label}</span>
-          </NavLink>
-        ))}
-      </nav>
-      <div className="flex-shrink-0 p-4">
+      <div className="flex-1 overflow-y-auto">
+        <nav className="px-3 space-y-1">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={onClose}
+              className={({ isActive }) =>
+                isActive ? 'sidebar-item-active' : 'sidebar-item'
+              }
+            >
+              <item.icon className="w-5 h-5" />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+        <div className="sticky bottom-0 p-4 bg-sidebar">
         <button
           onClick={handleCronToggle}
           disabled={loading || cronInstalled === null}
@@ -141,6 +142,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
             Last wakeup: {formatRelativeTime(lastWakeup)}
           </p>
         )}
+        </div>
       </div>
     </aside>
   );
