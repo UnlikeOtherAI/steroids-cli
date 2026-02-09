@@ -141,13 +141,19 @@ steroids loop
 - Ensures PATH and permissions work correctly
 - Catches installation/linking issues
 
-**When you need to update the CLI:**
-1. Stop any running processes: `steroids runners stop --all`
-2. Rebuild: `npm run build`
-3. Relink: `npm link`
-4. Restart: `steroids runners start --detach`
+**When you build the CLI, ALWAYS link it too:**
+```bash
+npm run build && npm link
+```
 
-The Makefile does steps 2-3: `make build`
+This ensures the `steroids` command is available globally with your latest changes.
+
+**Full update workflow:**
+1. Stop any running processes: `steroids runners stop --all`
+2. Build and link: `npm run build && npm link`
+3. Restart: `steroids runners start --detach`
+
+The Makefile does steps 2: `make build`
 
 ### Testing in Temp Directories (CRITICAL)
 
