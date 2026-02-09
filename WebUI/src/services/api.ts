@@ -218,6 +218,13 @@ export const runnersApi = {
   async stopCron(): Promise<void> {
     await fetchJson('/api/runners/cron/stop', { method: 'POST' });
   },
+
+  /**
+   * Kill a specific runner
+   */
+  async kill(runnerId: string): Promise<void> {
+    await fetchJson(`/api/runners/${encodeURIComponent(runnerId)}/kill`, { method: 'POST' });
+  },
 };
 
 export const sectionsApi = {

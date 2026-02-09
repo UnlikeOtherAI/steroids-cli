@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import { openGlobalDatabase } from '../../../src/runners/global-db.js';
 import { cronStatus, cronInstall, cronUninstall } from '../../../src/runners/cron.js';
 import { getLastWakeupTime } from '../../../src/runners/wakeup.js';
+import { listRunners } from '../../../src/runners/daemon.js';
 
 const router = Router();
 
@@ -227,6 +228,55 @@ router.post('/runners/cron/stop', (_req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to uninstall cron',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/runners/:runnerId/kill
+ * Kill a specific runner by ID
+ */
+router.post('/runners/:runnerId/kill', (req: Request, res: Response) => {
+  try {
+    const { runnerId } = req.params;
+    const runners = listRunners();
+    const runner = runners.find((r) => r.id === runnerId || r.id.startsWith(runnerId));
+
+    if (!runner) {
+      return res.status(404).json({
+        success: false,
+        error: 'Runner not found',
+      });
+    }
+
+    if (!runner.pid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Runner has no PID (not running)',
+      });
+    }
+
+    try {
+      process.kill(runner.pid, 'SIGTERM');
+      res.json({
+        success: true,
+        message: `Runner ${runner.id.slice(0, 8)} killed`,
+        runner_id: runner.id,
+        pid: runner.pid,
+      });
+    } catch (killError) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to kill runner process',
+        message: killError instanceof Error ? killError.message : 'Unknown error',
+      });
+    }
+  } catch (error) {
+    console.error('Error killing runner:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to kill runner',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

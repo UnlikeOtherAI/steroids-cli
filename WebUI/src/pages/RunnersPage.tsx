@@ -47,6 +47,7 @@ export const RunnersPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [taskDetails, setTaskDetails] = useState<Record<string, TaskDetails>>({});
+  const [killing, setKilling] = useState<Set<string>>(new Set());
 
   const loadRunners = async () => {
     try {
@@ -87,6 +88,22 @@ export const RunnersPage: React.FC = () => {
     const interval = setInterval(loadRunners, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleKillRunner = async (runnerId: string) => {
+    setKilling(prev => new Set(prev).add(runnerId));
+    try {
+      await runnersApi.kill(runnerId);
+      await loadRunners();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to kill runner');
+    } finally {
+      setKilling(prev => {
+        const next = new Set(prev);
+        next.delete(runnerId);
+        return next;
+      });
+    }
+  };
 
   const activeRunners = runners.filter(
     (r) => r.status === 'running' || r.status === 'active'
@@ -151,6 +168,29 @@ export const RunnersPage: React.FC = () => {
                     <Badge variant={getStatusBadgeVariant(runner.status)}>
                       {runner.status.charAt(0).toUpperCase() + runner.status.slice(1)}
                     </Badge>
+                    {runner.pid && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleKillRunner(runner.id);
+                        }}
+                        disabled={killing.has(runner.id)}
+                      >
+                        {killing.has(runner.id) ? (
+                          <>
+                            <i className="fa-solid fa-spinner fa-spin mr-1"></i>
+                            Killing...
+                          </>
+                        ) : (
+                          <>
+                            <i className="fa-solid fa-skull mr-1"></i>
+                            Kill
+                          </>
+                        )}
+                      </Button>
+                    )}
                   </div>
 
                   <p className="text-sm text-gray-500 mt-1">
