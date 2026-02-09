@@ -361,13 +361,13 @@ related: [
 
 Before merging command changes, verify:
 
-- [ ] Global flags work (`--json`, `--quiet`, `--verbose`, `--no-color`)
-- [ ] `--help` shows comprehensive documentation
-- [ ] JSON output uses the standard envelope
-- [ ] Errors use CliError with semantic error codes
-- [ ] Exit codes match error codes
-- [ ] Environment variables work
-- [ ] Examples are practical and tested
-- [ ] Help includes all required sections
-- [ ] Command is listed in main help (`src/index.ts`)
-- [ ] Test script passes: `./scripts/test-cli-contract.sh`
+- [x] Global flags work (`--json`, `--quiet`, `--verbose`, `--no-color`)
+- [x] `--help` shows comprehensive documentation
+- [x] JSON output uses the standard envelope
+- [x] Errors use CliError with semantic error codes
+- [x] Exit codes match error codes
+- [x] Environment variables work
+- [x] Examples are practical and tested
+- [x] Help includes all required sections
+- [x] Command is listed in main help (`src/index.ts`)
+- [x] Test script passes: `./scripts/test-cli-contract.sh`

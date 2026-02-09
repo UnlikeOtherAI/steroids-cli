@@ -465,9 +465,9 @@ fi
 
 Potential improvements (not currently planned):
 
-- [ ] Shell completion scripts (bash, zsh, fish)
+- [x] Shell completion scripts (bash, zsh, fish)
 - [ ] Man pages generation
-- [ ] Interactive mode with prompts (inquirer-like)
+- [-] Interactive mode with prompts (inquirer-like)
 - [ ] Progress bars for long-running operations
 - [ ] Table formatting with adjustable column widths
 - [ ] YAML output format (in addition to JSON)
