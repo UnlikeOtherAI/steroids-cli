@@ -1,6 +1,6 @@
 {
   "name": "steroids-cli",
-  "version": "0.4.15",
+  "version": "0.4.16",
   "description": "Automated task execution system with coder/reviewer loop",
   "main": "dist/index.js",
   "bin": {
