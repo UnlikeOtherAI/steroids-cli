@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { TaskDetails, AuditEntry, TaskStatus } from '../types';
+import { TaskDetails, AuditEntry, TaskInvocation, TaskStatus } from '../types';
 import { tasksApi, projectsApi } from '../services/api';
 import { Badge } from '../components/atoms/Badge';
 import { PageLayout } from '../components/templates/PageLayout';
@@ -132,6 +132,70 @@ const AuditLogRow: React.FC<AuditLogRowProps> = ({ entry, isLatest, githubUrl })
               <span>
                 <i className="fa-solid fa-hourglass-half mr-1"></i>
                 Duration: {formatDuration(entry.duration_seconds)}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+function formatDurationMs(ms: number): string {
+  return formatDuration(Math.round(ms / 1000));
+}
+
+function getProviderLabel(provider: string, model: string): string {
+  const p = provider.charAt(0).toUpperCase() + provider.slice(1);
+  return `${p} / ${model}`;
+}
+
+interface InvocationRowProps {
+  invocation: TaskInvocation;
+}
+
+const InvocationRow: React.FC<InvocationRowProps> = ({ invocation }) => {
+  const isSuccess = invocation.success === 1;
+  const isTimedOut = invocation.timed_out === 1;
+  const isCoder = invocation.role === 'coder';
+
+  let borderColor = 'border-success';
+  if (isTimedOut) borderColor = 'border-warning';
+  else if (!isSuccess) borderColor = 'border-danger';
+
+  return (
+    <div className={`p-3 border-l-4 ${borderColor} bg-bg-base`}>
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-bg-surface flex items-center justify-center">
+          <i className={`fa-solid ${isCoder ? 'fa-code' : 'fa-magnifying-glass'} text-text-muted text-xs`}></i>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-text-primary text-sm capitalize">{invocation.role}</span>
+            <span className="text-text-muted text-xs">{getProviderLabel(invocation.provider, invocation.model)}</span>
+            {isSuccess ? (
+              <Badge variant="success">OK</Badge>
+            ) : isTimedOut ? (
+              <Badge variant="warning">Timed Out</Badge>
+            ) : (
+              <Badge variant="danger">Failed (exit {invocation.exit_code})</Badge>
+            )}
+            {isCoder && invocation.rejection_number !== null && invocation.rejection_number > 0 && (
+              <span className="text-xs text-warning">
+                <i className="fa-solid fa-rotate-left mr-1"></i>
+                Attempt #{invocation.rejection_number}
+              </span>
+            )}
+          </div>
+          <div className="mt-1 flex items-center gap-4 text-xs text-text-muted">
+            <span>
+              <i className="fa-regular fa-clock mr-1"></i>
+              {formatTimestamp(invocation.created_at)}
+            </span>
+            {invocation.duration_ms > 0 && (
+              <span>
+                <i className="fa-solid fa-stopwatch mr-1"></i>
+                {formatDurationMs(invocation.duration_ms)}
               </span>
             )}
           </div>
@@ -383,6 +447,26 @@ export const TaskDetailPage: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* LLM Invocations */}
+          {task.invocations && task.invocations.length > 0 && (
+            <>
+              <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+                <i className="fa-solid fa-microchip mr-2"></i>
+                LLM Invocations
+                <span className="text-sm font-normal text-text-muted ml-2">
+                  ({task.invocations.filter(i => i.role === 'coder').length} coder, {task.invocations.filter(i => i.role === 'reviewer').length} reviewer)
+                </span>
+              </h2>
+              <div className="card overflow-hidden">
+                <div className="divide-y divide-border">
+                  {task.invocations.map((inv) => (
+                    <InvocationRow key={inv.id} invocation={inv} />
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Metadata */}
           <div className="mt-6 text-xs text-text-muted flex items-center gap-4">

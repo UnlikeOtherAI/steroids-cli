@@ -37,6 +37,20 @@ interface AuditEntry {
   duration_seconds?: number;
 }
 
+interface InvocationEntry {
+  id: number;
+  task_id: string;
+  role: string;
+  provider: string;
+  model: string;
+  exit_code: number;
+  duration_ms: number;
+  success: number;
+  timed_out: number;
+  rejection_number: number | null;
+  created_at: string;
+}
+
 interface TaskResponse extends TaskDetails {
   duration: {
     total_seconds: number;
@@ -44,6 +58,7 @@ interface TaskResponse extends TaskDetails {
     review_seconds: number;
   };
   audit_trail: AuditEntry[];
+  invocations: InvocationEntry[];
   github_url: string | null;
 }
 
@@ -186,6 +201,16 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
         )
         .all(taskId) as AuditEntry[];
 
+      // Get LLM invocations (exclude prompt/response to keep payload light)
+      const invocations = db
+        .prepare(
+          `SELECT id, task_id, role, provider, model, exit_code, duration_ms, success, timed_out, rejection_number, created_at
+          FROM task_invocations
+          WHERE task_id = ?
+          ORDER BY created_at ASC`
+        )
+        .all(taskId) as InvocationEntry[];
+
       // Calculate durations for each status
       const auditWithDurations = calculateDurations(auditTrail);
 
@@ -215,6 +240,7 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
           review_seconds: reviewSeconds,
         },
         audit_trail: auditWithDurations.reverse(), // Most recent first for display
+        invocations, // Oldest first (chronological)
         github_url: githubUrl,
       };
 

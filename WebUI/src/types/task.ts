@@ -18,6 +18,20 @@ export interface AuditEntry {
   duration_seconds?: number;
 }
 
+export interface TaskInvocation {
+  id: number;
+  task_id: string;
+  role: 'coder' | 'reviewer';
+  provider: string;
+  model: string;
+  exit_code: number;
+  duration_ms: number;
+  success: number;
+  timed_out: number;
+  rejection_number: number | null;
+  created_at: string;
+}
+
 export interface TaskDuration {
   total_seconds: number;
   in_progress_seconds: number;
@@ -36,6 +50,7 @@ export interface TaskDetails {
   updated_at: string;
   duration: TaskDuration;
   audit_trail: AuditEntry[];
+  invocations: TaskInvocation[];
   github_url: string | null;
 }
 
