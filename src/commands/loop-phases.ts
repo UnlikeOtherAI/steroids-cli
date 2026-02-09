@@ -120,11 +120,21 @@ export async function runCoderPhase(
   const updatedTask = getTask(db, task.id);
   if (!updatedTask) return;
 
-  if (!jsonMode) {
+  // AUTO-SUBMIT: If coder finished but didn't update status, automatically move to review
+  // This prevents infinite loops where coder completes work but forgets to run status update command
+  if (updatedTask.status === 'in_progress') {
+    const commitSha = getCurrentCommitSha(projectPath) ?? undefined;
+    updateTaskStatus(db, updatedTask.id, 'review', 'orchestrator',
+      'Auto-submitted to review (coder finished without status update)', commitSha);
+
+    if (!jsonMode) {
+      console.log('\nCoder finished without updating status. Auto-submitted to review.');
+    }
+  } else if (!jsonMode) {
     if (updatedTask.status === 'review') {
       console.log('\nCoder submitted for review. Ready for reviewer.');
     } else {
-      console.log(`Task status unchanged (${updatedTask.status}). Will retry next iteration.`);
+      console.log(`Task status: ${updatedTask.status}`);
     }
   }
 }

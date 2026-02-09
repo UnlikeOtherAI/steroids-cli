@@ -83,22 +83,28 @@ ${rejectionSection}
 
 1. Search for files/code that match the specification requirements
 2. Run \`git log --oneline -20\` to see recent commits
-3. If the implementation already exists:
-   - Identify which commit contains the work (you NEED the hash)
-   - Verify it matches the specification with \`git show <hash>\`
-   - **Do NOT create duplicate code**
-   - Submit for review with a note including the commit hash AND file list
+
+**IF THE WORK ALREADY EXISTS:**
+
+1. Verify it matches the spec:
 
 \`\`\`bash
-# Example: If work exists in commit abc1234
-git log --oneline -20  # Find commits
-git show abc1234 --stat  # Verify it matches spec, note the files
-
-# IMPORTANT: Include commit hash and files in your notes
-steroids tasks update ${task.id} --status review --notes "Work exists in commit abc1234. Files: src/foo.ts, src/bar.ts. Verified against spec."
+git log --oneline -20  # Find the commit hash
+git show <commit-hash> --stat  # Verify it matches the spec
 \`\`\`
 
-The reviewer will check the commit you reference. Be precise about the hash and files.
+2. Note which commit contains the work in your response
+3. **Do NOT implement duplicate code** - just finish and your work will be auto-submitted for review
+
+**OPTIONAL:** You can manually submit with notes about the existing work:
+
+\`\`\`bash
+steroids tasks update ${task.id} --status review --notes "Work exists in commit <hash>. Files: <list>. Verified against spec."
+\`\`\`
+
+---
+
+**IF THE WORK DOES NOT EXIST, CONTINUE BELOW:**
 
 ---
 
@@ -157,15 +163,20 @@ steroids tasks skip ${task.id} --notes "SKIP REASON: <why>. WHAT'S NEEDED: <huma
 
 ## When You Are Done
 
-**Verify the project builds AND tests pass, then:**
+**Verify the project builds AND tests pass, then commit your work:**
 
 \`\`\`bash
 git add <your-changed-files>
 git commit -m "<type>: <descriptive message>"
-steroids tasks update ${task.id} --status review
 \`\`\`
 
-If you do NOT run \`steroids tasks update\`, your work will not be submitted.
+Your work will be **automatically submitted for review** when you finish. The orchestrator will detect that you're done and move the task to review status.
+
+**OPTIONAL:** You can manually update the status yourself if you want to include submission notes:
+
+\`\`\`bash
+steroids tasks update ${task.id} --status review --notes "Implementation complete. Added X, Y, Z."
+\`\`\`
 
 ---
 ${task.rejection_count > 0 ? `
