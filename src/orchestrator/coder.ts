@@ -56,10 +56,12 @@ function writePromptToTempFile(prompt: string): string {
 async function invokeProvider(
   promptFile: string,
   timeoutMs: number = 900_000, // 15 minutes default
-  taskId?: string
+  taskId?: string,
+  projectPath?: string
 ): Promise<CoderResult> {
   // Load configuration to get coder provider settings
-  const config = loadConfig();
+  // Project config overrides global config
+  const config = loadConfig(projectPath);
   const coderConfig = config.ai?.coder;
 
   if (!coderConfig?.provider || !coderConfig?.model) {
@@ -119,10 +121,16 @@ export async function invokeCoder(
   projectPath: string,
   action: 'start' | 'resume'
 ): Promise<CoderResult> {
+  // Load config to show provider/model being used
+  const config = loadConfig(projectPath);
+  const coderConfig = config.ai?.coder;
+
   console.log(`\n${'='.repeat(60)}`);
   console.log(`CODER: ${task.title}`);
   console.log(`Action: ${action}`);
   console.log(`Task ID: ${task.id}`);
+  console.log(`Provider: ${coderConfig?.provider ?? 'not configured'}`);
+  console.log(`Model: ${coderConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
   // Fetch rejection history so coder can see past attempts
@@ -160,7 +168,7 @@ export async function invokeCoder(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    const result = await invokeProvider(promptFile, 900_000, task.id);
+    const result = await invokeProvider(promptFile, 900_000, task.id, projectPath);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`CODER COMPLETED`);
@@ -185,10 +193,16 @@ export async function invokeCoderBatch(
   sectionName: string,
   projectPath: string
 ): Promise<BatchCoderResult> {
+  // Load config to show provider/model being used
+  const config = loadConfig(projectPath);
+  const coderConfig = config.ai?.coder;
+
   console.log(`\n${'='.repeat(60)}`);
   console.log(`BATCH CODER: Section "${sectionName}"`);
   console.log(`Tasks: ${tasks.length}`);
   tasks.forEach((t, i) => console.log(`  ${i + 1}. ${t.title} (${t.id})`));
+  console.log(`Provider: ${coderConfig?.provider ?? 'not configured'}`);
+  console.log(`Model: ${coderConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
   const prompt = generateBatchCoderPrompt({ tasks, projectPath, sectionName });
@@ -197,7 +211,7 @@ export async function invokeCoderBatch(
   try {
     // Longer timeout for batch: base 30 minutes + 5 minutes per task
     const timeoutMs = 30 * 60 * 1000 + tasks.length * 5 * 60 * 1000;
-    const result = await invokeProvider(promptFile, timeoutMs);
+    const result = await invokeProvider(promptFile, timeoutMs, undefined, projectPath);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`BATCH CODER COMPLETED`);

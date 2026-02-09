@@ -91,10 +91,12 @@ function parseReviewerDecision(output: string): { decision?: 'approve' | 'reject
 async function invokeProvider(
   promptFile: string,
   timeoutMs: number = 600_000, // 10 minutes default for reviewer
-  taskId?: string
+  taskId?: string,
+  projectPath?: string
 ): Promise<ReviewerResult> {
   // Load configuration to get reviewer provider settings
-  const config = loadConfig();
+  // Project config overrides global config
+  const config = loadConfig(projectPath);
   const reviewerConfig = config.ai?.reviewer;
 
   if (!reviewerConfig?.provider || !reviewerConfig?.model) {
@@ -158,10 +160,16 @@ export async function invokeReviewer(
   task: Task,
   projectPath: string
 ): Promise<ReviewerResult> {
+  // Load config to show provider/model being used
+  const config = loadConfig(projectPath);
+  const reviewerConfig = config.ai?.reviewer;
+
   console.log(`\n${'='.repeat(60)}`);
   console.log(`REVIEWER: ${task.title}`);
   console.log(`Task ID: ${task.id}`);
   console.log(`Rejection count: ${task.rejection_count}/15`);
+  console.log(`Provider: ${reviewerConfig?.provider ?? 'not configured'}`);
+  console.log(`Model: ${reviewerConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
   // Try to find the specific commit for this task
@@ -215,11 +223,7 @@ export async function invokeReviewer(
     console.warn('Could not fetch task context:', error);
   }
 
-  // Load config to get quality settings
-  const config = loadConfig(projectPath);
-
-  // Get reviewer model from config
-  const reviewerConfig = config.ai?.reviewer;
+  // Reuse config loaded earlier, get reviewer model
   const reviewerModel = reviewerConfig?.model || 'unknown';
 
   const context: ReviewerPromptContext = {
@@ -240,7 +244,7 @@ export async function invokeReviewer(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    const result = await invokeProvider(promptFile, 600_000, task.id);
+    const result = await invokeProvider(promptFile, 600_000, task.id, projectPath);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`REVIEWER COMPLETED`);
@@ -265,19 +269,22 @@ export async function invokeReviewerBatch(
   sectionName: string,
   projectPath: string
 ): Promise<BatchReviewerResult> {
+  // Load config for quality settings and to show provider/model being used
+  const config = loadConfig(projectPath);
+  const reviewerConfig = config.ai?.reviewer;
+
   console.log(`\n${'='.repeat(60)}`);
   console.log(`BATCH REVIEWER: Section "${sectionName}"`);
   console.log(`Tasks: ${tasks.length}`);
   tasks.forEach((t, i) => console.log(`  ${i + 1}. ${t.title} (${t.id})`));
+  console.log(`Provider: ${reviewerConfig?.provider ?? 'not configured'}`);
+  console.log(`Model: ${reviewerConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
   // Get combined git diff for all tasks (compare against base before batch started)
   // We look for the earliest task's commit and diff from there
   const gitDiff = getGitDiff(projectPath, 'HEAD~' + tasks.length);
   const modifiedFiles = getModifiedFiles(projectPath);
-
-  // Load config for quality settings
-  const config = loadConfig(projectPath);
 
   const context: BatchReviewerPromptContext = {
     tasks,
@@ -294,7 +301,7 @@ export async function invokeReviewerBatch(
   try {
     // Longer timeout for batch: base 20 minutes + 3 minutes per task
     const timeoutMs = 20 * 60 * 1000 + tasks.length * 3 * 60 * 1000;
-    const result = await invokeProvider(promptFile, timeoutMs);
+    const result = await invokeProvider(promptFile, timeoutMs, undefined, projectPath);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`BATCH REVIEWER COMPLETED`);
