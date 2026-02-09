@@ -234,21 +234,23 @@ Answer these questions:
 4. Does code follow AGENTS.md guidelines?
 5. Are all files under 500 lines?
 
-## Security Review (MANDATORY)
+## Security Review
 
-**You MUST check the coder's changes for security vulnerabilities.** Reject if any are found.
+**Check the coder's NEW or CHANGED code for security vulnerabilities.**
+
+**Scope rule:** Only evaluate code in the diff. Pre-existing patterns in unchanged code are NOT the coder's responsibility — note them as advisory but do NOT reject for them. If the coder follows an existing pattern already in the codebase, that is acceptable even if the pattern is imperfect.
 
 Check for:
-- **Injection attacks**: SQL injection, command injection (shell commands built from user input), XSS, template injection
-- **Shell safety**: Prefer \`execFileSync\` (array args) over \`execSync\` (string interpolation) when passing user-controlled values
-- **Path traversal**: User-supplied file paths must be validated and confined to the project directory (no \`../\` escape)
-- **Secrets exposure**: No hardcoded API keys, tokens, passwords, or credentials in code or config files
-- **Unsafe deserialization**: No \`eval()\`, \`new Function()\`, or \`JSON.parse\` on untrusted input without validation
-- **Permission escalation**: Code should not grant broader access than necessary (file permissions, API scopes, etc.)
-- **Information leakage**: Error messages and logs should not expose internal paths, stack traces, or sensitive data to end users
-- **Dependency hygiene** (advisory only): If new dependencies are added, note whether they appear well-known and maintained. Flag potential typosquatting but do NOT reject solely for dependency choice — just highlight it as a note and suggest a more established alternative if one exists
+- **Injection attacks**: User input concatenated directly into SQL strings (instead of parameterized queries), or user input interpolated into shell command strings. String interpolation of hardcoded constants or internal config values is NOT injection.
+- **Shell safety**: When passing user-controlled or external values as arguments to commands, prefer array-based APIs (e.g., Node \`execFileSync(cmd, [args])\`, Python \`subprocess.run([cmd, args])\` without \`shell=True\`). Using \`execSync\` with hardcoded commands, shell features (pipes, chaining), or user-configured hook commands is acceptable.
+- **Path traversal**: File paths from end-user CLI input should be validated to stay within the expected directory. Internally-constructed paths to known locations (\`~/.steroids/\`, temp dirs, config paths) are fine.
+- **Secrets exposure**: No real API keys, tokens, or passwords hardcoded in source. Placeholder/example values, checksums, env var names, and test fixtures are NOT secrets.
+- **Unsafe code execution**: No \`eval()\`, \`new Function()\`, or dynamic code execution on any input. \`JSON.parse\` is safe to use — validate the parsed result before using it in security-sensitive operations (file paths, shell commands, SQL). Simple \`JSON.parse\` with try/catch is acceptable.
+- **Permission escalation**: Do not set overly permissive modes (e.g., 0o777) or disable security controls. Default permissions (0o644 files, 0o755 executables) are acceptable.
+- **Information leakage**: For HTTP/API responses, do not expose stack traces or internal paths. For CLI output, showing file paths and error details is expected and helpful — only ensure credentials are never logged.
+- **Dependency hygiene** (advisory only): If new dependencies are added, list them as a note and suggest alternatives if known. Do NOT reject solely for dependency choice.
 
-If you find a security vulnerability in the items above (excluding the advisory item), **REJECT immediately** with a clear explanation and remediation steps. Security vulnerabilities are never "minor".
+If you find a genuine vulnerability where an attacker could exploit the NEW code to gain unauthorized access, execute arbitrary code, or exfiltrate data — **REJECT** with a clear explanation and remediation steps. If the coder's notes explain why a flagged pattern is safe in context, evaluate their justification before rejecting. If you are uncertain, describe the concern as a security note rather than rejecting on uncertainty alone.
 ${getTestCoverageInstructions(config, modifiedFiles)}
 ---
 
