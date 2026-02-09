@@ -48,21 +48,21 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
       </div>
 
       {project.stats && (
-        <div className="grid grid-cols-4 gap-3 mb-3">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-gray-900">{project.stats.pending}</div>
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="bg-gray-50 rounded-lg p-2 text-center">
+            <div className="text-xl font-bold text-gray-900">{project.stats.pending}</div>
             <div className="text-xs text-gray-500">Pending</div>
           </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">{project.stats.in_progress}</div>
+          <div className="bg-blue-50 rounded-lg p-2 text-center">
+            <div className="text-xl font-bold text-blue-600">{project.stats.in_progress}</div>
             <div className="text-xs text-gray-500">In Progress</div>
           </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-yellow-600">{project.stats.review}</div>
+          <div className="bg-yellow-50 rounded-lg p-2 text-center">
+            <div className="text-xl font-bold text-yellow-600">{project.stats.review}</div>
             <div className="text-xs text-gray-500">Review</div>
           </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-green-600">{project.stats.completed}</div>
+          <div className="bg-green-50 rounded-lg p-2 text-center">
+            <div className="text-xl font-bold text-green-600">{project.stats.completed}</div>
             <div className="text-xs text-gray-500">Completed</div>
           </div>
         </div>
