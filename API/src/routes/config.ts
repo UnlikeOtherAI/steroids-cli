@@ -278,7 +278,7 @@ router.put('/config', (req: Request, res: Response) => {
   }
 });
 
-// Static model lists for each provider (from official docs, Feb 2026)
+// Static model lists for each provider (fallback if API unavailable)
 const FALLBACK_MODELS: Record<string, APIModel[]> = {
   claude: [
     { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
@@ -295,32 +295,254 @@ const FALLBACK_MODELS: Record<string, APIModel[]> = {
     { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)' },
   ],
   codex: [
-    { id: 'o3', name: 'O3' },
-    { id: 'o4-mini', name: 'O4 Mini' },
-    { id: 'gpt-4.1', name: 'GPT-4.1' },
-    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
-    { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano' },
+    { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex' },
+    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+    { id: 'gpt-5.2', name: 'GPT-5.2' },
+    { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' },
+    { id: 'gpt-5.1', name: 'GPT-5.1' },
   ],
 };
 
+// CLI config file paths
+const CLI_CONFIG_PATHS = {
+  claude: join(homedir(), '.claude', '.credentials.json'),
+  gemini: join(homedir(), '.gemini', 'oauth_creds.json'),
+  codex: join(homedir(), '.codex', 'auth.json'),
+  codexModelsCache: join(homedir(), '.codex', 'models_cache.json'),
+};
+
+/**
+ * Get Claude API key
+ * Note: CLI OAuth tokens (sk-ant-oat01-*) don't work with /v1/models endpoint
+ * Only real API keys (sk-ant-api-*) work, so we check env vars
+ */
+function getClaudeApiKey(): string | null {
+  // Check environment variable first (real API key)
+  const envKey = process.env.ANTHROPIC_API_KEY;
+  if (envKey && envKey.startsWith('sk-ant-api')) {
+    return envKey;
+  }
+  return null;
+}
+
+/**
+ * Get Gemini API key
+ * Note: CLI OAuth tokens don't have the right scope for generativelanguage API
+ * Only API keys work, so we check env vars
+ */
+function getGeminiApiKey(): string | null {
+  // Check environment variables (real API key)
+  return process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || null;
+}
+
+/**
+ * Read Codex CLI OAuth token
+ */
+function getCodexToken(): string | null {
+  try {
+    if (!existsSync(CLI_CONFIG_PATHS.codex)) return null;
+    const data = JSON.parse(readFileSync(CLI_CONFIG_PATHS.codex, 'utf-8'));
+    return data?.tokens?.access_token || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read Codex models from local cache file
+ */
+function getCodexModelsFromCache(): APIModel[] | null {
+  try {
+    if (!existsSync(CLI_CONFIG_PATHS.codexModelsCache)) return null;
+    const data = JSON.parse(readFileSync(CLI_CONFIG_PATHS.codexModelsCache, 'utf-8'));
+    if (!data?.models?.length) return null;
+    return data.models
+      .filter((m: { visibility?: string }) => m.visibility === 'list')
+      .map((m: { slug: string; display_name?: string; description?: string }) => ({
+        id: m.slug,
+        name: m.display_name || m.slug,
+        description: m.description,
+      }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch Claude models from Anthropic API
+ * Note: Only works with real API keys, not CLI OAuth tokens
+ */
+async function fetchClaudeModels(): Promise<{ models: APIModel[]; source: string }> {
+  const apiKey = getClaudeApiKey();
+  if (!apiKey) {
+    return { models: FALLBACK_MODELS.claude, source: 'fallback' };
+  }
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/models', {
+      method: 'GET',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+    });
+
+    if (!response.ok) {
+      return { models: FALLBACK_MODELS.claude, source: 'fallback' };
+    }
+
+    const data = await response.json() as { data: Array<{ id: string; display_name?: string }> };
+    const models: APIModel[] = data.data.map((m) => ({
+      id: m.id,
+      name: m.display_name || m.id,
+    }));
+
+    // Sort: opus first, then sonnet, then haiku
+    models.sort((a, b) => {
+      const getScore = (id: string) => {
+        if (id.includes('opus')) return 0;
+        if (id.includes('sonnet')) return 1;
+        if (id.includes('haiku')) return 2;
+        return 3;
+      };
+      return getScore(a.id) - getScore(b.id);
+    });
+
+    return { models, source: 'api' };
+  } catch {
+    return { models: FALLBACK_MODELS.claude, source: 'fallback' };
+  }
+}
+
+/**
+ * Fetch Gemini models from Google API
+ * Note: Only works with API keys, not CLI OAuth tokens
+ */
+async function fetchGeminiModels(): Promise<{ models: APIModel[]; source: string }> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    return { models: FALLBACK_MODELS.gemini, source: 'fallback' };
+  }
+
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
+      method: 'GET',
+    });
+
+    if (!response.ok) {
+      return { models: FALLBACK_MODELS.gemini, source: 'fallback' };
+    }
+
+    const data = await response.json() as {
+      models: Array<{
+        name: string;
+        displayName?: string;
+        description?: string;
+        supportedGenerationMethods?: string[];
+      }>;
+    };
+
+    const models: APIModel[] = data.models
+      .filter((m) => m.supportedGenerationMethods?.includes('generateContent') && m.name.includes('gemini'))
+      .map((m) => ({
+        id: m.name.replace('models/', ''),
+        name: m.displayName || m.name.replace('models/', ''),
+        description: m.description,
+      }));
+
+    // Sort by version (newer first)
+    models.sort((a, b) => {
+      const getScore = (id: string) => {
+        if (id.includes('3')) return 0;
+        if (id.includes('2.5')) return 1;
+        if (id.includes('2.0')) return 2;
+        if (id.includes('1.5')) return 3;
+        return 4;
+      };
+      return getScore(a.id) - getScore(b.id);
+    });
+
+    return { models, source: 'api' };
+  } catch {
+    return { models: FALLBACK_MODELS.gemini, source: 'fallback' };
+  }
+}
+
+/**
+ * Fetch Codex models - uses local cache or OpenAI API
+ */
+async function fetchCodexModels(): Promise<{ models: APIModel[]; source: string }> {
+  // First try local cache (faster, always up to date from CLI)
+  const cachedModels = getCodexModelsFromCache();
+  if (cachedModels?.length) {
+    return { models: cachedModels, source: 'cache' };
+  }
+
+  // Fall back to API if no cache
+  const token = getCodexToken();
+  if (!token) {
+    return { models: FALLBACK_MODELS.codex, source: 'fallback' };
+  }
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/models', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      return { models: FALLBACK_MODELS.codex, source: 'fallback' };
+    }
+
+    const data = await response.json() as { data: Array<{ id: string }> };
+    const models: APIModel[] = data.data
+      .filter((m) => m.id.includes('gpt') || m.id.startsWith('o'))
+      .map((m) => ({
+        id: m.id,
+        name: m.id,
+      }));
+
+    return { models, source: 'api' };
+  } catch {
+    return { models: FALLBACK_MODELS.codex, source: 'fallback' };
+  }
+}
+
 // GET /api/ai/models/:provider - Get models for a provider
-// Returns static model lists - no API keys needed
-router.get('/ai/models/:provider', (req: Request, res: Response) => {
+// Tries CLI config credentials first, falls back to static list
+router.get('/ai/models/:provider', async (req: Request, res: Response) => {
   const { provider } = req.params;
 
-  const models = FALLBACK_MODELS[provider];
-  if (!models) {
+  if (!FALLBACK_MODELS[provider]) {
     return res.status(400).json({
       success: false,
       error: `Unknown provider: ${provider}`,
     });
   }
 
+  let result: { models: APIModel[]; source: string };
+
+  switch (provider) {
+    case 'claude':
+      result = await fetchClaudeModels();
+      break;
+    case 'gemini':
+      result = await fetchGeminiModels();
+      break;
+    case 'codex':
+      result = await fetchCodexModels();
+      break;
+    default:
+      result = { models: FALLBACK_MODELS[provider], source: 'fallback' };
+  }
+
   res.json({
     success: true,
     provider,
-    source: 'static',
-    models,
+    source: result.source,
+    models: result.models,
   });
 });
 
