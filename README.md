@@ -383,6 +383,7 @@ Documentation scaffolding wizard. Interactive CLI for setting up CLAUDE.md, AGEN
 - [ ] Interactive config wizard
 - [ ] Provider adapters (multi-vendor coder/reviewer)
 - [ ] Token accounting and budgets
+- [ ] Jira integration (sync tasks, update tickets)
 
 ---
 
