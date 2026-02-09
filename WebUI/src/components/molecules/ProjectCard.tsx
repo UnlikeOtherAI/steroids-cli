@@ -42,18 +42,16 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
       onClick={handleClick}
       className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <h3 className="text-lg font-semibold text-gray-900 truncate">
-            {project.name || project.path.split('/').pop() || 'Project'}
-          </h3>
-          <Tooltip content={project.path}>
-            <p className="text-xs text-gray-400 mt-1 font-mono">
-              {truncateMiddle(project.path, 35)}
-            </p>
-          </Tooltip>
-        </div>
-        <div className="flex gap-2 ml-4">
+      <div className="mb-3">
+        <h3 className="text-lg font-semibold text-gray-900 truncate">
+          {project.name || project.path.split('/').pop() || 'Project'}
+        </h3>
+        <Tooltip content={project.path}>
+          <p className="text-xs text-gray-400 mt-1 font-mono">
+            {truncateMiddle(project.path, 45)}
+          </p>
+        </Tooltip>
+        <div className="flex gap-2 mt-2">
           <Badge variant={project.enabled ? 'success' : 'default'}>
             {project.enabled ? 'Enabled' : 'Disabled'}
           </Badge>
