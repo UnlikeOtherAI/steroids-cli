@@ -9,6 +9,7 @@ import projectsRouter from './routes/projects.js';
 import activityRouter from './routes/activity.js';
 import runnersRouter from './routes/runners.js';
 import tasksRouter from './routes/tasks.js';
+import configRouter from './routes/config.js';
 
 const app = express();
 const PORT = process.env.PORT || 3501;
@@ -32,6 +33,7 @@ app.use('/api', projectsRouter);
 app.use('/api', activityRouter);
 app.use('/api', runnersRouter);
 app.use('/api', tasksRouter);
+app.use('/api', configRouter);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -62,6 +64,10 @@ app.get('/', (req, res) => {
       'GET /api/runners/active-tasks',
       'GET /api/tasks/<taskId>?project=<path>',
       'GET /api/tasks/<taskId>/logs?project=<path>',
+      'GET /api/config/schema',
+      'GET /api/config/schema/<category>',
+      'GET /api/config?scope=global|project|merged&project=<path>',
+      'PUT /api/config',
     ],
   });
 });

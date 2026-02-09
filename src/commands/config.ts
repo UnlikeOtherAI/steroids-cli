@@ -26,6 +26,7 @@ import {
   validateValue,
 } from '../config/validator.js';
 import { getCategories, getCategoryDescription } from '../config/schema.js';
+import { toJsonSchema, getCategoryJsonSchema, getSchemaCategories } from '../config/json-schema.js';
 import { runBrowser } from '../config/browser.js';
 import { generateHelp } from '../cli/help.js';
 
@@ -41,6 +42,7 @@ const HELP = generateHelp({
     { name: 'show', args: '[key]', description: 'Display merged configuration or specific nested value' },
     { name: 'get', args: '<key>', description: 'Get a configuration value' },
     { name: 'set', args: '<key> <value>', description: 'Set a configuration value' },
+    { name: 'schema', args: '[category]', description: 'Output configuration schema as JSON Schema' },
     { name: 'validate', description: 'Validate configuration syntax' },
     { name: 'path', description: 'Show configuration file paths' },
     { name: 'edit', description: 'Open config in $EDITOR' },
@@ -64,6 +66,8 @@ const HELP = generateHelp({
     { command: 'steroids config validate', description: 'Validate config' },
     { command: 'steroids config path', description: 'Show file paths' },
     { command: 'steroids config edit', description: 'Open in editor' },
+    { command: 'steroids config schema', description: 'Output full schema' },
+    { command: 'steroids config schema ai', description: 'Output AI category schema' },
   ],
   related: [
     { command: 'steroids init', description: 'Initialize steroids in project' },
@@ -92,6 +96,9 @@ export async function configCommand(args: string[], flags: GlobalFlags): Promise
       break;
     case 'set':
       await runSet(subArgs);
+      break;
+    case 'schema':
+      await runSchema(subArgs);
       break;
     case 'validate':
       await runValidate(subArgs);
@@ -499,4 +506,59 @@ OPTIONS:
     console.error(`Failed to open editor: ${editor}`);
     process.exit(1);
   }
+}
+
+async function runSchema(args: string[]): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean', short: 'h', default: false },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help) {
+    console.log(`
+steroids config schema - Output configuration schema
+
+USAGE:
+  steroids config schema [category] [options]
+
+ARGUMENTS:
+  [category]          Optional category to show (ai, git, runners, etc.)
+
+OPTIONS:
+  -h, --help          Show help
+
+EXAMPLES:
+  steroids config schema              # Full schema as JSON
+  steroids config schema ai           # AI category only
+  steroids config schema --help       # Show available categories
+
+CATEGORIES:
+${getSchemaCategories().map(c => `  ${c}`).join('\n')}
+`);
+    return;
+  }
+
+  // If a category is specified, show just that category
+  if (positionals.length > 0) {
+    const category = positionals[0];
+    const categorySchema = getCategoryJsonSchema(category);
+
+    if (!categorySchema) {
+      console.error(`Unknown category: ${category}`);
+      console.error('');
+      console.error('Available categories:');
+      getSchemaCategories().forEach(c => console.error(`  ${c}`));
+      process.exit(1);
+    }
+
+    console.log(JSON.stringify(categorySchema, null, 2));
+    return;
+  }
+
+  // Output full schema
+  const schema = toJsonSchema();
+  console.log(JSON.stringify(schema, null, 2));
 }

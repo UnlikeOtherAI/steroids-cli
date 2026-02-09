@@ -223,3 +223,80 @@ export const tasksApi = {
     return fetchJson<TaskListResponse>(url);
   },
 };
+
+export interface ConfigSchema {
+  $schema?: string;
+  type: string;
+  description?: string;
+  properties?: Record<string, ConfigSchema>;
+  items?: ConfigSchema;
+  enum?: (string | number | boolean)[];
+  default?: unknown;
+}
+
+export interface ConfigResponse {
+  success: boolean;
+  data: {
+    scope: string;
+    project: string | null;
+    config: Record<string, unknown>;
+  };
+}
+
+export interface ConfigSchemaResponse {
+  success: boolean;
+  data: ConfigSchema;
+}
+
+export const configApi = {
+  /**
+   * Get full configuration schema
+   */
+  async getSchema(): Promise<ConfigSchema> {
+    const response = await fetchJson<ConfigSchemaResponse>('/api/config/schema');
+    return response.data;
+  },
+
+  /**
+   * Get schema for a specific category
+   */
+  async getCategorySchema(category: string): Promise<ConfigSchema> {
+    const response = await fetchJson<ConfigSchemaResponse>(
+      `/api/config/schema/${encodeURIComponent(category)}`
+    );
+    return response.data;
+  },
+
+  /**
+   * Get configuration values
+   */
+  async getConfig(
+    scope: 'global' | 'project' | 'merged' = 'merged',
+    projectPath?: string
+  ): Promise<Record<string, unknown>> {
+    let url = `/api/config?scope=${scope}`;
+    if (projectPath) {
+      url += `&project=${encodeURIComponent(projectPath)}`;
+    }
+    const response = await fetchJson<ConfigResponse>(url);
+    return response.data.config;
+  },
+
+  /**
+   * Update configuration values
+   */
+  async setConfig(
+    updates: Record<string, unknown>,
+    scope: 'global' | 'project' = 'global',
+    projectPath?: string
+  ): Promise<void> {
+    await fetchJson('/api/config', {
+      method: 'PUT',
+      body: JSON.stringify({
+        scope,
+        project: projectPath,
+        updates,
+      }),
+    });
+  },
+};

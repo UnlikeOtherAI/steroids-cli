@@ -6,6 +6,7 @@ import { RunnersPage } from './pages/RunnersPage';
 import { RunningTasksPage } from './pages/RunningTasksPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { AppShell } from './components/layouts';
 import { useProject } from './contexts/ProjectContext';
 import './App.css';
@@ -38,7 +39,7 @@ function App() {
         <Route path="/task/:taskId" element={<TaskDetailPage />} />
         <Route path="/runners" element={<RunnersPage />} />
         <Route path="/tasks" element={<RunningTasksPage />} />
-        <Route path="/settings" element={<div className="p-8"><p className="text-text-secondary">Settings page coming soon...</p></div>} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </AppShell>
   );
