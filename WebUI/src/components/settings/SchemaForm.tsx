@@ -97,9 +97,14 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
     return current;
   };
 
+  // Sort properties alphabetically
+  const sortedProperties = Object.entries(schema.properties).sort(([a], [b]) =>
+    a.localeCompare(b)
+  );
+
   return (
     <div className={`space-y-4 ${level > 0 ? 'pl-4 border-l border-border' : ''}`}>
-      {Object.entries(schema.properties).map(([key, fieldSchema]) => {
+      {sortedProperties.map(([key, fieldSchema]) => {
         const fullPath = basePath ? `${basePath}.${key}` : key;
         const value = getNestedValue(values, fullPath);
         const sectionCollapsed = isSectionCollapsed(fullPath);
