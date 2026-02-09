@@ -317,7 +317,7 @@ export interface AIProvider {
 export interface AIModelsResponse {
   success: boolean;
   provider: string;
-  source: 'api' | 'fallback';
+  source: 'api' | 'cache' | 'fallback';
   models: AIModel[];
   error?: string;
 }

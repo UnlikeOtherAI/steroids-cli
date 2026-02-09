@@ -10,12 +10,37 @@ interface RoleConfig {
   model: string;
 }
 
+// Installation commands for each provider
+const INSTALL_COMMANDS: Record<string, { command: string; description: string }> = {
+  claude: {
+    command: 'npm install -g @anthropic-ai/claude-code',
+    description: 'Install the Claude Code CLI to use Anthropic models.',
+  },
+  gemini: {
+    command: 'npm install -g @anthropic-ai/gemini-cli',
+    description: 'Install the Gemini CLI to use Google AI models.',
+  },
+  codex: {
+    command: 'npm install -g @openai/codex',
+    description: 'Install the Codex CLI to use OpenAI models.',
+  },
+};
+
+// API key environment variable names
+const API_KEY_ENV_VARS: Record<string, string> = {
+  claude: 'ANTHROPIC_API_KEY',
+  gemini: 'GOOGLE_API_KEY',
+  codex: 'OPENAI_API_KEY',
+};
+
 export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
   const [providers, setProviders] = useState<AIProvider[]>([]);
   const [models, setModels] = useState<Record<string, AIModel[]>>({});
+  const [modelSources, setModelSources] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
 
   // Role configurations
   const [orchestrator, setOrchestrator] = useState<RoleConfig>({ provider: '', model: '' });
@@ -34,17 +59,21 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
 
       // Load models for installed providers
       const modelsMap: Record<string, AIModel[]> = {};
+      const sourcesMap: Record<string, string> = {};
       for (const provider of providerList) {
         if (provider.installed) {
           try {
             const response = await aiApi.getModels(provider.id);
             modelsMap[provider.id] = response.models;
+            sourcesMap[provider.id] = response.source;
           } catch {
             modelsMap[provider.id] = [];
+            sourcesMap[provider.id] = 'fallback';
           }
         }
       }
       setModels(modelsMap);
+      setModelSources(sourcesMap);
     } catch (err) {
       setError('Failed to load AI providers');
     } finally {
@@ -61,8 +90,10 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
       try {
         const response = await aiApi.getModels(providerId);
         setModels(prev => ({ ...prev, [providerId]: response.models }));
+        setModelSources(prev => ({ ...prev, [providerId]: response.source }));
       } catch {
         setModels(prev => ({ ...prev, [providerId]: [] }));
+        setModelSources(prev => ({ ...prev, [providerId]: 'fallback' }));
       }
     }
   };
@@ -96,7 +127,13 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
     }
   };
 
-  const unavailableProviders = providers.filter(p => !p.installed);
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCommand(id);
+    setTimeout(() => setCopiedCommand(null), 2000);
+  };
+
+  const getProviderById = (id: string) => providers.find(p => p.id === id);
 
   const renderRoleSelector = (
     label: string,
@@ -105,14 +142,22 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
     setConfig: (role: 'orchestrator' | 'coder' | 'reviewer', provider: string) => void,
     setModel: React.Dispatch<React.SetStateAction<RoleConfig>>,
     role: 'orchestrator' | 'coder' | 'reviewer'
-  ) => (
-    <div className="bg-bg-base rounded-lg p-4 border border-border">
-      <div className="flex items-center gap-2 mb-3">
-        <i className={`fa-solid ${icon} text-accent`}></i>
-        <span className="font-medium text-text-primary">{label}</span>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
+  ) => {
+    const selectedProvider = getProviderById(config.provider);
+    const isNotInstalled = selectedProvider && !selectedProvider.installed;
+    const needsApiKey = selectedProvider?.installed && modelSources[config.provider] === 'fallback';
+    const installInfo = INSTALL_COMMANDS[config.provider];
+    const envVar = API_KEY_ENV_VARS[config.provider];
+
+    return (
+      <div className="bg-bg-base rounded-lg p-4 border border-border">
+        <div className="flex items-center gap-2 mb-3">
+          <i className={`fa-solid ${icon} text-accent`}></i>
+          <span className="font-medium text-text-primary">{label}</span>
+        </div>
+
+        {/* Provider Selection */}
+        <div className="mb-3">
           <label className="block text-xs text-text-muted mb-1">Provider</label>
           <select
             value={config.provider}
@@ -121,29 +166,88 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
           >
             <option value="">Select provider...</option>
             {providers.map(p => (
-              <option key={p.id} value={p.id} disabled={!p.installed}>
+              <option key={p.id} value={p.id}>
                 {p.name}{!p.installed ? ' (not installed)' : ''}
               </option>
             ))}
           </select>
         </div>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Model</label>
-          <select
-            value={config.model}
-            onChange={(e) => setModel(prev => ({ ...prev, model: e.target.value }))}
-            disabled={!config.provider}
-            className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-50"
-          >
-            <option value="">Select model...</option>
-            {(models[config.provider] || []).map(m => (
-              <option key={m.id} value={m.id}>{m.name || m.id}</option>
-            ))}
-          </select>
-        </div>
+
+        {/* Not Installed Warning */}
+        {isNotInstalled && installInfo && (
+          <div className="mb-3 p-3 bg-warning/10 border border-warning/30 rounded-lg">
+            <div className="flex items-start gap-2 text-warning text-sm mb-2">
+              <i className="fa-solid fa-triangle-exclamation mt-0.5"></i>
+              <span>{installInfo.description}</span>
+            </div>
+            <div className="relative">
+              <code className="block bg-bg-surface text-text-primary text-xs p-2 pr-10 rounded font-mono overflow-x-auto">
+                {installInfo.command}
+              </code>
+              <button
+                onClick={() => copyToClipboard(installInfo.command, `${role}-install`)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
+                title="Copy to clipboard"
+              >
+                <i className={`fa-solid ${copiedCommand === `${role}-install` ? 'fa-check text-success' : 'fa-copy'}`}></i>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Needs API Key Warning */}
+        {needsApiKey && envVar && (
+          <div className="mb-3 p-3 bg-info/10 border border-info/30 rounded-lg">
+            <div className="flex items-start gap-2 text-info text-sm mb-2">
+              <i className="fa-solid fa-key mt-0.5"></i>
+              <span>Set your API key to load models dynamically:</span>
+            </div>
+            <div className="relative">
+              <code className="block bg-bg-surface text-text-primary text-xs p-2 pr-10 rounded font-mono overflow-x-auto">
+                export {envVar}="your-api-key-here"
+              </code>
+              <button
+                onClick={() => copyToClipboard(`export ${envVar}="your-api-key-here"`, `${role}-env`)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
+                title="Copy to clipboard"
+              >
+                <i className={`fa-solid ${copiedCommand === `${role}-env` ? 'fa-check text-success' : 'fa-copy'}`}></i>
+              </button>
+            </div>
+            <p className="text-xs text-text-muted mt-2">
+              Add this to your shell profile (~/.zshrc or ~/.bashrc), then restart the API.
+            </p>
+          </div>
+        )}
+
+        {/* Model Selection - only show if provider is installed */}
+        {selectedProvider?.installed && (
+          <div>
+            <label className="block text-xs text-text-muted mb-1">
+              Model
+              {modelSources[config.provider] && (
+                <span className="ml-2 text-text-muted/60">
+                  ({modelSources[config.provider] === 'cache' ? 'from CLI cache' :
+                    modelSources[config.provider] === 'api' ? 'from API' : 'static list'})
+                </span>
+              )}
+            </label>
+            <select
+              value={config.model}
+              onChange={(e) => setModel(prev => ({ ...prev, model: e.target.value }))}
+              disabled={!config.provider}
+              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-50"
+            >
+              <option value="">Select model...</option>
+              {(models[config.provider] || []).map(m => (
+                <option key={m.id} value={m.id}>{m.name || m.id}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -172,21 +276,6 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
             </div>
           ) : (
             <>
-              {/* Unavailable providers notice */}
-              {unavailableProviders.length > 0 && (
-                <div className="mb-4 p-3 bg-bg-base border border-border rounded-lg">
-                  <div className="flex items-start gap-2 text-text-muted text-sm">
-                    <i className="fa-solid fa-info-circle mt-0.5"></i>
-                    <div>
-                      <span>Not available: {unavailableProviders.map(p => p.name).join(', ')}</span>
-                      <div className="text-xs mt-1">
-                        Install the required CLI tools to use these providers.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <div className="space-y-4">
                 {renderRoleSelector('Orchestrator', 'fa-sitemap', orchestrator, handleProviderChange, setOrchestrator, 'orchestrator')}
                 {renderRoleSelector('Coder', 'fa-code', coder, handleProviderChange, setCoder, 'coder')}

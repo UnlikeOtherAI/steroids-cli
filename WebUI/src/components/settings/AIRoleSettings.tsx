@@ -5,7 +5,30 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { ArrowPathIcon, CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline';
-import { aiApi, AIModel, ConfigSchema } from '../../services/api';
+import { aiApi, AIModel, AIProvider, ConfigSchema } from '../../services/api';
+
+// Installation commands for each provider
+const INSTALL_COMMANDS: Record<string, { command: string; description: string }> = {
+  claude: {
+    command: 'npm install -g @anthropic-ai/claude-code',
+    description: 'Install the Claude Code CLI to use Anthropic models.',
+  },
+  gemini: {
+    command: 'npm install -g @google/gemini-cli',
+    description: 'Install the Gemini CLI to use Google AI models.',
+  },
+  codex: {
+    command: 'npm install -g @openai/codex',
+    description: 'Install the Codex CLI to use OpenAI models.',
+  },
+};
+
+// API key environment variable names
+const API_KEY_ENV_VARS: Record<string, string> = {
+  claude: 'ANTHROPIC_API_KEY',
+  gemini: 'GOOGLE_API_KEY',
+  codex: 'OPENAI_API_KEY',
+};
 
 interface AIRoleSettingsProps {
   role: 'orchestrator' | 'coder' | 'reviewer';
@@ -24,8 +47,15 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
 }) => {
   const [models, setModels] = useState<AIModel[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
-  const [modelSource, setModelSource] = useState<'api' | 'fallback' | null>(null);
+  const [modelSource, setModelSource] = useState<'api' | 'cache' | 'fallback' | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
+  const [providers, setProviders] = useState<AIProvider[]>([]);
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
+
+  // Load providers on mount
+  useEffect(() => {
+    aiApi.getProviders().then(setProviders).catch(() => {});
+  }, []);
 
   // Get current values
   const getNestedValue = (obj: Record<string, unknown>, path: string): unknown => {
@@ -84,6 +114,19 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
     return r.charAt(0).toUpperCase() + r.slice(1);
   };
 
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCommand(id);
+    setTimeout(() => setCopiedCommand(null), 2000);
+  };
+
+  // Check if current provider is installed
+  const currentProviderInfo = providers.find(p => p.id === currentProvider);
+  const isNotInstalled = currentProviderInfo && !currentProviderInfo.installed;
+  const needsApiKey = currentProviderInfo?.installed && modelSource === 'fallback';
+  const installInfo = INSTALL_COMMANDS[currentProvider];
+  const envVar = API_KEY_ENV_VARS[currentProvider];
+
   return (
     <div className="space-y-4">
       {/* Provider Selection */}
@@ -100,73 +143,144 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
           }}
           className="w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
         >
-          {providerOptions.map((provider) => (
-            <option key={String(provider)} value={String(provider)}>
-              {formatProviderName(String(provider))}
-            </option>
-          ))}
+          {providerOptions.map((provider) => {
+            const providerInfo = providers.find(p => p.id === provider);
+            return (
+              <option key={String(provider)} value={String(provider)}>
+                {formatProviderName(String(provider))}{providerInfo && !providerInfo.installed ? ' (not installed)' : ''}
+              </option>
+            );
+          })}
         </select>
         <p className="text-xs text-text-muted mt-1">
           AI provider for {formatRoleName(role)} tasks
         </p>
       </div>
 
-      {/* Model Selection */}
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <label className="block text-sm font-medium text-text-primary">
-            Model
-          </label>
-          <div className="flex items-center gap-2">
-            {loadingModels && (
-              <ArrowPathIcon className="w-4 h-4 animate-spin text-text-muted" />
-            )}
-            {!loadingModels && modelSource === 'api' && (
-              <span className="flex items-center gap-1 text-xs text-green-600">
-                <CheckCircleIcon className="w-3 h-3" />
-                Live
-              </span>
-            )}
-            {!loadingModels && modelSource === 'fallback' && (
-              <span className="flex items-center gap-1 text-xs text-yellow-600">
-                <ExclamationCircleIcon className="w-3 h-3" />
-                Cached
-              </span>
-            )}
+      {/* Not Installed Warning */}
+      {isNotInstalled && installInfo && (
+        <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg">
+          <div className="flex items-start gap-2 text-warning text-sm mb-2">
+            <ExclamationCircleIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <span>{installInfo.description}</span>
+          </div>
+          <div className="relative">
+            <code className="block bg-bg-surface text-text-primary text-xs p-2 pr-10 rounded font-mono overflow-x-auto">
+              {installInfo.command}
+            </code>
             <button
-              type="button"
-              onClick={() => loadModels(currentProvider)}
-              disabled={loadingModels}
-              className="text-xs text-accent hover:text-accent/80"
+              onClick={() => copyToClipboard(installInfo.command, `${role}-install`)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
+              title="Copy to clipboard"
             >
-              Refresh
+              {copiedCommand === `${role}-install` ? (
+                <CheckCircleIcon className="w-4 h-4 text-green-500" />
+              ) : (
+                <span className="text-xs">Copy</span>
+              )}
             </button>
           </div>
         </div>
-        <select
-          value={currentModel}
-          onChange={(e) => onChange(`${basePath}.model`, e.target.value)}
-          disabled={loadingModels || models.length === 0}
-          className="w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
-        >
-          <option value="">Select a model...</option>
-          {models.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.name}
-            </option>
-          ))}
-        </select>
-        {modelError && (
-          <p className="text-xs text-yellow-600 mt-1">
-            {modelError} - showing cached models
+      )}
+
+      {/* Needs API Key Warning */}
+      {needsApiKey && envVar && (
+        <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+          <div className="flex items-start gap-2 text-blue-400 text-sm mb-2">
+            <ExclamationCircleIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <span>Set your API key to load models dynamically:</span>
+          </div>
+          <div className="relative">
+            <code className="block bg-bg-surface text-text-primary text-xs p-2 pr-10 rounded font-mono overflow-x-auto">
+              export {envVar}="your-api-key-here"
+            </code>
+            <button
+              onClick={() => copyToClipboard(`export ${envVar}="your-api-key-here"`, `${role}-env`)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
+              title="Copy to clipboard"
+            >
+              {copiedCommand === `${role}-env` ? (
+                <CheckCircleIcon className="w-4 h-4 text-green-500" />
+              ) : (
+                <span className="text-xs">Copy</span>
+              )}
+            </button>
+          </div>
+          <p className="text-xs text-text-muted mt-2">
+            Add this to your shell profile (~/.zshrc or ~/.bashrc), then restart the API.
           </p>
-        )}
-        {!modelError && modelSource === 'api' && (
-          <p className="text-xs text-text-muted mt-1">
-            Models fetched from {formatProviderName(currentProvider)} API
-          </p>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Model Selection - only show if provider is installed */}
+      {(!currentProviderInfo || currentProviderInfo.installed) && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-sm font-medium text-text-primary">
+              Model
+            </label>
+            <div className="flex items-center gap-2">
+              {loadingModels && (
+                <ArrowPathIcon className="w-4 h-4 animate-spin text-text-muted" />
+              )}
+              {!loadingModels && modelSource === 'api' && (
+                <span className="flex items-center gap-1 text-xs text-green-600">
+                  <CheckCircleIcon className="w-3 h-3" />
+                  Live
+                </span>
+              )}
+              {!loadingModels && modelSource === 'cache' && (
+                <span className="flex items-center gap-1 text-xs text-green-600">
+                  <CheckCircleIcon className="w-3 h-3" />
+                  From CLI
+                </span>
+              )}
+              {!loadingModels && modelSource === 'fallback' && (
+                <span className="flex items-center gap-1 text-xs text-yellow-600">
+                  <ExclamationCircleIcon className="w-3 h-3" />
+                  Static
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => loadModels(currentProvider)}
+                disabled={loadingModels}
+                className="text-xs text-accent hover:text-accent/80"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+          <select
+            value={currentModel}
+            onChange={(e) => onChange(`${basePath}.model`, e.target.value)}
+            disabled={loadingModels || models.length === 0}
+            className="w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
+          >
+            <option value="">Select a model...</option>
+            {models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name}
+              </option>
+            ))}
+          </select>
+          {modelError && (
+            <p className="text-xs text-yellow-600 mt-1">
+              {modelError} - showing cached models
+            </p>
+          )}
+          {!modelError && modelSource === 'api' && (
+            <p className="text-xs text-text-muted mt-1">
+              Models fetched from {formatProviderName(currentProvider)} API
+            </p>
+          )}
+          {!modelError && modelSource === 'cache' && (
+            <p className="text-xs text-text-muted mt-1">
+              Models loaded from CLI cache
+            </p>
+          )}
+        </div>
+      )}
 
       {/* CLI Path (optional) */}
       <div>
