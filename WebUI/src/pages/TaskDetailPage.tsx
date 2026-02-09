@@ -253,7 +253,7 @@ export const TaskDetailPage: React.FC = () => {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-text-primary mb-2">
-              #{task.id}: {task.title}
+              {task.title}
             </h1>
             <div className="flex items-center gap-3 text-sm text-text-muted">
               {task.section_name && (

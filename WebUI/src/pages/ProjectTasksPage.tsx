@@ -186,7 +186,7 @@ export const ProjectTasksPage: React.FC = () => {
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-text-primary truncate">
                   <i className="fa-solid fa-arrow-up-right-from-square text-xs text-text-muted mr-2"></i>
-                  #{task.id}: {task.title}
+                  {task.title}
                 </div>
                 <div className="text-xs text-text-muted flex gap-2 mt-1">
                   {task.section_name && (
