@@ -3,10 +3,9 @@
  * Following the exact templates from PROMPTS.md
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { Task, RejectionEntry } from '../database/queries.js';
 import type { SteroidsConfig } from '../config/loader.js';
+import { getSourceFileContent } from './prompt-helpers.js';
 
 export interface SectionTask {
   id: string;
@@ -24,30 +23,6 @@ export interface ReviewerPromptContext {
   rejectionHistory?: RejectionEntry[];  // Past rejections with commit hashes
   submissionNotes?: string | null;  // Notes from coder when submitting for review
   config: SteroidsConfig;  // Config for quality settings
-}
-
-/**
- * Read source file content if specified
- */
-function getSourceFileContent(
-  projectPath: string,
-  sourceFile?: string | null
-): string {
-  if (!sourceFile) {
-    return 'No specification file linked.';
-  }
-
-  const fullPath = join(projectPath, sourceFile);
-  if (!existsSync(fullPath)) {
-    return `Specification file not found: ${sourceFile}`;
-  }
-
-  const content = readFileSync(fullPath, 'utf-8');
-  // Truncate if too long (max 10000 chars per spec)
-  if (content.length > 10000) {
-    return content.substring(0, 10000) + `\n\n[Content truncated. Full file at: ${sourceFile}]`;
-  }
-  return content;
 }
 
 // Maximum tasks to show in section context (prevents prompt bloat)
@@ -82,16 +57,24 @@ ${notes}
 - Include exact code snippets that need to change
 - Point to similar working patterns in the codebase
 - Explain WHY the current approach doesn't work, not just WHAT is wrong
-${rejections.length >= 5 ? `
-**⚠️ HIGH REJECTION COUNT (${rejections.length})** - Consider explaining from a different angle
-` : ''}`;
+- **NEVER demand global/overall project coverage** - only coverage for THIS task's modified files
+- **Follow the project's architecture** - if coder's approach matches existing patterns, accept it`;
+
+  const highRejectionWarning = rejections.length >= 3 ? `
+
+**CRITICAL: This task has been rejected ${rejections.length} times.**
+- If you are about to reject for the SAME reasons as before, consider whether the requirement is achievable
+- If the coder has attempted to address your feedback but can't fully resolve it, consider APPROVING with notes
+- If there's a fundamental disagreement, use DISPUTE instead of rejecting again
+- Ask yourself: "Is what I'm asking for within the scope of THIS single task?"
+` : '';
 
   return `
 ---
 
-## Rejection History
-
-**IMPORTANT:** Review this history carefully before making your decision.
+## Rejection History (${rejections.length} previous)
+${highRejectionWarning}
+**Review this history carefully before making your decision.**
 - Look for patterns: Is the same issue being raised repeatedly?
 - If an issue was raised before and not fixed, be MORE SPECIFIC about what exactly needs to change
 - Use commit hashes to examine previous attempts: \`git show <hash>\`
@@ -148,25 +131,31 @@ ${lines.join('\n')}
 
 /**
  * Generate test coverage instructions if required
+ * Coverage is scoped to MODIFIED FILES ONLY - not global project coverage
  */
-function getTestCoverageInstructions(config: SteroidsConfig): string {
+function getTestCoverageInstructions(config: SteroidsConfig, modifiedFiles?: string[]): string {
   if (!config.quality?.tests?.required) {
     return '';
   }
 
-  const minCoverageNote = config.quality.tests.minCoverage !== undefined
-    ? `- Minimum coverage: ${config.quality.tests.minCoverage}%`
-    : '';
+  const minCoverage = config.quality.tests.minCoverage ?? 80;
+
+  const filesScope = modifiedFiles && modifiedFiles.length > 0
+    ? `- Coverage applies to files MODIFIED IN THIS TASK:\n${modifiedFiles.map(f => `  - ${f}`).join('\n')}`
+    : '- Coverage applies to the files modified in this task';
 
   return `
 
-## Test Coverage (REQUIRED)
+## Test Coverage (REQUIRED - SCOPED TO THIS TASK)
 
-**This project requires tests for new code:**
-- Verify new functionality has corresponding tests
-- Tests must actually exercise the new code paths
-${minCoverageNote}
-- REJECT if tests are missing or inadequate
+**This project requires tests for new code.**
+
+${filesScope}
+- Target coverage for THIS TASK's modified files: ${minCoverage}%
+- Tests must exercise the new/changed code paths
+- **DO NOT demand global/overall project coverage from a single task**
+- Other modules' coverage is tracked separately and is NOT this task's responsibility
+- REJECT only if tests for the NEW CODE in this task are missing or inadequate
 `;
 }
 
@@ -208,9 +197,12 @@ The coder included these notes when submitting for review:
     ? modifiedFiles.map(f => `- ${f}`).join('\n')
     : 'No files modified';
 
-  return `# STEROIDS REVIEWER TASK
+  return `# TASK: ${task.id.substring(0, 8)} - ${task.title}
+# Status: review | Rejections: ${task.rejection_count}/15
 
 You are a REVIEWER in an automated task execution system. Your job is to verify the coder's implementation matches the specification.
+
+**Follow the project's existing architecture.** If the coder's implementation follows the patterns already established in the codebase (as described in AGENTS.md), do not reject for architectural style differences. Focus on correctness and spec compliance.
 
 ---
 
@@ -218,7 +210,6 @@ You are a REVIEWER in an automated task execution system. Your job is to verify 
 
 **Task ID:** ${task.id}
 **Title:** ${task.title}
-**Status:** review (submitted by coder)
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
 ${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}
@@ -252,7 +243,7 @@ Answer these questions:
 3. Are tests present and adequate?
 4. Does code follow AGENTS.md guidelines?
 5. Are all files under 500 lines?
-${getTestCoverageInstructions(config)}
+${getTestCoverageInstructions(config, modifiedFiles)}
 ---
 
 ## Your Decision
@@ -416,7 +407,7 @@ ${diffContent}
 ${filesListFormatted}
 
 ---
-${getTestCoverageInstructions(config)}
+${getTestCoverageInstructions(config, modifiedFiles)}
 ## Review Checklist (For Each Task)
 
 For EACH task, verify:

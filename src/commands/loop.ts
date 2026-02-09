@@ -13,6 +13,7 @@ import {
   updateTaskStatus,
   approveTask,
   rejectTask,
+  getTaskRejections,
   getSection,
   getSectionByName,
   listSections,
@@ -25,6 +26,7 @@ import {
 } from '../orchestrator/task-selector.js';
 import { invokeCoder } from '../orchestrator/coder.js';
 import { invokeReviewer } from '../orchestrator/reviewer.js';
+import { invokeCoordinator } from '../orchestrator/coordinator.js';
 import { pushToRemote } from '../git/push.js';
 import { getCurrentCommitSha } from '../git/status.js';
 import { hasActiveRunnerForProject } from '../runners/wakeup.js';
@@ -426,11 +428,51 @@ async function runCoderPhase(
 ): Promise<void> {
   if (!task) return;
 
+  let coordinatorGuidance: string | undefined;
+
+  // After 2nd rejection, invoke coordinator to break potential deadlocks
+  if (task.rejection_count >= 2) {
+    if (!jsonMode) {
+      console.log(`\n>>> Task has ${task.rejection_count} rejections - invoking COORDINATOR...\n`);
+    }
+
+    try {
+      const rejectionHistory = getTaskRejections(db, task.id);
+      const coordResult = await invokeCoordinator(task, rejectionHistory, projectPath);
+
+      if (coordResult) {
+        if (coordResult.shouldDispute) {
+          // Coordinator recommends dispute - create it and move on
+          if (!jsonMode) {
+            console.log(`\nCoordinator recommends DISPUTE: ${coordResult.disputeReason}`);
+            console.log('Creating system dispute and moving to next task...');
+          }
+          updateTaskStatus(
+            db, task.id, 'disputed', 'system:coordinator',
+            `Coordinator intervention: ${coordResult.disputeReason}`
+          );
+          return;
+        }
+
+        // Pass guidance to coder
+        coordinatorGuidance = coordResult.guidance;
+        if (!jsonMode) {
+          console.log('\nCoordinator provided guidance for the coder.');
+        }
+      }
+    } catch (error) {
+      // Coordinator failure is non-fatal - continue without guidance
+      if (!jsonMode) {
+        console.warn('Coordinator invocation failed, continuing without guidance:', error);
+      }
+    }
+  }
+
   if (!jsonMode) {
     console.log('\n>>> Invoking CODER...\n');
   }
 
-  const result = await invokeCoder(task, projectPath, action);
+  const result = await invokeCoder(task, projectPath, action, coordinatorGuidance);
 
   if (result.timedOut) {
     console.warn('Coder timed out. Will retry next iteration.');

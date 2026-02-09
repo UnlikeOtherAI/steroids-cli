@@ -116,11 +116,13 @@ async function invokeProvider(
 
 /**
  * Invoke coder for a task
+ * @param coordinatorGuidance Optional guidance from coordinator after repeated rejections
  */
 export async function invokeCoder(
   task: Task,
   projectPath: string,
-  action: 'start' | 'resume'
+  action: 'start' | 'resume',
+  coordinatorGuidance?: string
 ): Promise<CoderResult> {
   // Load config to show provider/model being used
   const config = loadConfig(projectPath);
@@ -132,6 +134,9 @@ export async function invokeCoder(
   console.log(`Task ID: ${task.id}`);
   console.log(`Provider: ${coderConfig?.provider ?? 'not configured'}`);
   console.log(`Model: ${coderConfig?.model ?? 'not configured'}`);
+  if (coordinatorGuidance) {
+    console.log(`Coordinator guidance: included (${coordinatorGuidance.length} chars)`);
+  }
   console.log(`${'='.repeat(60)}\n`);
 
   // Fetch rejection history so coder can see past attempts
@@ -152,6 +157,7 @@ export async function invokeCoder(
     projectPath,
     previousStatus: task.status,
     rejectionHistory,
+    coordinatorGuidance,
   };
 
   let prompt: string;
