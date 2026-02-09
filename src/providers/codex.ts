@@ -43,8 +43,9 @@ const DEFAULT_TIMEOUT = 900_000;
 /**
  * Default invocation template for Codex CLI
  * Uses exec --full-auto with prompt from stdin (- means read from stdin)
+ * --skip-git-repo-check allows running outside trusted directories
  */
-const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec --full-auto -';
+const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec --full-auto --skip-git-repo-check -';
 
 /**
  * Codex AI Provider implementation
