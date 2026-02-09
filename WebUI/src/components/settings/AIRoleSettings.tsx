@@ -178,7 +178,7 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
           type="text"
           value={currentCli}
           onChange={(e) => onChange(`${basePath}.cli`, e.target.value)}
-          placeholder={`Default: ${currentProvider === 'claude' ? 'claude' : currentProvider}`}
+          placeholder={`Default: ${currentProvider === 'claude' ? 'claude' : currentProvider === 'openai' ? 'codex' : currentProvider}`}
           className="w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent"
         />
         <p className="text-xs text-text-muted mt-1">
