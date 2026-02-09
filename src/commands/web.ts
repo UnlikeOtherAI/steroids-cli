@@ -106,6 +106,10 @@ function installAndBuild(out: ReturnType<typeof createOutput>): void {
     process.exit(1);
   }
 
+  // Install root dependencies first (needed for ../src/ imports in API)
+  out.log('Installing root dependencies...');
+  run('npm install', WEB_DIR);
+
   out.log('Installing API dependencies...');
   run('npm install', apiDir);
 
