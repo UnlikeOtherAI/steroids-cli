@@ -1012,7 +1012,7 @@ OPTIONS:
     return;
   }
 
-  const results = wakeup({
+  const results = await wakeup({
     quiet: values.quiet || flags.quiet || values.json || flags.json,
     dryRun: flags.dryRun,
   });

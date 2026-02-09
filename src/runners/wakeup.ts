@@ -28,16 +28,15 @@ export interface WakeupResult {
 /**
  * Check if a project has pending work
  */
-function projectHasPendingWork(projectPath: string): boolean {
+async function projectHasPendingWork(projectPath: string): Promise<boolean> {
   const dbPath = join(projectPath, '.steroids', 'steroids.db');
   if (!existsSync(dbPath)) {
     return false;
   }
 
   try {
-    // Dynamic import to avoid loading better-sqlite3 if not needed
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Database = require('better-sqlite3');
+    // Use dynamic import for ESM compatibility
+    const { default: Database } = await import('better-sqlite3');
     const db = new Database(dbPath, { readonly: true });
 
     const result = db
@@ -118,7 +117,7 @@ function startRunner(projectPath: string): { pid: number } | null {
  * Iterates over ALL registered projects and starts runners as needed
  * Returns per-project results
  */
-export function wakeup(options: WakeupOptions = {}): WakeupResult[] {
+export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[]> {
   const { quiet = false, dryRun = false } = options;
   const results: WakeupResult[] = [];
 
@@ -200,7 +199,7 @@ export function wakeup(options: WakeupOptions = {}): WakeupResult[] {
     }
 
     // Check for pending work
-    if (!projectHasPendingWork(project.path)) {
+    if (!(await projectHasPendingWork(project.path))) {
       log(`Skipping ${project.path}: no pending tasks`);
       results.push({
         action: 'none',
@@ -253,10 +252,10 @@ export function wakeup(options: WakeupOptions = {}): WakeupResult[] {
 /**
  * Check if wake-up is needed without taking action
  */
-export function checkWakeupNeeded(): {
+export async function checkWakeupNeeded(): Promise<{
   needed: boolean;
   reason: string;
-} {
+}> {
   const lockStatus = checkLockStatus();
 
   if (lockStatus.locked && lockStatus.pid) {
@@ -284,7 +283,7 @@ export function checkWakeupNeeded(): {
   let projectsWithWork = 0;
 
   for (const project of registeredProjects) {
-    if (existsSync(project.path) && projectHasPendingWork(project.path)) {
+    if (existsSync(project.path) && (await projectHasPendingWork(project.path))) {
       projectsWithWork++;
     }
   }
