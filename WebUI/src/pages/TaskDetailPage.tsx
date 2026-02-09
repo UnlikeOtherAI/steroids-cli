@@ -52,9 +52,10 @@ function getActorIcon(actor: string): string {
 interface AuditLogRowProps {
   entry: AuditEntry;
   isLatest: boolean;
+  githubUrl: string | null;
 }
 
-const AuditLogRow: React.FC<AuditLogRowProps> = ({ entry, isLatest }) => {
+const AuditLogRow: React.FC<AuditLogRowProps> = ({ entry, isLatest, githubUrl }) => {
   return (
     <div className={`p-4 border-l-4 ${isLatest ? 'border-accent bg-bg-surface' : 'border-border bg-bg-base'}`}>
       <div className="flex items-start gap-4">
@@ -85,8 +86,23 @@ const AuditLogRow: React.FC<AuditLogRowProps> = ({ entry, isLatest }) => {
           )}
           {entry.commit_sha && (
             <div className="mt-2 text-xs text-text-muted">
-              <i className="fa-solid fa-code-commit mr-1"></i>
-              Commit: <code className="bg-bg-surface px-1 rounded">{entry.commit_sha.slice(0, 7)}</code>
+              {githubUrl ? (
+                <a
+                  href={`${githubUrl}/commit/${entry.commit_sha}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 hover:text-accent transition-colors"
+                >
+                  <i className="fa-brands fa-github"></i>
+                  <code className="bg-bg-surface px-1 rounded">{entry.commit_sha.slice(0, 7)}</code>
+                  <i className="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                </a>
+              ) : (
+                <>
+                  <i className="fa-solid fa-code-commit mr-1"></i>
+                  Commit: <code className="bg-bg-surface px-1 rounded">{entry.commit_sha.slice(0, 7)}</code>
+                </>
+              )}
             </div>
           )}
           <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
@@ -316,7 +332,7 @@ export const TaskDetailPage: React.FC = () => {
         ) : (
           <div className="divide-y divide-border">
             {task.audit_trail.map((entry, index) => (
-              <AuditLogRow key={entry.id} entry={entry} isLatest={index === 0} />
+              <AuditLogRow key={entry.id} entry={entry} isLatest={index === 0} githubUrl={task.github_url} />
             ))}
           </div>
         )}

@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { execSync } from 'node:child_process';
 
 const router = Router();
 
@@ -41,6 +42,39 @@ interface TaskResponse extends TaskDetails {
     review_seconds: number;
   };
   audit_trail: AuditEntry[];
+  github_url: string | null;
+}
+
+/**
+ * Get GitHub URL from git remote
+ * @param projectPath - Path to project root
+ * @returns GitHub base URL (e.g., https://github.com/owner/repo) or null
+ */
+function getGitHubUrl(projectPath: string): string | null {
+  try {
+    const remoteUrl = execSync('git remote get-url origin', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+    }).trim();
+
+    // Convert SSH or HTTPS URL to web URL
+    // SSH: git@github.com:owner/repo.git
+    // HTTPS: https://github.com/owner/repo.git
+    let webUrl: string | null = null;
+
+    if (remoteUrl.startsWith('git@github.com:')) {
+      // SSH format
+      const path = remoteUrl.replace('git@github.com:', '').replace(/\.git$/, '');
+      webUrl = `https://github.com/${path}`;
+    } else if (remoteUrl.includes('github.com')) {
+      // HTTPS format
+      webUrl = remoteUrl.replace(/\.git$/, '');
+    }
+
+    return webUrl;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -165,22 +199,11 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
         }
       }
 
-      // Calculate total duration from first entry to now or completion
-      let totalSeconds = 0;
-      if (auditWithDurations.length > 0) {
-        const firstEntry = auditWithDurations[0];
-        const startTime = new Date(firstEntry.created_at).getTime();
+      // Total time is just the sum of active work time (coding + review)
+      const totalSeconds = inProgressSeconds + reviewSeconds;
 
-        // If task is completed, use the last audit entry time
-        if (task.status === 'completed') {
-          const lastEntry = auditWithDurations[auditWithDurations.length - 1];
-          const endTime = new Date(lastEntry.created_at).getTime();
-          totalSeconds = Math.round((endTime - startTime) / 1000);
-        } else {
-          // Still in progress - use now
-          totalSeconds = Math.round((Date.now() - startTime) / 1000);
-        }
-      }
+      // Get GitHub URL for commit links
+      const githubUrl = getGitHubUrl(projectPath);
 
       const response: TaskResponse = {
         ...task,
@@ -190,6 +213,7 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
           review_seconds: reviewSeconds,
         },
         audit_trail: auditWithDurations.reverse(), // Most recent first for display
+        github_url: githubUrl,
       };
 
       res.json({

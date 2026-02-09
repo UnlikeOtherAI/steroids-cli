@@ -34,6 +34,7 @@ export interface TaskDetails {
   updated_at: string;
   duration: TaskDuration;
   audit_trail: AuditEntry[];
+  github_url: string | null;
 }
 
 export interface TaskDetailsResponse {
