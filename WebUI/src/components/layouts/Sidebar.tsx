@@ -84,7 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   };
 
   return (
-    <aside className="w-60 bg-sidebar flex flex-col h-full min-h-screen lg:min-h-full lg:rounded-l-xl">
+    <aside className="w-60 bg-sidebar flex flex-col h-full max-h-screen lg:max-h-full lg:rounded-l-xl">
       <div className="py-4 pr-4 flex items-center justify-between overflow-hidden">
         <div className="flex items-center">
           <img src="/logo-hand.png" alt="" className="h-20 w-auto" style={{ marginLeft: '-2px' }} />
@@ -99,7 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           </button>
         )}
       </div>
-      <nav className="flex-1 px-3 space-y-1">
+      <nav className="flex-1 overflow-y-auto px-3 space-y-1">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -114,7 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           </NavLink>
         ))}
       </nav>
-      <div className="p-4">
+      <div className="flex-shrink-0 p-4">
         <button
           onClick={handleCronToggle}
           disabled={loading || cronInstalled === null}
