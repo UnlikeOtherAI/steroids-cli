@@ -30,21 +30,17 @@ const CONFIG_FILE = 'config.yaml';
 
 /**
  * Get config schema by running CLI command
- * Uses node directly with the built CLI to avoid PATH issues
+ * Uses the globally installed steroids command
  */
 function getSchema(category?: string): object | null {
   try {
-    // Get path to the CLI dist directory
-    // When running from API/dist/API/src/routes/config.js, we need to go up to project root
-    const cliPath = join(__dirname, '..', '..', '..', '..', '..', 'dist', 'index.js');
     const cmd = category
-      ? `node "${cliPath}" config schema ${category}`
-      : `node "${cliPath}" config schema`;
+      ? `steroids config schema ${category} --json`
+      : `steroids config schema --json`;
     const output = execSync(cmd, { encoding: 'utf-8', timeout: 5000 });
     return JSON.parse(output);
   } catch (error) {
     console.error('Failed to get schema:', error);
-    console.error('CLI path attempted:', join(__dirname, '..', '..', '..', '..', '..', 'dist', 'index.js'));
     return null;
   }
 }
