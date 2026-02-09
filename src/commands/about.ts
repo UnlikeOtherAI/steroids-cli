@@ -117,6 +117,32 @@ EXAMPLE SPEC STRUCTURE (specs/feature-name.md):
   - [ ] Tests pass
   - [ ] Documentation updated
 
+ADDING TASKS
+-----------
+steroids tasks add <title> --section <id> --source <spec-file> [options]
+
+Required:
+  --section <id>    Section the task belongs to
+  --source <file>   Specification markdown file for the coder/reviewer
+
+Optional:
+  --file <path>     Anchor task to a specific file (must be committed in git)
+  --line <number>   Line number in the anchored file (requires --file)
+  --feedback        Add to "Needs User Input" section (skips --section/--source)
+
+When --file is used, Steroids validates the file is tracked and clean in git,
+then auto-captures the commit SHA and content hash. The coder/reviewer prompts
+will reference this exact file location.
+
+When --feedback is used, the task goes to a special skipped section called
+"Needs User Input" that the runner ignores. Use for advisory items, disputes,
+or anything needing human review.
+
+Examples:
+  steroids tasks add "Implement login" --section abc123 --source specs/login.md
+  steroids tasks add "Fix null check" --section abc123 --source spec.md --file src/utils.ts --line 42
+  steroids tasks add "Review execSync usage" --feedback
+
 INITIALIZING A PROJECT:
   1. steroids init                    # Creates .steroids/ directory
   2. Create specs/ with your specifications
@@ -228,6 +254,8 @@ export async function aboutCommand(args: string[], flags: GlobalFlags): Promise<
         'Create specs/ with your specifications',
         'steroids sections add "Phase 1: Feature Name"',
         'steroids tasks add "Task title" --section <id> --source specs/spec.md',
+        'steroids tasks add "Task title" --section <id> --source spec.md --file src/foo.ts --line 42  (anchor to file)',
+        'steroids tasks add "Advisory note" --feedback  (skipped section for human review)',
         'steroids loop - start processing',
       ],
     },

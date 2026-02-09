@@ -46,6 +46,14 @@ steroids tasks --status active --global # active across ALL projects
 steroids tasks --status all             # all tasks
 steroids tasks audit <id>               # view task spec, history, rejection notes
 
+### Add Tasks
+steroids tasks add "Title" --section <id> --source <spec-file>
+steroids tasks add "Title" --section <id> --source spec.md --file src/foo.ts --line 42
+  --file must be committed in git (auto-captures commit SHA + content hash)
+  --line requires --file
+steroids tasks add "Advisory note" --feedback
+  --feedback: creates task in skipped "Needs User Input" section (no --section/--source needed)
+
 ### Manage Tasks
 steroids tasks update <id> --status <s> --actor model --model <m>
   statuses: pending, in_progress, review, completed, skipped, partial
