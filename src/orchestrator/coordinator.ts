@@ -5,13 +5,20 @@
  * and provide actionable guidance to the coder
  */
 
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task, RejectionEntry } from '../database/queries.js';
 import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
+import { getAgentsMd, getSourceFileContent } from '../prompts/prompt-helpers.js';
+
+export interface CoordinatorContext {
+  sectionTasks?: { id: string; title: string; status: string }[];
+  submissionNotes?: string | null;
+  gitDiffSummary?: string;
+}
 
 export interface CoordinatorResult {
   success: boolean;
@@ -22,17 +29,57 @@ export interface CoordinatorResult {
 /**
  * Generate the coordinator prompt
  * The coordinator reviews rejection history and MUST provide a path forward
+ * Gets full project context: architecture, spec, and user-facing perspective
  */
 function generateCoordinatorPrompt(
   task: Task,
   rejectionHistory: RejectionEntry[],
-  projectPath: string
+  projectPath: string,
+  extra?: CoordinatorContext
 ): string {
   const rejectionSummary = rejectionHistory.map(r =>
     `### Rejection #${r.rejection_number}
 ${r.notes || '(no notes)'}
 `
   ).join('\n---\n');
+
+  // Pull in project context so coordinator understands the bigger picture
+  const agentsMd = getAgentsMd(projectPath);
+  const specContent = getSourceFileContent(projectPath, task.source_file);
+
+  // Build optional context sections
+  const sectionTasksSection = extra?.sectionTasks && extra.sectionTasks.length > 1
+    ? `
+---
+
+## Other Tasks in This Section
+
+This task is part of a group. Other tasks handle related work - don't demand this task does their job:
+${extra.sectionTasks.filter(t => t.id !== task.id).map(t => `- [${t.status}] ${t.title}`).join('\n')}
+`
+    : '';
+
+  const submissionNotesSection = extra?.submissionNotes
+    ? `
+---
+
+## Coder's Latest Submission Notes
+
+> ${extra.submissionNotes}
+`
+    : '';
+
+  const diffSection = extra?.gitDiffSummary
+    ? `
+---
+
+## What The Coder Actually Changed (Latest Attempt)
+
+\`\`\`
+${extra.gitDiffSummary}
+\`\`\`
+`
+    : '';
 
   return `# COORDINATOR INTERVENTION
 
@@ -52,9 +99,34 @@ A task has been rejected ${rejectionHistory.length} times. You MUST provide a de
 
 ---
 
+## Task Specification (The Brief)
+
+From: ${task.source_file ?? '(not specified)'}
+
+${specContent}
+
+---
+
+## Project Architecture & Best Practices
+
+${agentsMd}
+
+---
+
 ## Full Rejection History
 
 ${rejectionSummary}
+${sectionTasksSection}${submissionNotesSection}${diffSection}
+---
+
+## Your Decision Framework
+
+When making your decision, always consider:
+
+1. **Architecture** - Does the coder's approach follow the project's established patterns and best practices (see above)?
+2. **The brief** - Does the implementation actually deliver what the specification asks for?
+3. **User value** - Will this be usable and useful for the end user? Don't get bogged down in technical perfection at the expense of shipping.
+4. **Scope** - Is the reviewer asking for things outside this single task's responsibility?
 
 ---
 
@@ -80,7 +152,7 @@ GUIDANCE:
 - Which files to modify and what changes to make
 - What reviewer feedback to address vs what to ignore
 - If the reviewer demands global metrics, tell the coder to focus on task-scoped coverage only
-- If there's a design disagreement, pick an approach and commit to it
+- If there's a design disagreement, pick the approach that best fits the project architecture
 - Give the coder a clear path to get this task approved)
 
 ---
@@ -89,8 +161,9 @@ GUIDANCE:
 
 - You MUST provide guidance that unblocks the task. "Try again" is not guidance.
 - If the reviewer demands global project metrics from a single task, tell the coder to ignore that demand
-- If there's a design disagreement, PICK ONE APPROACH and tell the coder to follow it
+- If there's a design disagreement, PICK the approach that matches the project's architecture and tell the coder to follow it
 - If the same feedback appeared 3+ times unchanged, the coder needs a fundamentally different approach - describe it
+- Always ask: "Will this be usable for the end user?" - if the current approach works for users, don't block on technicalities
 - Keep guidance under 500 words
 - Focus on UNBLOCKING - the goal is to get this task approved on the next attempt
 `;
@@ -120,7 +193,8 @@ function parseCoordinatorResponse(output: string): CoordinatorResult {
 export async function invokeCoordinator(
   task: Task,
   rejectionHistory: RejectionEntry[],
-  projectPath: string
+  projectPath: string,
+  extra?: CoordinatorContext
 ): Promise<CoordinatorResult | null> {
   const config = loadConfig(projectPath);
   const orchestratorConfig = config.ai?.orchestrator;
@@ -148,7 +222,7 @@ export async function invokeCoordinator(
     return null;
   }
 
-  const prompt = generateCoordinatorPrompt(task, rejectionHistory, projectPath);
+  const prompt = generateCoordinatorPrompt(task, rejectionHistory, projectPath, extra);
 
   // Write prompt to temp file
   const tempPath = join(tmpdir(), `steroids-coordinator-${Date.now()}.txt`);

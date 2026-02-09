@@ -14,6 +14,8 @@ import {
   approveTask,
   rejectTask,
   getTaskRejections,
+  getLatestSubmissionNotes,
+  listTasks,
   getSection,
   getSectionByName,
   listSections,
@@ -26,9 +28,9 @@ import {
 } from '../orchestrator/task-selector.js';
 import { invokeCoder } from '../orchestrator/coder.js';
 import { invokeReviewer } from '../orchestrator/reviewer.js';
-import { invokeCoordinator } from '../orchestrator/coordinator.js';
+import { invokeCoordinator, type CoordinatorContext } from '../orchestrator/coordinator.js';
 import { pushToRemote } from '../git/push.js';
-import { getCurrentCommitSha } from '../git/status.js';
+import { getCurrentCommitSha, getModifiedFiles } from '../git/status.js';
 import { hasActiveRunnerForProject } from '../runners/wakeup.js';
 import { getRegisteredProject } from '../runners/projects.js';
 import { generateHelp } from '../cli/help.js';
@@ -438,7 +440,28 @@ async function runCoderPhase(
 
     try {
       const rejectionHistory = getTaskRejections(db, task.id);
-      const coordResult = await invokeCoordinator(task, rejectionHistory, projectPath);
+
+      // Gather extra context for the coordinator
+      const coordExtra: CoordinatorContext = {};
+
+      // Section tasks - so coordinator knows what other tasks handle
+      if (task.section_id) {
+        const allSectionTasks = listTasks(db, { sectionId: task.section_id });
+        coordExtra.sectionTasks = allSectionTasks.map(t => ({
+          id: t.id, title: t.title, status: t.status,
+        }));
+      }
+
+      // Coder's latest submission notes
+      coordExtra.submissionNotes = getLatestSubmissionNotes(db, task.id);
+
+      // What files were modified (lightweight diff summary)
+      const modified = getModifiedFiles(projectPath);
+      if (modified.length > 0) {
+        coordExtra.gitDiffSummary = modified.join('\n');
+      }
+
+      const coordResult = await invokeCoordinator(task, rejectionHistory, projectPath, coordExtra);
 
       if (coordResult) {
         coordinatorGuidance = coordResult.guidance;
