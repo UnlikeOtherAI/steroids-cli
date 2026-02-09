@@ -1,12 +1,17 @@
 /**
  * Cron management for runner wake-up
+ * Uses launchd on macOS (no permissions needed), cron on Linux
  */
 
 import { execSync, spawnSync } from 'node:child_process';
-import { platform } from 'node:os';
+import { platform, homedir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 
 const CRON_COMMENT = '# steroids-runners-wakeup';
 const CRON_ENTRY = '* * * * * steroids runners wakeup --quiet';
+const LAUNCHD_LABEL = 'com.unlikeotherai.steroids.wakeup';
+const LAUNCHD_PLIST = join(homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
 
 export interface CronStatus {
   installed: boolean;
@@ -74,7 +79,158 @@ function findSteroidsPath(): string {
 }
 
 /**
- * Check cron installation status
+ * Generate launchd plist content
+ */
+function generateLaunchdPlist(): string {
+  const steroidsPath = findSteroidsPath();
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${LAUNCHD_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${steroidsPath}</string>
+        <string>runners</string>
+        <string>wakeup</string>
+        <string>--quiet</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>60</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${homedir()}/Library/Logs/steroids-wakeup.log</string>
+    <key>StandardErrorPath</key>
+    <string>${homedir()}/Library/Logs/steroids-wakeup-error.log</string>
+</dict>
+</plist>`;
+}
+
+/**
+ * Check launchd installation status (macOS)
+ */
+function launchdStatus(): CronStatus {
+  try {
+    // Check if plist file exists
+    if (!existsSync(LAUNCHD_PLIST)) {
+      return { installed: false };
+    }
+
+    // Check if loaded
+    const result = spawnSync('launchctl', ['list', LAUNCHD_LABEL], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const isLoaded = result.status === 0;
+
+    return {
+      installed: isLoaded,
+      entry: isLoaded ? `launchd: ${LAUNCHD_LABEL}` : undefined,
+    };
+  } catch (error) {
+    return {
+      installed: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Install launchd job (macOS)
+ */
+function launchdInstall(): CronResult {
+  try {
+    // Check if already installed and loaded
+    const status = launchdStatus();
+    if (status.installed) {
+      return {
+        success: true,
+        message: 'Launchd job already installed',
+      };
+    }
+
+    // Generate and write plist
+    const plistContent = generateLaunchdPlist();
+    writeFileSync(LAUNCHD_PLIST, plistContent, 'utf-8');
+
+    // Load the job
+    const result = spawnSync('launchctl', ['load', LAUNCHD_PLIST], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    if (result.status !== 0) {
+      return {
+        success: false,
+        message: 'Failed to load launchd job',
+        error: result.stderr || 'Unknown error',
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Launchd job installed. Wake-up runs every minute.',
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to install launchd job',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Uninstall launchd job (macOS)
+ */
+function launchdUninstall(): CronResult {
+  try {
+    // Unload if loaded
+    const status = launchdStatus();
+    if (status.installed) {
+      const result = spawnSync('launchctl', ['unload', LAUNCHD_PLIST], {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      if (result.status !== 0 && !result.stderr?.includes('Could not find')) {
+        return {
+          success: false,
+          message: 'Failed to unload launchd job',
+          error: result.stderr || 'Unknown error',
+        };
+      }
+    }
+
+    // Remove plist file
+    if (existsSync(LAUNCHD_PLIST)) {
+      unlinkSync(LAUNCHD_PLIST);
+    }
+
+    return {
+      success: true,
+      message: 'Launchd job removed',
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to uninstall launchd job',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Check cron/launchd installation status
+ * Uses launchd on macOS, cron on Linux
  */
 export function cronStatus(): CronStatus {
   if (platform() === 'win32') {
@@ -84,6 +240,12 @@ export function cronStatus(): CronStatus {
     };
   }
 
+  // Use launchd on macOS (no permissions needed)
+  if (platform() === 'darwin') {
+    return launchdStatus();
+  }
+
+  // Use cron on Linux
   const crontab = getCrontab();
 
   if (crontab === null) {
@@ -109,7 +271,8 @@ export function cronStatus(): CronStatus {
 }
 
 /**
- * Install cron job for runner wake-up
+ * Install cron/launchd job for runner wake-up
+ * Uses launchd on macOS (no permissions needed), cron on Linux
  */
 export function cronInstall(): CronResult {
   if (platform() === 'win32') {
@@ -120,6 +283,12 @@ export function cronInstall(): CronResult {
     };
   }
 
+  // Use launchd on macOS (no permissions needed)
+  if (platform() === 'darwin') {
+    return launchdInstall();
+  }
+
+  // Use cron on Linux
   // Check if already installed
   const status = cronStatus();
   if (status.installed) {
@@ -162,7 +331,8 @@ export function cronInstall(): CronResult {
 }
 
 /**
- * Uninstall cron job
+ * Uninstall cron/launchd job
+ * Uses launchd on macOS, cron on Linux
  */
 export function cronUninstall(): CronResult {
   if (platform() === 'win32') {
@@ -173,6 +343,12 @@ export function cronUninstall(): CronResult {
     };
   }
 
+  // Use launchd on macOS
+  if (platform() === 'darwin') {
+    return launchdUninstall();
+  }
+
+  // Use cron on Linux
   const crontab = getCrontab();
   if (crontab === null) {
     return {

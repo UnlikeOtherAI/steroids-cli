@@ -131,6 +131,36 @@ Full changelog: https://github.com/UnlikeOtherAI/steroids-cli/compare/${PREV_TAG
 
 **Tip:** Use `gh release list` to see previous releases and `git log --oneline ${PREV_TAG}..HEAD` to see changes since last release.
 
+### Post-Release Development Workflow (CRITICAL)
+
+**After publishing a release, you MUST install the published version to continue development.**
+
+Since the project uses the globally installed `steroids` CLI (not `npm link`), you must update to the published version after each release:
+
+```bash
+# After publishing a new version:
+npm install -g steroids-cli@latest
+
+# Verify you have the latest version
+steroids --version
+```
+
+**Why this matters:**
+- The global install ensures launchd can run steroids without Full Disk Access permissions
+- `npm link` would symlink to the local dev directory which requires special permissions
+- Using the published version tests the actual user experience
+- Ensures the wakeup cron/launchd works correctly
+
+**Development workflow:**
+1. Make changes to code
+2. `npm run build` to compile
+3. Test locally with `node dist/index.js` if needed for quick testing
+4. When ready to release: version bump, publish, GitHub release
+5. **Install the published version:** `npm install -g steroids-cli@latest`
+6. Continue development with the published version
+
+**Exception:** During active development on a single feature, you can use `npm link` temporarily for rapid iteration. But before committing or moving to the next task, publish and switch to the global install.
+
 ### Dependency Management (CRITICAL)
 
 **Always use the latest stable versions of dependencies.** Before adding or updating packages:
