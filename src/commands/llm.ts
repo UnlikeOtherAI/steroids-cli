@@ -18,17 +18,88 @@ const LLM_INSTRUCTIONS = `# STEROIDS LLM QUICK REFERENCE
 Steroids=automated task orchestration system.
 It manages tasks and invokes LLM agents (coders/reviewers) to execute them.
 The system spawns separate LLM processes for coding and reviewing.
+Deterministic daemon — never makes decisions, just follows the state machine.
 
-## TASK FLOW
-pending → in_progress (coder works) → review (reviewer checks) → completed OR rejected→pending
-Runner daemon picks tasks and invokes appropriate LLM agents automatically.
+## TASK STATE MACHINE
+
+### All 8 Statuses
+
+| Marker | Status      | Terminal? | Runner picks it? | Description                                    |
+|--------|-------------|-----------|-------------------|------------------------------------------------|
+| [ ]    | pending     | No        | YES → coder       | Not started, waiting for coder                 |
+| [-]    | in_progress | No        | YES → coder       | Coder is actively working                      |
+| [o]    | review      | No        | YES → reviewer     | Coder finished, waiting for reviewer            |
+| [x]    | completed   | YES       | No                | Reviewer approved, code pushed                 |
+| [!]    | disputed    | YES       | No                | Coder/reviewer disagreement, code pushed       |
+| [F]    | failed      | YES       | No                | Exceeded 15 rejections, needs human            |
+| [S]    | skipped     | YES       | No                | Fully external — nothing to code               |
+| [s]    | partial     | YES       | No                | Some coded, rest needs external setup           |
+
+CRITICAL: skipped [S] and partial [s] are TERMINAL states. The runner will NEVER
+pick them up for coding. Once a task is marked partial/skipped, it is DONE from the
+runner's perspective. If coding is still needed, reset to pending manually.
+
+### State Transitions
+
+pending [ ] → in_progress [-] → review [o] → completed [x] (approved)
+                                    ↓ rejected → back to in_progress [-]
+                                    ↓ disputed → disputed [!] (code pushed, move on)
+                              if 15 rejections → failed [F] (full stop)
+Human can mark at any time → skipped [S] or partial [s] (terminal)
+
+### Coordinator Intervention
+At rejection thresholds [2, 5, 9], a coordinator LLM is invoked to analyze the
+rejection pattern and provide guidance to both coder and reviewer. This breaks
+coder/reviewer deadlocks without human intervention.
+
+## TASK SELECTION ALGORITHM
+
+Runner selects tasks in strict priority order:
+
+  Priority 1: review [o]      — complete reviews before starting new work
+  Priority 2: in_progress [-] — resume incomplete work
+  Priority 3: pending [ ]     — start new work
+
+Within each priority, ordered by: section position (lower=first), then created_at (older=first).
+
+### Filters Applied Before Selection
+1. Terminal statuses excluded: completed, disputed, failed, skipped, partial
+2. Tasks in skipped sections excluded (unless runner focused on specific section)
+3. Tasks in sections with UNMET DEPENDENCIES excluded (see below)
+4. Tasks locked by another runner excluded
+
+If no selectable task exists → runner goes idle.
+
+## SECTION DEPENDENCIES
+
+Sections can declare dependencies on other sections:
+  steroids sections depends-on <A> <B>   → Section A depends on Section B
+
+Effect: ALL tasks in section B must be completed before ANY task in section A
+can be picked by the runner. "Completed" means status=completed (not just
+skipped/partial — those count as incomplete for dependency purposes).
+
+Dependency checks:
+- Cycle detection prevents circular dependencies
+- Runner evaluates dependencies at task selection time
+- Use \`steroids sections graph\` to visualize the dependency tree
+
+Commands:
+  steroids sections depends-on <id> <dep-id>      # add dependency
+  steroids sections no-depends-on <id> <dep-id>    # remove dependency
+  steroids sections list --deps                     # show deps inline
+  steroids sections graph                           # ASCII dependency tree
+  steroids sections graph --mermaid                 # Mermaid syntax
+  steroids sections graph --json                    # JSON output
 
 ## ARCHITECTURE
-- Tasks stored in .steroids/steroids.db (per project)
+- Tasks stored in .steroids/steroids.db (SQLite, per project)
 - Runner daemon executes the loop (one per project)
 - Coder LLM: implements task, commits, submits for review
 - Reviewer LLM: verifies implementation, approves or rejects
-- You (reading this): likely helping user manage/debug the system
+- Coordinator LLM: breaks deadlocks at rejection thresholds [2, 5, 9]
+- Build verification: orchestrator re-runs build+tests after coder submits
+- If build/tests fail → auto-reject back to in_progress (coder fixes)
 
 ## MULTI-PROJECT
 - Multiple projects can have runners simultaneously
@@ -44,7 +115,7 @@ steroids tasks                          # pending tasks (current project)
 steroids tasks --status active          # in_progress+review (current project)
 steroids tasks --status active --global # active across ALL projects
 steroids tasks --status all             # all tasks
-steroids tasks audit <id>               # view task spec, history, rejection notes
+steroids tasks audit <id>              # view task spec, history, rejection notes
 
 ### Add Tasks
 steroids tasks add "Title" --section <id> --source <spec-file>
@@ -79,8 +150,13 @@ steroids tasks skip <id> --partial --notes "reason"         # coded some, rest e
 
 ### Sections
 steroids sections list                  # list sections
+steroids sections list --deps           # list with dependencies shown
 steroids sections skip <id>             # exclude from runner
 steroids sections unskip <id>           # include in runner
+steroids sections priority <id> <val>   # set priority (0-100 or high/medium/low)
+steroids sections depends-on <A> <B>    # A depends on B (B must complete first)
+steroids sections no-depends-on <A> <B> # remove dependency
+steroids sections graph                 # show dependency graph
 
 ### Runners (daemon that executes tasks)
 steroids runners list                   # all runners (all projects)
@@ -115,26 +191,22 @@ steroids tasks reject <id> --model human --notes "reason"  # reject manually
 ### Restart failed task
 steroids tasks update <id> --status pending --reset-rejections  # reset to pending with fresh count
 
+### Fix incorrectly marked partial/skipped tasks
+steroids tasks update <id> --status pending --actor human:cli
+# Use when: a task was marked partial/skipped but still needs coding
+
 ### Skip external setup task
 steroids tasks skip <id> --notes "spec says SKIP, needs Cloud SQL setup"
 # Use when: spec says SKIP/MANUAL, requires cloud console, account creation, etc.
 # --partial: use if you coded some parts but rest needs human action
 
-## TASK STATES
-- pending: waiting to be picked up
-- in_progress: coder is working on it
-- review: coder submitted, waiting for reviewer
-- completed: approved by reviewer
-- skipped: fully external (Cloud SQL, manual setup) - human must do
-- partial: some coded, rest external - human must complete
-- failed: exceeded 15 rejections, needs human intervention
-- disputed: coder/reviewer disagreement, needs human resolution
-
 ## IMPORTANT NOTES
 - Task spec is in source file (see tasks audit output)
-- Max 15 rejections before task fails
+- Max 15 rejections before task fails; coordinator intervenes at [2, 5, 9]
 - Runner auto-restarts via cron (steroids runners cron install)
 - Each project isolated: own database, own runner
+- Section dependencies block entire sections, not individual tasks
+- Build+test verification happens automatically after coder submits
 `;
 
 const HELP = generateHelp({
