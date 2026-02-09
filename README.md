@@ -33,6 +33,9 @@ Steroids is an AI-powered task orchestration system that automates software deve
 * [Quickstart](#quickstart)
 * [CLI Commands](#cli-commands)
 * [Runner Daemon](#runner-daemon)
+* [Coordinator System](#coordinator-system)
+* [Disputes](#disputes)
+* [Hooks](#hooks)
 * [Web Dashboard](#web-dashboard)
 * [Configuration](#configuration)
 * [Quality & Safety](#quality--safety)
@@ -51,7 +54,7 @@ Most AI coding tools optimize for speed. Steroids optimizes for **repeatable del
 * **Specs are the source of truth** — not chat vibes.
 * **Coder and reviewer are separated** by design.
 * **Nothing progresses without review approval.**
-* **Endless loops are prevented** via dispute escalation (after 15 rejections).
+* **Endless loops are prevented** via coordinator intervention and dispute escalation.
 * Built for **hands-off runs** — overnight or while you focus elsewhere.
 
 Steroids is for power developers who refuse to let their projects become unmaintainable slop.
@@ -78,13 +81,11 @@ Steroids runs an autonomous loop per task:
 
 1. **You write specs** in markdown files (tasks grouped into sections/phases).
 2. A **coder AI** implements the task strictly according to the spec.
-3. A **reviewer AI** evaluates:
-   * Does it match the spec?
-   * Does the build pass? Do tests pass?
-   * Is it maintainable and architecturally sound?
+3. A **reviewer AI** evaluates: does it match the spec? Do builds/tests pass? Is the code secure?
 4. If **rejected**, feedback is appended and the task goes back to the coder.
 5. If **approved**, Steroids commits, pushes, and moves to the next task.
-6. After **15 rejections**, Steroids raises a **dispute** (human attention required).
+6. A **coordinator AI** intervenes at rejection thresholds (2, 5, 9) to break deadlocks.
+7. After **15 rejections**, Steroids raises a **dispute** (human attention required).
 
 ```
 pending → in_progress → review → completed
@@ -92,24 +93,35 @@ pending → in_progress → review → completed
               │           ↓ (rejected)
               └───────────┘
                     │
-                    ↓ (external setup)
-               skipped/partial
+                    ↓ (15 rejections)
+                disputed/failed
 ```
 
 **External Setup:** Some tasks require human action (Cloud SQL, account creation, etc.). When the spec says SKIP or MANUAL, the coder can mark it as `skipped` (fully external) or `partial` (some coded, rest external). The runner moves on, and you'll see what needs manual action in `steroids llm --context`.
+
+**Feedback Tasks:** Both coder and reviewer can create feedback tasks for advisory items (pre-existing concerns, minor disputes, things needing human review). These go to a special skipped section called "Needs User Input" and never block the pipeline.
 
 ---
 
 ## Key Features
 
 * **Markdown specs** as the contract (task definitions, acceptance criteria, constraints)
-* **Sections/phases** to organize features and execution order
+* **Sections/phases** to organize features with priorities and dependencies
 * **Coder/Reviewer loop** with strict approval gating
+* **Coordinator intervention** at rejection thresholds to break deadlocks
 * **Dispute escalation** after 15 rejections to avoid infinite churn
+* **Security review** built into the reviewer (injection, shell safety, secrets, permissions)
+* **File anchoring** — pin tasks to specific file:line locations with auto-captured commit SHA
+* **Feedback tasks** — advisory items in a skipped section for human review
+* **Multi-provider support** — Claude, OpenAI, Codex, Gemini
 * **CLI-first workflow** for power users and automation
 * **Background runner daemon** to process tasks without babysitting
+* **Event hooks** — trigger scripts/webhooks on task completion, project events
 * **Multi-project support** with global project registry
 * **Web dashboard** for monitoring progress across projects
+* **Shell completion** for bash, zsh, and fish
+* **Backup & restore** for Steroids data
+* **Health checks** with weighted scoring for project fitness
 * *(Planned)* **Mac menu bar companion** for real-time status at a glance
 
 ---
@@ -171,6 +183,15 @@ steroids sections add "Phase 1: User Authentication"
 steroids tasks add "Implement login endpoint" \
   --section <section-id> \
   --source specs/auth.md
+
+# Anchor a task to a specific file and line
+steroids tasks add "Fix null check in utils" \
+  --section <section-id> \
+  --source specs/fix.md \
+  --file src/utils.ts --line 42
+
+# Create a feedback task for human review
+steroids tasks add "Should we use Redis or in-memory cache?" --feedback
 ```
 
 ### 4. Run the loop
@@ -208,7 +229,10 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 | `steroids tasks list` | List pending tasks |
 | `steroids tasks list --status all` | List all tasks with status |
 | `steroids tasks list --status active` | Show in_progress + review tasks |
+| `steroids tasks show <id>` | Show task details with invocation logs |
 | `steroids tasks add <title> --section <id> --source <file>` | Add a new task |
+| `steroids tasks add <title> ... --file <path> --line <n>` | Add task anchored to a committed file |
+| `steroids tasks add <title> --feedback` | Add feedback task (skipped section, no --section/--source needed) |
 | `steroids tasks update <id> --status review` | Submit task for review |
 | `steroids tasks approve <id> --model <model>` | Approve a task |
 | `steroids tasks reject <id> --model <model> --notes "..."` | Reject with feedback |
@@ -222,6 +246,12 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 |---------|-------------|
 | `steroids sections list` | List all sections |
 | `steroids sections add <name>` | Create a new section |
+| `steroids sections skip <id>` | Exclude section from runner |
+| `steroids sections unskip <id>` | Include section in runner |
+| `steroids sections priority <id> <value>` | Set section priority (0-100 or high/medium/low) |
+| `steroids sections depends-on <id> <dep-id>` | Add section dependency |
+| `steroids sections no-depends-on <id> <dep-id>` | Remove section dependency |
+| `steroids sections graph` | Show dependency graph (ASCII, `--mermaid`, or `--output png`) |
 
 ### Runner Management
 
@@ -230,8 +260,32 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 | `steroids runners list` | List active runners |
 | `steroids runners start` | Start runner in foreground |
 | `steroids runners start --detach` | Start runner in background |
+| `steroids runners start --section <name>` | Focus on a specific section |
 | `steroids runners stop --all` | Stop all runners |
+| `steroids runners status` | Current runner state |
+| `steroids runners logs [pid]` | View daemon output (`--tail`, `--follow`) |
 | `steroids runners wakeup` | Check and start runners for projects with pending work |
+| `steroids runners cron install` | Install cron job for auto-wakeup |
+| `steroids runners cron uninstall` | Remove cron job |
+
+### Dispute Management
+
+| Command | Description |
+|---------|-------------|
+| `steroids dispute list` | List open disputes |
+| `steroids dispute show <id>` | Show dispute details |
+| `steroids dispute create <task-id> --reason "..." --type <type>` | Create a dispute (types: major, minor, coder, reviewer) |
+| `steroids dispute resolve <id> --decision <coder\|reviewer\|custom>` | Resolve a dispute |
+| `steroids dispute log <task-id> --notes "..."` | Log minor disagreement without blocking |
+
+### AI Providers
+
+| Command | Description |
+|---------|-------------|
+| `steroids ai providers` | List detected AI providers |
+| `steroids ai models <provider>` | List available models for a provider |
+| `steroids ai test` | Test AI configuration (coder/reviewer connectivity) |
+| `steroids ai setup` | Interactive provider setup |
 
 ### Project Registry
 
@@ -252,6 +306,29 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 | `steroids config validate` | Validate configuration syntax |
 | `steroids config edit` | Open config in $EDITOR |
 
+### Maintenance & Utilities
+
+| Command | Description |
+|---------|-------------|
+| `steroids health` | Project health check with weighted scoring |
+| `steroids scan` | Scan directory for projects (auto-detects language/framework) |
+| `steroids backup create` | Backup Steroids data |
+| `steroids backup restore <file>` | Restore from backup |
+| `steroids gc` | Garbage collection (orphaned IDs, stale runners, DB optimization) |
+| `steroids purge tasks --older-than 30d` | Purge old data |
+| `steroids locks list` | View active task/section locks |
+| `steroids locks release <id>` | Release a stuck lock |
+| `steroids stats` | Global activity statistics |
+| `steroids stats 7d` | Activity stats for last 7 days |
+| `steroids git status` | Git status with task context |
+| `steroids git push` | Push with retry logic |
+| `steroids logs list` | List invocation log files |
+| `steroids completion bash` | Generate shell completion script |
+| `steroids completion install` | Auto-install completion for your shell |
+| `steroids hooks list` | List configured event hooks |
+| `steroids hooks add` | Add an event hook |
+| `steroids hooks test <event>` | Test a hook |
+
 ---
 
 ## Runner Daemon
@@ -265,8 +342,14 @@ steroids runners start --detach
 # Check status
 steroids runners list
 
+# View logs
+steroids runners logs <pid> --follow
+
 # Stop all runners
 steroids runners stop --all
+
+# Auto-restart via cron
+steroids runners cron install
 ```
 
 The daemon:
@@ -274,6 +357,73 @@ The daemon:
 - Updates heartbeat for health monitoring
 - Pushes approved work to git
 - Continues until all tasks complete or shutdown signal received
+- Skips sections marked as skipped (e.g., "Needs User Input")
+
+---
+
+## Coordinator System
+
+When the coder and reviewer get stuck in a rejection loop, the **coordinator** intervenes automatically at rejection thresholds (2, 5, and 9 rejections):
+
+The coordinator analyzes the rejection history and makes one of three decisions:
+
+| Decision | Effect |
+|----------|--------|
+| **guide_coder** | Reviewer feedback is valid — gives the coder clearer direction |
+| **override_reviewer** | Some reviewer demands are out of scope — tells the reviewer to stop raising them |
+| **narrow_scope** | Reduces the task scope to an achievable subset |
+
+The coordinator's guidance flows to **both** the coder and the reviewer on subsequent iterations, ensuring alignment. This prevents death spirals where the coder and reviewer talk past each other.
+
+Configure the coordinator in `.steroids/config.yaml`:
+
+```yaml
+ai:
+  orchestrator:
+    provider: claude
+    model: claude-sonnet-4
+```
+
+---
+
+## Disputes
+
+When a task hits 15 rejections, or when a coder/reviewer raises one manually, Steroids creates a **dispute**:
+
+```bash
+# View open disputes
+steroids dispute list
+
+# Resolve a dispute
+steroids dispute resolve <id> --decision coder --notes "Coder's approach is correct"
+```
+
+Dispute types:
+- **major** — Fundamental disagreement blocking progress
+- **minor** — Logged for record, doesn't block
+- **coder** — Raised by the coder against reviewer feedback
+- **reviewer** — Raised by the reviewer against coder's implementation
+
+---
+
+## Hooks
+
+Steroids supports event hooks that trigger shell commands or webhooks:
+
+```bash
+# List configured hooks
+steroids hooks list
+
+# Add a hook
+steroids hooks add
+
+# Test a hook
+steroids hooks test task.completed
+```
+
+Events: `task.created`, `task.completed`, `task.failed`, `section.completed`, `project.completed`
+
+Configure hooks in `.steroids/config.yaml` or manage via CLI.
 
 ---
 
@@ -300,6 +450,7 @@ cd WebUI && npm run dev &
 - **Task queues** — Pending, in-progress, review, completed
 - **Runner status** — Active daemons with heartbeat
 - **Audit trails** — Full history of task state changes
+- **Configuration** — Edit project settings from the browser
 
 ---
 
@@ -310,9 +461,12 @@ cd WebUI && npm run dev &
 ```yaml
 ai:
   coder:
-    provider: claude
+    provider: claude          # claude, openai, codex, gemini
     model: claude-sonnet-4
   reviewer:
+    provider: claude
+    model: claude-sonnet-4
+  orchestrator:               # Coordinator for breaking rejection loops
     provider: claude
     model: claude-sonnet-4
 
@@ -323,11 +477,42 @@ output:
 quality:
   tests:
     required: true
-    minCoverage: 80
+    minCoverage: 80           # Per-task modified files, not global
 
 sections:
-  batchMode: false     # Process all section tasks at once
-  maxBatchSize: 10     # Max tasks per batch
+  batchMode: false            # Process all section tasks at once
+  maxBatchSize: 10            # Max tasks per batch
+
+disputes:
+  timeoutDays: 7
+  autoCreateOnMaxRejections: true
+
+runners:
+  heartbeatInterval: 30s
+  staleTimeout: 5m
+  maxConcurrent: 1
+
+locking:
+  taskTimeout: 60m
+  sectionTimeout: 120m
+
+database:
+  autoMigrate: true
+  backupBeforeMigrate: true
+
+build:
+  timeout: 5m
+
+test:
+  timeout: 10m
+
+logs:
+  retention: 30d
+  level: info                 # debug, info, warn, error
+
+backup:
+  enabled: true
+  retention: 7d
 ```
 
 ### Global Config (`~/.steroids/config.yaml`)
@@ -339,6 +524,7 @@ Same schema — acts as default, overridden by project config.
 ```bash
 ANTHROPIC_API_KEY=...        # For Claude models
 OPENAI_API_KEY=...           # For OpenAI models
+GOOGLE_API_KEY=...           # For Gemini models
 
 STEROIDS_JSON=1              # Output as JSON
 STEROIDS_QUIET=1             # Minimal output
@@ -361,11 +547,16 @@ The coder is required to:
 - Run build before submitting for review
 - Run tests before submitting for review
 - Fix errors until both pass
+- Use secure patterns (array-based shell APIs, parameterized queries)
+- Create feedback tasks for pre-existing concerns
 
 The reviewer verifies:
 - Implementation matches the spec
 - Build and tests pass
 - Code follows project conventions
+- **Security review** of new/changed code (injection, shell safety, secrets, permissions, unsafe execution)
+- Test coverage for modified files (when configured)
+- Creates feedback tasks for advisory items that don't block approval
 
 ---
 
@@ -394,9 +585,16 @@ Documentation scaffolding wizard. Interactive CLI for setting up CLAUDE.md, AGEN
 - [x] Web dashboard (basic)
 - [x] Section priorities and dependencies
 - [x] Section batch mode (process all tasks at once)
+- [x] Multi-provider support (Claude, OpenAI, Codex, Gemini)
+- [x] Coordinator system for breaking rejection loops
+- [x] Event hooks (shell commands, webhooks)
+- [x] Security review in reviewer prompt
+- [x] File anchoring for tasks
+- [x] Feedback tasks (skipped "Needs User Input" section)
+- [x] Shell completion (bash, zsh, fish)
+- [x] Backup & restore
+- [x] Health checks and project scanning
 - [ ] Mac menu bar app
-- [ ] Interactive config wizard
-- [ ] Provider adapters (multi-vendor coder/reviewer)
 - [ ] Token accounting and budgets
 - [ ] Jira integration (sync tasks, update tickets)
 
