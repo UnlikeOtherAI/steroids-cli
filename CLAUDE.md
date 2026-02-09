@@ -1,5 +1,16 @@
 # Steroids Coding Standards
 
+## AI Providers (CRITICAL)
+
+**OpenAI's development tool CLI is Codex.** There is no separate `openai` CLI.
+
+Available providers:
+- **Claude** (Anthropic) - `claude` CLI
+- **Codex** (OpenAI) - `codex` CLI (this IS the OpenAI development tool)
+- **Gemini** (Google) - `gemini` CLI
+
+The "OpenAI" provider in the registry is redundant and references a non-existent CLI. Only use the Codex provider for OpenAI models.
+
 ## Language & Project Agnostic (CRITICAL)
 
 **Steroids must work with ANY programming language and project type.**
