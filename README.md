@@ -152,16 +152,13 @@ my-project/
 ### 1. Install
 
 ```bash
-# Clone the repository
+# Option A: Install from npm
+npm install -g steroids-cli
+
+# Option B: Install from source
 git clone https://github.com/UnlikeOtherAI/steroids-cli.git
 cd steroids-cli
-
-# Install dependencies and build
-npm install
-npm run build
-
-# Link globally
-npm link
+npm install && npm run build && npm link
 ```
 
 ### 2. Initialize in a project
@@ -429,20 +426,32 @@ Configure hooks in `.steroids/config.yaml` or manage via CLI.
 
 ## Web Dashboard
 
-Steroids includes a web dashboard for visual monitoring:
+Steroids includes a web dashboard for visual monitoring. It auto-clones on first run:
 
 ```bash
-# From the steroids-cli directory
-make launch
+# Launch the dashboard (clones repo to ~/.steroids/webui/ on first run)
+steroids web
 
-# Or start components individually
-cd API && npm start &
-cd WebUI && npm run dev &
+# Check status
+steroids web status
+
+# Pull latest changes and reinstall
+steroids web update
+
+# Stop the dashboard
+steroids web stop
 
 # Access at
 # Web UI: http://localhost:3500
 # API: http://localhost:3501
 ```
+
+| Command | Description |
+|---------|-------------|
+| `steroids web` | Clone (if needed) and launch WebUI + API |
+| `steroids web update` | Pull latest code and reinstall dependencies |
+| `steroids web stop` | Stop running WebUI and API processes |
+| `steroids web status` | Check if dashboard is running |
 
 ### Features
 
