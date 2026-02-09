@@ -7,10 +7,12 @@ import { openDatabase } from '../database/connection.js';
 import { getTask, getSection } from '../database/queries.js';
 import {
   selectNextTask,
+  selectTaskBatch,
   markTaskInProgress,
   getTaskCounts,
 } from '../orchestrator/task-selector.js';
-import { invokeCoder } from '../orchestrator/coder.js';
+import { invokeCoder, invokeCoderBatch } from '../orchestrator/coder.js';
+import { loadConfig } from '../config/loader.js';
 import { invokeReviewer } from '../orchestrator/reviewer.js';
 import { logActivity } from './activity-log.js';
 import { execSync } from 'node:child_process';
@@ -39,6 +41,11 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
 
   const { db, close } = openDatabase(projectPath);
 
+  // Load batch mode config
+  const config = loadConfig(projectPath);
+  const batchMode = config.sections?.batchMode ?? false;
+  const maxBatchSize = config.sections?.maxBatchSize ?? 10;
+
   try {
     let iteration = 0;
 
@@ -52,6 +59,38 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       iteration++;
       console.log(`\n─── Iteration ${iteration} ───\n`);
       options.onIteration?.(iteration);
+
+      // Batch mode: process multiple pending tasks at once
+      // Only active when not focusing on a specific section and batch mode is enabled
+      if (batchMode && !sectionId) {
+        const batch = selectTaskBatch(db, maxBatchSize);
+        if (batch && batch.tasks.length > 0) {
+          console.log(`[BATCH MODE] Section "${batch.sectionName}" - ${batch.tasks.length} tasks`);
+
+          // Mark all tasks as in_progress
+          for (const task of batch.tasks) {
+            markTaskInProgress(db, task.id);
+            options.onTaskStart?.(task.id, 'batch');
+          }
+
+          // Invoke batch coder
+          console.log('\n>>> Invoking BATCH CODER...\n');
+          await invokeCoderBatch(batch.tasks, batch.sectionName, projectPath);
+
+          // Notify completion for each task
+          for (const task of batch.tasks) {
+            options.onTaskComplete?.(task.id);
+          }
+
+          if (once) {
+            console.log('\n[--once] Stopping after one batch');
+            break;
+          }
+
+          await sleep(1000);
+          continue;
+        }
+      }
 
       // Select next task
       const selected = selectNextTask(db, sectionId);

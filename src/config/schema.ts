@@ -372,6 +372,20 @@ export const CONFIG_SCHEMA: SchemaObject = {
       },
     },
   },
+  sections: {
+    _description: 'Section processing settings',
+    _type: 'object',
+    batchMode: {
+      _description: 'Process all pending tasks in a section as one batch',
+      _type: 'boolean',
+      _default: false,
+    },
+    maxBatchSize: {
+      _description: 'Maximum tasks to batch together (prevents context overflow)',
+      _type: 'number',
+      _default: 10,
+    },
+  },
   hooks: {
     _description: 'Event hooks for automation (scripts and webhooks)',
     _type: 'array',

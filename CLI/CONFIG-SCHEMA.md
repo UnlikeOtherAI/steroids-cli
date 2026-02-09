@@ -126,6 +126,22 @@ locking:
     _type: duration
     _default: "30m"
 
+sections:
+  _description: "Section processing settings"
+  _category: true
+
+  batchMode:
+    _description: "Process all pending tasks in a section as one batch"
+    _type: boolean
+    _default: false
+
+  maxBatchSize:
+    _description: "Maximum tasks to batch together (prevents context overflow)"
+    _type: integer
+    _min: 1
+    _max: 50
+    _default: 10
+
 hooks:
   _description: "Event hooks for automation"
   _type: array

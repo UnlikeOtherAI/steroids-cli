@@ -105,6 +105,10 @@ export interface SteroidsConfig {
       minCoverage?: number;
     };
   };
+  sections?: {
+    batchMode?: boolean;
+    maxBatchSize?: number;
+  };
   hooks?: unknown[]; // Array of hook configurations
 }
 
@@ -195,6 +199,10 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
     tests: {
       required: false,
     },
+  },
+  sections: {
+    batchMode: false,
+    maxBatchSize: 10,
   },
 };
 

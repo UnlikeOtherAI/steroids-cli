@@ -422,6 +422,107 @@ Begin by reading ${task.source_file ?? 'the specification above'} and implementi
 }
 
 /**
+ * Context for batch coder prompts
+ */
+export interface BatchCoderPromptContext {
+  tasks: Task[];
+  projectPath: string;
+  sectionName: string;
+}
+
+/**
+ * Generate the coder prompt for a batch of tasks
+ */
+export function generateBatchCoderPrompt(context: BatchCoderPromptContext): string {
+  const { tasks, projectPath, sectionName } = context;
+
+  const agentsMd = getAgentsMd(projectPath);
+
+  // Build task specs for each task
+  const taskSpecs = tasks.map((task, index) => {
+    const sourceContent = getSourceFileContent(projectPath, task.source_file);
+    return `
+### Task ${index + 1}: ${task.title}
+**Task ID:** ${task.id}
+**Spec File:** ${task.source_file ?? '(not specified)'}
+
+${sourceContent}
+`;
+  }).join('\n---\n');
+
+  const taskIds = tasks.map(t => t.id);
+
+  return `# STEROIDS BATCH CODER TASK
+
+You are a CODER assigned MULTIPLE tasks from section "${sectionName}".
+
+**IMPORTANT:** Implement each task IN ORDER, committing after each one.
+
+## Section: ${sectionName}
+**Total Tasks:** ${tasks.length}
+**Project:** ${projectPath}
+
+---
+
+## Project Guidelines
+
+${agentsMd}
+
+---
+
+## TASKS TO IMPLEMENT
+
+${taskSpecs}
+
+---
+
+## YOUR WORKFLOW
+
+For EACH task:
+1. Read the specification
+2. Implement the feature/fix
+3. Run tests if applicable
+4. Commit: \`git add <files> && git commit -m "<type>: <message>"\`
+5. Update status: \`steroids tasks update <task-id> --status review\`
+6. Move to next task
+
+**CRITICAL:** Each task MUST have its own commit and status update.
+
+---
+
+## CRITICAL RULES
+
+1. **NEVER touch .steroids/ directory**
+   - Do NOT read, write, or modify any files in .steroids/
+
+2. **BUILD MUST PASS after each task**
+   - Run the project's build command (if applicable)
+   - Run tests (if the project has them)
+   - Fix any errors before moving to next task
+
+3. **Commit after EACH task**
+   - Each task gets its own commit with a descriptive message
+   - This maintains good git history
+
+4. **Update status after EACH commit**
+   - Run \`steroids tasks update <task-id> --status review\` after each commit
+   - This ensures each task can be reviewed individually
+
+---
+
+## TASK IDS
+
+${taskIds.map((id, i) => `- Task ${i + 1}: ${id}`).join('\n')}
+
+---
+
+## Start Now
+
+Begin with Task 1 and work through each task in order.
+`;
+}
+
+/**
  * Generate the coder prompt for resuming partial work
  */
 export function generateResumingCoderPrompt(context: CoderPromptContext): string {

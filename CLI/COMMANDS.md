@@ -763,6 +763,33 @@ When `--section` is specified:
 - Loop exits when that section is complete
 - Skipped sections cannot be focused (error)
 
+### Batch Mode
+
+When `sections.batchMode: true` is set in config:
+- The loop selects ALL pending tasks from a section at once
+- Coder receives a combined prompt with all task specs
+- Coder commits after EACH task individually (maintains good git history)
+- Coder runs `steroids tasks update <id> --status review` after each commit
+- Reviewer still reviews each task individually (quality control maintained)
+
+**Configuration:**
+```yaml
+# .steroids/config.yaml
+sections:
+  batchMode: true       # Enable batch processing
+  maxBatchSize: 10      # Max tasks per batch (prevents context overflow)
+```
+
+**When to use batch mode:**
+- Tasks in a section are related and benefit from shared context
+- Reduces AI invocation overhead for many small tasks
+- Section tasks have natural ordering that should be preserved
+
+**When NOT to use batch mode:**
+- Tasks are independent and benefit from fresh context each time
+- Section has very large tasks that would overflow context window
+- You need maximum isolation between task implementations
+
 ---
 
 ## `steroids runners`

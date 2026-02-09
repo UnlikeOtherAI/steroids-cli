@@ -78,6 +78,72 @@ export function selectNextTask(
 }
 
 /**
+ * Batch of tasks from a single section
+ */
+export interface TaskBatch {
+  tasks: Task[];
+  sectionId: string;
+  sectionName: string;
+}
+
+/**
+ * Select a batch of pending tasks from the first available section
+ * Used when batch mode is enabled
+ */
+export function selectTaskBatch(
+  db: Database.Database,
+  maxSize: number = 10
+): TaskBatch | null {
+  // Find sections with pending tasks, ordered by position
+  const sections = db
+    .prepare(
+      `SELECT s.id, s.name, s.position,
+              SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pending_count,
+              SUM(CASE WHEN t.status IN ('in_progress', 'review') THEN 1 ELSE 0 END) as active_count
+       FROM sections s
+       LEFT JOIN tasks t ON t.section_id = s.id
+       GROUP BY s.id
+       HAVING pending_count > 0
+       ORDER BY s.position`
+    )
+    .all() as Array<{
+      id: string;
+      name: string;
+      position: number;
+      pending_count: number;
+      active_count: number;
+    }>;
+
+  for (const section of sections) {
+    // Skip sections with active tasks (in_progress or review)
+    if (section.active_count > 0) continue;
+
+    // Skip sections with unmet dependencies
+    if (!hasDependenciesMet(db, section.id)) continue;
+
+    // Get pending tasks from this section
+    const tasks = db
+      .prepare(
+        `SELECT * FROM tasks
+         WHERE section_id = ? AND status = 'pending'
+         ORDER BY created_at
+         LIMIT ?`
+      )
+      .all(section.id, maxSize) as Task[];
+
+    if (tasks.length > 0) {
+      return {
+        tasks,
+        sectionId: section.id,
+        sectionName: section.name,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Mark a task as in_progress when starting
  */
 export function markTaskInProgress(db: Database.Database, taskId: string): void {

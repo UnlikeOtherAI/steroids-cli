@@ -13,7 +13,9 @@ import { openDatabase } from '../database/connection.js';
 import {
   generateCoderPrompt,
   generateResumingCoderPrompt,
+  generateBatchCoderPrompt,
   type CoderPromptContext,
+  type BatchCoderPromptContext,
 } from '../prompts/coder.js';
 import { getGitStatus, getGitDiff } from '../git/status.js';
 
@@ -24,6 +26,16 @@ export interface CoderResult {
   stderr: string;
   duration: number;
   timedOut: boolean;
+}
+
+export interface BatchCoderResult {
+  success: boolean;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  duration: number;
+  timedOut: boolean;
+  taskCount: number;
 }
 
 /**
@@ -175,6 +187,41 @@ export async function invokeCoder(
     return result;
   } finally {
     // Clean up temp file
+    if (existsSync(promptFile)) {
+      unlinkSync(promptFile);
+    }
+  }
+}
+
+/**
+ * Invoke coder for a batch of tasks
+ */
+export async function invokeCoderBatch(
+  tasks: Task[],
+  sectionName: string,
+  projectPath: string
+): Promise<BatchCoderResult> {
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`BATCH CODER: Section "${sectionName}"`);
+  console.log(`Tasks: ${tasks.length}`);
+  tasks.forEach((t, i) => console.log(`  ${i + 1}. ${t.title} (${t.id})`));
+  console.log(`${'='.repeat(60)}\n`);
+
+  const prompt = generateBatchCoderPrompt({ tasks, projectPath, sectionName });
+  const promptFile = writePromptToTempFile(prompt);
+
+  try {
+    // Longer timeout for batch: base 30 minutes + 5 minutes per task
+    const timeoutMs = 30 * 60 * 1000 + tasks.length * 5 * 60 * 1000;
+    const result = await invokeClaudeCli(promptFile, timeoutMs);
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`BATCH CODER COMPLETED`);
+    console.log(`Duration: ${(result.duration / 1000).toFixed(1)}s`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    return { ...result, taskCount: tasks.length };
+  } finally {
     if (existsSync(promptFile)) {
       unlinkSync(promptFile);
     }
