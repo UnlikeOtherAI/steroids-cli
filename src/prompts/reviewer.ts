@@ -244,11 +244,11 @@ Check for:
 - **Path traversal**: User-supplied file paths must be validated and confined to the project directory (no \`../\` escape)
 - **Secrets exposure**: No hardcoded API keys, tokens, passwords, or credentials in code or config files
 - **Unsafe deserialization**: No \`eval()\`, \`new Function()\`, or \`JSON.parse\` on untrusted input without validation
-- **Dependency risks**: New dependencies should be well-known and actively maintained; no typosquatting
 - **Permission escalation**: Code should not grant broader access than necessary (file permissions, API scopes, etc.)
 - **Information leakage**: Error messages and logs should not expose internal paths, stack traces, or sensitive data to end users
+- **Dependency hygiene** (advisory only): If new dependencies are added, note whether they appear well-known and maintained. Flag potential typosquatting but do NOT reject solely for dependency choice — just highlight it as a note
 
-If you find a security issue, **REJECT immediately** with a clear explanation and remediation steps. Security issues are never "minor".
+If you find a security vulnerability in the items above (excluding the advisory item), **REJECT immediately** with a clear explanation and remediation steps. Security vulnerabilities are never "minor".
 ${getTestCoverageInstructions(config, modifiedFiles)}
 ---
 
