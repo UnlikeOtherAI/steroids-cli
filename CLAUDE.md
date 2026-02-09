@@ -45,28 +45,51 @@ Follow semantic versioning strictly:
 
 This ensures every task completion is a deployable artifact and sections mark feature milestones.
 
-### GitHub Releases
+### Full Release Process (CRITICAL)
 
-**When creating a version, also create a GitHub release using `gh` CLI if available.**
+**Every version bump MUST include ALL three steps: npm publish, GitHub release, and git push.**
 
-After `npm version` and `git push --tags`:
+A release is NOT just a git tag. It must be a proper public release on both npm and GitHub with detailed release notes describing what changed.
 
+**Complete release workflow:**
 ```bash
-# Get the version just created
-VERSION=$(npm pkg get version | tr -d '"')
+# 1. Version bump (creates git tag)
+npm version patch   # or minor/major
 
-# Create GitHub release with release notes
+# 2. Push to remote
+git push --tags && git push
+
+# 3. Publish to npm (MANDATORY)
+npm publish
+
+# 4. Create GitHub release with DETAILED release notes (MANDATORY)
+VERSION=$(npm pkg get version | tr -d '"')
+PREV_TAG=$(git tag --sort=-v:refname | sed -n '2p')  # previous tag
+
+# Get commit messages since last release for the notes
 gh release create "v${VERSION}" \
   --title "v${VERSION}" \
-  --notes "## Changes in v${VERSION}
+  --notes "$(cat <<EOF
+## Changes in v${VERSION}
 
-- <Brief description of what was added/fixed>
-- <List key changes from commits since last release>
+<Summarize what changed — features, fixes, improvements. Be specific.>
+<List each meaningful change as a bullet point.>
+<Reference the actual code changes, not generic descriptions.>
 
-See commit history for full details."
+Full changelog: https://github.com/UnlikeOtherAI/steroids-cli/compare/${PREV_TAG}...v${VERSION}
+EOF
+)"
 ```
 
-**For minor/major releases**, include more detailed notes:
+**Release notes must be meaningful.** Don't write "bug fixes and improvements" — describe what actually changed:
+- Good: "Add `steroids web` command that auto-clones and launches the dashboard"
+- Good: "Fix schema migration errors showing raw SQLite messages instead of helpful instructions"
+- Bad: "Various improvements"
+- Bad: "Bug fixes"
+
+Use `git log --oneline ${PREV_TAG}..HEAD` to review what commits are included and summarize them.
+
+**For minor/major releases**, include categorized sections:
 ```bash
 gh release create "v${VERSION}" \
   --title "v${VERSION} - <Feature Name>" \
@@ -82,10 +105,10 @@ gh release create "v${VERSION}" \
 ### Breaking Changes (if any)
 - <Description of breaking change>
 
-Full changelog: https://github.com/UnlikeOtherAI/steroids-cli/compare/v<prev>...v${VERSION}"
+Full changelog: https://github.com/UnlikeOtherAI/steroids-cli/compare/${PREV_TAG}...v${VERSION}"
 ```
 
-**Tip:** Use `gh release list` to see previous releases and `git log --oneline v<prev>..HEAD` to see changes since last release.
+**Tip:** Use `gh release list` to see previous releases and `git log --oneline ${PREV_TAG}..HEAD` to see changes since last release.
 
 ### Dependency Management (CRITICAL)
 
