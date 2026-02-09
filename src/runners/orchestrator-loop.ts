@@ -231,6 +231,38 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
         await runReviewerPhase(db, task, projectPath, false);
       }
 
+      // Log activity if task reached terminal status
+      if (options.runnerId) {
+        const updatedTask = getTask(db, task.id);
+        if (updatedTask && ['completed', 'failed', 'disputed', 'skipped'].includes(updatedTask.status)) {
+          const section = updatedTask.section_id ? getSection(db, updatedTask.section_id) : null;
+          const sectionName = section?.name ?? null;
+
+          // Get commit message for completed tasks
+          let commitMessage: string | null = null;
+          if (updatedTask.status === 'completed') {
+            try {
+              commitMessage = execSync('git log -1 --format=%B', {
+                cwd: projectPath,
+                encoding: 'utf-8',
+              }).trim();
+            } catch {
+              // Ignore error
+            }
+          }
+
+          logActivity(
+            projectPath,
+            options.runnerId,
+            updatedTask.id,
+            updatedTask.title,
+            sectionName,
+            updatedTask.status as 'completed' | 'failed' | 'disputed' | 'skipped',
+            commitMessage
+          );
+        }
+      }
+
       options.onTaskComplete?.(task.id);
 
       if (once) {
