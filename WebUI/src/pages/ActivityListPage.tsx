@@ -36,6 +36,7 @@ export const ActivityListPage: React.FC = () => {
 
   const statusParam = searchParams.get('status') as ActivityStatusType | null;
   const hoursParam = searchParams.get('hours');
+  const projectParam = searchParams.get('project');
 
   const initialHours = hoursParam ? parseInt(hoursParam, 10) : 24;
   const initialRange = TIME_RANGE_OPTIONS.find(o => o.hours === initialHours) || TIME_RANGE_OPTIONS[1];
@@ -52,6 +53,7 @@ export const ActivityListPage: React.FC = () => {
       const response = await activityApi.list({
         hours: selectedRange.hours,
         status: statusParam || undefined,
+        projectPath: projectParam || undefined,
       });
       setEntries(response.entries);
     } catch (err) {
@@ -59,7 +61,7 @@ export const ActivityListPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedRange.hours, statusParam]);
+  }, [selectedRange.hours, statusParam, projectParam]);
 
   useEffect(() => {
     fetchEntries();
@@ -82,18 +84,40 @@ export const ActivityListPage: React.FC = () => {
     navigate(`?${params.toString()}`, { replace: true });
   };
 
+  const projectName = projectParam ? projectParam.split('/').pop() : null;
   const pageTitle = statusParam ? `${STATUS_LABELS[statusParam]} Tasks` : 'All Activity';
+  const pageSubtitle = projectName ? `in ${projectName}` : null;
+
+  const handleClearProject = () => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('project');
+    navigate(`?${params.toString()}`, { replace: true });
+  };
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-text-primary">{pageTitle}</h1>
+          <h1 className="text-3xl font-bold text-text-primary">
+            {pageTitle}
+            {pageSubtitle && <span className="text-text-muted font-normal text-xl ml-2">{pageSubtitle}</span>}
+          </h1>
           <p className="text-text-muted mt-1">
             {entries.length} {entries.length === 1 ? 'entry' : 'entries'} in last {selectedRange.label}
           </p>
         </div>
-        <TimeRangeSelector value={selectedRange.value} onChange={handleRangeChange} />
+        <div className="flex items-center gap-4">
+          {projectParam && (
+            <button
+              onClick={handleClearProject}
+              className="px-3 py-1 text-sm bg-bg-surface text-text-secondary hover:text-text-primary rounded transition-colors"
+            >
+              <i className="fa-solid fa-times mr-1"></i>
+              Clear project filter
+            </button>
+          )}
+          <TimeRangeSelector value={selectedRange.value} onChange={handleRangeChange} />
+        </div>
       </div>
 
       <div className="flex gap-2 mb-6 flex-wrap">

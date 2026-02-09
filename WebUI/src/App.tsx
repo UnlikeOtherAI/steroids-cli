@@ -5,6 +5,7 @@ import { ActivityListPage } from './pages/ActivityListPage';
 import { RunnersPage } from './pages/RunnersPage';
 import { RunningTasksPage } from './pages/RunningTasksPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
+import { ProjectTasksPage } from './pages/ProjectTasksPage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AppShell } from './components/layouts';
@@ -17,6 +18,7 @@ function App() {
 
   const getPageTitle = () => {
     if (location.pathname.startsWith('/activity')) return 'Activity';
+    if (location.pathname.includes('/tasks') && location.pathname.startsWith('/project/')) return 'Project Tasks';
     if (location.pathname.startsWith('/project/')) return 'Project Details';
     if (location.pathname.startsWith('/task/')) return 'Task Details';
     switch (location.pathname) {
@@ -35,6 +37,7 @@ function App() {
         <Route path="/" element={<DashboardPage project={selectedProject} />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
+        <Route path="/project/:projectPath/tasks" element={<ProjectTasksPage />} />
         <Route path="/activity" element={<ActivityListPage />} />
         <Route path="/task/:taskId" element={<TaskDetailPage />} />
         <Route path="/runners" element={<RunnersPage />} />

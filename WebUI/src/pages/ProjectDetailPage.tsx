@@ -288,11 +288,36 @@ export const ProjectDetailPage: React.FC = () => {
 
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <StatTile label="Completed" value={stats.completed} variant="success" />
-            <StatTile label="Failed" value={stats.failed} variant="danger" />
-            <StatTile label="Skipped" value={stats.skipped} variant="warning" />
-            <StatTile label="Partial" value={stats.partial} variant="info" />
-            <StatTile label="Disputed" value={stats.disputed} variant="default" />
+            <StatTile
+              label="Completed"
+              value={stats.completed}
+              variant="success"
+              onClick={() => navigate(`/activity?status=completed&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
+            />
+            <StatTile
+              label="Failed"
+              value={stats.failed}
+              variant="danger"
+              onClick={() => navigate(`/activity?status=failed&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
+            />
+            <StatTile
+              label="Skipped"
+              value={stats.skipped}
+              variant="warning"
+              onClick={() => navigate(`/activity?status=skipped&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
+            />
+            <StatTile
+              label="Partial"
+              value={stats.partial}
+              variant="info"
+              onClick={() => navigate(`/activity?status=partial&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
+            />
+            <StatTile
+              label="Disputed"
+              value={stats.disputed}
+              variant="default"
+              onClick={() => navigate(`/activity?status=disputed&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
+            />
           </div>
         )}
 
@@ -308,10 +333,30 @@ export const ProjectDetailPage: React.FC = () => {
         <div className="mb-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">Current Queue</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatTile label="Pending" value={project.stats.pending} variant="default" />
-            <StatTile label="In Progress" value={project.stats.in_progress} variant="info" />
-            <StatTile label="Review" value={project.stats.review} variant="warning" />
-            <StatTile label="Completed" value={project.stats.completed} variant="success" />
+            <StatTile
+              label="Pending"
+              value={project.stats.pending}
+              variant="default"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=pending`)}
+            />
+            <StatTile
+              label="In Progress"
+              value={project.stats.in_progress}
+              variant="info"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=in_progress`)}
+            />
+            <StatTile
+              label="Review"
+              value={project.stats.review}
+              variant="warning"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=review`)}
+            />
+            <StatTile
+              label="Completed"
+              value={project.stats.completed}
+              variant="success"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=completed`)}
+            />
           </div>
         </div>
       )}
