@@ -135,6 +135,12 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
 
   const getProviderById = (id: string) => providers.find(p => p.id === id);
 
+  // Check if all fields are complete for validation
+  const isFormComplete =
+    orchestrator.provider && orchestrator.model &&
+    coder.provider && coder.model &&
+    reviewer.provider && reviewer.model;
+
   const renderRoleSelector = (
     label: string,
     icon: string,
@@ -156,26 +162,50 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
           <span className="font-medium text-text-primary">{label}</span>
         </div>
 
-        {/* Provider Selection */}
-        <div className="mb-3">
-          <label className="block text-xs text-text-muted mb-1">Provider</label>
-          <select
-            value={config.provider}
-            onChange={(e) => setConfig(role, e.target.value)}
-            className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent"
-          >
-            <option value="">Select provider...</option>
-            {providers.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.name}{!p.installed ? ' (not installed)' : ''}
-              </option>
-            ))}
-          </select>
+        {/* Provider and Model Selection - always visible side by side */}
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="block text-xs text-text-secondary mb-1">Provider</label>
+            <select
+              value={config.provider}
+              onChange={(e) => setConfig(role, e.target.value)}
+              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent"
+            >
+              <option value="">Select provider...</option>
+              {providers.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name}{!p.installed ? ' (not installed)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-text-secondary mb-1">
+              Model
+              {modelSources[config.provider] && (
+                <span className="ml-1 text-text-secondary/60">
+                  ({modelSources[config.provider] === 'cache' ? 'CLI' :
+                    modelSources[config.provider] === 'api' ? 'API' : 'static'})
+                </span>
+              )}
+            </label>
+            <select
+              value={config.model}
+              onChange={(e) => setModel(prev => ({ ...prev, model: e.target.value }))}
+              disabled={!config.provider || isNotInstalled}
+              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-50"
+            >
+              <option value="">Select model...</option>
+              {(models[config.provider] || []).map(m => (
+                <option key={m.id} value={m.id}>{m.name || m.id}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        {/* Not Installed Warning */}
+        {/* Not Installed Warning - shown below provider/model */}
         {isNotInstalled && installInfo && (
-          <div className="mb-3 p-3 bg-warning/10 border border-warning/30 rounded-lg">
+          <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg">
             <div className="flex items-start gap-2 text-warning text-sm mb-2">
               <i className="fa-solid fa-triangle-exclamation mt-0.5"></i>
               <span>{installInfo.description}</span>
@@ -195,9 +225,9 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
           </div>
         )}
 
-        {/* Needs API Key Warning */}
+        {/* Needs API Key Warning - shown below provider/model */}
         {needsApiKey && envVar && (
-          <div className="mb-3 p-3 bg-info/10 border border-info/30 rounded-lg">
+          <div className="p-3 bg-info/10 border border-info/30 rounded-lg">
             <div className="flex items-start gap-2 text-info text-sm mb-2">
               <i className="fa-solid fa-key mt-0.5"></i>
               <span>Set your API key to load models dynamically:</span>
@@ -217,32 +247,6 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
             <p className="text-xs text-text-secondary mt-2">
               Add this to your shell profile (~/.zshrc or ~/.bashrc), then restart the API.
             </p>
-          </div>
-        )}
-
-        {/* Model Selection - only show if provider is installed */}
-        {selectedProvider?.installed && (
-          <div>
-            <label className="block text-xs text-text-muted mb-1">
-              Model
-              {modelSources[config.provider] && (
-                <span className="ml-2 text-text-muted/60">
-                  ({modelSources[config.provider] === 'cache' ? 'from CLI cache' :
-                    modelSources[config.provider] === 'api' ? 'from API' : 'static list'})
-                </span>
-              )}
-            </label>
-            <select
-              value={config.model}
-              onChange={(e) => setModel(prev => ({ ...prev, model: e.target.value }))}
-              disabled={!config.provider}
-              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-50"
-            >
-              <option value="">Select model...</option>
-              {(models[config.provider] || []).map(m => (
-                <option key={m.id} value={m.id}>{m.name || m.id}</option>
-              ))}
-            </select>
           </div>
         )}
       </div>
@@ -305,7 +309,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
         <div className="px-6 py-4 border-t border-border bg-bg-base">
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !isFormComplete}
             className="w-full px-4 py-3 bg-accent hover:bg-accent/80 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {saving ? (
@@ -320,6 +324,11 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
               </>
             )}
           </button>
+          {!isFormComplete && (
+            <p className="text-xs text-text-secondary text-center mt-2">
+              Please select a provider and model for all three roles
+            </p>
+          )}
         </div>
       </div>
     </div>
