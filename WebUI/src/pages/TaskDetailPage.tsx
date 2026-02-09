@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { TaskDetails, AuditEntry, TaskInvocation, TaskStatus } from '../types';
+import { TaskDetails, TaskStatus } from '../types';
 import { tasksApi, projectsApi } from '../services/api';
 import { Badge } from '../components/atoms/Badge';
 import { PageLayout } from '../components/templates/PageLayout';
+import { AuditLogRow, InvocationRow, DisputePanel, formatDuration, formatTimestamp } from './TaskDetailComponents';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   pending: 'Pending',
@@ -12,6 +13,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   completed: 'Completed',
   skipped: 'Skipped',
   failed: 'Failed',
+  disputed: 'Disputed',
 };
 
 const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'info' | 'default'> = {
@@ -21,189 +23,14 @@ const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'in
   completed: 'success',
   skipped: 'warning',
   failed: 'danger',
+  disputed: 'danger',
 };
-
-function formatDuration(seconds: number): string {
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
-  if (seconds < 3600) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
-  }
-  const hours = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-}
-
-function formatTimestamp(iso: string): string {
-  const date = new Date(iso);
-  return date.toLocaleString();
-}
 
 // Strip GUID prefix from task title (format: "#<uuid>: <title>")
 function stripGuidPrefix(title: string): string {
   const match = title.match(/^#[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\s*/i);
   return match ? title.slice(match[0].length) : title;
 }
-
-function getActorIcon(actorType: string | null): string {
-  switch (actorType) {
-    case 'coder': return 'fa-code';
-    case 'reviewer': return 'fa-magnifying-glass';
-    case 'orchestrator': return 'fa-arrows-rotate';
-    case 'human': return 'fa-user';
-    default: return 'fa-robot';
-  }
-}
-
-function getActorLabel(actorType: string | null, model: string | null): string {
-  const type = actorType || 'unknown';
-  const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
-  if (model) {
-    return `${typeLabel} (${model})`;
-  }
-  return typeLabel;
-}
-
-interface AuditLogRowProps {
-  entry: AuditEntry;
-  isLatest: boolean;
-  githubUrl: string | null;
-}
-
-const AuditLogRow: React.FC<AuditLogRowProps> = ({ entry, isLatest, githubUrl }) => {
-  return (
-    <div className={`p-4 border-l-4 ${isLatest ? 'border-accent bg-bg-surface' : 'border-border bg-bg-base'}`}>
-      <div className="flex items-start gap-4">
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-bg-surface flex items-center justify-center">
-          <i className={`fa-solid ${getActorIcon(entry.actor_type)} text-text-muted text-sm`}></i>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-text-primary">{getActorLabel(entry.actor_type, entry.model)}</span>
-            {entry.from_status && (
-              <>
-                <span className="text-text-muted">changed status from</span>
-                <Badge variant="default">{entry.from_status}</Badge>
-                <span className="text-text-muted">to</span>
-              </>
-            )}
-            {!entry.from_status && (
-              <span className="text-text-muted">set status to</span>
-            )}
-            <Badge variant={STATUS_VARIANTS[entry.to_status as TaskStatus] || 'default'}>
-              {entry.to_status}
-            </Badge>
-          </div>
-          {entry.notes && (
-            <div className="mt-2 p-3 bg-bg-base rounded-lg text-sm text-text-secondary font-mono whitespace-pre-wrap">
-              {entry.notes}
-            </div>
-          )}
-          {entry.commit_sha && (
-            <div className="mt-2 text-xs text-text-muted">
-              {githubUrl ? (
-                <a
-                  href={`${githubUrl}/commit/${entry.commit_sha}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 hover:text-accent transition-colors"
-                >
-                  <i className="fa-brands fa-github"></i>
-                  <code className="bg-bg-surface px-1 rounded">{entry.commit_sha.slice(0, 7)}</code>
-                  <i className="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
-                </a>
-              ) : (
-                <>
-                  <i className="fa-solid fa-code-commit mr-1"></i>
-                  Commit: <code className="bg-bg-surface px-1 rounded">{entry.commit_sha.slice(0, 7)}</code>
-                </>
-              )}
-            </div>
-          )}
-          <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
-            <span>
-              <i className="fa-regular fa-clock mr-1"></i>
-              {formatTimestamp(entry.created_at)}
-            </span>
-            {entry.duration_seconds !== undefined && entry.duration_seconds > 0 && (
-              <span>
-                <i className="fa-solid fa-hourglass-half mr-1"></i>
-                Duration: {formatDuration(entry.duration_seconds)}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-function formatDurationMs(ms: number): string {
-  return formatDuration(Math.round(ms / 1000));
-}
-
-function getProviderLabel(provider: string, model: string): string {
-  const p = provider.charAt(0).toUpperCase() + provider.slice(1);
-  return `${p} / ${model}`;
-}
-
-interface InvocationRowProps {
-  invocation: TaskInvocation;
-}
-
-const InvocationRow: React.FC<InvocationRowProps> = ({ invocation }) => {
-  const isSuccess = invocation.success === 1;
-  const isTimedOut = invocation.timed_out === 1;
-  const isCoder = invocation.role === 'coder';
-
-  let borderColor = 'border-success';
-  if (isTimedOut) borderColor = 'border-warning';
-  else if (!isSuccess) borderColor = 'border-danger';
-
-  return (
-    <div className={`p-3 border-l-4 ${borderColor} bg-bg-base`}>
-      <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-bg-surface flex items-center justify-center">
-          <i className={`fa-solid ${isCoder ? 'fa-code' : 'fa-magnifying-glass'} text-text-muted text-xs`}></i>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-text-primary text-sm capitalize">{invocation.role}</span>
-            <span className="text-text-muted text-xs">{getProviderLabel(invocation.provider, invocation.model)}</span>
-            {isSuccess ? (
-              <Badge variant="success">OK</Badge>
-            ) : isTimedOut ? (
-              <Badge variant="warning">Timed Out</Badge>
-            ) : (
-              <Badge variant="danger">Failed (exit {invocation.exit_code})</Badge>
-            )}
-            {isCoder && invocation.rejection_number !== null && invocation.rejection_number > 0 && (
-              <span className="text-xs text-warning">
-                <i className="fa-solid fa-rotate-left mr-1"></i>
-                Attempt #{invocation.rejection_number}
-              </span>
-            )}
-          </div>
-          <div className="mt-1 flex items-center gap-4 text-xs text-text-muted">
-            <span>
-              <i className="fa-regular fa-clock mr-1"></i>
-              {formatTimestamp(invocation.created_at)}
-            </span>
-            {invocation.duration_ms > 0 && (
-              <span>
-                <i className="fa-solid fa-stopwatch mr-1"></i>
-                {formatDurationMs(invocation.duration_ms)}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 export const TaskDetailPage: React.FC = () => {
   const { taskId } = useParams<{ taskId: string }>();
@@ -216,6 +43,7 @@ export const TaskDetailPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(true);
   const [restarting, setRestarting] = useState(false);
+  const [restartNotes, setRestartNotes] = useState('');
   const intervalRef = useRef<number | null>(null);
 
   const fetchTask = useCallback(async () => {
@@ -226,8 +54,8 @@ export const TaskDetailPage: React.FC = () => {
       setTask(data);
       setError(null);
 
-      // Stop live updates if task is completed or failed
-      if (['completed', 'failed', 'skipped'].includes(data.status)) {
+      // Stop live updates if task is in a terminal state
+      if (['completed', 'failed', 'skipped', 'disputed'].includes(data.status)) {
         setIsLive(false);
       }
     } catch (err) {
@@ -241,16 +69,14 @@ export const TaskDetailPage: React.FC = () => {
     fetchTask();
   }, [fetchTask]);
 
-  const handleRestart = async () => {
+  const handleRestart = async (notes?: string) => {
     if (!taskId || !projectPath || restarting || !task) return;
 
-    // Block restart for tasks already in progress
     if (task.status === 'in_progress' || task.status === 'review') {
       alert('Cannot restart a task that is already in progress or under review.');
       return;
     }
 
-    // Confirm for completed tasks
     if (task.status === 'completed') {
       const confirmed = confirm('Are you sure you want to restart this task? It has been completed successfully.');
       if (!confirmed) return;
@@ -258,7 +84,8 @@ export const TaskDetailPage: React.FC = () => {
 
     setRestarting(true);
     try {
-      await tasksApi.restart(taskId, projectPath);
+      await tasksApi.restart(taskId, projectPath, notes || undefined);
+      setRestartNotes('');
       setIsLive(true);
       await fetchTask();
     } catch (err) {
@@ -268,7 +95,6 @@ export const TaskDetailPage: React.FC = () => {
     }
   };
 
-  // Determine if restart button should be shown
   const canRestart = task && !['in_progress', 'review'].includes(task.status);
 
   const handleOpenSourceFile = async () => {
@@ -325,9 +151,9 @@ export const TaskDetailPage: React.FC = () => {
             <Badge variant={STATUS_VARIANTS[task.status]} className="text-base px-4 py-2">
               {STATUS_LABELS[task.status]}
             </Badge>
-            {canRestart && (
+            {canRestart && !['failed', 'disputed'].includes(task.status) && (
               <button
-                onClick={handleRestart}
+                onClick={() => handleRestart()}
                 disabled={restarting}
                 className="px-4 py-2 bg-accent hover:bg-accent/80 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
@@ -397,6 +223,19 @@ export const TaskDetailPage: React.FC = () => {
               <div className="text-sm text-text-muted">Review Time</div>
             </div>
           </div>
+
+          {/* Human Intervention Panel - for failed/disputed tasks */}
+          {['failed', 'disputed'].includes(task.status) && (
+            <DisputePanel
+              status={task.status}
+              rejectionCount={task.rejection_count}
+              disputes={task.disputes || []}
+              restartNotes={restartNotes}
+              onNotesChange={setRestartNotes}
+              onRestart={(notes) => handleRestart(notes)}
+              restarting={restarting}
+            />
+          )}
 
           {/* Live Indicator */}
           <div className="flex items-center justify-between mb-4">

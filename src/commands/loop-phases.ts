@@ -11,6 +11,7 @@ import {
   getTaskRejections,
   getLatestSubmissionNotes,
   listTasks,
+  addAuditEntry,
 } from '../database/queries.js';
 import type { openDatabase } from '../database/connection.js';
 import { invokeCoder } from '../orchestrator/coder.js';
@@ -78,6 +79,13 @@ export async function runCoderPhase(
         coordinatorGuidance = coordResult.guidance;
         // Store in cache for both coder reuse and reviewer phase
         coordinatorCache?.set(task.id, coordResult);
+
+        // Log coordinator intervention to audit trail so it's visible in WebUI
+        addAuditEntry(db, task.id, task.status, task.status, 'coordinator', {
+          actorType: 'orchestrator',
+          notes: `[${coordResult.decision}] ${coordResult.guidance}`,
+        });
+
         if (!jsonMode) {
           console.log(`\nCoordinator decision: ${coordResult.decision}`);
           console.log('Coordinator guidance stored for both coder and reviewer.');

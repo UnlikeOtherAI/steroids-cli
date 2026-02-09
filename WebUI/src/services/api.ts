@@ -278,12 +278,12 @@ export const tasksApi = {
   },
 
   /**
-   * Restart a failed task
+   * Restart a failed/disputed task with optional human guidance notes
    */
-  async restart(taskId: string, projectPath: string): Promise<void> {
+  async restart(taskId: string, projectPath: string, notes?: string): Promise<void> {
     await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/restart`, {
       method: 'POST',
-      body: JSON.stringify({ project: projectPath }),
+      body: JSON.stringify({ project: projectPath, notes }),
     });
   },
 };

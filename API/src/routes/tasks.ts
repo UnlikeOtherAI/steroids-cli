@@ -51,6 +51,22 @@ interface InvocationEntry {
   created_at: string;
 }
 
+interface DisputeEntry {
+  id: string;
+  task_id: string;
+  type: string;
+  status: string;
+  reason: string;
+  coder_position: string | null;
+  reviewer_position: string | null;
+  resolution: string | null;
+  resolution_notes: string | null;
+  created_by: string;
+  resolved_by: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
 interface TaskResponse extends TaskDetails {
   duration: {
     total_seconds: number;
@@ -59,6 +75,7 @@ interface TaskResponse extends TaskDetails {
   };
   audit_trail: AuditEntry[];
   invocations: InvocationEntry[];
+  disputes: DisputeEntry[];
   github_url: string | null;
 }
 
@@ -201,6 +218,15 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
         )
         .all(taskId) as AuditEntry[];
 
+      // Get disputes for task
+      const disputes = db
+        .prepare(
+          `SELECT * FROM disputes
+          WHERE task_id = ?
+          ORDER BY created_at DESC`
+        )
+        .all(taskId) as DisputeEntry[];
+
       // Get LLM invocations (exclude prompt/response to keep payload light)
       const invocations = db
         .prepare(
@@ -241,6 +267,7 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
         },
         audit_trail: auditWithDurations.reverse(), // Most recent first for display
         invocations, // Oldest first (chronological)
+        disputes,
         github_url: githubUrl,
       };
 
@@ -566,13 +593,15 @@ router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
 
 /**
  * POST /api/tasks/:taskId/restart
- * Restart a failed task by resetting rejection count and setting status to pending
- * Body: { project: string }
+ * Restart a failed/disputed task by resetting rejection count and setting status to pending
+ * Body: { project: string, notes?: string }
+ * Notes are stored in the audit entry as human guidance for the coder
  */
 router.post('/tasks/:taskId/restart', (req: Request, res: Response) => {
   try {
     const { taskId } = req.params;
     const projectPath = req.body.project as string;
+    const notes = req.body.notes as string | undefined;
 
     if (!projectPath) {
       res.status(400).json({
@@ -604,7 +633,7 @@ router.post('/tasks/:taskId/restart', (req: Request, res: Response) => {
     }
 
     try {
-      // Check task exists and is in failed status
+      // Check task exists
       const task = db.prepare('SELECT id, title, status FROM tasks WHERE id = ?').get(taskId) as
         | { id: string; title: string; status: string }
         | undefined;
@@ -627,6 +656,20 @@ router.post('/tasks/:taskId/restart', (req: Request, res: Response) => {
         return;
       }
 
+      // Resolve any open disputes for this task
+      const openDisputes = db
+        .prepare(`SELECT id FROM disputes WHERE task_id = ? AND status = 'open'`)
+        .all(taskId) as { id: string }[];
+
+      for (const dispute of openDisputes) {
+        db.prepare(
+          `UPDATE disputes
+           SET status = 'resolved', resolution = 'custom', resolution_notes = ?,
+               resolved_by = 'human:webui', resolved_at = datetime('now')
+           WHERE id = ?`
+        ).run(notes || 'Resolved via WebUI restart', dispute.id);
+      }
+
       // Reset task: set status to pending and rejection_count to 0
       db.prepare(
         `UPDATE tasks
@@ -634,16 +677,21 @@ router.post('/tasks/:taskId/restart', (req: Request, res: Response) => {
          WHERE id = ?`
       ).run(taskId);
 
-      // Add audit entry
+      // Add audit entry with human guidance notes
+      const auditNotes = notes
+        ? `Task restarted via WebUI. Human guidance: ${notes}`
+        : 'Task restarted via WebUI';
+
       db.prepare(
         `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
-         VALUES (?, ?, 'pending', 'WebUI', 'human', 'Task restarted via WebUI', datetime('now'))`
-      ).run(taskId, task.status);
+         VALUES (?, ?, 'pending', 'human:webui', 'human', ?, datetime('now'))`
+      ).run(taskId, task.status, auditNotes);
 
       res.json({
         success: true,
         message: 'Task restarted successfully',
         task_id: taskId,
+        disputes_resolved: openDisputes.length,
       });
     } finally {
       db.close();

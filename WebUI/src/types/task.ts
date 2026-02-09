@@ -2,7 +2,7 @@
  * Task detail types for task pages
  */
 
-export type TaskStatus = 'pending' | 'in_progress' | 'review' | 'completed' | 'skipped' | 'failed';
+export type TaskStatus = 'pending' | 'in_progress' | 'review' | 'completed' | 'skipped' | 'failed' | 'disputed';
 
 export interface AuditEntry {
   id: number;
@@ -32,6 +32,22 @@ export interface TaskInvocation {
   created_at: string;
 }
 
+export interface TaskDispute {
+  id: string;
+  task_id: string;
+  type: string;
+  status: 'open' | 'resolved';
+  reason: string;
+  coder_position: string | null;
+  reviewer_position: string | null;
+  resolution: string | null;
+  resolution_notes: string | null;
+  created_by: string;
+  resolved_by: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
 export interface TaskDuration {
   total_seconds: number;
   in_progress_seconds: number;
@@ -51,6 +67,7 @@ export interface TaskDetails {
   duration: TaskDuration;
   audit_trail: AuditEntry[];
   invocations: TaskInvocation[];
+  disputes: TaskDispute[];
   github_url: string | null;
 }
 

@@ -12,6 +12,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   completed: 'Completed',
   skipped: 'Skipped',
   failed: 'Failed',
+  disputed: 'Disputed',
 };
 
 const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'info' | 'default'> = {
@@ -21,6 +22,7 @@ const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'in
   completed: 'success',
   skipped: 'warning',
   failed: 'danger',
+  disputed: 'danger',
 };
 
 // Queue statuses for "next to run" sorting (pending first, then in_progress, then review)
