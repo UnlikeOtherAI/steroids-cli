@@ -14,7 +14,8 @@ interface AggregateStats {
   in_progress: number;
   review: number;
   completed: number;
-  projectCount: number;
+  enabledProjects: number;
+  disabledProjects: number;
   runningRunners: number;
 }
 
@@ -48,10 +49,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
         in_progress: 0,
         review: 0,
         completed: 0,
-        projectCount: projects.length,
+        enabledProjects: 0,
+        disabledProjects: 0,
         runningRunners: 0,
       };
       for (const p of projects) {
+        if (p.enabled) {
+          aggregate.enabledProjects++;
+        } else {
+          aggregate.disabledProjects++;
+        }
         if (p.stats) {
           aggregate.pending += p.stats.pending;
           aggregate.in_progress += p.stats.in_progress;
@@ -263,21 +270,29 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
       </div>
 
       {aggregateStats && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div
             className="card p-6 cursor-pointer hover:bg-bg-surface2 transition-colors"
-            onClick={() => navigate('/projects')}
+            onClick={() => navigate('/projects?filter=disabled')}
           >
-            <div className="text-sm text-text-secondary mb-2">Projects</div>
-            <div className="text-4xl font-bold text-text-primary">{aggregateStats.projectCount}</div>
-            <div className="text-xs text-text-muted mt-1">Click to view all projects</div>
+            <div className="text-sm text-text-secondary mb-2">Disabled Projects</div>
+            <div className="text-4xl font-bold text-text-muted">{aggregateStats.disabledProjects}</div>
+            <div className="text-xs text-text-muted mt-1">Click to view disabled projects</div>
+          </div>
+          <div
+            className="card p-6 cursor-pointer hover:bg-bg-surface2 transition-colors"
+            onClick={() => navigate('/projects?filter=enabled')}
+          >
+            <div className="text-sm text-text-secondary mb-2">Enabled Projects</div>
+            <div className="text-4xl font-bold text-success">{aggregateStats.enabledProjects}</div>
+            <div className="text-xs text-text-muted mt-1">Click to view enabled projects</div>
           </div>
           <div
             className="card p-6 cursor-pointer hover:bg-bg-surface2 transition-colors"
             onClick={() => navigate('/runners')}
           >
             <div className="text-sm text-text-secondary mb-2">Active Runners</div>
-            <div className="text-4xl font-bold text-success">{aggregateStats.runningRunners}</div>
+            <div className="text-4xl font-bold text-accent">{aggregateStats.runningRunners}</div>
             <div className="text-xs text-text-muted mt-1">Click to view runners</div>
           </div>
         </div>

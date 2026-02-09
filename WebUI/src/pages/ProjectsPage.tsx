@@ -28,20 +28,6 @@ export const ProjectsPage: React.FC = () => {
     loadProjects();
   }, [includeDisabled]);
 
-  const handlePrune = async () => {
-    if (!confirm('Remove all projects with missing directories?')) {
-      return;
-    }
-
-    try {
-      const count = await projectsApi.prune();
-      alert(`Pruned ${count} stale project(s)`);
-      await loadProjects();
-    } catch (err) {
-      alert(err instanceof ApiError ? err.message : 'Failed to prune projects');
-    }
-  };
-
   if (loading && projects.length === 0) {
     return (
       <div className="p-8">
@@ -71,9 +57,6 @@ export const ProjectsPage: React.FC = () => {
             label="Show disabled"
             sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem', color: '#374151' } }}
           />
-          <Button variant="secondary" size="sm" onClick={handlePrune}>
-            Prune Stale
-          </Button>
           <Button size="sm" onClick={loadProjects}>
             Refresh
           </Button>
