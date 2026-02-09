@@ -246,7 +246,7 @@ Check for:
 - **Unsafe deserialization**: No \`eval()\`, \`new Function()\`, or \`JSON.parse\` on untrusted input without validation
 - **Permission escalation**: Code should not grant broader access than necessary (file permissions, API scopes, etc.)
 - **Information leakage**: Error messages and logs should not expose internal paths, stack traces, or sensitive data to end users
-- **Dependency hygiene** (advisory only): If new dependencies are added, note whether they appear well-known and maintained. Flag potential typosquatting but do NOT reject solely for dependency choice — just highlight it as a note
+- **Dependency hygiene** (advisory only): If new dependencies are added, note whether they appear well-known and maintained. Flag potential typosquatting but do NOT reject solely for dependency choice — just highlight it as a note and suggest a more established alternative if one exists
 
 If you find a security vulnerability in the items above (excluding the advisory item), **REJECT immediately** with a clear explanation and remediation steps. Security vulnerabilities are never "minor".
 ${getTestCoverageInstructions(config, modifiedFiles)}
