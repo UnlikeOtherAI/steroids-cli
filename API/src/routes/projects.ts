@@ -4,8 +4,10 @@
  */
 
 import { Router, Request, Response } from 'express';
+import Database from 'better-sqlite3';
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   getRegisteredProjects,
   registerProject,
@@ -19,6 +21,43 @@ import { openGlobalDatabase } from '../../../src/runners/global-db.js';
 import { isValidProjectPath, validatePathRequest } from '../utils/validation.js';
 
 const router = Router();
+
+/**
+ * Query live task stats from a project's local database
+ */
+function getProjectLiveStats(projectPath: string): {
+  pending: number;
+  in_progress: number;
+  review: number;
+  completed: number;
+} {
+  const dbPath = join(projectPath, '.steroids', 'steroids.db');
+  if (!existsSync(dbPath)) {
+    return { pending: 0, in_progress: 0, review: 0, completed: 0 };
+  }
+
+  try {
+    const projectDb = new Database(dbPath, { readonly: true });
+    try {
+      const row = projectDb
+        .prepare(
+          `SELECT
+            COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) as pending,
+            COALESCE(SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END), 0) as in_progress,
+            COALESCE(SUM(CASE WHEN status = 'review' THEN 1 ELSE 0 END), 0) as review,
+            COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed
+          FROM tasks`
+        )
+        .get() as { pending: number; in_progress: number; review: number; completed: number } | undefined;
+
+      return row || { pending: 0, in_progress: 0, review: 0, completed: 0 };
+    } finally {
+      projectDb.close();
+    }
+  } catch {
+    return { pending: 0, in_progress: 0, review: 0, completed: 0 };
+  }
+}
 
 interface ProjectResponse {
   path: string;
@@ -66,26 +105,8 @@ router.get('/projects', (req: Request, res: Response) => {
           heartbeat_at: string | null;
         } | undefined;
 
-        // Get stats (if available from cached stats)
-        // Check if stats columns exist first
-        type StatsResult = {
-          pending_count: number | null;
-          in_progress_count: number | null;
-          review_count: number | null;
-          completed_count: number | null;
-        };
-
-        let stats: StatsResult | undefined = undefined;
-
-        try {
-          stats = db
-            .prepare(
-              'SELECT pending_count, in_progress_count, review_count, completed_count FROM projects WHERE path = ?'
-            )
-            .get(project.path) as StatsResult | undefined;
-        } catch {
-          // Stats columns don't exist yet - that's ok, they're optional
-        }
+        // Get live stats from project-local database
+        const liveStats = getProjectLiveStats(project.path);
 
         const response: ProjectResponse = {
           path: project.path,
@@ -94,6 +115,7 @@ router.get('/projects', (req: Request, res: Response) => {
           registered_at: project.registered_at,
           last_seen_at: project.last_seen_at,
           last_activity_at: runner?.heartbeat_at || null,
+          stats: liveStats,
           runner: runner
             ? {
                 id: runner.id,
@@ -104,22 +126,6 @@ router.get('/projects', (req: Request, res: Response) => {
               }
             : null,
         };
-
-        // Add stats if available
-        if (
-          stats &&
-          stats.pending_count !== null &&
-          stats.in_progress_count !== null &&
-          stats.review_count !== null &&
-          stats.completed_count !== null
-        ) {
-          response.stats = {
-            pending: stats.pending_count,
-            in_progress: stats.in_progress_count,
-            review: stats.review_count,
-            completed: stats.completed_count,
-          };
-        }
 
         return response;
       });

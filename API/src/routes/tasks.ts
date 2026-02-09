@@ -415,13 +415,26 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
     }
 
     try {
+      // Check if priority column exists (older databases may not have it)
+      const hasPriority = (() => {
+        try {
+          const cols = db.prepare("PRAGMA table_info(sections)").all() as Array<{ name: string }>;
+          return cols.some(c => c.name === 'priority');
+        } catch {
+          return false;
+        }
+      })();
+
+      const prioritySelect = hasPriority ? 's.priority,' : '50 as priority,';
+      const orderBy = hasPriority ? 'ORDER BY s.priority DESC, s.name ASC' : 'ORDER BY s.name ASC';
+
       // Get sections with task counts by status
       const sections = db
         .prepare(
           `SELECT
             s.id,
             s.name,
-            s.priority,
+            ${prioritySelect}
             s.created_at,
             COUNT(t.id) as total_tasks,
             SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pending,
@@ -433,7 +446,7 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
           FROM sections s
           LEFT JOIN tasks t ON t.section_id = s.id
           GROUP BY s.id
-          ORDER BY s.priority DESC, s.name ASC`
+          ${orderBy}`
         )
         .all() as Array<{
         id: string;
