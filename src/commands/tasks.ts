@@ -6,6 +6,7 @@ import type { GlobalFlags } from '../cli/flags.js';
 import { parseArgs } from 'node:util';
 import { existsSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
+import Database from 'better-sqlite3';
 import { openDatabase } from '../database/connection.js';
 import { getRegisteredProjects } from '../runners/projects.js';
 import { logActivity } from '../runners/activity-log.js';
@@ -21,6 +22,7 @@ import {
   getTaskAudit,
   getSection,
   getSectionByName,
+  listSections,
   STATUS_MARKERS,
   type Task,
   type TaskStatus,
@@ -33,6 +35,8 @@ import {
   triggerTaskCreated,
   triggerTaskUpdated,
   triggerTaskCompleted,
+  triggerSectionCompleted,
+  triggerProjectCompleted,
   triggerHooksSafely,
 } from '../hooks/integration.js';
 
@@ -637,6 +641,86 @@ EXAMPLES:
   }
 }
 
+/**
+ * Check if a section is completed after a task is marked complete
+ */
+async function checkSectionCompletion(
+  db: Database.Database,
+  sectionId: string | null,
+  flags: GlobalFlags
+): Promise<void> {
+  if (!sectionId || shouldSkipHooks(flags)) {
+    return;
+  }
+
+  // Get section info
+  const section = getSection(db, sectionId);
+  if (!section) {
+    return;
+  }
+
+  // Check if all tasks in section are completed
+  const sectionTasks = listTasks(db, { sectionId });
+  const allCompleted = sectionTasks.every((t) => t.status === 'completed');
+
+  if (allCompleted && sectionTasks.length > 0) {
+    // Trigger section.completed hooks
+    await triggerHooksSafely(
+      () =>
+        triggerSectionCompleted(
+          {
+            id: section.id,
+            name: section.name,
+            taskCount: sectionTasks.length,
+          },
+          sectionTasks.map((t) => ({ id: t.id, title: t.title })),
+          { verbose: flags.verbose }
+        ),
+      { verbose: flags.verbose }
+    );
+  }
+}
+
+/**
+ * Check if the entire project is completed after a task is marked complete
+ */
+async function checkProjectCompletion(
+  db: Database.Database,
+  flags: GlobalFlags
+): Promise<void> {
+  if (shouldSkipHooks(flags)) {
+    return;
+  }
+
+  // Get all tasks
+  const allTasks = listTasks(db, { status: 'all' });
+
+  // Check if all tasks are completed
+  const allCompleted = allTasks.every((t) => t.status === 'completed');
+
+  if (allCompleted && allTasks.length > 0) {
+    // Get sections
+    const sections = listSections(db);
+
+    // Get unique source files
+    const files = Array.from(new Set(allTasks.map((t) => t.source_file).filter(Boolean))) as string[];
+
+    // Trigger project.completed hooks
+    await triggerHooksSafely(
+      () =>
+        triggerProjectCompleted(
+          {
+            totalTasks: allTasks.length,
+            files,
+            sectionCount: sections.length,
+          },
+          { verbose: flags.verbose }
+        ),
+      { verbose: flags.verbose }
+    );
+  }
+}
+
 async function approveTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'tasks', subcommand: 'approve', flags });
 
@@ -694,6 +778,12 @@ OPTIONS:
         () => triggerTaskCompleted(updated, { verbose: flags.verbose }),
         { verbose: flags.verbose }
       );
+
+      // Check if section is now complete
+      await checkSectionCompletion(db, updated.section_id, flags);
+
+      // Check if entire project is now complete
+      await checkProjectCompletion(db, flags);
     }
 
     out.success({ task: updated });
