@@ -39,12 +39,9 @@ LLM agents to only work on their own project and not modify other projects.`,
     { name: 'disable', args: '[path]', description: 'Disable a project (defaults to current dir)' },
     { name: 'prune', description: 'Remove projects that no longer exist' },
   ],
-  options: [
-    { short: 'a', long: 'all', description: 'Include disabled projects (list only)' },
-  ],
+  options: [],
   examples: [
-    { command: 'steroids projects list', description: 'List enabled projects' },
-    { command: 'steroids projects list --all', description: 'List all projects (including disabled)' },
+    { command: 'steroids projects list', description: 'List all registered projects' },
     { command: 'steroids projects add', description: 'Register current directory' },
     { command: 'steroids projects add ~/code/my-app', description: 'Register a specific project' },
     { command: 'steroids projects remove', description: 'Unregister current directory' },
@@ -116,10 +113,11 @@ export async function projectsCommand(args: string[], flags: GlobalFlags): Promi
 
 async function listProjects(
   out: ReturnType<typeof createOutput>,
-  includeDisabled: boolean,
+  _includeDisabled: boolean,  // Ignored - always show all projects
   flags: GlobalFlags
 ): Promise<void> {
-  const projects = getRegisteredProjects(includeDisabled);
+  // Always show all projects (disabled ones are clearly marked)
+  const projects = getRegisteredProjects(true);
 
   if (flags.json) {
     out.success({
