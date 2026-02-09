@@ -8,6 +8,15 @@ interface ProjectCardProps {
   project: Project;
 }
 
+function truncateMiddle(str: string, maxLen: number = 40): string {
+  if (str.length <= maxLen) return str;
+  const ellipsis = '...';
+  const charsToShow = maxLen - ellipsis.length;
+  const frontChars = Math.ceil(charsToShow / 2);
+  const backChars = Math.floor(charsToShow / 2);
+  return str.slice(0, frontChars) + ellipsis + str.slice(-backChars);
+}
+
 export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
   const navigate = useNavigate();
 
@@ -34,10 +43,13 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
       className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
     >
       <div className="mb-3">
+        <h3 className="text-lg font-semibold text-gray-900 truncate">
+          {project.name || project.path.split('/').pop() || 'Project'}
+        </h3>
         <Tooltip content={project.path}>
-          <h3 className="text-lg font-semibold text-gray-900 truncate">
-            {project.name || project.path.split('/').pop() || 'Project'}
-          </h3>
+          <p className="text-xs text-gray-500 font-mono mt-0.5">
+            {truncateMiddle(project.path, 35)}
+          </p>
         </Tooltip>
         <div className="flex gap-2 mt-1">
           <Badge variant={project.enabled ? 'success' : 'default'}>
