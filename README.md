@@ -31,12 +31,12 @@ Steroids is an AI-powered task orchestration system that automates software deve
 * [Key Features](#key-features)
 * [Project Structure](#project-structure)
 * [Quickstart](#quickstart)
+* [Web Dashboard](#web-dashboard)
 * [CLI Commands](#cli-commands)
 * [Runner Daemon](#runner-daemon)
 * [Coordinator System](#coordinator-system)
 * [Disputes](#disputes)
 * [Hooks](#hooks)
-* [Web Dashboard](#web-dashboard)
 * [Configuration](#configuration)
 * [Quality & Safety](#quality--safety)
 * [The Suite](#the-suite)
@@ -202,6 +202,40 @@ steroids runners start --detach
 ```
 
 Steroids processes tasks in order, looping coder/reviewer until completion or dispute.
+
+---
+
+## Web Dashboard
+
+Steroids ships with a full web dashboard for monitoring tasks, runners, and project health.
+
+On first run, `steroids web` clones the dashboard repository to `~/.steroids/webui/` and installs everything automatically. On subsequent runs, it pulls the latest version before launching — so you're always up to date.
+
+```bash
+# Launch the dashboard (first run clones the repo, subsequent runs auto-update)
+steroids web
+```
+
+That's it. Open your browser at:
+
+- **Web UI:** [http://localhost:3500](http://localhost:3500)
+- **API:** [http://localhost:3501](http://localhost:3501)
+
+### Managing the Dashboard
+
+| Command | Description |
+|---------|-------------|
+| `steroids web` | Launch the dashboard (auto-clones on first run, auto-updates on every run) |
+| `steroids web stop` | Stop the dashboard |
+| `steroids web status` | Check if the dashboard is running |
+
+### What You Get
+
+- **Multi-project view** — See all registered projects at a glance
+- **Task queues** — Pending, in-progress, review, completed
+- **Runner status** — Active daemons with heartbeat monitoring
+- **Audit trails** — Full history of every task state change
+- **Configuration** — Edit project settings from the browser
 
 ---
 
@@ -423,43 +457,6 @@ Events: `task.created`, `task.completed`, `task.failed`, `section.completed`, `p
 Configure hooks in `.steroids/config.yaml` or manage via CLI.
 
 ---
-
-## Web Dashboard
-
-Steroids includes a web dashboard for visual monitoring. It auto-clones on first run:
-
-```bash
-# Launch the dashboard (clones repo to ~/.steroids/webui/ on first run)
-steroids web
-
-# Check status
-steroids web status
-
-# Pull latest changes and reinstall
-steroids web update
-
-# Stop the dashboard
-steroids web stop
-
-# Access at
-# Web UI: http://localhost:3500
-# API: http://localhost:3501
-```
-
-| Command | Description |
-|---------|-------------|
-| `steroids web` | Clone (if needed) and launch WebUI + API |
-| `steroids web update` | Pull latest code and reinstall dependencies |
-| `steroids web stop` | Stop running WebUI and API processes |
-| `steroids web status` | Check if dashboard is running |
-
-### Features
-
-- **Multi-project view** — See all registered projects
-- **Task queues** — Pending, in-progress, review, completed
-- **Runner status** — Active daemons with heartbeat
-- **Audit trails** — Full history of task state changes
-- **Configuration** — Edit project settings from the browser
 
 ---
 

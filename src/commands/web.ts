@@ -176,6 +176,20 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
       const freshClone = ensureRepo(out);
       if (freshClone) {
         installAndBuild(out);
+      } else {
+        // Always pull latest before launching
+        out.log('Checking for updates...');
+        try {
+          const result = execSync('git pull', { cwd: WEB_DIR, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+          if (result.includes('Already up to date')) {
+            out.log('Already up to date.');
+          } else {
+            out.log('Updated. Reinstalling...');
+            installAndBuild(out);
+          }
+        } catch {
+          out.log('Could not check for updates (offline?). Launching with current version.');
+        }
       }
       launchProcesses(out);
       break;
