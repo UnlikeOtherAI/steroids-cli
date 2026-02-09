@@ -20,7 +20,13 @@ import {
   SectionsListResponse,
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3501';
+// Auto-detect API URL: use the same host as the WebUI but port 3501
+// This allows accessing from mobile devices on the local network
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:3501`
+    : 'http://localhost:3501');
 
 export class ApiError extends Error {
   constructor(
