@@ -129,6 +129,86 @@ describe('Section Dependencies', () => {
       expect(deps[0].id).toBe(depSection.id);
     });
 
+    it('returns dependency when it has disputed tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      // Add dependency
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // Add disputed task to dependency
+      createTask(db, 'Disputed Task', {
+        sectionId: depSection.id,
+        status: 'disputed',
+      });
+
+      const deps = getPendingDependencies(db, mainSection.id);
+      expect(deps.length).toBe(1);
+      expect(deps[0].id).toBe(depSection.id);
+    });
+
+    it('returns dependency when it has failed tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      // Add dependency
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // Add failed task to dependency
+      createTask(db, 'Failed Task', {
+        sectionId: depSection.id,
+        status: 'failed',
+      });
+
+      const deps = getPendingDependencies(db, mainSection.id);
+      expect(deps.length).toBe(1);
+      expect(deps[0].id).toBe(depSection.id);
+    });
+
+    it('returns dependency when it has skipped tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      // Add dependency
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // Add skipped task to dependency
+      createTask(db, 'Skipped Task', {
+        sectionId: depSection.id,
+        status: 'skipped',
+      });
+
+      const deps = getPendingDependencies(db, mainSection.id);
+      expect(deps.length).toBe(1);
+      expect(deps[0].id).toBe(depSection.id);
+    });
+
+    it('returns dependency when it has partial tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      // Add dependency
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // Add partial task to dependency
+      createTask(db, 'Partial Task', {
+        sectionId: depSection.id,
+        status: 'partial',
+      });
+
+      const deps = getPendingDependencies(db, mainSection.id);
+      expect(deps.length).toBe(1);
+      expect(deps[0].id).toBe(depSection.id);
+    });
+
     it('returns multiple dependencies when multiple have pending tasks', () => {
       const dep1 = createSection(db, 'Dependency 1');
       const dep2 = createSection(db, 'Dependency 2');
@@ -228,6 +308,78 @@ describe('Section Dependencies', () => {
       createTask(db, 'In Progress Task', {
         sectionId: depSection.id,
         status: 'in_progress',
+      });
+
+      expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
+    });
+
+    it('returns false when dependency has disputed tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      // Add dependency
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // Add disputed task to dependency
+      createTask(db, 'Disputed Task', {
+        sectionId: depSection.id,
+        status: 'disputed',
+      });
+
+      expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
+    });
+
+    it('returns false when dependency has failed tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      // Add dependency
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // Add failed task to dependency
+      createTask(db, 'Failed Task', {
+        sectionId: depSection.id,
+        status: 'failed',
+      });
+
+      expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
+    });
+
+    it('returns false when dependency has skipped tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      // Add dependency
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // Add skipped task to dependency
+      createTask(db, 'Skipped Task', {
+        sectionId: depSection.id,
+        status: 'skipped',
+      });
+
+      expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
+    });
+
+    it('returns false when dependency has partial tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      // Add dependency
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // Add partial task to dependency
+      createTask(db, 'Partial Task', {
+        sectionId: depSection.id,
+        status: 'partial',
       });
 
       expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
