@@ -273,25 +273,26 @@ async function runReviewerPhase(
   if (result.decision === 'approve') {
     console.log('\n✓ Task APPROVED');
 
-    // Get the commit message before pushing
+    // Get the commit message and SHA before pushing
     let commitMessage: string | null = null;
+    let commitSha: string | null = null;
     try {
       commitMessage = execSync('git log -1 --format=%B', {
         cwd: projectPath,
         encoding: 'utf-8',
       }).trim();
+      commitSha = execSync('git rev-parse HEAD', {
+        cwd: projectPath,
+        encoding: 'utf-8',
+      }).trim();
     } catch (error) {
-      console.warn('Failed to get commit message:', error);
+      console.warn('Failed to get commit info:', error);
     }
 
     // Push changes
     try {
       console.log('Pushing to git...');
       execSync('git push', { cwd: projectPath, stdio: 'inherit' });
-      const commitSha = execSync('git rev-parse HEAD', {
-        cwd: projectPath,
-        encoding: 'utf-8',
-      }).trim();
       console.log(`Pushed successfully (${commitSha})`);
     } catch (error) {
       console.warn('Failed to push:', error);
@@ -306,7 +307,8 @@ async function runReviewerPhase(
         task.title,
         sectionName,
         'completed',
-        commitMessage
+        commitMessage,
+        commitSha
       );
     }
   } else if (result.decision === 'reject') {

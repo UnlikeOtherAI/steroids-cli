@@ -4,6 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { execSync } from 'node:child_process';
 import {
   getActivityStatsByProject,
   getActivityFiltered,
@@ -11,6 +12,33 @@ import {
   ActivityStatus,
   ActivityLogEntry,
 } from '../../../src/runners/activity-log.js';
+
+/**
+ * Get GitHub URL from git remote for a project
+ */
+function getGitHubUrl(projectPath: string): string | null {
+  try {
+    const remoteUrl = execSync('git remote get-url origin', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+    }).trim();
+
+    // Convert SSH or HTTPS URL to web URL
+    if (remoteUrl.startsWith('git@github.com:')) {
+      const path = remoteUrl.replace('git@github.com:', '').replace(/\.git$/, '');
+      return `https://github.com/${path}`;
+    } else if (remoteUrl.includes('github.com')) {
+      return remoteUrl.replace(/\.git$/, '');
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+interface ActivityListEntry extends ActivityLogEntry {
+  github_url: string | null;
+}
 
 const router = Router();
 
@@ -209,11 +237,24 @@ router.get('/activity/list', (req: Request, res: Response) => {
       }
     }
 
-    const entries = getActivityFiltered({
+    const rawEntries = getActivityFiltered({
       hoursAgo: hours,
       status: statusParam as ActivityStatus | undefined,
       projectPath,
       limit,
+    });
+
+    // Cache GitHub URLs by project path to avoid repeated git calls
+    const githubUrlCache = new Map<string, string | null>();
+
+    const entries: ActivityListEntry[] = rawEntries.map((entry) => {
+      if (!githubUrlCache.has(entry.project_path)) {
+        githubUrlCache.set(entry.project_path, getGitHubUrl(entry.project_path));
+      }
+      return {
+        ...entry,
+        github_url: githubUrlCache.get(entry.project_path) ?? null,
+      };
     });
 
     res.json({
