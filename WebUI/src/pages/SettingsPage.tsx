@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  Cog6ToothIcon,
   ArrowPathIcon,
   CheckIcon,
   ExclamationTriangleIcon,
@@ -147,7 +146,7 @@ export const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-4xl mx-auto">
+    <div className="p-8 max-w-6xl mx-auto">
       {showAISetup && (
         <AISetupModal
           onComplete={handleAISetupDone}
@@ -156,14 +155,11 @@ export const SettingsPage: React.FC = () => {
       )}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Cog6ToothIcon className="w-8 h-8 text-accent" />
-          <div>
-            <h1 className="text-2xl font-bold text-text-primary">Global Settings</h1>
-            <p className="text-sm text-text-muted">
-              Configure Steroids behavior and preferences across all projects
-            </p>
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold text-text-primary">Settings</h1>
+          <p className="text-text-muted mt-1">
+            Configure Steroids behavior and preferences across all projects
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
