@@ -31,6 +31,7 @@ import { llmCommand } from './commands/llm.js';
 import { statsCommand } from './commands/stats.js';
 import { hooksCommand } from './commands/hooks.js';
 import { aiCommand } from './commands/ai.js';
+import { webCommand } from './commands/web.js';
 
 // Read version from package.json - search up from dist folder
 function getVersion(): string {
@@ -81,6 +82,7 @@ COMMANDS:
   purge             Purge old data
   git               Git integration commands
   completion        Generate shell completions
+  web               Launch the web dashboard (auto-clones on first run)
   locks             Manage task and section locks
 
 GLOBAL OPTIONS:
@@ -218,6 +220,9 @@ async function main(): Promise<void> {
         break;
       case 'llm':
         await llmCommand(commandArgs, flags);
+        break;
+      case 'web':
+        await webCommand(commandArgs, flags);
         break;
       default:
         if (flags.json) {

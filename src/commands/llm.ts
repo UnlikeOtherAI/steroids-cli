@@ -93,6 +93,12 @@ steroids runners logs <pid>             # view daemon output
 ### Projects
 steroids projects list                  # all registered projects
 
+### Web Dashboard
+steroids web                            # clone (first run) and launch dashboard
+steroids web update                     # pull latest + reinstall deps
+steroids web stop                       # stop running dashboard
+steroids web status                     # check if dashboard is running
+
 ## COMMON OPERATIONS
 
 ### Start automation
