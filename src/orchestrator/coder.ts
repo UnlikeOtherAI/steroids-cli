@@ -19,6 +19,7 @@ import {
 import { getGitStatus, getGitDiff } from '../git/status.js';
 import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
+import { logInvocation } from '../providers/invocation-logger.js';
 
 export interface CoderResult {
   success: boolean;
@@ -54,7 +55,8 @@ function writePromptToTempFile(prompt: string): string {
  */
 async function invokeProvider(
   promptFile: string,
-  timeoutMs: number = 900_000 // 15 minutes default
+  timeoutMs: number = 900_000, // 15 minutes default
+  taskId?: string
 ): Promise<CoderResult> {
   // Load configuration to get coder provider settings
   const config = loadConfig();
@@ -89,6 +91,14 @@ async function invokeProvider(
     promptFile,
     role: 'coder',
     streamOutput: true,
+  });
+
+  // Log the invocation
+  logInvocation(promptContent, result, {
+    role: 'coder',
+    provider: coderConfig.provider,
+    model: coderConfig.model,
+    taskId,
   });
 
   return {
@@ -150,7 +160,7 @@ export async function invokeCoder(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    const result = await invokeProvider(promptFile);
+    const result = await invokeProvider(promptFile, 900_000, task.id);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`CODER COMPLETED`);

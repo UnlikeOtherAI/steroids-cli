@@ -47,3 +47,14 @@ export {
   getApiKeyEnvVar,
   hasApiKey,
 } from './api-models.js';
+
+// Invocation logging
+export {
+  type InvocationLogEntry,
+  type InvocationLoggerConfig,
+  InvocationLogger,
+  getInvocationLogger,
+  setInvocationLogger,
+  resetInvocationLogger,
+  logInvocation,
+} from './invocation-logger.js';

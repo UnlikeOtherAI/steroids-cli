@@ -25,6 +25,7 @@ import {
 } from '../git/status.js';
 import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
+import { logInvocation } from '../providers/invocation-logger.js';
 
 export interface ReviewerResult {
   success: boolean;
@@ -89,7 +90,8 @@ function parseReviewerDecision(output: string): { decision?: 'approve' | 'reject
  */
 async function invokeProvider(
   promptFile: string,
-  timeoutMs: number = 600_000 // 10 minutes default for reviewer
+  timeoutMs: number = 600_000, // 10 minutes default for reviewer
+  taskId?: string
 ): Promise<ReviewerResult> {
   // Load configuration to get reviewer provider settings
   const config = loadConfig();
@@ -124,6 +126,14 @@ async function invokeProvider(
     promptFile,
     role: 'reviewer',
     streamOutput: true,
+  });
+
+  // Log the invocation
+  logInvocation(promptContent, result, {
+    role: 'reviewer',
+    provider: reviewerConfig.provider,
+    model: reviewerConfig.model,
+    taskId,
   });
 
   // Parse the decision from output
@@ -230,7 +240,7 @@ export async function invokeReviewer(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    const result = await invokeProvider(promptFile);
+    const result = await invokeProvider(promptFile, 600_000, task.id);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`REVIEWER COMPLETED`);
