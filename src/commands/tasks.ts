@@ -23,9 +23,12 @@ import {
   getSection,
   getSectionByName,
   listSections,
+  getTaskInvocations,
+  getInvocationCount,
   STATUS_MARKERS,
   type Task,
   type TaskStatus,
+  type TaskInvocation,
 } from '../database/queries.js';
 import { outputJson as outputEnvelope, outputJsonError, createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
@@ -54,6 +57,7 @@ Use this command to add, update, approve, reject, or skip tasks.`,
   subcommands: [
     { name: 'list', description: 'List tasks (default subcommand)' },
     { name: 'stats', description: 'Show task counts by status' },
+    { name: 'show', args: '<id|title>', description: 'Show task details with invocation logs' },
     { name: 'add', args: '<title>', description: 'Add a new task' },
     { name: 'update', args: '<id|title>', description: 'Update task status' },
     { name: 'approve', args: '<id|title>', description: 'Approve a task (mark completed)' },
@@ -87,6 +91,7 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { command: 'steroids tasks reject abc123 --model codex --notes "Missing tests"', description: 'Reject a task' },
     { command: 'steroids tasks skip abc123 --notes "Cloud SQL - manual setup"', description: 'Skip a task' },
     { command: 'steroids tasks audit abc123', description: 'View task history' },
+    { command: 'steroids tasks show abc123 --logs', description: 'Show task with LLM invocation logs' },
     { command: 'steroids tasks stats --json', description: 'Get task statistics as JSON' },
   ],
   related: [
@@ -137,6 +142,9 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
   switch (subcommand) {
     case 'stats':
       await showStats(subArgs, flags);
+      break;
+    case 'show':
+      await showTask(subArgs, flags);
       break;
     case 'add':
       await addTask(subArgs, flags);
@@ -434,6 +442,160 @@ EXAMPLE:
     }
     console.log('─'.repeat(30));
     console.log(`  Total: ${total}`);
+  } finally {
+    close();
+  }
+}
+
+async function showTask(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'tasks', subcommand: 'show', flags });
+
+  const { values, positionals } = parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean', short: 'h', default: false },
+      logs: { type: 'boolean', default: false },
+      'logs-full': { type: 'boolean', default: false },
+      limit: { type: 'string', default: '5' },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help || flags.help || positionals.length === 0) {
+    out.log(`
+steroids tasks show <id|title> - Show task details with invocation logs
+
+USAGE:
+  steroids tasks show <id|title> [options]
+
+OPTIONS:
+  --logs              Show LLM invocation history (prompts/responses)
+  --logs-full         Show full prompts and responses (verbose)
+  --limit <n>         Limit number of invocations shown (default: 5)
+  -h, --help          Show help
+
+DESCRIPTION:
+  Shows detailed information about a task including:
+  - Task metadata (ID, title, status, section, spec file)
+  - Rejection count and history
+  - LLM invocation logs (with --logs flag)
+
+EXAMPLES:
+  steroids tasks show abc123                   # Basic task info
+  steroids tasks show abc123 --logs            # Include LLM invocation summary
+  steroids tasks show abc123 --logs-full       # Full prompts and responses
+  steroids tasks show abc123 --logs --limit 10 # Show last 10 invocations
+`);
+    return;
+  }
+
+  const identifier = positionals[0];
+  const showLogs = values.logs || values['logs-full'];
+  const showFullLogs = values['logs-full'];
+  const limit = parseInt(values.limit as string, 10) || 5;
+
+  const { db, close } = openDatabase();
+  try {
+    let task = getTask(db, identifier);
+    if (!task) {
+      task = getTaskByTitle(db, identifier);
+    }
+
+    if (!task) {
+      out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
+      process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
+    }
+
+    // Get section info
+    const section = task.section_id ? getSection(db, task.section_id) : null;
+
+    // Get invocation counts
+    const invocationCounts = getInvocationCount(db, task.id);
+
+    // Get invocations if requested
+    let invocations: TaskInvocation[] = [];
+    if (showLogs) {
+      invocations = getTaskInvocations(db, task.id).slice(-limit);
+    }
+
+    // Get audit trail for rejection history
+    const auditEntries = getTaskAudit(db, task.id);
+
+    if (flags.json) {
+      out.success({
+        task,
+        section: section ? { id: section.id, name: section.name } : null,
+        invocationCounts,
+        invocations: showLogs ? invocations : undefined,
+        auditTrail: auditEntries,
+      });
+      return;
+    }
+
+    // Display task details
+    console.log('─'.repeat(80));
+    console.log('TASK DETAILS');
+    console.log('─'.repeat(80));
+    console.log(`ID:              ${task.id}`);
+    console.log(`Title:           ${task.title}`);
+    console.log(`Status:          ${STATUS_MARKERS[task.status]} ${task.status}`);
+    console.log(`Section:         ${section ? section.name : '(none)'}`);
+    console.log(`Spec File:       ${task.source_file ?? '(not set)'}`);
+    console.log(`Rejections:      ${task.rejection_count}/15`);
+    console.log(`Created:         ${task.created_at}`);
+    console.log(`Updated:         ${task.updated_at}`);
+    console.log('');
+    console.log(`Invocations:     ${invocationCounts.coder} coder, ${invocationCounts.reviewer} reviewer (${invocationCounts.total} total)`);
+    console.log('─'.repeat(80));
+
+    if (showLogs && invocations.length > 0) {
+      console.log('');
+      console.log('LLM INVOCATIONS (most recent)');
+      console.log('─'.repeat(80));
+
+      for (const inv of invocations) {
+        const ts = inv.created_at.substring(0, 19).replace('T', ' ');
+        const status = inv.success ? 'OK' : (inv.timed_out ? 'TIMEOUT' : 'FAIL');
+        const duration = (inv.duration_ms / 1000).toFixed(1) + 's';
+        const rejNum = inv.rejection_number ? ` (rejection #${inv.rejection_number})` : '';
+
+        console.log(`\n[${ts}] ${inv.role.toUpperCase()} - ${inv.provider}/${inv.model} - ${status} - ${duration}${rejNum}`);
+
+        if (showFullLogs) {
+          console.log('\n--- PROMPT ---');
+          console.log(inv.prompt.substring(0, 5000) + (inv.prompt.length > 5000 ? '\n\n[...truncated...]' : ''));
+          console.log('\n--- RESPONSE ---');
+          const response = inv.response || '(no response)';
+          console.log(response.substring(0, 3000) + (response.length > 3000 ? '\n\n[...truncated...]' : ''));
+          if (inv.error) {
+            console.log('\n--- ERROR ---');
+            console.log(inv.error.substring(0, 1000));
+          }
+        } else {
+          // Summary view
+          const promptLines = inv.prompt.split('\n').length;
+          const responseLines = (inv.response || '').split('\n').length;
+          console.log(`  Prompt: ${promptLines} lines, ${inv.prompt.length} chars`);
+          console.log(`  Response: ${responseLines} lines, ${(inv.response || '').length} chars`);
+          if (inv.error) {
+            console.log(`  Error: ${inv.error.substring(0, 100)}...`);
+          }
+        }
+      }
+
+      console.log('');
+      console.log('─'.repeat(80));
+      console.log(`Tip: Use --logs-full to see complete prompts and responses`);
+    } else if (showLogs && invocations.length === 0) {
+      console.log('');
+      console.log('No invocations recorded for this task yet.');
+      console.log('Invocations are recorded when coder/reviewer processes run.');
+    }
+
+    if (!showLogs && invocationCounts.total > 0) {
+      console.log('');
+      console.log(`Tip: Use --logs to see invocation history, --logs-full for full prompts`);
+    }
   } finally {
     close();
   }

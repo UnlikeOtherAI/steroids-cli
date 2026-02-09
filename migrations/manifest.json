@@ -1,6 +1,6 @@
 {
   "version": "0.2.0",
-  "latestDbVersion": 5,
+  "latestDbVersion": 6,
   "migrations": [
     {
       "id": 1,
@@ -41,6 +41,14 @@
       "description": "Add actor_type and model columns to audit table for better tracking",
       "checksum": "",
       "cliVersion": "0.4.25"
+    },
+    {
+      "id": 6,
+      "name": "006_add_task_invocations",
+      "file": "006_add_task_invocations.sql",
+      "description": "Add task_invocations table for per-task LLM prompt/response logging",
+      "checksum": "",
+      "cliVersion": "0.4.27"
     }
   ]
 }

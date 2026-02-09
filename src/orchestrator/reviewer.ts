@@ -130,12 +130,13 @@ async function invokeProvider(
     streamOutput: true,
   });
 
-  // Log the invocation
+  // Log the invocation (to both file and database)
   logInvocation(promptContent, result, {
     role: 'reviewer',
     provider: reviewerConfig.provider,
     model: reviewerConfig.model,
     taskId,
+    projectPath,
   });
 
   // Parse the decision from output

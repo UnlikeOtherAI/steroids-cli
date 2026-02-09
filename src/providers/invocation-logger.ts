@@ -321,6 +321,7 @@ export function resetInvocationLogger(): void {
 
 /**
  * Helper to log an invocation result
+ * Logs to both file system and database (if taskId provided)
  */
 export function logInvocation(
   prompt: string,
@@ -330,10 +331,13 @@ export function logInvocation(
     provider: string;
     model: string;
     taskId?: string;
+    projectPath?: string;
+    rejectionNumber?: number;
   }
 ): void {
   const logger = getInvocationLogger();
 
+  // Log to file system
   logger.log({
     timestamp: new Date().toISOString(),
     role: metadata.role,
@@ -348,4 +352,36 @@ export function logInvocation(
     response: result.stdout,
     error: result.stderr || undefined,
   });
+
+  // Also log to database if we have a task ID
+  if (metadata.taskId && (metadata.role === 'coder' || metadata.role === 'reviewer')) {
+    try {
+      // Dynamic import to avoid circular dependencies
+      const { openDatabase } = require('../database/connection.js');
+      const { createTaskInvocation } = require('../database/queries.js');
+
+      const { db, close } = openDatabase(metadata.projectPath);
+      try {
+        createTaskInvocation(db, {
+          taskId: metadata.taskId,
+          role: metadata.role,
+          provider: metadata.provider,
+          model: metadata.model,
+          prompt,
+          response: result.stdout,
+          error: result.stderr || undefined,
+          exitCode: result.exitCode,
+          durationMs: result.duration,
+          success: result.success,
+          timedOut: result.timedOut,
+          rejectionNumber: metadata.rejectionNumber,
+        });
+      } finally {
+        close();
+      }
+    } catch (error) {
+      // Don't fail the invocation if database logging fails
+      console.warn(`Failed to log invocation to database: ${error}`);
+    }
+  }
 }

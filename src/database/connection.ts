@@ -62,6 +62,7 @@ export function initDatabase(projectPath?: string): DatabaseConnection {
 
 /**
  * Open an existing database connection
+ * If STEROIDS_AUTO_MIGRATE is set, applies pending migrations automatically
  */
 export function openDatabase(projectPath?: string): DatabaseConnection {
   const dbPath = getDbPath(projectPath);
@@ -78,6 +79,23 @@ export function openDatabase(projectPath?: string): DatabaseConnection {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
   db.pragma('foreign_keys = ON');
+
+  // Auto-migrate if env var is set
+  if (process.env.STEROIDS_AUTO_MIGRATE === '1' || process.env.STEROIDS_AUTO_MIGRATE === 'true') {
+    try {
+      const { autoMigrate } = require('../migrations/runner.js');
+      const result = autoMigrate(db, dbPath);
+      if (result.applied && result.migrations.length > 0) {
+        console.log(`Auto-migrated database: ${result.migrations.join(', ')}`);
+      }
+      if (result.error) {
+        console.error(`Migration error: ${result.error}`);
+      }
+    } catch (err) {
+      // Don't fail if migrations module is not available
+      console.warn('Could not run auto-migrate:', err);
+    }
+  }
 
   return {
     db,

@@ -95,12 +95,13 @@ async function invokeProvider(
     streamOutput: true,
   });
 
-  // Log the invocation
+  // Log the invocation (to both file and database)
   logInvocation(promptContent, result, {
     role: 'coder',
     provider: coderConfig.provider,
     model: coderConfig.model,
     taskId,
+    projectPath,
   });
 
   return {

@@ -159,6 +159,7 @@ Usage: steroids tasks [options]
        steroids tasks reject <id> [options]
        steroids tasks skip <id> [options]
        steroids tasks audit <id>
+       steroids tasks show <id> [options]
 
 Arguments:
   title                     Task title (exact or partial match)
@@ -201,6 +202,11 @@ Skip Options:
   --notes <text>            Reason for skipping (what human action is needed)
   --model <model>           Model identifying the skip (for LLM actors)
   -p, --partial             Mark as partial (coded some, rest external)
+
+Show Options:
+  --logs                    Show LLM invocation history (prompts/responses)
+  --logs-full               Show full prompts and responses (verbose)
+  --limit <n>               Limit number of invocations shown (default: 5)
 
 Task Status Markers:
   - [ ]  pending
@@ -251,6 +257,10 @@ Examples:
 
   # View audit trail
   steroids tasks audit a1b2c3d4-...
+
+  # View task details with LLM invocation logs
+  steroids tasks show a1b2c3d4-... --logs
+  steroids tasks show a1b2c3d4-... --logs-full --limit 10
 ```
 
 ---

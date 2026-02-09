@@ -840,3 +840,147 @@ export function getTaskCountsByStatus(db: Database.Database): {
 
   return counts;
 }
+
+// ============ Task Invocation Logging ============
+
+export interface TaskInvocation {
+  id: number;
+  task_id: string;
+  role: 'coder' | 'reviewer';
+  provider: string;
+  model: string;
+  prompt: string;
+  response: string | null;
+  error: string | null;
+  exit_code: number;
+  duration_ms: number;
+  success: number;
+  timed_out: number;
+  rejection_number: number | null;
+  created_at: string;
+}
+
+export interface CreateInvocationParams {
+  taskId: string;
+  role: 'coder' | 'reviewer';
+  provider: string;
+  model: string;
+  prompt: string;
+  response?: string;
+  error?: string;
+  exitCode: number;
+  durationMs: number;
+  success: boolean;
+  timedOut: boolean;
+  rejectionNumber?: number;
+}
+
+/**
+ * Log an LLM invocation for a task
+ * This stores the full prompt and response for debugging
+ */
+export function createTaskInvocation(
+  db: Database.Database,
+  params: CreateInvocationParams
+): number {
+  const result = db.prepare(
+    `INSERT INTO task_invocations (
+      task_id, role, provider, model, prompt, response, error,
+      exit_code, duration_ms, success, timed_out, rejection_number
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    params.taskId,
+    params.role,
+    params.provider,
+    params.model,
+    params.prompt,
+    params.response ?? null,
+    params.error ?? null,
+    params.exitCode,
+    params.durationMs,
+    params.success ? 1 : 0,
+    params.timedOut ? 1 : 0,
+    params.rejectionNumber ?? null
+  );
+
+  return result.lastInsertRowid as number;
+}
+
+/**
+ * Get all invocations for a task
+ * Ordered by creation time (oldest first)
+ */
+export function getTaskInvocations(
+  db: Database.Database,
+  taskId: string
+): TaskInvocation[] {
+  return db
+    .prepare(
+      `SELECT * FROM task_invocations
+       WHERE task_id = ?
+       ORDER BY created_at ASC`
+    )
+    .all(taskId) as TaskInvocation[];
+}
+
+/**
+ * Get recent invocations for a task (limited)
+ * Ordered by creation time (newest first)
+ */
+export function getRecentTaskInvocations(
+  db: Database.Database,
+  taskId: string,
+  limit: number = 10
+): TaskInvocation[] {
+  return db
+    .prepare(
+      `SELECT * FROM task_invocations
+       WHERE task_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(taskId, limit) as TaskInvocation[];
+}
+
+/**
+ * Get the latest invocation for a specific role
+ */
+export function getLatestInvocation(
+  db: Database.Database,
+  taskId: string,
+  role: 'coder' | 'reviewer'
+): TaskInvocation | null {
+  return db
+    .prepare(
+      `SELECT * FROM task_invocations
+       WHERE task_id = ? AND role = ?
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+    .get(taskId, role) as TaskInvocation | null;
+}
+
+/**
+ * Get invocation count for a task
+ */
+export function getInvocationCount(
+  db: Database.Database,
+  taskId: string
+): { coder: number; reviewer: number; total: number } {
+  const rows = db
+    .prepare(
+      `SELECT role, COUNT(*) as count
+       FROM task_invocations
+       WHERE task_id = ?
+       GROUP BY role`
+    )
+    .all(taskId) as Array<{ role: string; count: number }>;
+
+  const counts = { coder: 0, reviewer: 0, total: 0 };
+  for (const row of rows) {
+    if (row.role === 'coder') counts.coder = row.count;
+    if (row.role === 'reviewer') counts.reviewer = row.count;
+    counts.total += row.count;
+  }
+  return counts;
+}
