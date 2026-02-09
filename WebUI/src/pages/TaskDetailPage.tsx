@@ -241,7 +241,10 @@ export const TaskDetailPage: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold text-text-primary">
               <i className="fa-solid fa-clock-rotate-left mr-2"></i>
-              Activity Log
+              Activity Timeline
+              <span className="text-sm font-normal text-text-muted ml-2">
+                ({task.audit_trail.length} status changes, {task.invocations?.length || 0} invocations)
+              </span>
             </h2>
             <div className="flex items-center gap-2">
               {isLive && (
@@ -271,46 +274,40 @@ export const TaskDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Audit Trail */}
+          {/* Merged Timeline */}
           <div className="card overflow-hidden">
-            {task.audit_trail.length === 0 ? (
+            {task.audit_trail.length === 0 && (!task.invocations || task.invocations.length === 0) ? (
               <div className="p-8 text-center text-text-muted">
                 <i className="fa-solid fa-list text-4xl mb-4"></i>
                 <p>No activity recorded yet</p>
               </div>
             ) : (
               <div className="divide-y divide-border">
-                {task.audit_trail.map((entry, index) => (
-                  <AuditLogRow key={entry.id} entry={entry} isLatest={index === 0} githubUrl={task.github_url} />
-                ))}
+                {[
+                  ...task.audit_trail.map(entry => ({ type: 'audit' as const, data: entry, timestamp: entry.created_at })),
+                  ...(task.invocations || []).map(inv => ({ type: 'invocation' as const, data: inv, timestamp: inv.created_at }))
+                ]
+                  .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                  .map((item, index) =>
+                    item.type === 'audit' ? (
+                      <AuditLogRow
+                        key={`audit-${item.data.id}`}
+                        entry={item.data}
+                        isLatest={index === 0}
+                        githubUrl={task.github_url}
+                      />
+                    ) : (
+                      <InvocationRow
+                        key={`invocation-${item.data.id}`}
+                        invocation={item.data}
+                        taskId={taskId!}
+                        projectPath={projectPath!}
+                      />
+                    )
+                  )}
               </div>
             )}
           </div>
-
-          {/* LLM Invocations */}
-          {task.invocations && task.invocations.length > 0 && (
-            <>
-              <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
-                <i className="fa-solid fa-microchip mr-2"></i>
-                LLM Invocations
-                <span className="text-sm font-normal text-text-muted ml-2">
-                  ({task.invocations.filter(i => i.role === 'coder').length} coder, {task.invocations.filter(i => i.role === 'reviewer').length} reviewer)
-                </span>
-              </h2>
-              <div className="card overflow-hidden">
-                <div className="divide-y divide-border">
-                  {task.invocations.map((inv) => (
-                    <InvocationRow
-                      key={inv.id}
-                      invocation={inv}
-                      taskId={taskId!}
-                      projectPath={projectPath!}
-                    />
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
 
           {/* Metadata */}
           <div className="mt-6 text-xs text-text-muted flex items-center gap-4">
