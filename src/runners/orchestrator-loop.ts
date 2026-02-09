@@ -12,13 +12,14 @@ import {
   markTaskInProgress,
   getTaskCounts,
 } from '../orchestrator/task-selector.js';
-import { invokeCoder, invokeCoderBatch } from '../orchestrator/coder.js';
+import { invokeCoderBatch } from '../orchestrator/coder.js';
 import { loadConfig } from '../config/loader.js';
-import { invokeReviewer, invokeReviewerBatch } from '../orchestrator/reviewer.js';
+import { invokeReviewerBatch } from '../orchestrator/reviewer.js';
 import { listTasks } from '../database/queries.js';
 import { logActivity } from './activity-log.js';
 import { getRegisteredProject } from './projects.js';
 import { execSync } from 'node:child_process';
+import { runCoderPhase, runReviewerPhase } from '../commands/loop-phases.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -223,11 +224,11 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
 
       if (action === 'start') {
         markTaskInProgress(db, task.id);
-        await runCoderPhase(db, task, projectPath, 'start');
+        await runCoderPhase(db, task, projectPath, 'start', false);
       } else if (action === 'resume') {
-        await runCoderPhase(db, task, projectPath, 'resume');
+        await runCoderPhase(db, task, projectPath, 'resume', false);
       } else if (action === 'review') {
-        await runReviewerPhase(db, task, projectPath, options.runnerId);
+        await runReviewerPhase(db, task, projectPath, false);
       }
 
       options.onTaskComplete?.(task.id);
@@ -252,148 +253,5 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
   }
 }
 
-async function runCoderPhase(
-  db: ReturnType<typeof openDatabase>['db'],
-  task: NonNullable<ReturnType<typeof getTask>>,
-  projectPath: string,
-  action: 'start' | 'resume'
-): Promise<void> {
-  console.log('\n>>> Invoking CODER...\n');
-
-  const result = await invokeCoder(task, projectPath, action);
-
-  if (result.timedOut) {
-    console.warn('Coder timed out. Will retry next iteration.');
-    return;
-  }
-
-  const updatedTask = getTask(db, task.id);
-  if (!updatedTask) return;
-
-  if (updatedTask.status === 'review') {
-    console.log('\nCoder submitted for review. Ready for reviewer.');
-  } else {
-    console.log(`Task status unchanged (${updatedTask.status}). Will retry next iteration.`);
-  }
-}
-
-async function runReviewerPhase(
-  db: ReturnType<typeof openDatabase>['db'],
-  task: NonNullable<ReturnType<typeof getTask>>,
-  projectPath: string,
-  runnerId?: string
-): Promise<void> {
-  console.log('\n>>> Invoking REVIEWER...\n');
-
-  const result = await invokeReviewer(task, projectPath);
-
-  if (result.timedOut) {
-    console.warn('Reviewer timed out. Will retry next iteration.');
-    return;
-  }
-
-  const updatedTask = getTask(db, task.id);
-  if (!updatedTask) return;
-
-  // Get section name for activity logging
-  const section = task.section_id ? getSection(db, task.section_id) : null;
-  const sectionName = section?.name ?? null;
-
-  // Check actual task status in database - don't trust parsed decision alone
-  // The reviewer might say "APPROVE" but the command could fail
-  if (updatedTask.status === 'completed') {
-    console.log('\n✓ Task APPROVED');
-
-    // Get the commit message and SHA before pushing
-    let commitMessage: string | null = null;
-    let commitSha: string | null = null;
-    try {
-      commitMessage = execSync('git log -1 --format=%B', {
-        cwd: projectPath,
-        encoding: 'utf-8',
-      }).trim();
-      commitSha = execSync('git rev-parse HEAD', {
-        cwd: projectPath,
-        encoding: 'utf-8',
-      }).trim();
-    } catch (error) {
-      console.warn('Failed to get commit info:', error);
-    }
-
-    // Push changes
-    try {
-      console.log('Pushing to git...');
-      execSync('git push', { cwd: projectPath, stdio: 'inherit' });
-      console.log(`Pushed successfully (${commitSha})`);
-    } catch (error) {
-      console.warn('Failed to push:', error);
-    }
-
-    // Log activity for completed task
-    if (runnerId) {
-      logActivity(
-        projectPath,
-        runnerId,
-        task.id,
-        task.title,
-        sectionName,
-        'completed',
-        commitMessage,
-        commitSha
-      );
-    }
-  } else if (updatedTask.status === 'skipped') {
-    console.log('\n⊘ Task SKIPPED');
-
-    // Log activity for skipped task
-    if (runnerId) {
-      logActivity(
-        projectPath,
-        runnerId,
-        task.id,
-        task.title,
-        sectionName,
-        'skipped'
-      );
-    }
-  } else if (result.decision === 'reject') {
-    console.log('\n✗ Task REJECTED');
-    console.log(`Rejection count: ${updatedTask.rejection_count}/15`);
-    if (result.notes) {
-      console.log(`Notes: ${result.notes}`);
-    }
-
-    // Check if task failed (exceeded 15 rejections)
-    if (updatedTask.status === 'failed' && runnerId) {
-      logActivity(
-        projectPath,
-        runnerId,
-        task.id,
-        task.title,
-        sectionName,
-        'failed'
-      );
-    } else {
-      console.log('Returning to coder for fixes.');
-    }
-  } else if (result.decision === 'dispute') {
-    console.log('\n! Task DISPUTED');
-    if (result.notes) {
-      console.log(`Reason: ${result.notes}`);
-    }
-
-    // Log activity for disputed task
-    if (runnerId) {
-      logActivity(
-        projectPath,
-        runnerId,
-        task.id,
-        task.title,
-        sectionName,
-        'disputed'
-      );
-    }
-  } else {
-    console.log(`\nReviewer completed without clear decision. Status: ${updatedTask.status}`);
-  }
-}
+// Note: runCoderPhase and runReviewerPhase are now imported from ../commands/loop-phases.js
+// They implement the orchestrator-driven architecture where the orchestrator makes all status decisions

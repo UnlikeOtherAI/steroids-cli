@@ -152,6 +152,9 @@ export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation, taskId
   const [showModal, setShowModal] = useState(false);
   const [details, setDetails] = useState<InvocationDetails | null>(null);
   const [loading, setLoading] = useState(false);
+  const [expandedPrompt, setExpandedPrompt] = useState(false);
+  const [expandedResponse, setExpandedResponse] = useState(false);
+  const [expandedError, setExpandedError] = useState(false);
 
   const isSuccess = invocation.success === 1;
   const isTimedOut = invocation.timed_out === 1;
@@ -237,9 +240,9 @@ export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation, taskId
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-bg-base rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 border-b border-border flex items-center justify-between">
+        <div className="fixed inset-0 bg-bg-base flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
+          <div className="bg-bg-surface rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-border flex items-center justify-between bg-bg-base">
               <h2 className="text-xl font-bold text-text-primary">
                 <i className={`fa-solid ${isCoder ? 'fa-code' : 'fa-magnifying-glass'} mr-2`}></i>
                 {invocation.role.toUpperCase()} Invocation Details
@@ -252,44 +255,77 @@ export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation, taskId
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {loading ? (
                 <div className="flex items-center justify-center py-8">
                   <i className="fa-solid fa-spinner fa-spin text-accent text-2xl"></i>
                 </div>
               ) : details ? (
                 <>
-                  <div>
-                    <h3 className="text-sm font-semibold text-text-muted mb-2">
-                      <i className="fa-solid fa-file-lines mr-2"></i>
-                      PROMPT ({details.prompt.length.toLocaleString()} chars)
-                    </h3>
-                    <pre className="bg-bg-surface p-4 rounded-lg text-sm overflow-x-auto border border-border">
-                      <code className="text-text-secondary font-mono whitespace-pre-wrap">{details.prompt}</code>
-                    </pre>
+                  {/* Prompt Section */}
+                  <div className="border border-border rounded-lg overflow-hidden bg-bg-base">
+                    <button
+                      onClick={() => setExpandedPrompt(!expandedPrompt)}
+                      className="w-full p-3 flex items-center justify-between hover:bg-bg-surface transition-colors"
+                    >
+                      <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                        <i className="fa-solid fa-file-lines"></i>
+                        PROMPT ({details.prompt.length.toLocaleString()} chars)
+                      </h3>
+                      <i className={`fa-solid ${expandedPrompt ? 'fa-chevron-up' : 'fa-chevron-down'} text-text-muted`}></i>
+                    </button>
+                    {expandedPrompt && (
+                      <div className="border-t border-border">
+                        <pre className="bg-bg-surface p-4 text-sm overflow-x-auto max-h-96">
+                          <code className="text-text-secondary font-mono whitespace-pre-wrap">{details.prompt}</code>
+                        </pre>
+                      </div>
+                    )}
                   </div>
 
+                  {/* Response Section */}
                   {details.response && (
-                    <div>
-                      <h3 className="text-sm font-semibold text-text-muted mb-2">
-                        <i className="fa-solid fa-reply mr-2"></i>
-                        RESPONSE ({details.response.length.toLocaleString()} chars)
-                      </h3>
-                      <pre className="bg-bg-surface p-4 rounded-lg text-sm overflow-x-auto border border-border">
-                        <code className="text-text-secondary font-mono whitespace-pre-wrap">{details.response}</code>
-                      </pre>
+                    <div className="border border-border rounded-lg overflow-hidden bg-bg-base">
+                      <button
+                        onClick={() => setExpandedResponse(!expandedResponse)}
+                        className="w-full p-3 flex items-center justify-between hover:bg-bg-surface transition-colors"
+                      >
+                        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                          <i className="fa-solid fa-reply"></i>
+                          RESPONSE ({details.response.length.toLocaleString()} chars)
+                        </h3>
+                        <i className={`fa-solid ${expandedResponse ? 'fa-chevron-up' : 'fa-chevron-down'} text-text-muted`}></i>
+                      </button>
+                      {expandedResponse && (
+                        <div className="border-t border-border">
+                          <pre className="bg-bg-surface p-4 text-sm overflow-x-auto max-h-96">
+                            <code className="text-text-secondary font-mono whitespace-pre-wrap">{details.response}</code>
+                          </pre>
+                        </div>
+                      )}
                     </div>
                   )}
 
+                  {/* Error Section */}
                   {details.error && (
-                    <div>
-                      <h3 className="text-sm font-semibold text-danger mb-2">
-                        <i className="fa-solid fa-triangle-exclamation mr-2"></i>
-                        ERROR
-                      </h3>
-                      <pre className="bg-danger/10 p-4 rounded-lg text-sm overflow-x-auto border border-danger/20">
-                        <code className="text-danger font-mono whitespace-pre-wrap">{details.error}</code>
-                      </pre>
+                    <div className="border-2 border-danger rounded-lg overflow-hidden bg-danger/5">
+                      <button
+                        onClick={() => setExpandedError(!expandedError)}
+                        className="w-full p-3 flex items-center justify-between hover:bg-danger/10 transition-colors"
+                      >
+                        <h3 className="text-sm font-semibold text-danger flex items-center gap-2">
+                          <i className="fa-solid fa-triangle-exclamation"></i>
+                          ERROR ({details.error.length.toLocaleString()} chars)
+                        </h3>
+                        <i className={`fa-solid ${expandedError ? 'fa-chevron-up' : 'fa-chevron-down'} text-danger`}></i>
+                      </button>
+                      {expandedError && (
+                        <div className="border-t-2 border-danger">
+                          <pre className="bg-danger/20 p-4 text-sm overflow-x-auto max-h-96">
+                            <code className="text-danger font-mono whitespace-pre-wrap">{details.error}</code>
+                          </pre>
+                        </div>
+                      )}
                     </div>
                   )}
                 </>
