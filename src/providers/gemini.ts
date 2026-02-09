@@ -54,9 +54,9 @@ const DEFAULT_TIMEOUT = 900_000;
 
 /**
  * Default invocation template for Gemini CLI
- * Uses stdin input from prompt file
+ * Uses -p flag for non-interactive (headless) mode with prompt from file
  */
-const DEFAULT_INVOCATION_TEMPLATE = '{cli} generate < {prompt_file}';
+const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" -m {model}';
 
 /**
  * Gemini AI Provider implementation
