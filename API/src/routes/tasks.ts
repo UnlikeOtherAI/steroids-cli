@@ -51,6 +51,12 @@ interface InvocationEntry {
   created_at: string;
 }
 
+interface InvocationDetails extends InvocationEntry {
+  prompt: string;
+  response: string | null;
+  error: string | null;
+}
+
 interface DisputeEntry {
   id: string;
   task_id: string;
@@ -599,6 +605,72 @@ router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to list project tasks',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/tasks/:taskId/invocations/:invocationId
+ * Get full details for a specific invocation including prompt and response
+ * Query params:
+ *   - project: string (required) - project path
+ */
+router.get('/tasks/:taskId/invocations/:invocationId', (req: Request, res: Response) => {
+  try {
+    const { taskId, invocationId } = req.params;
+    const projectPath = req.query.project as string;
+
+    if (!projectPath) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required query parameter: project',
+      });
+      return;
+    }
+
+    const db = openProjectDatabase(projectPath);
+    if (!db) {
+      res.status(404).json({
+        success: false,
+        error: 'Project database not found',
+        project: projectPath,
+      });
+      return;
+    }
+
+    try {
+      // Get full invocation details including prompt and response
+      const invocation = db
+        .prepare(
+          `SELECT id, task_id, role, provider, model, prompt, response, error, exit_code, duration_ms, success, timed_out, rejection_number, created_at
+          FROM task_invocations
+          WHERE id = ? AND task_id = ?`
+        )
+        .get(invocationId, taskId) as InvocationDetails | undefined;
+
+      if (!invocation) {
+        res.status(404).json({
+          success: false,
+          error: 'Invocation not found',
+          invocation_id: invocationId,
+          task_id: taskId,
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        invocation,
+      });
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    console.error('Error getting invocation details:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get invocation details',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
