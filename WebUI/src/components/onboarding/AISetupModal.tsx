@@ -55,8 +55,19 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
   const loadProviders = async () => {
     try {
       setLoading(true);
-      const providerList = await aiApi.getProviders();
+      const [providerList, globalConfig] = await Promise.all([
+        aiApi.getProviders(),
+        configApi.getConfig('global'),
+      ]);
       setProviders(providerList);
+
+      // Pre-fill from existing config
+      const ai = globalConfig.ai as Record<string, Record<string, string>> | undefined;
+      if (ai) {
+        if (ai.orchestrator?.provider) setOrchestrator({ provider: ai.orchestrator.provider, model: ai.orchestrator.model || '' });
+        if (ai.coder?.provider) setCoder({ provider: ai.coder.provider, model: ai.coder.model || '' });
+        if (ai.reviewer?.provider) setReviewer({ provider: ai.reviewer.provider, model: ai.reviewer.model || '' });
+      }
 
       // Load models for installed providers
       const modelsMap: Record<string, AIModel[]> = {};
