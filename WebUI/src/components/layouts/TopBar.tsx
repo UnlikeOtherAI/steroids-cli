@@ -1,16 +1,12 @@
 import React from 'react';
 import { MagnifyingGlassIcon, BellIcon, Bars3Icon } from '@heroicons/react/24/outline';
-import { Project } from '../../types';
 
 interface TopBarProps {
   title?: string;
-  project?: Project | null;
   onMenuClick?: () => void;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({ title = 'Dashboard', project, onMenuClick }) => {
-  const projectName = project?.name || project?.path.split('/').pop() || 'Select Project';
-
+export const TopBar: React.FC<TopBarProps> = ({ title = 'Dashboard', onMenuClick }) => {
   return (
     <header className="h-[72px] flex items-center justify-between px-4 md:px-8 bg-bg-surface">
       <div className="flex items-center gap-3">
@@ -30,10 +26,6 @@ export const TopBar: React.FC<TopBarProps> = ({ title = 'Dashboard', project, on
           <input type="text" placeholder="Search tasks..." className="input-search w-64" />
         </div>
         <button className="btn-pill p-2 md:p-3"><BellIcon className="w-5 h-5" /></button>
-        <div className="btn-pill flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-success" />
-          <span className="text-sm font-medium truncate max-w-[100px] md:max-w-[150px] hidden sm:inline">{projectName}</span>
-        </div>
       </div>
     </header>
   );

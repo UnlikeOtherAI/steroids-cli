@@ -37,7 +37,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children, title, project }) 
         <div className="flex-1 flex flex-col min-w-0">
           <TopBar
             title={title}
-            project={project}
             onMenuClick={() => setSidebarOpen(true)}
           />
           <main className="flex-1 bg-bg-surface overflow-auto">{children}</main>
