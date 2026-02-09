@@ -285,7 +285,7 @@ router.put('/config', (req: Request, res: Response) => {
   }
 });
 
-// Fallback models when API is not available
+// Static model lists for each provider
 const FALLBACK_MODELS: Record<string, APIModel[]> = {
   claude: [
     { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
@@ -293,14 +293,6 @@ const FALLBACK_MODELS: Record<string, APIModel[]> = {
     { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },
     { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku' },
     { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus' },
-  ],
-  openai: [
-    { id: 'gpt-4o', name: 'GPT-4o' },
-    { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
-    { id: 'gpt-4', name: 'GPT-4' },
-    { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo' },
-    { id: 'o1', name: 'O1' },
-    { id: 'o1-mini', name: 'O1 Mini' },
   ],
   gemini: [
     { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
@@ -533,32 +525,22 @@ function isCliInstalled(command: string): boolean {
 
 // GET /api/ai/providers - Get list of available providers
 router.get('/ai/providers', (req: Request, res: Response) => {
-  // Check for CLI tool availability instead of API keys
-  // CLI tools handle their own authentication
+  // Only codex has a CLI tool to check for
   const providers = [
     {
       id: 'claude',
       name: 'Claude (Anthropic)',
-      installed: isCliInstalled('claude'),
-      cliCommand: 'claude',
-    },
-    {
-      id: 'openai',
-      name: 'OpenAI',
-      installed: isCliInstalled('openai') || isCliInstalled('chatgpt'),
-      cliCommand: 'openai',
+      installed: true, // Uses claude CLI or API
     },
     {
       id: 'gemini',
       name: 'Gemini (Google)',
-      installed: isCliInstalled('gemini'),
-      cliCommand: 'gemini',
+      installed: true, // Uses API
     },
     {
       id: 'codex',
-      name: 'Codex (OpenAI)',
+      name: 'Codex',
       installed: isCliInstalled('codex'),
-      cliCommand: 'codex',
     },
   ];
 

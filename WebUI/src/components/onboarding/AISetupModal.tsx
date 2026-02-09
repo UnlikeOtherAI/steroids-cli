@@ -172,15 +172,15 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
             </div>
           ) : (
             <>
-              {/* Unavailable CLI tools notice */}
+              {/* Unavailable providers notice */}
               {unavailableProviders.length > 0 && (
                 <div className="mb-4 p-3 bg-bg-base border border-border rounded-lg">
                   <div className="flex items-start gap-2 text-text-muted text-sm">
                     <i className="fa-solid fa-info-circle mt-0.5"></i>
                     <div>
-                      <span>CLI tools not found: {unavailableProviders.map(p => p.cliCommand).join(', ')}</span>
+                      <span>Not available: {unavailableProviders.map(p => p.name).join(', ')}</span>
                       <div className="text-xs mt-1">
-                        Install the CLI tools to use these providers.
+                        Install the required CLI tools to use these providers.
                       </div>
                     </div>
                   </div>

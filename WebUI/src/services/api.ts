@@ -312,7 +312,6 @@ export interface AIProvider {
   id: string;
   name: string;
   installed: boolean;
-  cliCommand: string;
 }
 
 export interface AIModelsResponse {

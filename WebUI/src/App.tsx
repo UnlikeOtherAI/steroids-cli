@@ -78,19 +78,21 @@ function App() {
       {showAISetup && (
         <AISetupModal onComplete={() => setShowAISetup(false)} />
       )}
-      <AppShell title={getPageTitle()} project={selectedProject}>
-        <Routes>
-          <Route path="/" element={<DashboardPage project={selectedProject} />} />
-          <Route path="/projects" element={<ProjectsPage />} />
-          <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
-          <Route path="/project/:projectPath/tasks" element={<ProjectTasksPage />} />
-          <Route path="/activity" element={<ActivityListPage />} />
-          <Route path="/task/:taskId" element={<TaskDetailPage />} />
-          <Route path="/runners" element={<RunnersPage />} />
-          <Route path="/tasks" element={<RunningTasksPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-        </Routes>
-      </AppShell>
+      <div className={showAISetup ? 'blur-[2px] pointer-events-none' : ''}>
+        <AppShell title={getPageTitle()} project={selectedProject}>
+          <Routes>
+            <Route path="/" element={<DashboardPage project={selectedProject} />} />
+            <Route path="/projects" element={<ProjectsPage />} />
+            <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
+            <Route path="/project/:projectPath/tasks" element={<ProjectTasksPage />} />
+            <Route path="/activity" element={<ActivityListPage />} />
+            <Route path="/task/:taskId" element={<TaskDetailPage />} />
+            <Route path="/runners" element={<RunnersPage />} />
+            <Route path="/tasks" element={<RunningTasksPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Routes>
+        </AppShell>
+      </div>
     </>
   );
 }
