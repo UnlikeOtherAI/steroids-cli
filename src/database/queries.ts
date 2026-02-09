@@ -161,7 +161,8 @@ export function getSectionTaskCount(
 
 /**
  * Get dependencies for a section that have incomplete tasks
- * Returns sections that the given section depends on and have pending/in_progress/review tasks
+ * Returns sections that the given section depends on and have any non-completed tasks
+ * (pending, in_progress, review, disputed, failed, skipped, partial)
  */
 export function getPendingDependencies(
   db: Database.Database,
@@ -176,7 +177,7 @@ export function getPendingDependencies(
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.section_id = s.id
-         AND t.status IN ('pending', 'in_progress', 'review')
+         AND t.status != 'completed'
        )
        ORDER BY s.position ASC`
     )
