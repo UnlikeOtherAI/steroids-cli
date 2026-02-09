@@ -319,8 +319,9 @@ const FALLBACK_MODELS: Record<string, APIModel[]> = {
 async function fetchClaudeModels(): Promise<FetchModelsResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
+  // Return fallback models if no API key (no error shown)
   if (!apiKey) {
-    return { success: false, models: FALLBACK_MODELS.claude, error: 'ANTHROPIC_API_KEY not set', source: 'fallback' };
+    return { success: true, models: FALLBACK_MODELS.claude, source: 'fallback' };
   }
 
   try {
@@ -363,8 +364,9 @@ async function fetchClaudeModels(): Promise<FetchModelsResult> {
 async function fetchOpenAIModels(): Promise<FetchModelsResult> {
   const apiKey = process.env.OPENAI_API_KEY;
 
+  // Return fallback models if no API key (no error shown)
   if (!apiKey) {
-    return { success: false, models: FALLBACK_MODELS.openai, error: 'OPENAI_API_KEY not set', source: 'fallback' };
+    return { success: true, models: FALLBACK_MODELS.openai, source: 'fallback' };
   }
 
   try {
@@ -436,8 +438,9 @@ function getOpenAIModelScore(id: string): number {
 async function fetchGeminiModels(): Promise<FetchModelsResult> {
   const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
 
+  // Return fallback models if no API key (no error shown)
   if (!apiKey) {
-    return { success: false, models: FALLBACK_MODELS.gemini, error: 'GOOGLE_API_KEY or GEMINI_API_KEY not set', source: 'fallback' };
+    return { success: true, models: FALLBACK_MODELS.gemini, source: 'fallback' };
   }
 
   try {
