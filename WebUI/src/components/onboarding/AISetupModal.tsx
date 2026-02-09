@@ -3,6 +3,7 @@ import { aiApi, configApi, AIProvider, AIModel } from '../../services/api';
 
 interface AISetupModalProps {
   onComplete: () => void;
+  onClose?: () => void;
 }
 
 interface RoleConfig {
@@ -33,7 +34,7 @@ const API_KEY_ENV_VARS: Record<string, string> = {
   codex: 'OPENAI_API_KEY',
 };
 
-export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
+export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose }) => {
   const [providers, setProviders] = useState<AIProvider[]>([]);
   const [models, setModels] = useState<Record<string, AIModel[]>>({});
   const [modelSources, setModelSources] = useState<Record<string, string>>({});
@@ -262,10 +263,21 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
       <div className="relative bg-bg-shell rounded-2xl shadow-2xl w-full max-w-xl mx-4 overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 border-b border-border">
-          <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
-            <i className="fa-solid fa-robot text-accent"></i>
-            AI Configuration Required
-          </h2>
+          <div className="flex items-start justify-between">
+            <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
+              <i className="fa-solid fa-robot text-accent"></i>
+              AI Configuration Required
+            </h2>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="p-1 rounded-lg hover:bg-bg-surface2 text-text-muted hover:text-text-primary transition-colors"
+                title="Close"
+              >
+                <i className="fa-solid fa-xmark text-lg"></i>
+              </button>
+            )}
+          </div>
           <p className="text-sm text-text-secondary mt-1">
             Configure the AI models for each role before using Steroids
           </p>

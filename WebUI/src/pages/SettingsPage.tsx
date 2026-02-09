@@ -7,6 +7,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { configApi, ConfigSchema } from '../services/api';
 import { SchemaForm } from '../components/settings/SchemaForm';
+import { AISetupModal } from '../components/onboarding/AISetupModal';
 
 export const SettingsPage: React.FC = () => {
   const [schema, setSchema] = useState<ConfigSchema | null>(null);
@@ -16,6 +17,7 @@ export const SettingsPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [showAISetup, setShowAISetup] = useState(false);
 
   // Load schema and config
   const loadData = useCallback(async () => {
@@ -139,8 +141,19 @@ export const SettingsPage: React.FC = () => {
     </div>
   );
 
+  const handleAISetupDone = () => {
+    setShowAISetup(false);
+    loadData();
+  };
+
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto">
+      {showAISetup && (
+        <AISetupModal
+          onComplete={handleAISetupDone}
+          onClose={() => setShowAISetup(false)}
+        />
+      )}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -153,14 +166,23 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
 
-        <button
-          onClick={loadData}
-          disabled={loading}
-          className="p-2 rounded-lg hover:bg-bg-surface2 text-text-secondary"
-          title="Refresh"
-        >
-          <ArrowPathIcon className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAISetup(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent text-white hover:bg-accent/90 text-sm font-medium transition-colors"
+          >
+            <i className="fa-solid fa-robot"></i>
+            Reconfigure AI
+          </button>
+          <button
+            onClick={loadData}
+            disabled={loading}
+            className="p-2 rounded-lg hover:bg-bg-surface2 text-text-secondary"
+            title="Refresh"
+          >
+            <ArrowPathIcon className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Location info */}
