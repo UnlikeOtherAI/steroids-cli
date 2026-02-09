@@ -272,7 +272,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
     autoCreateOnMaxRejections: {
       _description: 'Auto-create dispute when task hits 15 rejections',
       _type: 'boolean',
-      _default: true,
+      _default: false,
     },
     majorBlocksLoop: {
       _description: 'Whether major disputes block the loop',
