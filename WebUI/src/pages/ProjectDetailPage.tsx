@@ -33,8 +33,25 @@ export const ProjectDetailPage: React.FC = () => {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [pathCopied, setPathCopied] = useState(false);
 
   const decodedPath = projectPath ? decodeURIComponent(projectPath) : '';
+
+  const handleCopyPath = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(project?.path || '');
+      setPathCopied(true);
+      setTimeout(() => setPathCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy path:', err);
+    }
+  };
+
+  const handleOpenPath = () => {
+    // Open in Finder using file:// protocol
+    window.open(`file://${project?.path}`, '_blank');
+  };
 
   const loadProject = async () => {
     if (!decodedPath) return;
@@ -249,11 +266,24 @@ export const ProjectDetailPage: React.FC = () => {
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">{projectName}</h1>
-            <Tooltip content={project.path}>
-              <p className="text-sm text-gray-500 font-mono mt-1 truncate max-w-lg">
-                {project.path}
-              </p>
-            </Tooltip>
+            <div className="flex items-center gap-2 mt-1">
+              <Tooltip content="Open in Finder">
+                <button
+                  onClick={handleOpenPath}
+                  className="text-sm text-gray-500 font-mono hover:text-blue-600 truncate max-w-lg transition-colors text-left"
+                >
+                  {project.path}
+                </button>
+              </Tooltip>
+              <Tooltip content={pathCopied ? 'Copied!' : 'Copy path'}>
+                <button
+                  onClick={handleCopyPath}
+                  className={`text-gray-400 hover:text-gray-600 transition-colors ${pathCopied ? 'text-green-500' : ''}`}
+                >
+                  <i className={`fa-regular ${pathCopied ? 'fa-circle-check' : 'fa-copy'}`}></i>
+                </button>
+              </Tooltip>
+            </div>
           </div>
           <div className="flex gap-2">
             <Badge variant={project.enabled ? 'success' : 'default'}>
