@@ -42,10 +42,11 @@ const DEFAULT_TIMEOUT = 900_000;
 
 /**
  * Default invocation template for Codex CLI
- * Uses exec --full-auto with prompt from stdin (- means read from stdin)
+ * Uses exec with danger-full-access sandbox to allow git operations
  * --skip-git-repo-check allows running outside trusted directories
+ * -a never = no approval prompts (full automation)
  */
-const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec --full-auto --skip-git-repo-check -';
+const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec --sandbox danger-full-access -a never --skip-git-repo-check -';
 
 /**
  * Codex AI Provider implementation
