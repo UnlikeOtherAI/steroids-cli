@@ -159,19 +159,44 @@ router.get('/activity', (req: Request, res: Response) => {
         { completed: 0, failed: 0, skipped: 0, partial: 0, disputed: 0, total: 0 }
       );
 
-      // Calculate global metrics
+      // Find the earliest first_activity and latest last_activity across all projects
+      let globalFirstActivity: string | null = null;
+      let globalLastActivity: string | null = null;
+      for (const s of enrichedStats) {
+        if (s.first_activity) {
+          if (!globalFirstActivity || s.first_activity < globalFirstActivity) {
+            globalFirstActivity = s.first_activity;
+          }
+        }
+        if (s.last_activity) {
+          if (!globalLastActivity || s.last_activity > globalLastActivity) {
+            globalLastActivity = s.last_activity;
+          }
+        }
+      }
+
+      // Calculate global metrics based on actual activity timespan
       const globalSuccessRate =
         totals.total > 0
           ? Math.round((totals.completed / totals.total) * 1000) / 10
           : 0;
-      const globalTasksPerHour =
-        hours > 0 ? Math.round((totals.total / hours) * 100) / 100 : 0;
+
+      // Calculate tasks per hour based on actual time between first and last activity
+      let globalTasksPerHour = 0;
+      if (globalFirstActivity && globalLastActivity && totals.total > 0) {
+        const firstTime = new Date(globalFirstActivity).getTime();
+        const lastTime = new Date(globalLastActivity).getTime();
+        const hoursDiff = Math.max((lastTime - firstTime) / (1000 * 60 * 60), 1);
+        globalTasksPerHour = Math.round((totals.total / hoursDiff) * 100) / 100;
+      }
 
       res.json({
         success: true,
         hours,
         stats: {
           ...totals,
+          first_activity: globalFirstActivity,
+          last_activity: globalLastActivity,
           tasks_per_hour: globalTasksPerHour,
           success_rate: globalSuccessRate,
         },
