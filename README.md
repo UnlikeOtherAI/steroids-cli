@@ -309,6 +309,10 @@ quality:
   tests:
     required: true
     minCoverage: 80
+
+sections:
+  batchMode: false     # Process all section tasks at once
+  maxBatchSize: 10     # Max tasks per batch
 ```
 
 ### Global Config (`~/.steroids/config.yaml`)
@@ -373,9 +377,10 @@ Documentation scaffolding wizard. Interactive CLI for setting up CLAUDE.md, AGEN
 - [x] Background runner daemon
 - [x] Multi-project registry
 - [x] Web dashboard (basic)
+- [x] Section priorities and dependencies
+- [x] Section batch mode (process all tasks at once)
 - [ ] Mac menu bar app
 - [ ] Interactive config wizard
-- [ ] Section priorities and dependencies
 - [ ] Provider adapters (multi-vendor coder/reviewer)
 - [ ] Token accounting and budgets
 
