@@ -28,6 +28,8 @@ import {
 import { getCategories, getCategoryDescription } from '../config/schema.js';
 import { toJsonSchema, getCategoryJsonSchema, getSchemaCategories } from '../config/json-schema.js';
 import { runBrowser } from '../config/browser.js';
+import { runAISetup, quickAISetup } from '../config/ai-setup.js';
+import { fetchModelsForProvider, hasApiKey, getApiKeyEnvVar } from '../providers/api-models.js';
 import { generateHelp } from '../cli/help.js';
 
 const HELP = generateHelp({
@@ -47,6 +49,8 @@ const HELP = generateHelp({
     { name: 'path', description: 'Show configuration file paths' },
     { name: 'edit', description: 'Open config in $EDITOR' },
     { name: 'browse', description: 'Interactive configuration browser' },
+    { name: 'ai', args: '[role]', description: 'Interactive AI provider/model setup' },
+    { name: 'models', args: '<provider>', description: 'List available models from API' },
   ],
   options: [
     { long: 'template', description: 'Config template (init)', values: 'minimal | standard | full', default: 'standard' },
@@ -68,6 +72,9 @@ const HELP = generateHelp({
     { command: 'steroids config edit', description: 'Open in editor' },
     { command: 'steroids config schema', description: 'Output full schema' },
     { command: 'steroids config schema ai', description: 'Output AI category schema' },
+    { command: 'steroids config ai', description: 'Interactive AI setup wizard' },
+    { command: 'steroids config ai coder', description: 'Configure coder role' },
+    { command: 'steroids config models claude', description: 'List Claude models from API' },
   ],
   related: [
     { command: 'steroids init', description: 'Initialize steroids in project' },
@@ -111,6 +118,12 @@ export async function configCommand(args: string[], flags: GlobalFlags): Promise
       break;
     case 'browse':
       await runBrowser();
+      break;
+    case 'ai':
+      await runAI(subArgs, flags);
+      break;
+    case 'models':
+      await runModels(subArgs, flags);
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
@@ -561,4 +574,169 @@ ${getSchemaCategories().map(c => `  ${c}`).join('\n')}
   // Output full schema
   const schema = toJsonSchema();
   console.log(JSON.stringify(schema, null, 2));
+}
+
+async function runAI(args: string[], flags: GlobalFlags): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean', short: 'h', default: false },
+      global: { type: 'boolean', default: false },
+      provider: { type: 'string', short: 'p' },
+      model: { type: 'string', short: 'm' },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help || flags.help) {
+    console.log(`
+steroids config ai - Interactive AI provider and model setup
+
+USAGE:
+  steroids config ai [role] [options]
+
+ARGUMENTS:
+  [role]              Role to configure: coder | reviewer | orchestrator
+
+OPTIONS:
+  -p, --provider      Provider (claude | openai | gemini) - skip interactive selection
+  -m, --model         Model ID - skip interactive selection
+  --global            Save to global config
+  -h, --help          Show help
+
+EXAMPLES:
+  steroids config ai                              # Interactive setup wizard
+  steroids config ai coder                        # Configure coder role
+  steroids config ai coder -p claude -m sonnet    # Non-interactive setup
+  steroids config ai reviewer --global            # Configure reviewer in global config
+
+ENVIRONMENT VARIABLES:
+  ANTHROPIC_API_KEY   Required for Claude models
+  OPENAI_API_KEY      Required for OpenAI models
+  GOOGLE_API_KEY      Required for Gemini models (or GEMINI_API_KEY)
+`);
+    return;
+  }
+
+  const role = positionals[0] as 'coder' | 'reviewer' | 'orchestrator' | undefined;
+
+  if (role && !['coder', 'reviewer', 'orchestrator'].includes(role)) {
+    console.error(`Invalid role: ${role}`);
+    console.error('Valid roles: coder, reviewer, orchestrator');
+    process.exit(1);
+  }
+
+  if (values.provider) {
+    const provider = values.provider as 'claude' | 'openai' | 'gemini';
+    if (!['claude', 'openai', 'gemini'].includes(provider)) {
+      console.error(`Invalid provider: ${provider}`);
+      console.error('Valid providers: claude, openai, gemini');
+      process.exit(1);
+    }
+
+    const result = await quickAISetup({
+      role: role ?? 'coder',
+      provider,
+      model: values.model,
+      global: values.global,
+    });
+
+    if (!result.success) {
+      console.error(`Error: ${result.error}`);
+      process.exit(1);
+    }
+
+    console.log('✓ Configuration saved');
+    return;
+  }
+
+  await runAISetup({ role, global: values.global });
+}
+
+async function runModels(args: string[], flags: GlobalFlags): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean', short: 'h', default: false },
+      json: { type: 'boolean', short: 'j', default: false },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help || flags.help) {
+    console.log(`
+steroids config models - List available models from provider API
+
+USAGE:
+  steroids config models <provider> [options]
+
+ARGUMENTS:
+  <provider>          Provider to query: claude | openai | gemini
+
+OPTIONS:
+  -j, --json          Output as JSON
+  -h, --help          Show help
+
+EXAMPLES:
+  steroids config models claude           # List Claude models
+  steroids config models openai --json    # List OpenAI models as JSON
+  steroids config models gemini           # List Gemini models
+
+ENVIRONMENT VARIABLES:
+  ANTHROPIC_API_KEY   Required for Claude
+  OPENAI_API_KEY      Required for OpenAI
+  GOOGLE_API_KEY      Required for Gemini (or GEMINI_API_KEY)
+`);
+    return;
+  }
+
+  if (positionals.length === 0) {
+    console.error('Provider is required');
+    console.error('Usage: steroids config models <claude|openai|gemini>');
+    process.exit(2);
+  }
+
+  const provider = positionals[0] as 'claude' | 'openai' | 'gemini';
+
+  if (!['claude', 'openai', 'gemini'].includes(provider)) {
+    console.error(`Invalid provider: ${provider}`);
+    console.error('Valid providers: claude, openai, gemini');
+    process.exit(2);
+  }
+
+  if (!hasApiKey(provider)) {
+    console.error(`${getApiKeyEnvVar(provider)} environment variable not set`);
+    process.exit(1);
+  }
+
+  console.error(`Fetching models from ${provider}...`);
+
+  const result = await fetchModelsForProvider(provider);
+
+  if (!result.success) {
+    console.error(`Error: ${result.error}`);
+    process.exit(1);
+  }
+
+  if (result.models.length === 0) {
+    console.log('No models found');
+    return;
+  }
+
+  if (values.json) {
+    console.log(JSON.stringify(result.models, null, 2));
+  } else {
+    console.log('');
+    console.log(`Available ${provider} models:`);
+    console.log('');
+    for (const model of result.models) {
+      const ctx = model.contextWindow
+        ? ` (${(model.contextWindow / 1000).toFixed(0)}k ctx)`
+        : '';
+      console.log(`  ${model.id}`);
+      console.log(`    ${model.name}${ctx}`);
+    }
+    console.log('');
+    console.log(`Total: ${result.models.length} models`);
+  }
 }

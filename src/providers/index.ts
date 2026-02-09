@@ -35,3 +35,15 @@ export {
   setProviderRegistry,
   resetProviderRegistry,
 } from './registry.js';
+
+// API model fetching
+export {
+  type APIModel,
+  type FetchModelsResult,
+  fetchClaudeModels,
+  fetchOpenAIModels,
+  fetchGeminiModels,
+  fetchModelsForProvider,
+  getApiKeyEnvVar,
+  hasApiKey,
+} from './api-models.js';
