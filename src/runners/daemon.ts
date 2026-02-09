@@ -8,7 +8,7 @@ import { openGlobalDatabase } from './global-db.js';
 import { createHeartbeatManager } from './heartbeat.js';
 import { hasActiveRunnerForProject } from './wakeup.js';
 import { runOrchestratorLoop } from './orchestrator-loop.js';
-import { updateProjectStats } from './projects.js';
+import { updateProjectStats, getRegisteredProject } from './projects.js';
 import { openDatabase } from '../database/connection.js';
 import { getTaskCountsByStatus } from '../database/queries.js';
 
@@ -175,6 +175,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
   // Always resolve to absolute path for consistent tracking
   const effectiveProjectPath = resolve(options.projectPath ?? process.cwd());
 
+  // Check if project is disabled in the global registry
+  const registeredProject = getRegisteredProject(effectiveProjectPath);
+  if (registeredProject && !registeredProject.enabled) {
+    console.error(`Project is disabled: ${effectiveProjectPath}`);
+    console.error('Run "steroids projects enable <path>" to enable it.');
+    process.exit(7); // Project disabled exit code
+  }
+
   // Check if there's already an active runner for this specific project
   if (hasActiveRunnerForProject(effectiveProjectPath)) {
     console.error(
@@ -271,6 +279,15 @@ export function canStartDaemon(projectPath?: string): {
   // Default to cwd if not specified for consistent per-project tracking
   // Always resolve to absolute path
   const effectivePath = resolve(projectPath ?? process.cwd());
+
+  // Check if project is disabled
+  const registeredProject = getRegisteredProject(effectivePath);
+  if (registeredProject && !registeredProject.enabled) {
+    return {
+      canStart: false,
+      reason: `Project is disabled: ${effectivePath}. Run "steroids projects enable <path>" to enable it.`,
+    };
+  }
 
   // Check for project-specific runner (one runner per project allowed)
   if (hasActiveRunnerForProject(effectivePath)) {
