@@ -176,6 +176,7 @@ export function createBackup(dbPath: string): string {
 
 /**
  * Apply a single migration
+ * Handles idempotent migrations (e.g., duplicate column errors are treated as success)
  */
 export function applyMigration(
   db: Database.Database,
@@ -198,8 +199,24 @@ export function applyMigration(
   }
 
   // Apply the migration in a transaction
+  // Handle idempotent cases like "duplicate column name" or "table already exists"
   const transaction = db.transaction(() => {
-    db.exec(parsed.up);
+    try {
+      db.exec(parsed.up);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // These errors indicate the migration was already effectively applied
+      const idempotentErrors = [
+        'duplicate column name',
+        'table already exists',
+        'index already exists',
+      ];
+      const isIdempotent = idempotentErrors.some(e => msg.toLowerCase().includes(e));
+      if (!isIdempotent) {
+        throw err;
+      }
+      // Migration already applied, continue to record it
+    }
     recordMigration(db, entry, checksum);
     updateDatabaseVersion(db, entry.id, entry.name);
   });

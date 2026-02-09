@@ -1,11 +1,8 @@
-/**
- * Database schema definitions for Steroids CLI
- * Creates all required tables with proper constraints
- */
+-- Migration: Initial database schema
+-- This creates the base tables for Steroids CLI
+-- Uses IF NOT EXISTS so it's safe to run on existing databases
 
-export const SCHEMA_VERSION = '0.1.0';
-
-export const SCHEMA_SQL = `
+-- UP
 -- Schema metadata (version tracking)
 CREATE TABLE IF NOT EXISTS _schema (
     key TEXT PRIMARY KEY,
@@ -50,15 +47,11 @@ CREATE TABLE IF NOT EXISTS audit (
     from_status TEXT,
     to_status TEXT NOT NULL,
     actor TEXT NOT NULL,
-    actor_type TEXT DEFAULT 'human',
-    model TEXT,
     notes TEXT,
-    commit_sha TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_task ON audit(task_id);
-CREATE INDEX IF NOT EXISTS idx_audit_commit ON audit(commit_sha);
 
 -- Disputes
 CREATE TABLE IF NOT EXISTS disputes (
@@ -100,16 +93,14 @@ CREATE TABLE IF NOT EXISTS section_locks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_section_locks_expires ON section_locks(expires_at);
-`;
 
-export const INITIAL_SCHEMA_DATA = `
-INSERT OR REPLACE INTO _schema (key, value) VALUES ('version', '${SCHEMA_VERSION}');
-INSERT OR REPLACE INTO _schema (key, value) VALUES ('created_at', datetime('now'));
-
--- Mark all migrations as applied since new databases have the full schema
-INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (1, '001_initial_schema', 'builtin');
-INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (2, '002_add_commit_sha', 'builtin');
-INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (3, '003_add_section_priority', 'builtin');
-INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (4, '004_add_section_dependencies', 'builtin');
-INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (5, '005_add_audit_actor_model', 'builtin');
-`;
+-- DOWN
+-- WARNING: This will destroy all data!
+DROP TABLE IF EXISTS section_locks;
+DROP TABLE IF EXISTS task_locks;
+DROP TABLE IF EXISTS disputes;
+DROP TABLE IF EXISTS audit;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS sections;
+DROP TABLE IF EXISTS _migrations;
+DROP TABLE IF EXISTS _schema;
