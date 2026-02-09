@@ -202,9 +202,14 @@ function spawnSync(
       child.kill('SIGTERM');
 
       // Force kill after 5 seconds if still running
+      // Note: child.killed becomes true immediately after kill(), so we check exitCode instead
       killTimer = setTimeout(() => {
-        if (!child.killed) {
-          child.kill('SIGKILL');
+        if (child.exitCode === null) {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            // Process already exited, ignore ESRCH
+          }
         }
       }, 5000);
       killTimer.unref(); // Don't keep event loop alive
