@@ -262,7 +262,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
             <i className="fa-solid fa-robot text-accent"></i>
             AI Configuration Required
           </h2>
-          <p className="text-sm text-text-muted mt-1">
+          <p className="text-sm text-text-secondary mt-1">
             Configure the AI models for each role before using Steroids
           </p>
         </div>
