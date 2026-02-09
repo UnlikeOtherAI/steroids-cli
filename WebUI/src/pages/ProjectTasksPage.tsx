@@ -3,6 +3,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { TaskListItem, TaskStatus } from '../types';
 import { tasksApi } from '../services/api';
 import { Badge } from '../components/atoms/Badge';
+import { PageLayout } from '../components/templates/PageLayout';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   pending: 'Pending',
@@ -55,16 +56,12 @@ export const ProjectTasksPage: React.FC = () => {
         limit: 100,
       });
 
-      // Sort tasks: for queue statuses, sort by next-to-run (pending first, oldest first)
-      // For completed/historical, sort by most recent first
       let sortedTasks = [...response.tasks];
       if (statusParam && QUEUE_STATUSES.includes(statusParam) && statusParam !== 'completed') {
-        // Next to run first: oldest created_at first (FIFO queue)
         sortedTasks.sort((a, b) =>
           new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
       } else {
-        // Most recent first
         sortedTasks.sort((a, b) =>
           new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
         );
@@ -98,38 +95,24 @@ export const ProjectTasksPage: React.FC = () => {
 
   if (!decodedPath) {
     return (
-      <div className="p-8">
-        <div className="card p-8 text-center">
-          <i className="fa-solid fa-exclamation-triangle text-4xl text-danger mb-4"></i>
-          <p className="text-text-muted">Missing project path</p>
-        </div>
-      </div>
+      <PageLayout title="Error" error="Missing project path">
+        <div />
+      </PageLayout>
     );
   }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="mb-6">
-        <button
-          onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}`)}
-          className="text-sm text-gray-500 hover:text-gray-700 mb-4"
-        >
-          &larr; Back to {projectName}
-        </button>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-text-primary">
-              {pageTitle}
-              <span className="text-text-muted font-normal text-xl ml-2">in {projectName}</span>
-            </h1>
-            <p className="text-text-muted mt-1">
-              {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}
-            </p>
-          </div>
-        </div>
-      </div>
-
+    <PageLayout
+      title={pageTitle}
+      titleSuffix={`in ${projectName}`}
+      subtitle={`${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`}
+      backTo={`/project/${encodeURIComponent(decodedPath)}`}
+      backLabel={`Back to ${projectName}`}
+      loading={loading}
+      loadingMessage="Loading tasks..."
+      error={error}
+    >
+      {/* Status filter pills */}
       <div className="flex gap-2 mb-6 flex-wrap">
         <button
           onClick={() => handleStatusFilter(null)}
@@ -156,23 +139,14 @@ export const ProjectTasksPage: React.FC = () => {
         ))}
       </div>
 
-      {loading && (
-        <div className="text-center py-8 text-text-muted">
-          <i className="fa-solid fa-spinner fa-spin text-2xl mb-4"></i>
-          <p>Loading tasks...</p>
-        </div>
-      )}
-
-      {error && (
-        <div className="text-center py-8 text-danger">{error}</div>
-      )}
-
+      {/* Empty state */}
       {!loading && !error && tasks.length === 0 && (
         <div className="card p-8 text-center">
           <p className="text-text-muted">No tasks found for the selected filter</p>
         </div>
       )}
 
+      {/* Task list */}
       {!loading && !error && tasks.length > 0 && (
         <div className="space-y-2">
           {tasks.map((task, index) => (
@@ -216,6 +190,6 @@ export const ProjectTasksPage: React.FC = () => {
           ))}
         </div>
       )}
-    </div>
+    </PageLayout>
   );
 };

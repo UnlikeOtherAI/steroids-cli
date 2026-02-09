@@ -4,6 +4,7 @@ import { ActivityLogEntry, ActivityStatusType, TIME_RANGE_OPTIONS, TimeRangeOpti
 import { activityApi } from '../services/api';
 import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
 import { Badge } from '../components/atoms/Badge';
+import { PageLayout } from '../components/templates/PageLayout';
 
 const STATUS_LABELS: Record<ActivityStatusType, string> = {
   completed: 'Completed',
@@ -101,17 +102,14 @@ export const ActivityListPage: React.FC = () => {
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-text-primary">
-            {pageTitle}
-            {pageSubtitle && <span className="text-text-muted font-normal text-xl ml-2">{pageSubtitle}</span>}
-          </h1>
-          <p className="text-text-muted mt-1">
-            {entries.length} {entries.length === 1 ? 'entry' : 'entries'} in last {selectedRange.label}
-          </p>
-        </div>
+    <PageLayout
+      title={pageTitle}
+      titleSuffix={pageSubtitle || undefined}
+      subtitle={`${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} in last ${selectedRange.label}`}
+      loading={loading}
+      loadingMessage="Loading activity..."
+      error={error}
+      actions={
         <div className="flex items-center gap-4">
           {projectParam && (
             <button
@@ -124,8 +122,9 @@ export const ActivityListPage: React.FC = () => {
           )}
           <TimeRangeSelector value={selectedRange.value} onChange={handleRangeChange} />
         </div>
-      </div>
-
+      }
+    >
+      {/* Status filter pills */}
       <div className="flex gap-2 mb-6 flex-wrap">
         <button
           onClick={() => handleStatusFilter(null)}
@@ -152,14 +151,7 @@ export const ActivityListPage: React.FC = () => {
         ))}
       </div>
 
-      {loading && (
-        <div className="text-center py-8 text-text-muted">Loading...</div>
-      )}
-
-      {error && (
-        <div className="text-center py-8 text-danger">{error}</div>
-      )}
-
+      {/* Empty state */}
       {!loading && !error && entries.length === 0 && (
         <div className="card p-8 text-center">
           <p className="text-text-muted">No activity found for the selected filters</p>
@@ -228,6 +220,6 @@ export const ActivityListPage: React.FC = () => {
           ))}
         </div>
       )}
-    </div>
+    </PageLayout>
   );
 };

@@ -15,6 +15,7 @@ import { Tooltip } from '../components/atoms/Tooltip';
 import { StatTile } from '../components/molecules/StatTile';
 import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
 import { SchemaForm } from '../components/settings/SchemaForm';
+import { PageLayout } from '../components/templates/PageLayout';
 
 export const ProjectDetailPage: React.FC = () => {
   const { projectPath } = useParams<{ projectPath: string }>();
@@ -222,30 +223,7 @@ export const ProjectDetailPage: React.FC = () => {
     return 'default';
   };
 
-  if (loading) {
-    return (
-      <div className="p-8">
-        <div className="text-center">
-          <div className="text-gray-500">Loading project...</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !project) {
-    return (
-      <div className="p-8">
-        <div className="text-center">
-          <p className="text-red-500">{error || 'Project not found'}</p>
-          <Button className="mt-4" onClick={() => navigate('/projects')}>
-            Back to Projects
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const projectName = project.name || project.path.split('/').pop() || 'Project';
+  const projectName = project?.name || project?.path.split('/').pop() || 'Project';
 
   const getTimeRangeValue = () => {
     switch (selectedHours) {
@@ -258,47 +236,49 @@ export const ProjectDetailPage: React.FC = () => {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="mb-6">
-        <button
-          onClick={() => navigate('/projects')}
-          className="text-sm text-gray-500 hover:text-gray-700 mb-4"
-        >
-          &larr; Back to Projects
-        </button>
-
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">{projectName}</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <Tooltip content="Open in Finder">
-                <button
-                  onClick={handleOpenPath}
-                  className="text-sm text-gray-500 font-mono hover:text-blue-600 truncate max-w-lg transition-colors text-left"
-                >
-                  {project.path}
-                </button>
-              </Tooltip>
-              <Tooltip content={pathCopied ? 'Copied!' : 'Copy path'}>
-                <button
-                  onClick={handleCopyPath}
-                  className={`p-1 text-sm transition-colors ${pathCopied ? 'text-green-500' : 'text-gray-400 hover:text-gray-600'}`}
-                >
-                  <i className={`fa-solid ${pathCopied ? 'fa-check' : 'fa-copy'}`}></i>
-                </button>
-              </Tooltip>
-            </div>
-          </div>
+    <PageLayout
+      title={projectName}
+      backTo="/projects"
+      backLabel="Back to Projects"
+      loading={loading}
+      loadingMessage="Loading project..."
+      error={error || (!loading && !project ? 'Project not found' : null)}
+      maxWidth="max-w-7xl"
+      actions={
+        project && (
           <div className="flex gap-2">
             <Badge variant={project.enabled ? 'success' : 'default'}>
               {project.enabled ? 'Enabled' : 'Disabled'}
             </Badge>
             <Badge variant={getRunnerBadgeVariant()}>{getRunnerStatus()}</Badge>
           </div>
-        </div>
-      </div>
+        )
+      }
+    >
+      {project && (
+        <>
+          {/* Path with copy/open actions */}
+          <div className="flex items-center gap-2 -mt-4 mb-6">
+            <Tooltip content="Open in Finder">
+              <button
+                onClick={handleOpenPath}
+                className="text-sm text-text-muted font-mono hover:text-accent truncate max-w-lg transition-colors text-left"
+              >
+                {project.path}
+              </button>
+            </Tooltip>
+            <Tooltip content={pathCopied ? 'Copied!' : 'Copy path'}>
+              <button
+                onClick={handleCopyPath}
+                className={`p-1 text-sm transition-colors ${pathCopied ? 'text-success' : 'text-text-muted hover:text-text-primary'}`}
+              >
+                <i className={`fa-solid ${pathCopied ? 'fa-check' : 'fa-copy'}`}></i>
+              </button>
+            </Tooltip>
+          </div>
 
-      <div className="mb-8 flex gap-3">
+          {/* Action buttons */}
+          <div className="mb-8 flex gap-3">
         {project.enabled ? (
           <Button variant="secondary" onClick={handleDisable}>
             Disable Project
@@ -313,7 +293,7 @@ export const ProjectDetailPage: React.FC = () => {
 
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-gray-900">Activity</h2>
+          <h2 className="text-xl font-semibold text-text-primary">Activity</h2>
           <TimeRangeSelector
             value={getTimeRangeValue()}
             onChange={(option: TimeRangeOption) => setSelectedHours(option.hours)}
@@ -356,7 +336,7 @@ export const ProjectDetailPage: React.FC = () => {
         )}
 
         {stats && (
-          <div className="mt-4 flex gap-6 text-sm text-gray-600">
+          <div className="mt-4 flex gap-6 text-sm text-text-secondary">
             <span>Rate: {stats.tasks_per_hour} tasks/hour</span>
             <span>Success Rate: {stats.success_rate}%</span>
           </div>
@@ -365,7 +345,7 @@ export const ProjectDetailPage: React.FC = () => {
 
       {project.stats && (
         <div className="mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Current Queue</h2>
+          <h2 className="text-xl font-semibold text-text-primary mb-4">Current Queue</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatTile
               label="Pending"
@@ -399,7 +379,7 @@ export const ProjectDetailPage: React.FC = () => {
       <div className="mb-8">
         <button
           onClick={() => setSettingsOpen(!settingsOpen)}
-          className="flex items-center gap-2 text-xl font-semibold text-gray-900 mb-4 hover:text-gray-700"
+          className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
         >
           {settingsOpen ? (
             <ChevronDownIcon className="w-5 h-5" />
@@ -411,31 +391,31 @@ export const ProjectDetailPage: React.FC = () => {
         </button>
 
         {settingsOpen && (
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-sm text-gray-500 mb-4">
+          <div className="bg-bg-surface rounded-lg p-4">
+            <p className="text-sm text-text-muted mb-4">
               Project-specific settings override global settings. Stored in{' '}
-              <code className="text-xs bg-gray-200 px-1 py-0.5 rounded">
+              <code className="text-xs bg-bg-base px-1 py-0.5 rounded border border-border">
                 .steroids/config.yaml
               </code>
             </p>
 
             {settingsLoading ? (
               <div className="flex items-center justify-center py-8">
-                <ArrowPathIcon className="w-6 h-6 animate-spin text-gray-400" />
+                <ArrowPathIcon className="w-6 h-6 animate-spin text-text-muted" />
               </div>
             ) : settingsSchema ? (
               <>
                 {/* Save Bar - Top */}
-                <div className="flex items-center justify-between pb-4 mb-4 border-b border-gray-200">
+                <div className="flex items-center justify-between pb-4 mb-4 border-b border-border">
                   <div className="flex items-center gap-2">
                     {Object.keys(settingsChanges).length > 0 && (
-                      <span className="text-sm text-gray-500">
+                      <span className="text-sm text-text-muted">
                         {Object.keys(settingsChanges).length} unsaved change
                         {Object.keys(settingsChanges).length !== 1 ? 's' : ''}
                       </span>
                     )}
                     {settingsSaveStatus === 'success' && (
-                      <span className="flex items-center gap-1 text-sm text-green-600">
+                      <span className="flex items-center gap-1 text-sm text-success">
                         <CheckIcon className="w-4 h-4" />
                         Saved
                       </span>
@@ -447,8 +427,8 @@ export const ProjectDetailPage: React.FC = () => {
                     disabled={Object.keys(settingsChanges).length === 0 || settingsSaving}
                     className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                       Object.keys(settingsChanges).length > 0
-                        ? 'bg-blue-600 text-white hover:bg-blue-700'
-                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        ? 'bg-accent text-white hover:bg-accent/80'
+                        : 'bg-bg-base text-text-muted cursor-not-allowed'
                     }`}
                   >
                     {settingsSaving ? (
@@ -469,16 +449,16 @@ export const ProjectDetailPage: React.FC = () => {
                 />
 
                 {/* Save Bar - Bottom */}
-                <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200">
+                <div className="flex items-center justify-between mt-6 pt-4 border-t border-border">
                   <div className="flex items-center gap-2">
                     {Object.keys(settingsChanges).length > 0 && (
-                      <span className="text-sm text-gray-500">
+                      <span className="text-sm text-text-muted">
                         {Object.keys(settingsChanges).length} unsaved change
                         {Object.keys(settingsChanges).length !== 1 ? 's' : ''}
                       </span>
                     )}
                     {settingsSaveStatus === 'success' && (
-                      <span className="flex items-center gap-1 text-sm text-green-600">
+                      <span className="flex items-center gap-1 text-sm text-success">
                         <CheckIcon className="w-4 h-4" />
                         Saved
                       </span>
@@ -490,8 +470,8 @@ export const ProjectDetailPage: React.FC = () => {
                     disabled={Object.keys(settingsChanges).length === 0 || settingsSaving}
                     className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                       Object.keys(settingsChanges).length > 0
-                        ? 'bg-blue-600 text-white hover:bg-blue-700'
-                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        ? 'bg-accent text-white hover:bg-accent/80'
+                        : 'bg-bg-base text-text-muted cursor-not-allowed'
                     }`}
                   >
                     {settingsSaving ? (
@@ -506,33 +486,36 @@ export const ProjectDetailPage: React.FC = () => {
                 </div>
               </>
             ) : (
-              <p className="text-gray-500">No configuration schema available.</p>
+              <p className="text-text-muted">No configuration schema available.</p>
             )}
           </div>
         )}
       </div>
 
-      <div className="text-sm text-gray-500">
-        <p>Registered: {new Date(project.registered_at).toLocaleString()}</p>
-        <p>
-          Last activity: {project.last_activity_at
-            ? new Date(project.last_activity_at).toLocaleString()
-            : project.runner
-              ? 'No recent activity'
-              : 'No runner'
-          }
-        </p>
-        {project.runner?.current_task_id && (
-          <p
-            className="mt-2 cursor-pointer text-blue-600 hover:text-blue-800"
-            onClick={() => navigate(`/task/${project.runner!.current_task_id}?project=${encodeURIComponent(project.path)}`)}
-          >
-            <i className="fa-solid fa-arrow-up-right-from-square text-xs mr-1"></i>
-            Current Task: {project.runner.current_task_id}
-          </p>
-        )}
-      </div>
-    </div>
+          {/* Footer metadata */}
+          <div className="text-sm text-text-muted">
+            <p>Registered: {new Date(project.registered_at).toLocaleString()}</p>
+            <p>
+              Last activity: {project.last_activity_at
+                ? new Date(project.last_activity_at).toLocaleString()
+                : project.runner
+                  ? 'No recent activity'
+                  : 'No runner'
+              }
+            </p>
+            {project.runner?.current_task_id && (
+              <p
+                className="mt-2 cursor-pointer text-accent hover:text-accent/80"
+                onClick={() => navigate(`/task/${project.runner!.current_task_id}?project=${encodeURIComponent(project.path)}`)}
+              >
+                <i className="fa-solid fa-arrow-up-right-from-square text-xs mr-1"></i>
+                Current Task: {project.runner.current_task_id}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </PageLayout>
   );
 };
 
