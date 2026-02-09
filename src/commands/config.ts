@@ -50,7 +50,7 @@ const HELP = generateHelp({
     { name: 'edit', description: 'Open config in $EDITOR' },
     { name: 'browse', description: 'Interactive configuration browser' },
     { name: 'ai', args: '[role]', description: 'Interactive AI provider/model setup' },
-    { name: 'models', args: '<provider>', description: 'List available models from API' },
+    { name: 'models', args: '<provider>', description: 'List available models for a provider' },
   ],
   options: [
     { long: 'template', description: 'Config template (init)', values: 'minimal | standard | full', default: 'standard' },

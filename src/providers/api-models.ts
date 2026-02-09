@@ -1,7 +1,10 @@
 /**
- * API Model Fetching
- * Fetches available models from provider APIs
+ * Provider Model Discovery
+ * Fetches available models from providers (via CLI or API)
  */
+
+import { getProviderRegistry, type ProviderStatus } from './registry.js';
+import type { ModelInfo } from './interface.js';
 
 export interface APIModel {
   id: string;
@@ -9,6 +12,77 @@ export interface APIModel {
   description?: string;
   contextWindow?: number;
   created?: Date;
+}
+
+export interface ProviderModel {
+  id: string;
+  name: string;
+  recommendedFor?: ('orchestrator' | 'coder' | 'reviewer')[];
+  supportsStreaming?: boolean;
+}
+
+/**
+ * Check if provider CLI is available
+ * Uses the provider registry to verify CLI availability
+ */
+export async function checkProviderCLI(
+  provider: 'claude' | 'openai' | 'gemini' | 'codex'
+): Promise<ProviderStatus> {
+  const registry = getProviderRegistry();
+  const providerInstance = registry.tryGet(provider);
+
+  if (!providerInstance) {
+    return {
+      name: provider,
+      displayName: provider,
+      available: false,
+      models: [],
+    };
+  }
+
+  const available = await providerInstance.isAvailable();
+  return {
+    name: providerInstance.name,
+    displayName: providerInstance.displayName,
+    available,
+    cliPath: providerInstance.getCliPath(),
+    models: providerInstance.listModels(),
+  };
+}
+
+/**
+ * Get models for a provider from the registry (CLI-based)
+ * Does not require API keys - uses hardcoded model lists from provider implementations
+ */
+export function getModelsForProvider(
+  provider: 'claude' | 'openai' | 'gemini' | 'codex'
+): ProviderModel[] {
+  const registry = getProviderRegistry();
+  const providerInstance = registry.tryGet(provider);
+
+  if (!providerInstance) {
+    return [];
+  }
+
+  const modelInfo = providerInstance.getModelInfo();
+  return modelInfo.map((m: ModelInfo) => ({
+    id: m.id,
+    name: m.name,
+    recommendedFor: m.recommendedFor,
+    supportsStreaming: m.supportsStreaming,
+  }));
+}
+
+/**
+ * Get the default model for a provider and role
+ */
+export function getDefaultModel(
+  provider: 'claude' | 'openai' | 'gemini' | 'codex',
+  role: 'orchestrator' | 'coder' | 'reviewer'
+): string | undefined {
+  const registry = getProviderRegistry();
+  const providerInstance = registry.tryGet(provider);
+  return providerInstance?.getDefaultModel(role);
 }
 
 export interface FetchModelsResult {

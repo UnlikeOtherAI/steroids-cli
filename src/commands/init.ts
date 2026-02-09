@@ -12,6 +12,7 @@ import { createOutput } from '../cli/output.js';
 import { colors, markers } from '../cli/colors.js';
 import { registerProject } from '../runners/projects.js';
 import { generateHelp } from '../cli/help.js';
+import { runAISetup } from '../config/ai-setup.js';
 
 const HELP = generateHelp({
   command: 'init',
@@ -22,8 +23,9 @@ Projects are only registered globally if inside a git repository.
 This prevents test/temporary directories from polluting the global registry.`,
   usage: ['steroids init [options]'],
   options: [
-    { short: 'y', long: 'yes', description: 'Accept all defaults without prompts' },
+    { short: 'y', long: 'yes', description: 'Accept all defaults without prompts (skips AI setup wizard)' },
     { long: 'no-register', description: 'Skip global project registration' },
+    { long: 'skip-ai-setup', description: 'Skip AI provider configuration wizard' },
   ],
   examples: [
     { command: 'steroids init', description: 'Initialize in current directory' },
@@ -90,6 +92,7 @@ export async function initCommand(args: string[], flags: GlobalFlags): Promise<v
       yes: { type: 'boolean', short: 'y', default: false },
       help: { type: 'boolean', short: 'h', default: false },
       'no-register': { type: 'boolean', default: false },
+      'skip-ai-setup': { type: 'boolean', default: false },
     },
     allowPositionals: false,
   });
@@ -154,11 +157,35 @@ export async function initCommand(args: string[], flags: GlobalFlags): Promise<v
     }
   }
 
+  // Run AI setup wizard (unless --yes or --skip-ai-setup is used, or JSON output)
+  const skipAISetup = values.yes || values['skip-ai-setup'] || flags.json;
+
+  if (!skipAISetup) {
+    out.log('');
+    out.log(markers.info('AI Provider Configuration'));
+    out.log('Configure AI providers for orchestrator, coder, and reviewer roles.');
+    out.log(`${colors.dim('(You can skip this and configure later with "steroids config ai")')}`);
+    out.log('');
+
+    try {
+      // Run wizard for coder role first (most important)
+      await runAISetup({ role: 'coder', global: true });
+
+      // Ask if user wants to configure other roles
+      out.log('');
+      out.log(`${colors.dim('Tip: Run "steroids config ai" to configure other roles (orchestrator, reviewer)')}`);
+    } catch (error) {
+      // AI setup failed or was cancelled - don't fail init
+      out.verbose(`AI setup skipped or cancelled: ${error}`);
+    }
+  }
+
   if (flags.json) {
     out.success({
       message: 'Initialized successfully',
       database: dbPath,
       nextSteps: [
+        'steroids config ai',
         'steroids sections add "Phase 1"',
         'steroids tasks add "My first task" --section "Phase 1"',
         'steroids loop',
@@ -170,6 +197,9 @@ export async function initCommand(args: string[], flags: GlobalFlags): Promise<v
     out.log(`Database: ${colors.cyan(dbPath)}`);
     out.log('');
     out.log(colors.bold('Next steps:'));
+    if (skipAISetup) {
+      out.log(`  ${colors.dim('$')} steroids config ai  ${colors.dim('# Configure AI providers')}`);
+    }
     out.log(`  ${colors.dim('$')} steroids sections add "Phase 1"`);
     out.log(`  ${colors.dim('$')} steroids tasks add "My first task" --section "Phase 1"`);
     out.log(`  ${colors.dim('$')} steroids loop`);
