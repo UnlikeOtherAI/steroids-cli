@@ -46,17 +46,17 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
         <h3 className="text-lg font-semibold text-gray-900 truncate">
           {project.name || project.path.split('/').pop() || 'Project'}
         </h3>
-        <Tooltip content={project.path}>
-          <p className="text-xs text-gray-400 mt-1 font-mono">
-            {truncateMiddle(project.path, 45)}
-          </p>
-        </Tooltip>
-        <div className="flex gap-2 mt-2">
+        <div className="flex gap-2 mt-1">
           <Badge variant={project.enabled ? 'success' : 'default'}>
             {project.enabled ? 'Enabled' : 'Disabled'}
           </Badge>
           <Badge variant={getRunnerBadgeVariant()}>{getRunnerStatus()}</Badge>
         </div>
+        <Tooltip content={project.path}>
+          <p className="text-xs text-gray-400 mt-2 font-mono">
+            {truncateMiddle(project.path, 45)}
+          </p>
+        </Tooltip>
       </div>
 
       {project.stats && (
