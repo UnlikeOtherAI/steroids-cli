@@ -113,7 +113,7 @@ pending → in_progress → review → completed
 * **Security review** built into the reviewer (injection, shell safety, secrets, permissions)
 * **File anchoring** — pin tasks to specific file:line locations with auto-captured commit SHA
 * **Feedback tasks** — advisory items in a skipped section for human review
-* **Multi-provider support** — Claude, OpenAI, Codex, Gemini
+* **Multi-provider support** — Claude, Codex (OpenAI), Gemini
 * **CLI-first workflow** for power users and automation
 * **Background runner daemon** to process tasks without babysitting
 * **Event hooks** — trigger scripts/webhooks on task completion, project events
@@ -467,7 +467,7 @@ Configure hooks in `.steroids/config.yaml` or manage via CLI.
 ```yaml
 ai:
   coder:
-    provider: claude          # claude, openai, codex, gemini
+    provider: claude          # claude, codex, gemini
     model: claude-sonnet-4
   reviewer:
     provider: claude
@@ -529,7 +529,7 @@ Same schema — acts as default, overridden by project config.
 
 ```bash
 ANTHROPIC_API_KEY=...        # For Claude models
-OPENAI_API_KEY=...           # For OpenAI models
+OPENAI_API_KEY=...           # For Codex (OpenAI's development CLI)
 GOOGLE_API_KEY=...           # For Gemini models
 
 STEROIDS_JSON=1              # Output as JSON
@@ -591,7 +591,7 @@ Documentation scaffolding wizard. Interactive CLI for setting up CLAUDE.md, AGEN
 - [x] Web dashboard (basic)
 - [x] Section priorities and dependencies
 - [x] Section batch mode (process all tasks at once)
-- [x] Multi-provider support (Claude, OpenAI, Codex, Gemini)
+- [x] Multi-provider support (Claude, Codex/OpenAI, Gemini)
 - [x] Coordinator system for breaking rejection loops
 - [x] Event hooks (shell commands, webhooks)
 - [x] Security review in reviewer prompt

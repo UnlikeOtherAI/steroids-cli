@@ -22,7 +22,7 @@ Steroids uses **existing CLI tools** for AI providers rather than direct API int
 |----------|----------|-------------------|
 | Anthropic (Claude) | `claude` | `which claude` |
 | Google (Gemini) | `gemini` | `which gemini` |
-| OpenAI | `openai` | `which openai` |
+| Codex (OpenAI) | `codex` | `which codex` |
 
 ### Future Providers
 
@@ -441,20 +441,20 @@ gcloud auth application-default login
 gemini --version
 ```
 
-### OpenAI
+### Codex (OpenAI)
 
-- Requires `openai` CLI installed
+- Requires `codex` CLI installed
+- This IS OpenAI's development tool CLI - there is no separate `openai` CLI
 - Authenticated via API key
 
 ```bash
-# Install
-pip install openai
+# Install: See https://codex.com
 
 # Set API key
 export OPENAI_API_KEY=sk-...
 
 # Verify
-openai --version
+codex --version
 ```
 
 ---
