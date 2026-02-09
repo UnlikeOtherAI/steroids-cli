@@ -192,6 +192,18 @@ async function runReviewerPhase(
 
   if (result.decision === 'approve') {
     console.log('\n✓ Task APPROVED');
+
+    // Get the commit message before pushing
+    let commitMessage: string | null = null;
+    try {
+      commitMessage = execSync('git log -1 --format=%B', {
+        cwd: projectPath,
+        encoding: 'utf-8',
+      }).trim();
+    } catch (error) {
+      console.warn('Failed to get commit message:', error);
+    }
+
     // Push changes
     try {
       console.log('Pushing to git...');
@@ -213,7 +225,8 @@ async function runReviewerPhase(
         task.id,
         task.title,
         sectionName,
-        'completed'
+        'completed',
+        commitMessage
       );
     }
   } else if (result.decision === 'reject') {

@@ -152,6 +152,12 @@ export const ActivityListPage: React.FC = () => {
                   <i className="fa-solid fa-arrow-up-right-from-square text-xs text-text-muted mr-2"></i>
                   {entry.task_title}
                 </div>
+                {entry.commit_message && (
+                  <div className="text-sm text-text-secondary mt-1 line-clamp-2">
+                    <i className="fa-solid fa-code-commit text-xs text-text-muted mr-1"></i>
+                    {entry.commit_message.split('\n')[0]}
+                  </div>
+                )}
                 <div className="text-xs text-text-muted flex gap-2 mt-1">
                   <span title={entry.project_path} className="cursor-help">
                     {truncateMiddle(entry.project_path, 30)}

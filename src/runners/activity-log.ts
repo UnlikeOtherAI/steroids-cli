@@ -20,6 +20,7 @@ export interface ActivityLogEntry {
   task_title: string;
   section_name: string | null;
   final_status: ActivityStatus;
+  commit_message: string | null;
   created_at: string;
 }
 
@@ -32,15 +33,16 @@ export function logActivity(
   taskId: string,
   taskTitle: string,
   sectionName: string | null,
-  finalStatus: ActivityStatus
+  finalStatus: ActivityStatus,
+  commitMessage?: string | null
 ): void {
   const { db, close } = openGlobalDatabase();
   try {
     db.prepare(
       `INSERT INTO activity_log
-        (project_path, runner_id, task_id, task_title, section_name, final_status)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(projectPath, runnerId, taskId, taskTitle, sectionName, finalStatus);
+        (project_path, runner_id, task_id, task_title, section_name, final_status, commit_message)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(projectPath, runnerId, taskId, taskTitle, sectionName, finalStatus, commitMessage ?? null);
   } finally {
     close();
   }

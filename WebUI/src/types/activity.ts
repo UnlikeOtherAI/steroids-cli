@@ -51,6 +51,7 @@ export interface ActivityLogEntry {
   task_title: string;
   section_name: string | null;
   final_status: ActivityStatusType;
+  commit_message: string | null;
   created_at: string;
 }
 
