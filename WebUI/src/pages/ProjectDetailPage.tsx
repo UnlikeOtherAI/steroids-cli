@@ -346,12 +346,50 @@ export const ProjectDetailPage: React.FC = () => {
               </div>
             ) : settingsSchema ? (
               <>
+                {/* Save Bar - Top */}
+                <div className="flex items-center justify-between pb-4 mb-4 border-b border-gray-200">
+                  <div className="flex items-center gap-2">
+                    {Object.keys(settingsChanges).length > 0 && (
+                      <span className="text-sm text-gray-500">
+                        {Object.keys(settingsChanges).length} unsaved change
+                        {Object.keys(settingsChanges).length !== 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {settingsSaveStatus === 'success' && (
+                      <span className="flex items-center gap-1 text-sm text-green-600">
+                        <CheckIcon className="w-4 h-4" />
+                        Saved
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleSettingsSave}
+                    disabled={Object.keys(settingsChanges).length === 0 || settingsSaving}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      Object.keys(settingsChanges).length > 0
+                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {settingsSaving ? (
+                      <span className="flex items-center gap-2">
+                        <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                        Saving...
+                      </span>
+                    ) : (
+                      'Save Changes'
+                    )}
+                  </button>
+                </div>
+
                 <SchemaForm
                   schema={settingsSchema}
                   values={getMergedSettingsValues()}
                   onChange={handleSettingsChange}
                 />
 
+                {/* Save Bar - Bottom */}
                 <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200">
                   <div className="flex items-center gap-2">
                     {Object.keys(settingsChanges).length > 0 && (

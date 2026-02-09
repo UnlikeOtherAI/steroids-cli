@@ -100,6 +100,45 @@ export const SettingsPage: React.FC = () => {
 
   const hasChanges = Object.keys(changes).length > 0;
 
+  // Reusable save bar component
+  const SaveBar = ({ sticky = false }: { sticky?: boolean }) => (
+    <div className={`${sticky ? 'sticky bottom-0' : ''} bg-bg-surface py-4 -mx-4 px-4 md:-mx-8 md:px-8 border-t border-border flex items-center justify-between`}>
+      <div className="flex items-center gap-2">
+        {hasChanges && (
+          <span className="text-sm text-text-muted">
+            {Object.keys(changes).length} unsaved change
+            {Object.keys(changes).length !== 1 ? 's' : ''}
+          </span>
+        )}
+        {saveStatus === 'success' && (
+          <span className="flex items-center gap-1 text-sm text-green-600">
+            <CheckIcon className="w-4 h-4" />
+            Saved
+          </span>
+        )}
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={!hasChanges || saving}
+        className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+          hasChanges
+            ? 'bg-accent text-white hover:bg-accent/90'
+            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+        }`}
+      >
+        {saving ? (
+          <span className="flex items-center gap-2">
+            <ArrowPathIcon className="w-4 h-4 animate-spin" />
+            Saving...
+          </span>
+        ) : (
+          'Save Changes'
+        )}
+      </button>
+    </div>
+  );
+
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto">
       {/* Header */}
@@ -148,8 +187,11 @@ export const SettingsPage: React.FC = () => {
         </div>
       ) : schema ? (
         <>
+          {/* Save Bar - Top */}
+          <SaveBar />
+
           {/* Schema Form */}
-          <div className="space-y-6">
+          <div className="space-y-6 mt-6">
             <SchemaForm
               schema={schema}
               values={getMergedValues()}
@@ -157,41 +199,9 @@ export const SettingsPage: React.FC = () => {
             />
           </div>
 
-          {/* Save Button */}
-          <div className="sticky bottom-0 bg-bg-surface py-4 mt-8 -mx-4 px-4 md:-mx-8 md:px-8 border-t border-border flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {hasChanges && (
-                <span className="text-sm text-text-muted">
-                  {Object.keys(changes).length} unsaved change
-                  {Object.keys(changes).length !== 1 ? 's' : ''}
-                </span>
-              )}
-              {saveStatus === 'success' && (
-                <span className="flex items-center gap-1 text-sm text-green-600">
-                  <CheckIcon className="w-4 h-4" />
-                  Saved
-                </span>
-              )}
-            </div>
-
-            <button
-              onClick={handleSave}
-              disabled={!hasChanges || saving}
-              className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-                hasChanges
-                  ? 'bg-accent text-white hover:bg-accent/90'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              {saving ? (
-                <span className="flex items-center gap-2">
-                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                  Saving...
-                </span>
-              ) : (
-                'Save Changes'
-              )}
-            </button>
+          {/* Save Bar - Bottom (sticky) */}
+          <div className="mt-8">
+            <SaveBar sticky />
           </div>
         </>
       ) : (
