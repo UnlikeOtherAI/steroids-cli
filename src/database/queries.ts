@@ -153,6 +153,25 @@ export function getSectionByName(
     .get(name) as Section | null;
 }
 
+const FEEDBACK_SECTION_NAME = 'Needs User Input';
+
+export function getOrCreateFeedbackSection(db: Database.Database): Section {
+  const existing = getSectionByName(db, FEEDBACK_SECTION_NAME);
+  if (existing) return existing;
+
+  const maxPos = db
+    .prepare('SELECT MAX(position) as max FROM sections')
+    .get() as { max: number | null };
+  const position = (maxPos?.max ?? -1) + 1;
+
+  const id = uuidv4();
+  db.prepare(
+    `INSERT INTO sections (id, name, position, priority, skipped) VALUES (?, ?, ?, ?, ?)`
+  ).run(id, FEEDBACK_SECTION_NAME, position, 100, 1);
+
+  return { id, name: FEEDBACK_SECTION_NAME, position, priority: 100, skipped: 1, created_at: new Date().toISOString() };
+}
+
 export function getSectionTaskCount(
   db: Database.Database,
   sectionId: string
@@ -756,12 +775,15 @@ export function findNextTask(
   const sectionFilter = sectionId ? 'AND t.section_id = ?' : '';
   const sectionParams = sectionId ? [sectionId] : [];
 
+  // Exclude tasks in skipped sections unless a specific section was requested
+  const skipFilter = sectionId ? '' : 'AND (s.skipped IS NULL OR s.skipped = 0)';
+
   // Priority 1: Tasks ready for review
   const reviewTasks = db
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
-       WHERE t.status = 'review' ${sectionFilter}
+       WHERE t.status = 'review' ${sectionFilter} ${skipFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -776,7 +798,7 @@ export function findNextTask(
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
-       WHERE t.status = 'in_progress' ${sectionFilter}
+       WHERE t.status = 'in_progress' ${sectionFilter} ${skipFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -791,7 +813,7 @@ export function findNextTask(
     .prepare(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
-       WHERE t.status = 'pending' ${sectionFilter}
+       WHERE t.status = 'pending' ${sectionFilter} ${skipFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];

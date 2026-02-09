@@ -336,6 +336,24 @@ If you do NOT run a command, the task will remain in review and you will be invo
 
 ---
 
+## Feedback Tasks
+
+**After making your decision**, create feedback tasks for anything a human should review later. These go to a skipped section and will NOT block the pipeline.
+
+Create a feedback task when you notice:
+- A pre-existing security concern in unchanged code
+- A minor design dispute even if you approved
+- Something uncertain that a human should verify
+- A suggestion the coder should consider for a future task
+
+\`\`\`bash
+steroids tasks add "Description of the concern" --feedback
+\`\`\`
+
+You may create multiple feedback tasks. Do this AFTER your approve/reject/dispute decision, not instead of it.
+
+---
+
 ## Review Now
 
 Examine the diff above, then run the appropriate command to record your decision.

@@ -25,8 +25,12 @@ CREATE TABLE IF NOT EXISTS sections (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     position INTEGER NOT NULL,
+    priority INTEGER DEFAULT 50,
+    skipped INTEGER DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_sections_priority ON sections(priority);
 
 -- Tasks
 CREATE TABLE IF NOT EXISTS tasks (

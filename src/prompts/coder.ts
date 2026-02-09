@@ -110,6 +110,16 @@ The reviewer will check the commit you reference. Be precise about the hash and 
 4. Keep files under 500 lines
 5. Follow the coding standards in AGENTS.md
 
+### Security Notes
+
+- When executing shell commands with user-controlled arguments, use array-based APIs (e.g., \`execFileSync(cmd, [args])\`). Add a comment like \`// hardcoded command, no user input\` when using \`execSync\` intentionally for fixed commands or shell features.
+- If you make a security-relevant decision (e.g., choosing \`execSync\` over \`execFileSync\` because you need pipes), explain your reasoning in your submission notes with \`--notes\`.
+- If you notice a pre-existing security concern or something a human should review, create a feedback task:
+\`\`\`bash
+steroids tasks add "Description of the concern" --feedback
+\`\`\`
+This goes to a skipped section for human review and will NOT block the pipeline.
+
 ---
 
 ## Attempt Before Skip (IMPORTANT)

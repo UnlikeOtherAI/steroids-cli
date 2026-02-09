@@ -25,6 +25,7 @@ import {
   listSections,
   getTaskInvocations,
   getInvocationCount,
+  getOrCreateFeedbackSection,
   STATUS_MARKERS,
   type Task,
   type TaskStatus,
@@ -83,6 +84,7 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { long: 'source', description: 'Specification file (add subcommand)', values: '<file>' },
     { long: 'file', description: 'Anchor task to a committed file (add subcommand)', values: '<path>' },
     { long: 'line', description: 'Line number in anchored file (requires --file)', values: '<number>' },
+    { long: 'feedback', description: 'Add to "Needs User Input" section (skipped, for human review)' },
     { long: 'partial', description: 'Mark as partial when skipping' },
     { long: 'no-hooks', description: 'Skip hook execution (global flag)' },
   ],
@@ -626,6 +628,7 @@ async function addTask(args: string[], flags: GlobalFlags): Promise<void> {
       source: { type: 'string' },
       file: { type: 'string' },
       line: { type: 'string' },
+      feedback: { type: 'boolean', default: false },
     },
     allowPositionals: true,
   });
@@ -636,18 +639,21 @@ steroids tasks add <title> - Add a new task
 
 USAGE:
   steroids tasks add <title> --section <id> --source <file> [options]
+  steroids tasks add <title> --feedback [--file <path> --line <n>]
 
 OPTIONS:
-  --section <id>        Section ID (REQUIRED)
-  --source <file>       Specification file (REQUIRED)
+  --section <id>        Section ID (required unless --feedback)
+  --source <file>       Specification file (required unless --feedback)
+  --feedback            Add to "Needs User Input" section (skipped, for human review)
   --file <path>         Anchor task to a committed file
   --line <number>       Line number in the anchored file (requires --file)
   -h, --help            Show help
 
 EXAMPLES:
   steroids tasks add "Implement login" --section abc123 --source docs/login-spec.md
-  steroids tasks add "Fix bug" --section def456 --source specs/bugfix.md
   steroids tasks add "Fix null check" --section abc123 --source spec.md --file src/utils.ts --line 42
+  steroids tasks add "Pre-existing execSync in queries.ts needs review" --feedback
+  steroids tasks add "Should we use Redis or in-memory cache?" --feedback
 `);
     return;
   }
@@ -659,18 +665,18 @@ EXAMPLES:
     process.exit(2);
   }
 
-  if (!values.section) {
-    out.error(ErrorCode.INVALID_ARGUMENTS, '--section <id> is required', {
+  if (!values.feedback && !values.section) {
+    out.error(ErrorCode.INVALID_ARGUMENTS, '--section <id> is required (or use --feedback)', {
       usage: 'steroids tasks add <title> --section <id> --source <file>',
-      hint: 'Every task must belong to a section.',
+      hint: 'Every task must belong to a section. Use --feedback for advisory items.',
     });
     process.exit(2);
   }
 
-  if (!values.source) {
-    out.error(ErrorCode.INVALID_ARGUMENTS, '--source <file> is required', {
+  if (!values.feedback && !values.source) {
+    out.error(ErrorCode.INVALID_ARGUMENTS, '--source <file> is required (or use --feedback)', {
       usage: 'steroids tasks add <title> --section <id> --source <file>',
-      hint: 'Every task must reference a specification file.',
+      hint: 'Every task must reference a specification file. Use --feedback for advisory items.',
     });
     process.exit(2);
   }
@@ -746,18 +752,23 @@ EXAMPLES:
 
   const { db, close } = openDatabase();
   try {
-    const section = getSection(db, values.section);
-    if (!section) {
-      out.error(ErrorCode.SECTION_NOT_FOUND, `Section not found: ${values.section}`, {
-        sectionId: values.section,
-        hint: 'Use "steroids sections list" to see available sections.',
-      });
-      process.exit(1);
+    let section;
+    if (values.feedback) {
+      section = getOrCreateFeedbackSection(db);
+    } else {
+      section = getSection(db, values.section as string);
+      if (!section) {
+        out.error(ErrorCode.SECTION_NOT_FOUND, `Section not found: ${values.section}`, {
+          sectionId: values.section,
+          hint: 'Use "steroids sections list" to see available sections.',
+        });
+        process.exit(1);
+      }
     }
 
     const task = createTask(db, title, {
       sectionId: section.id,
-      sourceFile: values.source,
+      sourceFile: values.source ?? undefined,
       filePath,
       fileLine,
       fileCommitSha,
@@ -772,11 +783,14 @@ EXAMPLES:
       );
     }
 
-    out.success({ task });
+    out.success({ task, feedback: !!values.feedback });
     if (!flags.json) {
       out.log(`Task created: ${task.title}`);
       out.log(`  ID: ${task.id}`);
       out.log(`  Status: ${task.status}`);
+      if (values.feedback) {
+        out.log(`  Section: Needs User Input (skipped - for human review)`);
+      }
       if (task.source_file) {
         out.log(`  Source: ${task.source_file}`);
       }

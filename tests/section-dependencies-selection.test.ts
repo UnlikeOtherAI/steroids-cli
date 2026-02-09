@@ -21,10 +21,7 @@ describe('Section Dependencies - Task Selection', () => {
     db = new Database(':memory:');
     db.exec(SCHEMA_SQL);
 
-    // Apply migrations for priority and dependencies
-    db.exec('ALTER TABLE sections ADD COLUMN priority INTEGER DEFAULT 50');
-    db.exec('CREATE INDEX IF NOT EXISTS idx_sections_priority ON sections(priority)');
-
+    // Apply section_dependencies migration (priority and skipped are in SCHEMA_SQL)
     db.exec(`
       CREATE TABLE IF NOT EXISTS section_dependencies (
         id TEXT PRIMARY KEY,
