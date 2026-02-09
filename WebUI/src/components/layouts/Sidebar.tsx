@@ -86,7 +86,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   return (
     <aside className="w-60 bg-sidebar flex flex-col h-full min-h-screen lg:min-h-full lg:rounded-l-xl">
       <div className="py-4 pr-4 flex items-center justify-between overflow-hidden">
-        <img src="/logo-hand.png" alt="Steroids" className="h-20 w-auto -ml-6" />
+        <div className="flex items-center">
+          <img src="/logo-hand.png" alt="" className="h-20 w-auto -ml-6" />
+          <h1 className="text-xl font-bold text-text-inverse -ml-2">Steroids</h1>
+        </div>
         {onClose && (
           <button
             onClick={onClose}
