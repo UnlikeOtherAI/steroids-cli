@@ -28,6 +28,7 @@ import { invokeReviewer } from '../orchestrator/reviewer.js';
 import { pushToRemote } from '../git/push.js';
 import { getCurrentCommitSha } from '../git/status.js';
 import { hasActiveRunnerForProject } from '../runners/wakeup.js';
+import { getRegisteredProject } from '../runners/projects.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
@@ -162,6 +163,23 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
   }
 
   const projectPath = process.cwd();
+
+  // Check if project is disabled in the global registry
+  const registeredProject = getRegisteredProject(projectPath);
+  if (registeredProject && !registeredProject.enabled) {
+    if (flags.json) {
+      out.error(ErrorCode.CONFIG_ERROR, 'Project is disabled', {
+        project: projectPath,
+        hint: 'Run "steroids projects enable <path>" to enable it.',
+      });
+    } else {
+      console.error('Error: Project is disabled');
+      console.error('  Project: ' + projectPath);
+      console.error('');
+      console.error('Run "steroids projects enable <path>" to enable it.');
+    }
+    process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
+  }
 
   // Check if a runner is already active for this project
   if (hasActiveRunnerForProject(projectPath)) {
