@@ -11,6 +11,57 @@ Available providers:
 
 The "OpenAI" provider in the registry is redundant and references a non-existent CLI. Only use the Codex provider for OpenAI models.
 
+## Agent Prompt Changes (CRITICAL)
+
+**Every time you modify a prompt for orchestrator, coder, or reviewer agents, you MUST validate it with multiple AI providers.**
+
+When changing any prompt file in `src/prompts/` or any code that generates prompts for agents:
+
+1. **Use parallel validation**: Run the modified prompt through Claude, Codex, AND Gemini (if sufficient credits available)
+2. **Test with diverse scenarios**:
+   - Multiple programming languages (JavaScript, Python, Rust, Go, etc.)
+   - Different project types (web apps, CLIs, libraries, services)
+   - Various task types (new features, bug fixes, refactoring)
+3. **Check for deadly spirals**: Ensure constraints are achievable and won't cause rejection loops
+4. **Verify language-agnostic phrasing**: No hardcoded assumptions about tooling or structure
+
+**Why this matters:**
+- A poorly worded prompt can cause infinite rejection cycles (coder and reviewer disagree on interpretation)
+- Language-specific assumptions break projects in other languages
+- Impossible constraints (e.g., "100% test coverage") cause task failures
+- Each AI provider interprets prompts differently - validation catches ambiguities
+
+**Example validation workflow:**
+```bash
+# After modifying src/prompts/coder.ts
+echo "Testing prompt changes with multiple providers..."
+
+# Test with Claude
+steroids config set ai.coder.provider claude
+steroids loop --once --section test-section
+
+# Test with Codex
+steroids config set ai.coder.provider codex
+steroids loop --once --section test-section
+
+# Test with Gemini
+steroids config set ai.coder.provider gemini
+steroids loop --once --section test-section
+
+# Compare results: do all three understand and execute correctly?
+```
+
+**Red flags in prompt changes:**
+- Adding absolute requirements without escape clauses
+- Using language-specific terminology (npm, cargo, pytest) without generic alternatives
+- Tightening constraints without considering edge cases
+- Removing flexibility that allows for project-specific workflows
+
+**Skip validation only if:**
+- Typo fixes or formatting changes (no semantic change)
+- Adding clarifying examples (not changing constraints)
+- Very minor wording adjustments
+
 ## Language & Project Agnostic (CRITICAL)
 
 **Steroids must work with ANY programming language and project type.**
