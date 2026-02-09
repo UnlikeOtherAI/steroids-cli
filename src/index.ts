@@ -30,6 +30,7 @@ import { projectsCommand } from './commands/projects.js';
 import { llmCommand } from './commands/llm.js';
 import { statsCommand } from './commands/stats.js';
 import { hooksCommand } from './commands/hooks.js';
+import { aiCommand } from './commands/ai.js';
 
 // Read version from package.json - search up from dist folder
 function getVersion(): string {
@@ -70,6 +71,7 @@ COMMANDS:
   loop              Run the orchestrator loop
   runners           Manage runner daemons
   config            Manage configuration
+  ai                Manage AI providers and models
   hooks             Manage event hooks
   health            Check project health
   scan              Scan directory for projects
@@ -171,6 +173,9 @@ async function main(): Promise<void> {
         break;
       case 'config':
         await configCommand(commandArgs, flags);
+        break;
+      case 'ai':
+        await aiCommand(commandArgs, flags);
         break;
       case 'hooks':
         await hooksCommand(commandArgs, flags);
