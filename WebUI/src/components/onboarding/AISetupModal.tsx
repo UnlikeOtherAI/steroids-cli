@@ -278,7 +278,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
             <>
               {/* Setup info message */}
               <div className="mb-4 p-3 bg-bg-base border border-border rounded-lg">
-                <p className="text-sm text-text-muted">
+                <p className="text-sm text-text-primary">
                   <i className="fa-solid fa-circle-info text-accent mr-2"></i>
                   Select AI providers that are already installed and configured on your system.
                   Steroids will use them with your existing credentials, just like you would from the command line.
