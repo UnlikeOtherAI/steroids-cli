@@ -114,7 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           </NavLink>
         ))}
       </nav>
-      <div className="flex-shrink-0 p-4">
+      <div className="flex-shrink-0 px-4 pt-4 pb-[44px]">
         <button
           onClick={handleCronToggle}
           disabled={loading || cronInstalled === null}
