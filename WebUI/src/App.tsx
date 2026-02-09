@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -9,12 +10,41 @@ import { ProjectTasksPage } from './pages/ProjectTasksPage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AppShell } from './components/layouts';
+import { AISetupModal } from './components/onboarding/AISetupModal';
 import { useProject } from './contexts/ProjectContext';
+import { configApi } from './services/api';
 import './App.css';
 
 function App() {
   const { selectedProject } = useProject();
   const location = useLocation();
+  const [showAISetup, setShowAISetup] = useState(false);
+  const [checkingConfig, setCheckingConfig] = useState(true);
+
+  useEffect(() => {
+    checkAIConfiguration();
+  }, []);
+
+  const checkAIConfiguration = async () => {
+    try {
+      const config = await configApi.getConfig('global');
+      const ai = config.ai as Record<string, Record<string, unknown>> | undefined;
+
+      // Check if all three roles have provider and model configured
+      const hasOrchestrator = ai?.orchestrator?.provider && ai?.orchestrator?.model;
+      const hasCoder = ai?.coder?.provider && ai?.coder?.model;
+      const hasReviewer = ai?.reviewer?.provider && ai?.reviewer?.model;
+
+      if (!hasOrchestrator || !hasCoder || !hasReviewer) {
+        setShowAISetup(true);
+      }
+    } catch {
+      // If config check fails, show setup modal
+      setShowAISetup(true);
+    } finally {
+      setCheckingConfig(false);
+    }
+  };
 
   const getPageTitle = () => {
     if (location.pathname.startsWith('/activity')) return 'Activity';
@@ -31,20 +61,37 @@ function App() {
     }
   };
 
+  // Show loading while checking config
+  if (checkingConfig) {
+    return (
+      <div className="min-h-screen bg-bg-page flex items-center justify-center">
+        <div className="text-center">
+          <i className="fa-solid fa-spinner fa-spin text-4xl text-accent mb-4"></i>
+          <p className="text-text-muted">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <AppShell title={getPageTitle()} project={selectedProject}>
-      <Routes>
-        <Route path="/" element={<DashboardPage project={selectedProject} />} />
-        <Route path="/projects" element={<ProjectsPage />} />
-        <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
-        <Route path="/project/:projectPath/tasks" element={<ProjectTasksPage />} />
-        <Route path="/activity" element={<ActivityListPage />} />
-        <Route path="/task/:taskId" element={<TaskDetailPage />} />
-        <Route path="/runners" element={<RunnersPage />} />
-        <Route path="/tasks" element={<RunningTasksPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-      </Routes>
-    </AppShell>
+    <>
+      {showAISetup && (
+        <AISetupModal onComplete={() => setShowAISetup(false)} />
+      )}
+      <AppShell title={getPageTitle()} project={selectedProject}>
+        <Routes>
+          <Route path="/" element={<DashboardPage project={selectedProject} />} />
+          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
+          <Route path="/project/:projectPath/tasks" element={<ProjectTasksPage />} />
+          <Route path="/activity" element={<ActivityListPage />} />
+          <Route path="/task/:taskId" element={<TaskDetailPage />} />
+          <Route path="/runners" element={<RunnersPage />} />
+          <Route path="/tasks" element={<RunningTasksPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Routes>
+      </AppShell>
+    </>
   );
 }
 
