@@ -440,4 +440,97 @@ router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/tasks/:taskId/restart
+ * Restart a failed task by resetting rejection count and setting status to pending
+ * Body: { project: string }
+ */
+router.post('/tasks/:taskId/restart', (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const projectPath = req.body.project as string;
+
+    if (!projectPath) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required body parameter: project',
+      });
+      return;
+    }
+
+    const dbPath = join(projectPath, '.steroids', 'steroids.db');
+    if (!existsSync(dbPath)) {
+      res.status(404).json({
+        success: false,
+        error: 'Project database not found',
+        project: projectPath,
+      });
+      return;
+    }
+
+    let db: Database.Database;
+    try {
+      db = new Database(dbPath); // Writable mode
+    } catch {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to open project database',
+      });
+      return;
+    }
+
+    try {
+      // Check task exists and is in failed status
+      const task = db.prepare('SELECT id, title, status FROM tasks WHERE id = ?').get(taskId) as
+        | { id: string; title: string; status: string }
+        | undefined;
+
+      if (!task) {
+        res.status(404).json({
+          success: false,
+          error: 'Task not found',
+          task_id: taskId,
+        });
+        return;
+      }
+
+      if (task.status !== 'failed') {
+        res.status(400).json({
+          success: false,
+          error: `Cannot restart task in ${task.status} status. Only failed tasks can be restarted.`,
+        });
+        return;
+      }
+
+      // Reset task: set status to pending and rejection_count to 0
+      db.prepare(
+        `UPDATE tasks
+         SET status = 'pending', rejection_count = 0, updated_at = datetime('now')
+         WHERE id = ?`
+      ).run(taskId);
+
+      // Add audit entry
+      db.prepare(
+        `INSERT INTO audit (task_id, from_status, to_status, actor, notes, created_at)
+         VALUES (?, 'failed', 'pending', 'webui:restart', 'Task restarted via WebUI', datetime('now'))`
+      ).run(taskId);
+
+      res.json({
+        success: true,
+        message: 'Task restarted successfully',
+        task_id: taskId,
+      });
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    console.error('Error restarting task:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to restart task',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 export default router;

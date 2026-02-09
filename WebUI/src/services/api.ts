@@ -255,6 +255,16 @@ export const tasksApi = {
     }
     return fetchJson<TaskListResponse>(url);
   },
+
+  /**
+   * Restart a failed task
+   */
+  async restart(taskId: string, projectPath: string): Promise<void> {
+    await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/restart`, {
+      method: 'POST',
+      body: JSON.stringify({ project: projectPath }),
+    });
+  },
 };
 
 export interface ConfigSchema {

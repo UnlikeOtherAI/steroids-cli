@@ -133,6 +133,7 @@ export const TaskDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(true);
+  const [restarting, setRestarting] = useState(false);
   const intervalRef = useRef<number | null>(null);
 
   const fetchTask = useCallback(async () => {
@@ -157,6 +158,21 @@ export const TaskDetailPage: React.FC = () => {
   useEffect(() => {
     fetchTask();
   }, [fetchTask]);
+
+  const handleRestart = async () => {
+    if (!taskId || !projectPath || restarting) return;
+
+    setRestarting(true);
+    try {
+      await tasksApi.restart(taskId, projectPath);
+      setIsLive(true); // Resume live updates after restart
+      await fetchTask(); // Refresh task data
+    } catch (err) {
+      alert('Failed to restart task: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setRestarting(false);
+    }
+  };
 
   useEffect(() => {
     if (isLive) {
@@ -260,9 +276,30 @@ export const TaskDetailPage: React.FC = () => {
               )}
             </div>
           </div>
-          <Badge variant={STATUS_VARIANTS[task.status]} className="text-base px-4 py-2">
-            {STATUS_LABELS[task.status]}
-          </Badge>
+          <div className="flex items-center gap-3">
+            <Badge variant={STATUS_VARIANTS[task.status]} className="text-base px-4 py-2">
+              {STATUS_LABELS[task.status]}
+            </Badge>
+            {task.status === 'failed' && (
+              <button
+                onClick={handleRestart}
+                disabled={restarting}
+                className="px-4 py-2 bg-accent hover:bg-accent/80 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {restarting ? (
+                  <>
+                    <i className="fa-solid fa-spinner fa-spin"></i>
+                    Restarting...
+                  </>
+                ) : (
+                  <>
+                    <i className="fa-solid fa-rotate-right"></i>
+                    Restart
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
