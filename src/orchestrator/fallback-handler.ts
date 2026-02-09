@@ -15,9 +15,14 @@ export class OrchestrationFallbackHandler {
     try {
       const parsed = JSON.parse(rawOutput);
       if (validateCoderResult(parsed)) {
+        console.log('[Orchestrator] ✓ Layer 1: Direct JSON parse succeeded');
         return parsed as unknown as CoderOrchestrationResult;
+      } else {
+        console.warn('[Orchestrator] Layer 1 JSON parsed but validation failed');
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[Orchestrator] Layer 1: JSON.parse failed');
+    }
 
     // Layer 2: Extract from markdown code block
     const jsonBlock = rawOutput.match(/```json\s*([\s\S]*?)\s*```/);
@@ -25,9 +30,14 @@ export class OrchestrationFallbackHandler {
       try {
         const parsed = JSON.parse(jsonBlock[1]);
         if (validateCoderResult(parsed)) {
+          console.log('[Orchestrator] ✓ Layer 2: Markdown extraction succeeded');
           return parsed as unknown as CoderOrchestrationResult;
+        } else {
+          console.warn('[Orchestrator] Layer 2 JSON parsed but validation failed');
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[Orchestrator] Layer 2: Markdown block found but JSON.parse failed');
+      }
     }
 
     // Layer 3: Find first { to last }
@@ -37,12 +47,18 @@ export class OrchestrationFallbackHandler {
       try {
         const parsed = JSON.parse(rawOutput.substring(start, end + 1));
         if (validateCoderResult(parsed)) {
+          console.log('[Orchestrator] ✓ Layer 3: Substring extraction succeeded');
           return parsed as unknown as CoderOrchestrationResult;
+        } else {
+          console.warn('[Orchestrator] Layer 3 JSON parsed but validation failed');
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[Orchestrator] Layer 3: Substring found but JSON.parse failed');
+      }
     }
 
     // Layer 4: Keyword fallback
+    console.warn('[Orchestrator] ⚠ Layer 4: Using keyword fallback (all parsing failed)');
     return this.keywordFallbackCoder(rawOutput);
   }
 
@@ -54,9 +70,14 @@ export class OrchestrationFallbackHandler {
     try {
       const parsed = JSON.parse(rawOutput);
       if (validateReviewerResult(parsed)) {
+        console.log('[Orchestrator] ✓ Layer 1: Direct JSON parse succeeded');
         return parsed as unknown as ReviewerOrchestrationResult;
+      } else {
+        console.warn('[Orchestrator] Layer 1 JSON parsed but validation failed');
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[Orchestrator] Layer 1: JSON.parse failed');
+    }
 
     // Layer 2: Extract from markdown code block
     const jsonBlock = rawOutput.match(/```json\s*([\s\S]*?)\s*```/);
@@ -64,9 +85,14 @@ export class OrchestrationFallbackHandler {
       try {
         const parsed = JSON.parse(jsonBlock[1]);
         if (validateReviewerResult(parsed)) {
+          console.log('[Orchestrator] ✓ Layer 2: Markdown extraction succeeded');
           return parsed as unknown as ReviewerOrchestrationResult;
+        } else {
+          console.warn('[Orchestrator] Layer 2 JSON parsed but validation failed');
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[Orchestrator] Layer 2: Markdown block found but JSON.parse failed');
+      }
     }
 
     // Layer 3: Find first { to last }
@@ -76,12 +102,18 @@ export class OrchestrationFallbackHandler {
       try {
         const parsed = JSON.parse(rawOutput.substring(start, end + 1));
         if (validateReviewerResult(parsed)) {
+          console.log('[Orchestrator] ✓ Layer 3: Substring extraction succeeded');
           return parsed as unknown as ReviewerOrchestrationResult;
+        } else {
+          console.warn('[Orchestrator] Layer 3 JSON parsed but validation failed');
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[Orchestrator] Layer 3: Substring found but JSON.parse failed');
+      }
     }
 
     // Layer 4: Keyword fallback
+    console.warn('[Orchestrator] ⚠ Layer 4: Using keyword fallback (all parsing failed)');
     return this.keywordFallbackReviewer(rawOutput);
   }
 
