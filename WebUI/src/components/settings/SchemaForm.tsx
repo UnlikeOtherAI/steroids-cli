@@ -41,6 +41,9 @@ interface SchemaFormProps {
   // For nested forms to share collapsed state with root
   collapsedState?: Record<string, boolean>;
   onToggleCollapse?: (path: string) => void;
+  // For project-level settings to show inherited values
+  scope?: 'global' | 'project';
+  globalValues?: Record<string, unknown>;
 }
 
 export const SchemaForm: React.FC<SchemaFormProps> = ({
@@ -51,6 +54,8 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
   level = 0,
   collapsedState,
   onToggleCollapse,
+  scope = 'global',
+  globalValues,
 }) => {
   // Only manage state at root level
   const [localCollapsed, setLocalCollapsed] = useState<Record<string, boolean>>(() =>
@@ -153,6 +158,8 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
                     values={values}
                     onChange={onChange}
                     basePath={fullPath}
+                    scope={scope}
+                    globalValues={globalValues}
                   />
                 </div>
               )}
@@ -193,6 +200,8 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
                     level={level + 1}
                     collapsedState={collapsed}
                     onToggleCollapse={toggleCollapse}
+                    scope={scope}
+                    globalValues={globalValues}
                   />
                 </div>
               )}
@@ -201,6 +210,7 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
         }
 
         // Otherwise render as a field
+        const globalFieldValue = globalValues ? getNestedValue(globalValues, fullPath) : undefined;
         return (
           <SchemaField
             key={key}
@@ -209,6 +219,8 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
             schema={fieldSchema}
             value={value}
             onChange={onChange}
+            scope={scope}
+            globalValue={globalFieldValue}
           />
         );
       })}

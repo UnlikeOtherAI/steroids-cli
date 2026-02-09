@@ -54,6 +54,7 @@ app.get('/', (req, res) => {
       'GET /api/projects',
       'GET /api/projects/status?path=<path>',
       'GET /api/projects/<path>/tasks',
+      'GET /api/projects/<path>/sections',
       'POST /api/projects',
       'POST /api/projects/remove',
       'POST /api/projects/enable',

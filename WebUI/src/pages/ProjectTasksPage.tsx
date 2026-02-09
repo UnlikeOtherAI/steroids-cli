@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { TaskListItem, TaskStatus } from '../types';
-import { tasksApi } from '../services/api';
+import { TaskListItem, TaskStatus, Section } from '../types';
+import { tasksApi, sectionsApi } from '../services/api';
 import { Badge } from '../components/atoms/Badge';
 import { PageLayout } from '../components/templates/PageLayout';
 
@@ -38,12 +38,33 @@ export const ProjectTasksPage: React.FC = () => {
   const navigate = useNavigate();
 
   const statusParam = searchParams.get('status') as TaskStatus | null;
+  const sectionParam = searchParams.get('section');
   const decodedPath = projectPath ? decodeURIComponent(projectPath) : '';
 
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [sections, setSections] = useState<Section[]>([]);
+  const [currentSection, setCurrentSection] = useState<Section | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch sections for the filter dropdown
+  const fetchSections = useCallback(async () => {
+    if (!decodedPath) return;
+    try {
+      const response = await sectionsApi.listForProject(decodedPath);
+      setSections(response.sections);
+      // Set current section info if filtered by section
+      if (sectionParam) {
+        const section = response.sections.find(s => s.id === sectionParam);
+        setCurrentSection(section || null);
+      } else {
+        setCurrentSection(null);
+      }
+    } catch (err) {
+      console.error('Failed to load sections:', err);
+    }
+  }, [decodedPath, sectionParam]);
 
   const fetchTasks = useCallback(async () => {
     if (!decodedPath) return;
@@ -53,6 +74,7 @@ export const ProjectTasksPage: React.FC = () => {
     try {
       const response = await tasksApi.listForProject(decodedPath, {
         status: statusParam || undefined,
+        section: sectionParam || undefined,
         limit: 100,
       });
 
@@ -74,7 +96,11 @@ export const ProjectTasksPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [decodedPath, statusParam]);
+  }, [decodedPath, statusParam, sectionParam]);
+
+  useEffect(() => {
+    fetchSections();
+  }, [fetchSections]);
 
   useEffect(() => {
     fetchTasks();
@@ -90,8 +116,22 @@ export const ProjectTasksPage: React.FC = () => {
     navigate(`?${params.toString()}`, { replace: true });
   };
 
+  const handleSectionFilter = (sectionId: string | null) => {
+    const params = new URLSearchParams(searchParams);
+    if (sectionId) {
+      params.set('section', sectionId);
+    } else {
+      params.delete('section');
+    }
+    navigate(`?${params.toString()}`, { replace: true });
+  };
+
   const projectName = decodedPath.split('/').pop() || 'Project';
-  const pageTitle = statusParam ? `${STATUS_LABELS[statusParam]} Tasks` : 'All Tasks';
+  const pageTitle = currentSection
+    ? currentSection.name
+    : statusParam
+      ? `${STATUS_LABELS[statusParam]} Tasks`
+      : 'All Tasks';
 
   if (!decodedPath) {
     return (
@@ -112,6 +152,43 @@ export const ProjectTasksPage: React.FC = () => {
       loadingMessage="Loading tasks..."
       error={error}
     >
+      {/* Section filter (if filtering by section, show section info) */}
+      {currentSection && (
+        <div className="mb-4 p-3 bg-bg-surface rounded-lg border border-border flex items-center justify-between">
+          <div>
+            <span className="text-text-secondary text-sm">Section:</span>
+            <span className="ml-2 font-medium text-text-primary">{currentSection.name}</span>
+            <span className="ml-2 text-xs text-text-muted">
+              ({currentSection.total_tasks} tasks)
+            </span>
+          </div>
+          <button
+            onClick={() => handleSectionFilter(null)}
+            className="text-sm text-accent hover:text-accent/80"
+          >
+            Clear section filter
+          </button>
+        </div>
+      )}
+
+      {/* Section dropdown (only show if not filtering by section and sections exist) */}
+      {!sectionParam && sections.length > 0 && (
+        <div className="mb-4">
+          <select
+            value=""
+            onChange={(e) => e.target.value && handleSectionFilter(e.target.value)}
+            className="px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          >
+            <option value="">Filter by section...</option>
+            {sections.map((section) => (
+              <option key={section.id} value={section.id}>
+                {section.name} ({section.total_tasks} tasks)
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Status filter pills */}
       <div className="flex gap-2 mb-6 flex-wrap">
         <button

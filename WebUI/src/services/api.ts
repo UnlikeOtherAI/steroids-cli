@@ -17,6 +17,7 @@ import {
   TaskDetailsResponse,
   TaskLogsResponse,
   TaskListResponse,
+  SectionsListResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3501';
@@ -210,6 +211,16 @@ export const runnersApi = {
    */
   async stopCron(): Promise<void> {
     await fetchJson('/api/runners/cron/stop', { method: 'POST' });
+  },
+};
+
+export const sectionsApi = {
+  /**
+   * List all sections for a project with task counts
+   */
+  async listForProject(projectPath: string): Promise<SectionsListResponse> {
+    const url = `/api/projects/${encodeURIComponent(projectPath)}/sections`;
+    return fetchJson<SectionsListResponse>(url);
   },
 };
 

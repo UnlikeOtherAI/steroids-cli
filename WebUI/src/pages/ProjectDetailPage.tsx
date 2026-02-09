@@ -7,8 +7,8 @@ import {
   ArrowPathIcon,
   CheckIcon,
 } from '@heroicons/react/24/outline';
-import { projectsApi, activityApi, configApi, ApiError, ConfigSchema } from '../services/api';
-import { Project, ActivityStats, TimeRangeOption } from '../types';
+import { projectsApi, activityApi, configApi, sectionsApi, ApiError, ConfigSchema } from '../services/api';
+import { Project, ActivityStats, TimeRangeOption, Section } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
 import { Tooltip } from '../components/atoms/Tooltip';
@@ -26,10 +26,15 @@ export const ProjectDetailPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedHours, setSelectedHours] = useState(24);
 
+  // Sections state
+  const [sections, setSections] = useState<Section[]>([]);
+  const [sectionsLoading, setSectionsLoading] = useState(false);
+
   // Settings state
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSchema, setSettingsSchema] = useState<ConfigSchema | null>(null);
   const [settingsConfig, setSettingsConfig] = useState<Record<string, unknown>>({});
+  const [globalConfig, setGlobalConfig] = useState<Record<string, unknown>>({});
   const [settingsChanges, setSettingsChanges] = useState<Record<string, unknown>>({});
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -89,17 +94,33 @@ export const ProjectDetailPage: React.FC = () => {
     }
   };
 
+  const loadSections = async () => {
+    if (!decodedPath) return;
+
+    setSectionsLoading(true);
+    try {
+      const response = await sectionsApi.listForProject(decodedPath);
+      setSections(response.sections);
+    } catch (err) {
+      console.error('Failed to load sections:', err);
+    } finally {
+      setSectionsLoading(false);
+    }
+  };
+
   const loadSettings = useCallback(async () => {
     if (!decodedPath) return;
 
     setSettingsLoading(true);
     try {
-      const [schemaData, configData] = await Promise.all([
+      const [schemaData, projectConfigData, globalConfigData] = await Promise.all([
         configApi.getSchema(),
         configApi.getConfig('project', decodedPath),
+        configApi.getConfig('global'),
       ]);
       setSettingsSchema(schemaData);
-      setSettingsConfig(configData);
+      setSettingsConfig(projectConfigData);
+      setGlobalConfig(globalConfigData);
       setSettingsChanges({});
     } catch (err) {
       console.error('Failed to load settings:', err);
@@ -164,6 +185,7 @@ export const ProjectDetailPage: React.FC = () => {
 
   useEffect(() => {
     loadProject();
+    loadSections();
   }, [decodedPath]);
 
   useEffect(() => {
@@ -375,6 +397,95 @@ export const ProjectDetailPage: React.FC = () => {
         </div>
       )}
 
+      {/* Sections */}
+      <div className="mb-8">
+        <h2 className="text-xl font-semibold text-text-primary mb-4">Sections</h2>
+        {sectionsLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <ArrowPathIcon className="w-6 h-6 animate-spin text-text-muted" />
+          </div>
+        ) : sections.length === 0 ? (
+          <div className="card p-6 text-center">
+            <p className="text-text-muted">No sections found. Tasks are organized into sections.</p>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-border">
+            <table className="w-full">
+              <thead className="bg-bg-surface2">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-text-secondary">Section</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Total</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Pending</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Active</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Done</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Failed</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {sections.map((section) => (
+                  <tr
+                    key={section.id}
+                    onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?section=${section.id}`)}
+                    className="bg-bg-surface hover:bg-bg-surface2 cursor-pointer transition-colors"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-text-primary">
+                        <i className="fa-solid fa-folder text-text-muted mr-2"></i>
+                        {section.name}
+                      </div>
+                      {section.priority !== 50 && (
+                        <div className="text-xs text-text-muted mt-0.5">
+                          Priority: {section.priority}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center text-sm text-text-primary font-medium">
+                      {section.total_tasks}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {section.pending > 0 ? (
+                        <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
+                          {section.pending}
+                        </span>
+                      ) : (
+                        <span className="text-text-muted">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {section.in_progress + section.review > 0 ? (
+                        <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                          {section.in_progress + section.review}
+                        </span>
+                      ) : (
+                        <span className="text-text-muted">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {section.completed > 0 ? (
+                        <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                          {section.completed}
+                        </span>
+                      ) : (
+                        <span className="text-text-muted">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {section.failed > 0 ? (
+                        <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                          {section.failed}
+                        </span>
+                      ) : (
+                        <span className="text-text-muted">-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Project Settings */}
       <div className="mb-8">
         <button
@@ -446,6 +557,8 @@ export const ProjectDetailPage: React.FC = () => {
                   schema={settingsSchema}
                   values={getMergedSettingsValues()}
                   onChange={handleSettingsChange}
+                  scope="project"
+                  globalValues={globalConfig}
                 />
 
                 {/* Save Bar - Bottom */}

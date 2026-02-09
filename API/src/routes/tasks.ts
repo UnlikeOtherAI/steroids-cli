@@ -344,6 +344,102 @@ router.get('/tasks/:taskId/logs', (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/projects/:projectPath/sections
+ * List all sections for a project with task counts by status
+ */
+router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) => {
+  try {
+    const projectPath = decodeURIComponent(req.params.projectPath);
+
+    const db = openProjectDatabase(projectPath);
+    if (!db) {
+      res.status(404).json({
+        success: false,
+        error: 'Project database not found',
+        project: projectPath,
+      });
+      return;
+    }
+
+    try {
+      // Get sections with task counts by status
+      const sections = db
+        .prepare(
+          `SELECT
+            s.id,
+            s.name,
+            s.priority,
+            s.created_at,
+            COUNT(t.id) as total_tasks,
+            SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+            SUM(CASE WHEN t.status = 'review' THEN 1 ELSE 0 END) as review,
+            SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN t.status = 'skipped' THEN 1 ELSE 0 END) as skipped
+          FROM sections s
+          LEFT JOIN tasks t ON t.section_id = s.id
+          GROUP BY s.id
+          ORDER BY s.priority DESC, s.name ASC`
+        )
+        .all() as Array<{
+        id: string;
+        name: string;
+        priority: number;
+        created_at: string;
+        total_tasks: number;
+        pending: number;
+        in_progress: number;
+        review: number;
+        completed: number;
+        failed: number;
+        skipped: number;
+      }>;
+
+      // Also get tasks without a section (null section_id)
+      const unassigned = db
+        .prepare(
+          `SELECT
+            COUNT(*) as total_tasks,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+            SUM(CASE WHEN status = 'review' THEN 1 ELSE 0 END) as review,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) as skipped
+          FROM tasks
+          WHERE section_id IS NULL`
+        )
+        .get() as {
+        total_tasks: number;
+        pending: number;
+        in_progress: number;
+        review: number;
+        completed: number;
+        failed: number;
+        skipped: number;
+      };
+
+      res.json({
+        success: true,
+        project: projectPath,
+        sections,
+        unassigned: unassigned.total_tasks > 0 ? unassigned : null,
+      });
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    console.error('Error listing project sections:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to list project sections',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
  * GET /api/projects/:projectPath/tasks
  * List all tasks for a project
  * Query params:

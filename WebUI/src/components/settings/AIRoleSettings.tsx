@@ -36,6 +36,8 @@ interface AIRoleSettingsProps {
   values: Record<string, unknown>;
   onChange: (path: string, value: unknown) => void;
   basePath: string;
+  scope?: 'global' | 'project';
+  globalValues?: Record<string, unknown>;
 }
 
 export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
@@ -44,6 +46,8 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
   values,
   onChange,
   basePath,
+  scope = 'global',
+  globalValues,
 }) => {
   const [models, setModels] = useState<AIModel[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -68,9 +72,16 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
     return current;
   };
 
-  const currentProvider = (getNestedValue(values, `${basePath}.provider`) as string) || 'claude';
+  const currentProvider = (getNestedValue(values, `${basePath}.provider`) as string) || '';
   const currentModel = (getNestedValue(values, `${basePath}.model`) as string) || '';
   const currentCli = (getNestedValue(values, `${basePath}.cli`) as string) || '';
+
+  // Get global/inherited values for project scope
+  const globalProvider = globalValues ? (getNestedValue(globalValues, `${basePath}.provider`) as string) || '' : '';
+  const globalModel = globalValues ? (getNestedValue(globalValues, `${basePath}.model`) as string) || '' : '';
+
+  // Check if using inherited (no value set at project level)
+  const isInherited = scope === 'project' && !currentProvider;
 
   // Load models when provider changes
   const loadModels = useCallback(async (provider: string) => {
@@ -91,9 +102,14 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
     }
   }, []);
 
+  // Load models for active provider (current or inherited)
+  const activeProvider = isInherited ? globalProvider : currentProvider;
+
   useEffect(() => {
-    loadModels(currentProvider);
-  }, [currentProvider, loadModels]);
+    if (activeProvider) {
+      loadModels(activeProvider);
+    }
+  }, [activeProvider, loadModels]);
 
   // Get provider options from schema
   const providerSchema = schema.properties?.provider;
@@ -129,20 +145,70 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Inherited/Custom Toggle for Project Scope */}
+      {scope === 'project' && (
+        <div className="flex items-center gap-3 pb-3 border-b border-border">
+          <label className="text-sm font-medium text-text-primary">Mode:</label>
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => {
+                // Switch to inherited - clear project values
+                onChange(`${basePath}.provider`, '');
+                onChange(`${basePath}.model`, '');
+              }}
+              className={`px-3 py-1.5 text-sm transition-colors ${
+                isInherited
+                  ? 'bg-accent text-white'
+                  : 'bg-bg-surface text-text-secondary hover:bg-bg-surface2'
+              }`}
+            >
+              Inherited
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                // Switch to custom - copy global values as starting point
+                if (isInherited && globalProvider) {
+                  onChange(`${basePath}.provider`, globalProvider);
+                  onChange(`${basePath}.model`, globalModel);
+                }
+              }}
+              className={`px-3 py-1.5 text-sm transition-colors ${
+                !isInherited
+                  ? 'bg-accent text-white'
+                  : 'bg-bg-surface text-text-secondary hover:bg-bg-surface2'
+              }`}
+            >
+              Custom
+            </button>
+          </div>
+          {isInherited && globalProvider && (
+            <span className="text-xs text-text-secondary">
+              Using global: {formatProviderName(globalProvider)} / {globalModel}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Provider Selection */}
       <div>
         <label className="block text-sm font-medium text-text-primary mb-1">
           Provider
         </label>
         <select
-          value={currentProvider}
+          value={isInherited ? globalProvider : currentProvider}
           onChange={(e) => {
             onChange(`${basePath}.provider`, e.target.value);
             // Clear model when provider changes
             onChange(`${basePath}.model`, '');
           }}
-          className="w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+          disabled={isInherited}
+          className={`w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent ${
+            isInherited ? 'opacity-60 cursor-not-allowed' : ''
+          }`}
         >
+          <option value="">Select provider...</option>
           {providerOptions.map((provider) => {
             const providerInfo = providers.find(p => p.id === provider);
             return (
@@ -241,21 +307,25 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
                   Static
                 </span>
               )}
-              <button
-                type="button"
-                onClick={() => loadModels(currentProvider)}
-                disabled={loadingModels}
-                className="text-xs text-accent hover:text-accent/80"
-              >
-                Refresh
-              </button>
+              {!isInherited && (
+                <button
+                  type="button"
+                  onClick={() => loadModels(activeProvider)}
+                  disabled={loadingModels}
+                  className="text-xs text-accent hover:text-accent/80"
+                >
+                  Refresh
+                </button>
+              )}
             </div>
           </div>
           <select
-            value={currentModel}
+            value={isInherited ? globalModel : currentModel}
             onChange={(e) => onChange(`${basePath}.model`, e.target.value)}
-            disabled={loadingModels || models.length === 0}
-            className="w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
+            disabled={isInherited || loadingModels || models.length === 0}
+            className={`w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50 ${
+              isInherited ? 'cursor-not-allowed' : ''
+            }`}
           >
             <option value="">Select a model...</option>
             {models.map((model) => (

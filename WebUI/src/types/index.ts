@@ -40,3 +40,32 @@ export interface ProjectsListResponse {
   projects: Project[];
   count: number;
 }
+
+export interface Section {
+  id: string;
+  name: string;
+  priority: number;
+  created_at: string;
+  total_tasks: number;
+  pending: number;
+  in_progress: number;
+  review: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface SectionsListResponse {
+  success: boolean;
+  project: string;
+  sections: Section[];
+  unassigned: {
+    total_tasks: number;
+    pending: number;
+    in_progress: number;
+    review: number;
+    completed: number;
+    failed: number;
+    skipped: number;
+  } | null;
+}
