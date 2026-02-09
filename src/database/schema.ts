@@ -108,6 +108,40 @@ CREATE TABLE IF NOT EXISTS section_locks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_section_locks_expires ON section_locks(expires_at);
+
+-- Section dependencies (ordering constraints between sections)
+CREATE TABLE IF NOT EXISTS section_dependencies (
+    id TEXT PRIMARY KEY,
+    section_id TEXT NOT NULL REFERENCES sections(id),
+    depends_on_section_id TEXT NOT NULL REFERENCES sections(id),
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(section_id, depends_on_section_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_section_dependencies_section ON section_dependencies(section_id);
+CREATE INDEX IF NOT EXISTS idx_section_dependencies_depends_on ON section_dependencies(depends_on_section_id);
+
+-- Task invocations (LLM calls per task)
+CREATE TABLE IF NOT EXISTS task_invocations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    role TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    response TEXT,
+    error TEXT,
+    exit_code INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    success INTEGER NOT NULL DEFAULT 0,
+    timed_out INTEGER NOT NULL DEFAULT 0,
+    rejection_number INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_invocations_task ON task_invocations(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_invocations_role ON task_invocations(role);
+CREATE INDEX IF NOT EXISTS idx_task_invocations_created ON task_invocations(created_at DESC);
 `;
 
 export const INITIAL_SCHEMA_DATA = `
