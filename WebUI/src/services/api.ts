@@ -152,6 +152,18 @@ export const activityApi = {
   },
 };
 
+export interface CronStatus {
+  installed: boolean;
+  entry?: string;
+  error?: string;
+}
+
+export interface CronStatusResponse {
+  success: boolean;
+  cron: CronStatus;
+  last_wakeup_at: string | null;
+}
+
 export const runnersApi = {
   /**
    * List all runners
@@ -167,6 +179,27 @@ export const runnersApi = {
   async getActiveTasks(): Promise<ActiveTask[]> {
     const response = await fetchJson<ActiveTasksResponse>('/api/runners/active-tasks');
     return response.tasks;
+  },
+
+  /**
+   * Get cron status and last wakeup time
+   */
+  async getCronStatus(): Promise<CronStatusResponse> {
+    return fetchJson<CronStatusResponse>('/api/runners/cron');
+  },
+
+  /**
+   * Start cron (install cron job)
+   */
+  async startCron(): Promise<void> {
+    await fetchJson('/api/runners/cron/start', { method: 'POST' });
+  },
+
+  /**
+   * Stop cron (uninstall cron job)
+   */
+  async stopCron(): Promise<void> {
+    await fetchJson('/api/runners/cron/stop', { method: 'POST' });
   },
 };
 

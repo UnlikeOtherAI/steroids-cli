@@ -117,6 +117,36 @@ function startRunner(projectPath: string): { pid: number } | null {
  * Iterates over ALL registered projects and starts runners as needed
  * Returns per-project results
  */
+/**
+ * Record the last wakeup invocation time
+ */
+function recordWakeupTime(): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare(
+      `INSERT INTO _global_schema (key, value) VALUES ('last_wakeup_at', datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = datetime('now')`
+    ).run();
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Get the last wakeup invocation time
+ */
+export function getLastWakeupTime(): string | null {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db
+      .prepare("SELECT value FROM _global_schema WHERE key = 'last_wakeup_at'")
+      .get() as { value: string } | undefined;
+    return row?.value ?? null;
+  } finally {
+    close();
+  }
+}
+
 export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[]> {
   const { quiet = false, dryRun = false } = options;
   const results: WakeupResult[] = [];
@@ -124,6 +154,11 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
   const log = (msg: string): void => {
     if (!quiet) console.log(msg);
   };
+
+  // Record wakeup invocation time (even for dry runs)
+  if (!dryRun) {
+    recordWakeupTime();
+  }
 
   // Step 1: Clean up stale runners first
   const { db, close } = openGlobalDatabase();

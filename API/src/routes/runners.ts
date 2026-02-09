@@ -5,6 +5,8 @@
 
 import { Router, Request, Response } from 'express';
 import { openGlobalDatabase } from '../../../src/runners/global-db.js';
+import { cronStatus, cronInstall, cronUninstall } from '../../../src/runners/cron.js';
+import { getLastWakeupTime } from '../../../src/runners/wakeup.js';
 
 const router = Router();
 
@@ -137,6 +139,94 @@ router.get('/runners/active-tasks', (_req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to list active tasks',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/runners/cron
+ * Get cron status and last wakeup time
+ */
+router.get('/runners/cron', (_req: Request, res: Response) => {
+  try {
+    const status = cronStatus();
+    const lastWakeup = getLastWakeupTime();
+
+    res.json({
+      success: true,
+      cron: {
+        installed: status.installed,
+        entry: status.entry,
+        error: status.error,
+      },
+      last_wakeup_at: lastWakeup,
+    });
+  } catch (error) {
+    console.error('Error getting cron status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get cron status',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/runners/cron/start
+ * Install cron job
+ */
+router.post('/runners/cron/start', (_req: Request, res: Response) => {
+  try {
+    const result = cronInstall();
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: result.message,
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.message,
+        message: result.error,
+      });
+    }
+  } catch (error) {
+    console.error('Error installing cron:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to install cron',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/runners/cron/stop
+ * Uninstall cron job
+ */
+router.post('/runners/cron/stop', (_req: Request, res: Response) => {
+  try {
+    const result = cronUninstall();
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: result.message,
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.message,
+        message: result.error,
+      });
+    }
+  } catch (error) {
+    console.error('Error uninstalling cron:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to uninstall cron',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
