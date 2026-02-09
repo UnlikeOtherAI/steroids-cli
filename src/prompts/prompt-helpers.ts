@@ -256,12 +256,10 @@ ${coordinatorSection}---
    - The project must build successfully
    - Tests must pass (if the project has tests)
 
-3. Only THEN submit for review:
-   \`\`\`bash
-   steroids tasks update ${taskId} --status review
-   \`\`\`
+3. Commit your changes and output "TASK COMPLETE" - the orchestrator will submit for review
 
 **DO NOT submit until you have addressed EVERY checkbox in the rejection notes.**
+**DO NOT run any CLI commands - the orchestrator handles all status updates.**
 
 If you believe the reviewer is wrong or the requirement is impossible, dispute:
 \`\`\`bash
