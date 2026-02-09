@@ -9,8 +9,6 @@ ALTER TABLE tasks ADD COLUMN file_commit_sha TEXT;
 ALTER TABLE tasks ADD COLUMN file_content_hash TEXT;
 
 -- DOWN
-
-ALTER TABLE tasks DROP COLUMN file_path;
-ALTER TABLE tasks DROP COLUMN file_line;
-ALTER TABLE tasks DROP COLUMN file_commit_sha;
-ALTER TABLE tasks DROP COLUMN file_content_hash;
+-- Note: SQLite doesn't support DROP COLUMN in versions before 3.35.0
+-- Would need to recreate table without the columns
+-- For now, this migration is considered forward-only

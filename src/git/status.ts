@@ -2,7 +2,7 @@
  * Git status and diff utilities
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 
 /**
  * Get the current HEAD commit SHA
@@ -201,7 +201,7 @@ export function isFileTracked(
   projectPath: string = process.cwd()
 ): boolean {
   try {
-    execSync(`git ls-files --error-unmatch "${filePath}"`, {
+    execFileSync('git', ['ls-files', '--error-unmatch', filePath], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -220,7 +220,7 @@ export function isFileDirty(
   projectPath: string = process.cwd()
 ): boolean {
   try {
-    const status = execSync(`git status --porcelain -- "${filePath}"`, {
+    const status = execFileSync('git', ['status', '--porcelain', '--', filePath], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -239,7 +239,7 @@ export function getFileLastCommit(
   projectPath: string = process.cwd()
 ): string | null {
   try {
-    return execSync(`git log -1 --format=%H -- "${filePath}"`, {
+    return execFileSync('git', ['log', '-1', '--format=%H', '--', filePath], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -257,7 +257,7 @@ export function getFileContentHash(
   projectPath: string = process.cwd()
 ): string | null {
   try {
-    return execSync(`git rev-parse HEAD:"${filePath}"`, {
+    return execFileSync('git', ['rev-parse', `HEAD:${filePath}`], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],

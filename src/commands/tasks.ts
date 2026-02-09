@@ -5,7 +5,7 @@ import type { GlobalFlags } from '../cli/flags.js';
 
 import { parseArgs } from 'node:util';
 import { existsSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { basename, relative, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { openDatabase } from '../database/connection.js';
 import { getRegisteredProjects } from '../runners/projects.js';
@@ -43,6 +43,12 @@ import {
   triggerProjectCompleted,
   triggerHooksSafely,
 } from '../hooks/integration.js';
+import {
+  isFileTracked,
+  isFileDirty,
+  getFileLastCommit,
+  getFileContentHash,
+} from '../git/status.js';
 
 const HELP = generateHelp({
   command: 'tasks',
@@ -75,6 +81,8 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { long: 'model', description: 'Model identifier (for LLM actors)', values: '<model>' },
     { long: 'notes', description: 'Review notes/comments', values: '<text>' },
     { long: 'source', description: 'Specification file (add subcommand)', values: '<file>' },
+    { long: 'file', description: 'Anchor task to a committed file (add subcommand)', values: '<path>' },
+    { long: 'line', description: 'Line number in anchored file (requires --file)', values: '<number>' },
     { long: 'partial', description: 'Mark as partial when skipping' },
     { long: 'no-hooks', description: 'Skip hook execution (global flag)' },
   ],
@@ -694,36 +702,44 @@ EXAMPLES:
   let fileContentHash: string | undefined;
 
   if (values.file) {
-    const { isFileTracked, isFileDirty, getFileLastCommit, getFileContentHash } = await import('../git/status.js');
     const fullPath = resolve(process.cwd(), values.file);
+    const normalizedPath = relative(process.cwd(), fullPath);
+
+    if (normalizedPath.startsWith('..')) {
+      out.error(ErrorCode.INVALID_ARGUMENTS, `File is outside the project directory: ${values.file}`, {
+        file: values.file,
+        hint: 'The file must be within the project directory.',
+      });
+      process.exit(2);
+    }
 
     if (!existsSync(fullPath)) {
-      out.error(ErrorCode.INVALID_ARGUMENTS, `File not found: ${values.file}`, {
-        file: values.file,
+      out.error(ErrorCode.INVALID_ARGUMENTS, `File not found: ${normalizedPath}`, {
+        file: normalizedPath,
         hint: 'The file must exist in the project directory.',
       });
       process.exit(2);
     }
 
-    if (!isFileTracked(values.file)) {
-      out.error(ErrorCode.INVALID_ARGUMENTS, `File is not tracked by git: ${values.file}`, {
-        file: values.file,
+    if (!isFileTracked(normalizedPath)) {
+      out.error(ErrorCode.INVALID_ARGUMENTS, `File is not tracked by git: ${normalizedPath}`, {
+        file: normalizedPath,
         hint: 'The file must be committed to the repository. Run: git add && git commit',
       });
       process.exit(2);
     }
 
-    if (isFileDirty(values.file)) {
-      out.error(ErrorCode.INVALID_ARGUMENTS, `File has uncommitted changes: ${values.file}`, {
-        file: values.file,
+    if (isFileDirty(normalizedPath)) {
+      out.error(ErrorCode.INVALID_ARGUMENTS, `File has uncommitted changes: ${normalizedPath}`, {
+        file: normalizedPath,
         hint: 'Commit your changes before anchoring a task to this file.',
       });
       process.exit(2);
     }
 
-    filePath = values.file;
-    fileCommitSha = getFileLastCommit(values.file) ?? undefined;
-    fileContentHash = getFileContentHash(values.file) ?? undefined;
+    filePath = normalizedPath;
+    fileCommitSha = getFileLastCommit(normalizedPath) ?? undefined;
+    fileContentHash = getFileContentHash(normalizedPath) ?? undefined;
   }
 
   const title = positionals.join(' ');
