@@ -47,6 +47,7 @@ lint:
 	npm run lint
 
 # Launch WebUI and API in foreground (shows logs, Ctrl+C to stop)
+# WebUI runs in dev mode with hot reload - no build needed
 launch:
 	@echo "Stopping existing services..."
 	-@pkill -f "steroids-api" 2>/dev/null || true
@@ -55,11 +56,9 @@ launch:
 	@sleep 1
 	@echo "Building API..."
 	@cd API && npm run build
-	@echo "Building WebUI..."
-	@cd WebUI && npm run build
 	@echo ""
 	@echo "Starting Steroids Dashboard (Ctrl+C to stop)..."
-	@echo "  WebUI: http://localhost:3500"
+	@echo "  WebUI: http://localhost:3500 (dev mode - hot reload enabled)"
 	@echo "  API:   http://localhost:3501"
 	@echo ""
 	@bash -c '\
@@ -71,6 +70,7 @@ launch:
 	'
 
 # Launch WebUI and API in background (detached, no terminal output)
+# WebUI runs in dev mode with hot reload - no build needed
 launch-detached:
 	@echo "Stopping existing services..."
 	-@pkill -f "steroids-api" 2>/dev/null || true
@@ -79,8 +79,6 @@ launch-detached:
 	@sleep 1
 	@echo "Building API..."
 	@cd API && npm run build
-	@echo "Building WebUI..."
-	@cd WebUI && npm run build
 	@mkdir -p .steroids/logs
 	@echo "Starting Steroids API (detached)..."
 	@cd API && nohup npm start > ../.steroids/logs/api.log 2>&1 &
@@ -90,7 +88,7 @@ launch-detached:
 	@sleep 2
 	@echo ""
 	@echo "Steroids Dashboard running (detached):"
-	@echo "  WebUI: http://localhost:3500"
+	@echo "  WebUI: http://localhost:3500 (dev mode - hot reload enabled)"
 	@echo "  API:   http://localhost:3501"
 	@echo ""
 	@echo "Logs: .steroids/logs/api.log, .steroids/logs/webui.log"
