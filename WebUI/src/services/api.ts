@@ -291,6 +291,50 @@ export interface ConfigSchemaResponse {
   data: ConfigSchema;
 }
 
+export interface AIModel {
+  id: string;
+  name: string;
+  description?: string;
+  contextWindow?: number;
+}
+
+export interface AIProvider {
+  id: string;
+  name: string;
+  hasApiKey: boolean;
+  envVar: string | null;
+}
+
+export interface AIModelsResponse {
+  success: boolean;
+  provider: string;
+  source: 'api' | 'fallback';
+  models: AIModel[];
+  error?: string;
+}
+
+export interface AIProvidersResponse {
+  success: boolean;
+  providers: AIProvider[];
+}
+
+export const aiApi = {
+  /**
+   * Get list of available AI providers
+   */
+  async getProviders(): Promise<AIProvider[]> {
+    const response = await fetchJson<AIProvidersResponse>('/api/ai/providers');
+    return response.providers;
+  },
+
+  /**
+   * Get models for a specific provider
+   */
+  async getModels(provider: string): Promise<AIModelsResponse> {
+    return fetchJson<AIModelsResponse>(`/api/ai/models/${encodeURIComponent(provider)}`);
+  },
+};
+
 export const configApi = {
   /**
    * Get full configuration schema

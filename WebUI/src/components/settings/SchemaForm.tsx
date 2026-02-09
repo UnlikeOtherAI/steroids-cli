@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { ConfigSchema } from '../../services/api';
 import { SchemaField } from './SchemaField';
+import { AIRoleSettings } from './AIRoleSettings';
 
 interface SchemaFormProps {
   schema: ConfigSchema;
@@ -50,6 +51,51 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
           .replace(/([A-Z])/g, ' $1')
           .replace(/^./, (str) => str.toUpperCase())
           .trim();
+
+        // Check if this is an AI role section (orchestrator, coder, reviewer under ai)
+        const isAIRoleSection =
+          basePath === 'ai' &&
+          (key === 'orchestrator' || key === 'coder' || key === 'reviewer') &&
+          fieldSchema.type === 'object' &&
+          fieldSchema.properties;
+
+        // If it's an AI role section, use the custom AIRoleSettings component
+        if (isAIRoleSection) {
+          return (
+            <div key={key} className="border border-border rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleCollapse(key)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-bg-surface2 hover:bg-bg-surface2/80 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  {isCollapsed ? (
+                    <ChevronRightIcon className="w-4 h-4 text-text-muted" />
+                  ) : (
+                    <ChevronDownIcon className="w-4 h-4 text-text-muted" />
+                  )}
+                  <span className="font-medium text-text-primary">{displayName}</span>
+                </div>
+                {fieldSchema.description && (
+                  <span className="text-xs text-text-muted hidden sm:block">
+                    {fieldSchema.description}
+                  </span>
+                )}
+              </button>
+              {!isCollapsed && (
+                <div className="p-4 bg-bg-surface">
+                  <AIRoleSettings
+                    role={key as 'orchestrator' | 'coder' | 'reviewer'}
+                    schema={fieldSchema}
+                    values={values}
+                    onChange={onChange}
+                    basePath={fullPath}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        }
 
         // If it's an object type with properties, render as collapsible section
         if (fieldSchema.type === 'object' && fieldSchema.properties) {

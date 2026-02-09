@@ -68,6 +68,8 @@ app.get('/', (req, res) => {
       'GET /api/config/schema/<category>',
       'GET /api/config?scope=global|project|merged&project=<path>',
       'PUT /api/config',
+      'GET /api/ai/providers',
+      'GET /api/ai/models/<provider>',
     ],
   });
 });
