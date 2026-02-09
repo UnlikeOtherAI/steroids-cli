@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Project } from '../../types';
 import { Badge } from '../atoms/Badge';
+import { Tooltip } from '../atoms/Tooltip';
 
 interface ProjectCardProps {
   project: Project;
@@ -46,9 +47,11 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
           <h3 className="text-lg font-semibold text-gray-900 truncate">
             {project.name || project.path.split('/').pop() || 'Project'}
           </h3>
-          <p className="text-xs text-gray-400 mt-1 font-mono" title={project.path}>
-            {truncateMiddle(project.path, 35)}
-          </p>
+          <Tooltip content={project.path}>
+            <p className="text-xs text-gray-400 mt-1 font-mono">
+              {truncateMiddle(project.path, 35)}
+            </p>
+          </Tooltip>
         </div>
         <div className="flex gap-2 ml-4">
           <Badge variant={project.enabled ? 'success' : 'default'}>
@@ -80,7 +83,12 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
       )}
 
       <div className="text-xs text-gray-400">
-        Last seen: {new Date(project.last_seen_at).toLocaleString()}
+        Last activity: {project.last_activity_at
+          ? new Date(project.last_activity_at).toLocaleString()
+          : project.runner
+            ? 'No recent activity'
+            : 'No runner'
+        }
       </div>
     </div>
   );

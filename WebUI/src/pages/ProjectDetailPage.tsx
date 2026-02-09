@@ -4,6 +4,7 @@ import { projectsApi, activityApi, ApiError } from '../services/api';
 import { Project, ActivityStats, TimeRangeOption } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
+import { Tooltip } from '../components/atoms/Tooltip';
 import { StatTile } from '../components/molecules/StatTile';
 import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
 
@@ -152,7 +153,11 @@ export const ProjectDetailPage: React.FC = () => {
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">{projectName}</h1>
-            <p className="text-sm text-gray-500 font-mono mt-1">{project.path}</p>
+            <Tooltip content={project.path}>
+              <p className="text-sm text-gray-500 font-mono mt-1 truncate max-w-lg">
+                {project.path}
+              </p>
+            </Tooltip>
           </div>
           <div className="flex gap-2">
             <Badge variant={project.enabled ? 'success' : 'default'}>
@@ -217,7 +222,14 @@ export const ProjectDetailPage: React.FC = () => {
 
       <div className="text-sm text-gray-500">
         <p>Registered: {new Date(project.registered_at).toLocaleString()}</p>
-        <p>Last seen: {new Date(project.last_seen_at).toLocaleString()}</p>
+        <p>
+          Last activity: {project.last_activity_at
+            ? new Date(project.last_activity_at).toLocaleString()
+            : project.runner
+              ? 'No recent activity'
+              : 'No runner'
+          }
+        </p>
         {project.runner?.current_task_id && (
           <p
             className="mt-2 cursor-pointer text-blue-600 hover:text-blue-800"

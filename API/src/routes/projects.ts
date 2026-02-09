@@ -24,6 +24,7 @@ interface ProjectResponse {
   enabled: boolean;
   registered_at: string;
   last_seen_at: string;
+  last_activity_at: string | null;  // Runner heartbeat or null if no active runner
   stats?: {
     pending: number;
     in_progress: number;
@@ -35,6 +36,7 @@ interface ProjectResponse {
     status: string;
     pid: number | null;
     current_task_id: string | null;
+    heartbeat_at: string | null;
   } | null;
 }
 
@@ -51,14 +53,15 @@ router.get('/projects', (req: Request, res: Response) => {
     const { db, close } = openGlobalDatabase();
     try {
       const projectsWithData: ProjectResponse[] = projects.map((project) => {
-        // Get runner info
+        // Get runner info (including heartbeat)
         const runner = db
-          .prepare('SELECT id, status, pid, current_task_id FROM runners WHERE project_path = ?')
+          .prepare('SELECT id, status, pid, current_task_id, heartbeat_at FROM runners WHERE project_path = ?')
           .get(project.path) as {
           id: string;
           status: string;
           pid: number | null;
           current_task_id: string | null;
+          heartbeat_at: string | null;
         } | undefined;
 
         // Get stats (if available from cached stats)
@@ -88,7 +91,16 @@ router.get('/projects', (req: Request, res: Response) => {
           enabled: project.enabled,
           registered_at: project.registered_at,
           last_seen_at: project.last_seen_at,
-          runner: runner || null,
+          last_activity_at: runner?.heartbeat_at || null,
+          runner: runner
+            ? {
+                id: runner.id,
+                status: runner.status,
+                pid: runner.pid,
+                current_task_id: runner.current_task_id,
+                heartbeat_at: runner.heartbeat_at,
+              }
+            : null,
         };
 
         // Add stats if available
@@ -360,12 +372,13 @@ router.get('/projects/status', (req: Request, res: Response) => {
     const { db, close } = openGlobalDatabase();
     try {
       const runner = db
-        .prepare('SELECT id, status, pid, current_task_id FROM runners WHERE project_path = ?')
+        .prepare('SELECT id, status, pid, current_task_id, heartbeat_at FROM runners WHERE project_path = ?')
         .get(path) as {
         id: string;
         status: string;
         pid: number | null;
         current_task_id: string | null;
+        heartbeat_at: string | null;
       } | undefined;
 
       const response: ProjectResponse = {
@@ -374,7 +387,16 @@ router.get('/projects/status', (req: Request, res: Response) => {
         enabled: project.enabled,
         registered_at: project.registered_at,
         last_seen_at: project.last_seen_at,
-        runner: runner || null,
+        last_activity_at: runner?.heartbeat_at || null,
+        runner: runner
+          ? {
+              id: runner.id,
+              status: runner.status,
+              pid: runner.pid,
+              current_task_id: runner.current_task_id,
+              heartbeat_at: runner.heartbeat_at,
+            }
+          : null,
       };
 
       res.json({

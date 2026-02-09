@@ -12,6 +12,7 @@ export interface Project {
   enabled: boolean;
   registered_at: string;
   last_seen_at: string;
+  last_activity_at: string | null;
   stats?: {
     pending: number;
     in_progress: number;
@@ -23,6 +24,7 @@ export interface Project {
     status: string;
     pid: number | null;
     current_task_id: string | null;
+    heartbeat_at: string | null;
   } | null;
 }
 

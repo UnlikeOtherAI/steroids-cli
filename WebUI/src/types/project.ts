@@ -10,6 +10,7 @@ export interface ProjectRunner {
   status: string;
   pid: number | null;
   current_task_id: string | null;
+  heartbeat_at: string | null;
 }
 
 export interface Project {
@@ -18,6 +19,7 @@ export interface Project {
   enabled: boolean;
   registered_at: string;
   last_seen_at: string;
+  last_activity_at: string | null;
   stats?: ProjectStats;
   runner?: ProjectRunner | null;
 }
