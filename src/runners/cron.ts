@@ -6,6 +6,7 @@ import { execSync, spawnSync } from 'node:child_process';
 import { platform } from 'node:os';
 
 const CRON_COMMENT = '# steroids-runners-wakeup';
+const CRON_PATH = 'PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin';
 const CRON_ENTRY = '* * * * * steroids runners wakeup --quiet';
 
 export interface CronStatus {
@@ -140,7 +141,8 @@ export function cronInstall(): CronResult {
 
   // Find steroids path for full path in crontab
   const steroidsPath = findSteroidsPath();
-  const cronLine = `${CRON_COMMENT}\n* * * * * ${steroidsPath} runners wakeup --quiet`;
+  // Include PATH so cron can find node (needed for #!/usr/bin/env node shebang)
+  const cronLine = `${CRON_COMMENT}\n${CRON_PATH}\n* * * * * ${steroidsPath} runners wakeup --quiet`;
 
   // Append to existing crontab
   const newCrontab = crontab.trim()
@@ -181,11 +183,13 @@ export function cronUninstall(): CronResult {
     };
   }
 
-  // Remove lines containing steroids runners wakeup or our comment
+  // Remove lines containing steroids runners wakeup, our comment, or our PATH setting
   const lines = crontab.split('\n');
   const filteredLines = lines.filter(
     (line) =>
-      !line.includes(CRON_COMMENT) && !line.includes('steroids runners wakeup')
+      !line.includes(CRON_COMMENT) &&
+      !line.includes('steroids runners wakeup') &&
+      line !== CRON_PATH
   );
 
   if (lines.length === filteredLines.length) {
