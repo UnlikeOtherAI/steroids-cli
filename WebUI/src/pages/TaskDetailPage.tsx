@@ -300,7 +300,12 @@ export const TaskDetailPage: React.FC = () => {
               <div className="card overflow-hidden">
                 <div className="divide-y divide-border">
                   {task.invocations.map((inv) => (
-                    <InvocationRow key={inv.id} invocation={inv} />
+                    <InvocationRow
+                      key={inv.id}
+                      invocation={inv}
+                      taskId={taskId!}
+                      projectPath={projectPath!}
+                    />
                   ))}
                 </div>
               </div>

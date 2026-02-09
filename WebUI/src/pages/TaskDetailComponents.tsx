@@ -3,7 +3,7 @@
  * Extracted to keep page under 500 lines
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { AuditEntry, TaskInvocation, TaskDispute } from '../types';
 import { Badge } from '../components/atoms/Badge';
 
@@ -138,9 +138,21 @@ export const AuditLogRow: React.FC<AuditLogRowProps> = ({ entry, isLatest, githu
 
 interface InvocationRowProps {
   invocation: TaskInvocation;
+  taskId: string;
+  projectPath: string;
 }
 
-export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation }) => {
+interface InvocationDetails {
+  prompt: string;
+  response: string | null;
+  error: string | null;
+}
+
+export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation, taskId, projectPath }) => {
+  const [showModal, setShowModal] = useState(false);
+  const [details, setDetails] = useState<InvocationDetails | null>(null);
+  const [loading, setLoading] = useState(false);
+
   const isSuccess = invocation.success === 1;
   const isTimedOut = invocation.timed_out === 1;
   const isCoder = invocation.role === 'coder';
@@ -151,45 +163,142 @@ export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation }) => {
 
   const provider = invocation.provider.charAt(0).toUpperCase() + invocation.provider.slice(1);
 
+  const handleClick = async () => {
+    setShowModal(true);
+    if (!details) {
+      setLoading(true);
+      try {
+        const response = await fetch(
+          `/api/tasks/${taskId}/invocations/${invocation.id}?project=${encodeURIComponent(projectPath)}`
+        );
+        const data = await response.json();
+        if (data.success) {
+          setDetails({
+            prompt: data.invocation.prompt,
+            response: data.invocation.response,
+            error: data.invocation.error,
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch invocation details:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   return (
-    <div className={`p-3 border-l-4 ${borderColor} bg-bg-base`}>
-      <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-bg-surface flex items-center justify-center">
-          <i className={`fa-solid ${isCoder ? 'fa-code' : 'fa-magnifying-glass'} text-text-muted text-xs`}></i>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-text-primary text-sm capitalize">{invocation.role}</span>
-            <span className="text-text-muted text-xs">{provider} / {invocation.model}</span>
-            {isSuccess ? (
-              <Badge variant="success">OK</Badge>
-            ) : isTimedOut ? (
-              <Badge variant="warning">Timed Out</Badge>
-            ) : (
-              <Badge variant="danger">Failed (exit {invocation.exit_code})</Badge>
-            )}
-            {isCoder && invocation.rejection_number !== null && invocation.rejection_number > 0 && (
-              <span className="text-xs text-warning">
-                <i className="fa-solid fa-rotate-left mr-1"></i>
-                Attempt #{invocation.rejection_number}
-              </span>
-            )}
+    <>
+      <div
+        className={`p-3 border-l-4 ${borderColor} bg-bg-base cursor-pointer hover:bg-bg-surface transition-colors`}
+        onClick={handleClick}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-bg-surface flex items-center justify-center">
+            <i className={`fa-solid ${isCoder ? 'fa-code' : 'fa-magnifying-glass'} text-text-muted text-xs`}></i>
           </div>
-          <div className="mt-1 flex items-center gap-4 text-xs text-text-muted">
-            <span>
-              <i className="fa-regular fa-clock mr-1"></i>
-              {formatTimestamp(invocation.created_at)}
-            </span>
-            {invocation.duration_ms > 0 && (
-              <span>
-                <i className="fa-solid fa-stopwatch mr-1"></i>
-                {formatDuration(Math.round(invocation.duration_ms / 1000))}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-medium text-text-primary text-sm capitalize">{invocation.role}</span>
+              <span className="text-text-muted text-xs">{provider} / {invocation.model}</span>
+              {isSuccess ? (
+                <Badge variant="success">OK</Badge>
+              ) : isTimedOut ? (
+                <Badge variant="warning">Timed Out</Badge>
+              ) : (
+                <Badge variant="danger">Failed (exit {invocation.exit_code})</Badge>
+              )}
+              {isCoder && invocation.rejection_number !== null && invocation.rejection_number > 0 && (
+                <span className="text-xs text-warning">
+                  <i className="fa-solid fa-rotate-left mr-1"></i>
+                  Attempt #{invocation.rejection_number}
+                </span>
+              )}
+              <span className="text-xs text-accent ml-auto">
+                <i className="fa-solid fa-eye mr-1"></i>
+                Click to view details
               </span>
-            )}
+            </div>
+            <div className="mt-1 flex items-center gap-4 text-xs text-text-muted">
+              <span>
+                <i className="fa-regular fa-clock mr-1"></i>
+                {formatTimestamp(invocation.created_at)}
+              </span>
+              {invocation.duration_ms > 0 && (
+                <span>
+                  <i className="fa-solid fa-stopwatch mr-1"></i>
+                  {formatDuration(Math.round(invocation.duration_ms / 1000))}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
+          <div className="bg-bg-base rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h2 className="text-xl font-bold text-text-primary">
+                <i className={`fa-solid ${isCoder ? 'fa-code' : 'fa-magnifying-glass'} mr-2`}></i>
+                {invocation.role.toUpperCase()} Invocation Details
+              </h2>
+              <button
+                onClick={() => setShowModal(false)}
+                className="w-8 h-8 rounded-full hover:bg-bg-surface flex items-center justify-center transition-colors"
+              >
+                <i className="fa-solid fa-times text-text-muted"></i>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <i className="fa-solid fa-spinner fa-spin text-accent text-2xl"></i>
+                </div>
+              ) : details ? (
+                <>
+                  <div>
+                    <h3 className="text-sm font-semibold text-text-muted mb-2">
+                      <i className="fa-solid fa-file-lines mr-2"></i>
+                      PROMPT ({details.prompt.length.toLocaleString()} chars)
+                    </h3>
+                    <pre className="bg-bg-surface p-4 rounded-lg text-sm overflow-x-auto border border-border">
+                      <code className="text-text-secondary font-mono whitespace-pre-wrap">{details.prompt}</code>
+                    </pre>
+                  </div>
+
+                  {details.response && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-text-muted mb-2">
+                        <i className="fa-solid fa-reply mr-2"></i>
+                        RESPONSE ({details.response.length.toLocaleString()} chars)
+                      </h3>
+                      <pre className="bg-bg-surface p-4 rounded-lg text-sm overflow-x-auto border border-border">
+                        <code className="text-text-secondary font-mono whitespace-pre-wrap">{details.response}</code>
+                      </pre>
+                    </div>
+                  )}
+
+                  {details.error && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-danger mb-2">
+                        <i className="fa-solid fa-triangle-exclamation mr-2"></i>
+                        ERROR
+                      </h3>
+                      <pre className="bg-danger/10 p-4 rounded-lg text-sm overflow-x-auto border border-danger/20">
+                        <code className="text-danger font-mono whitespace-pre-wrap">{details.error}</code>
+                      </pre>
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 
