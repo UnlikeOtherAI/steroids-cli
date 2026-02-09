@@ -62,6 +62,13 @@ Options:
   --feedback         Add to skipped "Needs User Input" section for human review
                      Skips --section and --source requirements
 
+BEST PRACTICE: When generating tasks from documentation or specs, commit the
+documentation first, then fill in ALL values including optional ones:
+  --source pointing to the committed spec file
+  --file pointing to the relevant source file in the codebase
+  --line pointing to the exact line where work applies
+This gives the coder/reviewer maximum context and traceability.
+
 ### Manage Tasks
 steroids tasks update <id> --status <s> --actor model --model <m>
   statuses: pending, in_progress, review, completed, skipped, partial
