@@ -13,8 +13,18 @@ const coderSchema = {
       enum: ['submit', 'retry', 'stage_commit_submit', 'error']
     },
     reasoning: { type: 'string', minLength: 10, maxLength: 200 },
-    commits: { type: 'array', items: { type: 'string' } },
-    commit_message: { type: 'string', maxLength: 200 },
+    commits: {
+      oneOf: [
+        { type: 'array', items: { type: 'string' } },
+        { type: 'null' }
+      ]
+    },
+    commit_message: {
+      oneOf: [
+        { type: 'string', maxLength: 200 },
+        { type: 'null' }
+      ]
+    },
     next_status: {
       type: 'string',
       enum: ['review', 'in_progress', 'failed']
@@ -41,7 +51,12 @@ const reviewerSchema = {
       enum: ['approve', 'reject', 'dispute', 'skip', 'unclear']
     },
     reasoning: { type: 'string', minLength: 10, maxLength: 200 },
-    notes: { type: 'string', maxLength: 1000 },
+    notes: {
+      oneOf: [
+        { type: 'string', maxLength: 1000 },
+        { type: 'null' }
+      ]
+    },
     next_status: {
       type: 'string',
       enum: ['completed', 'in_progress', 'disputed', 'skipped', 'review']
@@ -53,7 +68,12 @@ const reviewerSchema = {
         rejection_count: { type: 'number', minimum: 0 },
         confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
         push_to_remote: { type: 'boolean' },
-        repeated_issue: { type: 'boolean' }
+        repeated_issue: {
+          oneOf: [
+            { type: 'boolean' },
+            { type: 'null' }
+          ]
+        }
       }
     }
   }
