@@ -23,6 +23,8 @@ export interface ReviewerPromptContext {
   rejectionHistory?: RejectionEntry[];  // Past rejections with commit hashes
   submissionNotes?: string | null;  // Notes from coder when submitting for review
   config: SteroidsConfig;  // Config for quality settings
+  coordinatorGuidance?: string;  // Guidance from coordinator after repeated rejections
+  coordinatorDecision?: string;  // Coordinator's decision type
 }
 
 // Maximum tasks to show in section context (prevents prompt bloat)
@@ -130,6 +132,43 @@ ${lines.join('\n')}
 }
 
 /**
+ * Format coordinator guidance for the reviewer
+ * Makes coordinator decisions visible and enforceable by the reviewer
+ */
+function formatCoordinatorGuidance(guidance?: string, decision?: string): string {
+  if (!guidance) return '';
+
+  const decisionLabels: Record<string, string> = {
+    'guide_coder': 'Guide coder (reviewer feedback is valid, coder needs clearer direction)',
+    'override_reviewer': 'Override reviewer (some reviewer demands are out of scope or unachievable)',
+    'narrow_scope': 'Narrow scope (task scope reduced to achievable subset)',
+  };
+
+  const decisionLabel = decisionLabels[decision || ''] || decision || 'unknown';
+
+  return `
+---
+
+## COORDINATOR INTERVENTION
+
+A coordinator has reviewed the rejection history for this task and made the following decision:
+
+**Decision:** ${decisionLabel}
+
+**Coordinator's Guidance:**
+
+${guidance}
+
+**You MUST consider this when making your decision:**
+- If the coordinator decided **override_reviewer**: do NOT re-raise the issues the coordinator flagged as out of scope or unachievable. Those demands have been ruled invalid.
+- If the coordinator decided **narrow_scope**: evaluate the coder's work against the NARROWED scope described above, not the original full scope.
+- If the coordinator decided **guide_coder**: the coder was given specific direction - check whether they followed it.
+- You may still reject for NEW issues not addressed by the coordinator, but do not contradict the coordinator's ruling.
+
+`;
+}
+
+/**
  * Generate test coverage instructions if required
  * Coverage is scoped to MODIFIED FILES ONLY - not global project coverage
  */
@@ -163,7 +202,7 @@ ${filesScope}
  * Generate the reviewer prompt
  */
 export function generateReviewerPrompt(context: ReviewerPromptContext): string {
-  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks, rejectionHistory, submissionNotes, config } = context;
+  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks, rejectionHistory, submissionNotes, config, coordinatorGuidance, coordinatorDecision } = context;
 
   // Format coder's submission notes if present
   const submissionNotesSection = submissionNotes
@@ -212,7 +251,7 @@ You are a REVIEWER in an automated task execution system. Your job is to verify 
 **Title:** ${task.title}
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}
+${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}${formatCoordinatorGuidance(coordinatorGuidance, coordinatorDecision)}
 ## Original Specification
 
 From ${task.source_file ?? '(not specified)'}:

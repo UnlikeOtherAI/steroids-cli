@@ -156,10 +156,14 @@ async function invokeProvider(
 
 /**
  * Invoke reviewer for a task
+ * @param coordinatorGuidance Optional guidance from coordinator after repeated rejections
+ * @param coordinatorDecision Optional decision type from coordinator
  */
 export async function invokeReviewer(
   task: Task,
-  projectPath: string
+  projectPath: string,
+  coordinatorGuidance?: string,
+  coordinatorDecision?: string
 ): Promise<ReviewerResult> {
   // Load config to show provider/model being used
   const config = loadConfig(projectPath);
@@ -237,6 +241,8 @@ export async function invokeReviewer(
     rejectionHistory,
     submissionNotes,
     config,
+    coordinatorGuidance,
+    coordinatorDecision,
   };
 
   const prompt = generateReviewerPrompt(context);

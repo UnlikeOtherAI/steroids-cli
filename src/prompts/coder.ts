@@ -264,11 +264,15 @@ Begin with Task 1 and work through each task in order.
  * Generate the coder prompt for resuming partial work
  */
 export function generateResumingCoderPrompt(context: CoderPromptContext): string {
-  const { task, projectPath, gitStatus, gitDiff } = context;
+  const { task, projectPath, gitStatus, gitDiff, rejectionHistory, coordinatorGuidance } = context;
 
   const sourceContent = getSourceFileContent(projectPath, task.source_file);
 
+  // Build rejection section with full history and coordinator guidance (same as normal prompt)
+  const rejectionSection = formatRejectionHistoryForCoder(task.id, rejectionHistory, undefined, coordinatorGuidance);
+
   return `# TASK: ${task.id.substring(0, 8)} - ${task.title} (RESUMING)
+# Status: resuming | Rejections: ${task.rejection_count}/15
 
 You are a CODER resuming work on a partially completed task.
 
@@ -279,6 +283,7 @@ You are a CODER resuming work on a partially completed task.
 **Task ID:** ${task.id}
 **Title:** ${task.title}
 **Status:** in_progress (resuming)
+**Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
 
 ---
@@ -307,7 +312,7 @@ ${gitDiff ?? 'No changes'}
 2. If the work looks good, complete it
 3. If the work looks wrong, you may start fresh
 4. Commit all changes when done
-
+${rejectionSection}
 ---
 
 ## Specification

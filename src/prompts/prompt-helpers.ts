@@ -58,24 +58,67 @@ export function extractRejectionTitle(notes: string | null | undefined): string 
 }
 
 /**
+ * Normalize text for fuzzy comparison
+ * Strips punctuation, lowercases, collapses whitespace
+ */
+function normalizeForComparison(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Detect repeated patterns in rejection history
+ * Uses normalized fuzzy matching to catch similar (not just identical) issues
  */
 export function detectRejectionPatterns(rejectionHistory: RejectionEntry[]): string {
   if (rejectionHistory.length < 3) return '';
 
-  // Extract titles and count duplicates
-  const titles = rejectionHistory.map(r => extractRejectionTitle(r.notes));
-  const counts = new Map<string, number>();
-  for (const t of titles) {
-    counts.set(t, (counts.get(t) || 0) + 1);
+  // Extract titles and normalize for comparison
+  const entries = rejectionHistory.map(r => ({
+    title: extractRejectionTitle(r.notes),
+    normalized: normalizeForComparison(extractRejectionTitle(r.notes)),
+  }));
+
+  // Group by normalized title (catches minor wording variations)
+  const groups = new Map<string, { title: string; count: number }>();
+  for (const entry of entries) {
+    const existing = groups.get(entry.normalized);
+    if (existing) {
+      existing.count++;
+    } else {
+      groups.set(entry.normalized, { title: entry.title, count: 1 });
+    }
   }
 
-  const repeated = [...counts.entries()].filter(([, count]) => count >= 3);
-  if (repeated.length === 0) return '';
+  // Also check for keyword-level overlap between non-identical entries
+  // If 3+ rejections share significant keywords, flag it
+  const allNotes = rejectionHistory.map(r => r.notes || '');
+  const keywordCounts = new Map<string, number>();
+  for (const note of allNotes) {
+    // Extract significant words (4+ chars, not common words)
+    const words = new Set(
+      normalizeForComparison(note)
+        .split(' ')
+        .filter(w => w.length >= 4)
+    );
+    for (const word of words) {
+      keywordCounts.set(word, (keywordCounts.get(word) || 0) + 1);
+    }
+  }
+  const hotKeywords = [...keywordCounts.entries()]
+    .filter(([, count]) => count >= 3)
+    .filter(([word]) => !['task', 'file', 'code', 'this', 'that', 'should', 'must', 'need'].includes(word))
+    .map(([word]) => word);
 
-  const lines = repeated.map(([title, count]) =>
-    `- "${title}" - raised ${count} times`
-  );
+  const repeated = [...groups.values()].filter(g => g.count >= 3);
+  if (repeated.length === 0 && hotKeywords.length === 0) return '';
+
+  const lines: string[] = [];
+  for (const { title, count } of repeated) {
+    lines.push(`- "${title}" - raised ${count} times`);
+  }
+  if (hotKeywords.length > 0 && repeated.length === 0) {
+    lines.push(`- Recurring themes: ${hotKeywords.slice(0, 5).join(', ')}`);
+  }
 
   return `
 **PATTERN DETECTED - The following issues keep repeating:**
@@ -91,16 +134,22 @@ steroids dispute create <task-id> --reason "Cannot resolve: <explain why>" --typ
 
 /**
  * Extract file paths mentioned in text (task title, spec content)
- * Looks for common source file patterns
+ * Language-agnostic: matches any path-like pattern with directory separators and file extensions
  */
 export function extractFileHints(title: string, specContent: string): string[] {
   const combined = `${title}\n${specContent}`;
-  // Match file paths like src/foo/bar.ts, lib/utils.js, etc.
-  const filePattern = /(?:^|\s|`|"|'|\()((?:src|lib|test|tests|migrations|scripts|config|commands|hooks|runners|orchestrator|prompts|providers|disputes|database|git|cli|utils)\/[\w./-]+\.\w+)/gm;
+  // Match any path with at least one directory separator and a file extension (1-10 chars)
+  // Examples: src/foo.ts, lib/utils/helpers.py, app/models/user.rb, pkg/api/handler.go
+  const filePattern = /(?:^|\s|`|"|'|\()([\w][\w.-]*(?:\/[\w.-]+)+\.\w{1,10})/gm;
   const matches = new Set<string>();
   let match;
   while ((match = filePattern.exec(combined)) !== null) {
-    matches.add(match[1]);
+    const path = match[1];
+    // Filter out URLs, version numbers, and common false positives
+    if (path.includes('://') || /^\d+\.\d+\.\d+/.test(path) || path.includes('node_modules/')) {
+      continue;
+    }
+    matches.add(path);
   }
   return [...matches];
 }

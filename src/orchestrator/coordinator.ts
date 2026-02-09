@@ -18,6 +18,7 @@ export interface CoordinatorContext {
   sectionTasks?: { id: string; title: string; status: string }[];
   submissionNotes?: string | null;
   gitDiffSummary?: string;
+  previousGuidance?: string;  // Previous coordinator guidance to avoid repeating itself
 }
 
 export interface CoordinatorResult {
@@ -81,12 +82,31 @@ ${extra.gitDiffSummary}
 `
     : '';
 
+  // Previous coordinator guidance section (prevents repeating itself)
+  const previousGuidanceSection = extra?.previousGuidance
+    ? `
+---
+
+## Your Previous Guidance
+
+You previously provided this guidance for this task:
+
+> ${extra.previousGuidance.substring(0, 500)}${extra.previousGuidance.length > 500 ? '...' : ''}
+
+**Do NOT repeat the same guidance.** If the previous guidance didn't work, provide a DIFFERENT approach.
+`
+    : '';
+
   return `# COORDINATOR INTERVENTION
 
 You are a COORDINATOR in a fully automated task system with NO human in the loop.
 A task has been rejected ${rejectionHistory.length} times. You MUST provide a decision that moves the task forward.
 
 **Your job is to MAKE A DECISION, not to escalate.** There is no human to escalate to.
+
+**IMPORTANT: Your guidance will be sent to BOTH the coder AND the reviewer.**
+- The coder will follow your guidance when implementing fixes
+- The reviewer will see your decision and must respect it (especially override_reviewer decisions)
 
 ---
 
@@ -116,7 +136,7 @@ ${agentsMd}
 ## Full Rejection History
 
 ${rejectionSummary}
-${sectionTasksSection}${submissionNotesSection}${diffSection}
+${sectionTasksSection}${submissionNotesSection}${diffSection}${previousGuidanceSection}
 ---
 
 ## Your Decision Framework
@@ -148,10 +168,12 @@ DECISION: (one of: guide_coder | override_reviewer | narrow_scope)
 - **narrow_scope** - Both have valid points; narrow the task scope to what's achievable
 
 GUIDANCE:
-(Your specific guidance for the coder. Be concrete:
+(Your specific guidance. This will be shown to BOTH the coder AND the reviewer. Be concrete:
 - Which files to modify and what changes to make
 - What reviewer feedback to address vs what to ignore
-- If the reviewer demands global metrics, tell the coder to focus on task-scoped coverage only
+- If using override_reviewer: explicitly list which reviewer demands the coder should IGNORE
+- If using narrow_scope: explicitly describe the NARROWED scope the reviewer should evaluate against
+- If the reviewer demands global metrics, state clearly that this is out of scope
 - If there's a design disagreement, pick the approach that best fits the project architecture
 - Give the coder a clear path to get this task approved)
 
@@ -171,18 +193,31 @@ GUIDANCE:
 
 /**
  * Parse the coordinator's response
+ * Handles cases where guidance text may contain --- separators
  */
 function parseCoordinatorResponse(output: string): CoordinatorResult {
-  const guidanceMatch = output.match(/GUIDANCE:\s*([\s\S]+?)(?:---|$)/i);
-  const decisionMatch = output.match(/DECISION:\s*(\w+)/i);
+  // Extract decision - look for valid decision values only
+  const decisionMatch = output.match(/DECISION:\s*(guide_coder|override_reviewer|narrow_scope)/i);
+  const rawDecision = decisionMatch?.[1]?.trim().toLowerCase();
 
-  const guidance = guidanceMatch?.[1]?.trim() || output.trim();
-  const decision = decisionMatch?.[1]?.trim().toLowerCase() || 'guide_coder';
+  // Validate decision is one of the allowed values
+  const validDecisions = ['guide_coder', 'override_reviewer', 'narrow_scope'] as const;
+  const decision = validDecisions.includes(rawDecision as typeof validDecisions[number])
+    ? rawDecision as CoordinatorResult['decision']
+    : 'guide_coder';
+
+  // Extract guidance - everything after "GUIDANCE:" until end of output
+  // Use a greedy match since guidance is typically the last section
+  const guidanceMatch = output.match(/GUIDANCE:\s*([\s\S]+)$/i);
+  let guidance = guidanceMatch?.[1]?.trim() || output.trim();
+
+  // Strip trailing section markers that might be from prompt template leaking
+  guidance = guidance.replace(/\n## Rules[\s\S]*$/i, '').trim();
 
   return {
     success: true,
     guidance,
-    decision: decision as CoordinatorResult['decision'],
+    decision,
   };
 }
 

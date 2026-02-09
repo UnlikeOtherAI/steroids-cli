@@ -9,13 +9,6 @@ import { existsSync, statSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { openDatabase } from '../database/connection.js';
 import {
-  getTask,
-  updateTaskStatus,
-  approveTask,
-  rejectTask,
-  getTaskRejections,
-  getLatestSubmissionNotes,
-  listTasks,
   getSection,
   getSectionByName,
   listSections,
@@ -23,16 +16,11 @@ import {
 import {
   selectNextTask,
   markTaskInProgress,
-  areAllTasksComplete,
   getTaskCounts,
 } from '../orchestrator/task-selector.js';
-import { invokeCoder } from '../orchestrator/coder.js';
-import { invokeReviewer } from '../orchestrator/reviewer.js';
-import { invokeCoordinator, type CoordinatorContext } from '../orchestrator/coordinator.js';
-import { pushToRemote } from '../git/push.js';
-import { getCurrentCommitSha, getModifiedFiles } from '../git/status.js';
 import { hasActiveRunnerForProject } from '../runners/wakeup.js';
 import { getRegisteredProject } from '../runners/projects.js';
+import { runCoderPhase, runReviewerPhase, type CoordinatorResult } from './loop-phases.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
@@ -331,6 +319,13 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     let iteration = 0;
     const processedTasks: { taskId: string; title: string; action: string; status: string }[] = [];
 
+    // Cache coordinator results so they can flow from coder phase to reviewer phase
+    // Key: task ID, Value: coordinator result
+    const coordinatorCache = new Map<string, CoordinatorResult>();
+
+    // Coordinator only runs at specific rejection thresholds to avoid redundant LLM calls
+    const COORDINATOR_THRESHOLDS = [2, 5, 9];
+
     // Main loop
     while (true) {
       iteration++;
@@ -377,13 +372,14 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
       if (action === 'start') {
         // Starting a new task
         markTaskInProgress(db, task.id);
-        await runCoderPhase(db, task, projectPath, 'start', flags.json);
+        await runCoderPhase(db, task, projectPath, 'start', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
       } else if (action === 'resume') {
         // Resuming in-progress task
-        await runCoderPhase(db, task, projectPath, 'resume', flags.json);
+        await runCoderPhase(db, task, projectPath, 'resume', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
       } else if (action === 'review') {
-        // Task ready for review
-        await runReviewerPhase(db, task, projectPath, flags.json);
+        // Task ready for review - pass coordinator guidance if available
+        const cachedCoord = coordinatorCache.get(task.id);
+        await runReviewerPhase(db, task, projectPath, flags.json, cachedCoord);
       }
 
       // Check if we should continue
@@ -418,189 +414,6 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     }
   } finally {
     close();
-  }
-}
-
-async function runCoderPhase(
-  db: ReturnType<typeof openDatabase>['db'],
-  task: ReturnType<typeof getTask>,
-  projectPath: string,
-  action: 'start' | 'resume',
-  jsonMode = false
-): Promise<void> {
-  if (!task) return;
-
-  let coordinatorGuidance: string | undefined;
-
-  // After 2nd rejection, invoke coordinator to break potential deadlocks
-  if (task.rejection_count >= 2) {
-    if (!jsonMode) {
-      console.log(`\n>>> Task has ${task.rejection_count} rejections - invoking COORDINATOR...\n`);
-    }
-
-    try {
-      const rejectionHistory = getTaskRejections(db, task.id);
-
-      // Gather extra context for the coordinator
-      const coordExtra: CoordinatorContext = {};
-
-      // Section tasks - so coordinator knows what other tasks handle
-      if (task.section_id) {
-        const allSectionTasks = listTasks(db, { sectionId: task.section_id });
-        coordExtra.sectionTasks = allSectionTasks.map(t => ({
-          id: t.id, title: t.title, status: t.status,
-        }));
-      }
-
-      // Coder's latest submission notes
-      coordExtra.submissionNotes = getLatestSubmissionNotes(db, task.id);
-
-      // What files were modified (lightweight diff summary)
-      const modified = getModifiedFiles(projectPath);
-      if (modified.length > 0) {
-        coordExtra.gitDiffSummary = modified.join('\n');
-      }
-
-      const coordResult = await invokeCoordinator(task, rejectionHistory, projectPath, coordExtra);
-
-      if (coordResult) {
-        coordinatorGuidance = coordResult.guidance;
-        if (!jsonMode) {
-          console.log(`\nCoordinator decision: ${coordResult.decision}`);
-          console.log('Coordinator provided guidance for the coder.');
-        }
-      }
-    } catch (error) {
-      // Coordinator failure is non-fatal - continue without guidance
-      if (!jsonMode) {
-        console.warn('Coordinator invocation failed, continuing without guidance:', error);
-      }
-    }
-  }
-
-  if (!jsonMode) {
-    console.log('\n>>> Invoking CODER...\n');
-  }
-
-  const result = await invokeCoder(task, projectPath, action, coordinatorGuidance);
-
-  if (result.timedOut) {
-    console.warn('Coder timed out. Will retry next iteration.');
-    return;
-  }
-
-  // Re-read task to see if status was updated
-  const updatedTask = getTask(db, task.id);
-  if (!updatedTask) return;
-
-  if (!jsonMode) {
-    if (updatedTask.status === 'review') {
-      console.log('\nCoder submitted for review. Ready for reviewer.');
-    } else {
-      console.log(`Task status unchanged (${updatedTask.status}). Will retry next iteration.`);
-    }
-  }
-}
-
-async function runReviewerPhase(
-  db: ReturnType<typeof openDatabase>['db'],
-  task: ReturnType<typeof getTask>,
-  projectPath: string,
-  jsonMode = false
-): Promise<void> {
-  if (!task) return;
-
-  if (!jsonMode) {
-    console.log('\n>>> Invoking REVIEWER...\n');
-  }
-
-  const result = await invokeReviewer(task, projectPath);
-
-  if (result.timedOut) {
-    if (!jsonMode) {
-      console.warn('Reviewer timed out. Will retry next iteration.');
-    }
-    return;
-  }
-
-  // Re-read task to see what the reviewer decided
-  // (Codex runs steroids commands directly to update the database)
-  const updatedTask = getTask(db, task.id);
-  if (!updatedTask) return;
-
-  if (updatedTask.status === 'completed') {
-    if (!jsonMode) {
-      console.log('\n✓ Task APPROVED');
-      console.log('Pushing to git...');
-    }
-
-    // Push to git
-    const pushResult = pushToRemote(projectPath);
-
-    if (!jsonMode) {
-      if (pushResult.success) {
-        console.log(`Pushed successfully (${pushResult.commitHash})`);
-      } else {
-        console.warn('Push failed. Will stack and retry on next completion.');
-      }
-    }
-  } else if (updatedTask.status === 'in_progress') {
-    if (!jsonMode) {
-      console.log(`\n✗ Task REJECTED (${updatedTask.rejection_count}/15)`);
-      console.log('Returning to coder for fixes.');
-    }
-  } else if (updatedTask.status === 'disputed') {
-    if (!jsonMode) {
-      console.log('\n! Task DISPUTED');
-      console.log('Pushing current work and moving to next task.');
-    }
-
-    // Push even for disputed tasks
-    const pushResult = pushToRemote(projectPath);
-    if (!jsonMode && pushResult.success) {
-      console.log(`Pushed disputed work (${pushResult.commitHash})`);
-    }
-  } else if (updatedTask.status === 'failed') {
-    if (!jsonMode) {
-      console.log('\n✗ Task FAILED (exceeded 15 rejections)');
-      console.log('Human intervention required.');
-    }
-  } else if (updatedTask.status === 'review') {
-    // Reviewer didn't run a command - check if we can parse the decision as fallback
-    if (result.decision) {
-      if (!jsonMode) {
-        console.log(`\nReviewer indicated ${result.decision.toUpperCase()} but command may have failed.`);
-        console.log('Attempting fallback...');
-      }
-
-      const commitSha = getCurrentCommitSha(projectPath) ?? undefined;
-
-      if (result.decision === 'approve') {
-        approveTask(db, task.id, 'codex', result.notes, commitSha);
-        if (!jsonMode) {
-          console.log('✓ Task APPROVED (via fallback)');
-        }
-
-        const pushResult = pushToRemote(projectPath);
-        if (!jsonMode && pushResult.success) {
-          console.log(`Pushed successfully (${pushResult.commitHash})`);
-        }
-      } else if (result.decision === 'reject') {
-        rejectTask(db, task.id, 'codex', result.notes, commitSha);
-        if (!jsonMode) {
-          console.log('✗ Task REJECTED (via fallback)');
-        }
-      } else if (result.decision === 'dispute') {
-        updateTaskStatus(db, task.id, 'disputed', 'codex', result.notes, commitSha);
-        if (!jsonMode) {
-          console.log('! Task DISPUTED (via fallback)');
-        }
-      }
-    } else {
-      if (!jsonMode) {
-        console.log('\nReviewer did not take action (status unchanged). Will retry.');
-      }
-    }
   }
 }
 
