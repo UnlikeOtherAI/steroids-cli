@@ -342,3 +342,129 @@ If you do NOT run a command, the task will remain in review and you will be invo
 Examine the diff above, then run the appropriate command to record your decision.
 `;
 }
+
+/**
+ * Context for batch reviewer prompts
+ */
+export interface BatchReviewerPromptContext {
+  tasks: Task[];
+  projectPath: string;
+  sectionName: string;
+  gitDiff: string;
+  modifiedFiles: string[];
+  config: SteroidsConfig;
+}
+
+/**
+ * Generate the reviewer prompt for a batch of tasks
+ */
+export function generateBatchReviewerPrompt(context: BatchReviewerPromptContext): string {
+  const { tasks, projectPath, sectionName, gitDiff, modifiedFiles, config } = context;
+
+  // Build task specs for each task
+  const taskSpecs = tasks.map((task, index) => {
+    const sourceContent = getSourceFileContent(projectPath, task.source_file);
+    return `
+### Task ${index + 1}: ${task.title}
+**Task ID:** ${task.id}
+**Spec File:** ${task.source_file ?? '(not specified)'}
+
+${sourceContent}
+`;
+  }).join('\n---\n');
+
+  // Truncate diff if too long
+  let diffContent = gitDiff;
+  if (diffContent.length > 30000) {
+    diffContent = diffContent.substring(0, 30000) + '\n\n[Diff truncated - review individual commits for full changes]';
+  }
+
+  const filesListFormatted = modifiedFiles.length > 0
+    ? modifiedFiles.map(f => `- ${f}`).join('\n')
+    : 'No files modified';
+
+  const taskIds = tasks.map(t => t.id);
+
+  return `# STEROIDS BATCH REVIEWER TASK
+
+You are a REVIEWER reviewing MULTIPLE tasks from section "${sectionName}".
+
+**IMPORTANT:** Review all changes as a cohesive unit. The coder implemented all these tasks together.
+
+## Section: ${sectionName}
+**Total Tasks:** ${tasks.length}
+**Project:** ${projectPath}
+
+---
+
+## TASKS BEING REVIEWED
+
+${taskSpecs}
+
+---
+
+## Combined Changes (All Tasks)
+
+\`\`\`diff
+${diffContent}
+\`\`\`
+
+---
+
+## Files Modified
+
+${filesListFormatted}
+
+---
+${getTestCoverageInstructions(config)}
+## Review Checklist (For Each Task)
+
+For EACH task, verify:
+1. Does the implementation match the specification?
+2. Are there bugs, security issues, or logic errors?
+3. Are tests present and adequate (if project requires tests)?
+4. Does code follow project guidelines?
+5. Are all files under 500 lines?
+
+---
+
+## YOUR WORKFLOW
+
+Review all tasks, then record your decision for EACH one:
+
+**For each task that passes review:**
+\`\`\`bash
+steroids tasks approve <task-id> --model codex
+\`\`\`
+
+**For each task that needs changes:**
+\`\`\`bash
+steroids tasks reject <task-id> --model codex --notes "- [ ] specific issue 1
+- [ ] specific issue 2"
+\`\`\`
+
+**CRITICAL:** You MUST run a command for EACH task. Use checkboxes in rejection notes.
+
+---
+
+## TASK IDS
+
+${taskIds.map((id, i) => `- Task ${i + 1}: ${id}`).join('\n')}
+
+---
+
+## CRITICAL RULES
+
+1. **NEVER modify code yourself** - only review it
+2. **Review ALL tasks** - don't skip any
+3. **Be specific in rejection notes** - use checkboxes for each issue
+4. **Consider tasks as a unit** - they were implemented together
+5. **You MUST run approve/reject for EACH task**
+
+---
+
+## Review Now
+
+Examine the diff, verify each task's specification is met, then run the appropriate commands.
+`;
+}

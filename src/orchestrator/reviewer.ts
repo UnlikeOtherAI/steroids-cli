@@ -12,7 +12,9 @@ import { listTasks, getTaskRejections, getLatestSubmissionNotes } from '../datab
 import { openDatabase } from '../database/connection.js';
 import {
   generateReviewerPrompt,
+  generateBatchReviewerPrompt,
   type ReviewerPromptContext,
+  type BatchReviewerPromptContext,
   type SectionTask,
 } from '../prompts/reviewer.js';
 import {
@@ -33,6 +35,16 @@ export interface ReviewerResult {
   timedOut: boolean;
   decision?: 'approve' | 'reject' | 'dispute';
   notes?: string;
+}
+
+export interface BatchReviewerResult {
+  success: boolean;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  duration: number;
+  timedOut: boolean;
+  taskCount: number;
 }
 
 const REVIEWER_MODEL = 'codex';
@@ -252,6 +264,58 @@ export async function invokeReviewer(
     return result;
   } finally {
     // Clean up temp file
+    if (existsSync(promptFile)) {
+      unlinkSync(promptFile);
+    }
+  }
+}
+
+/**
+ * Invoke reviewer for a batch of tasks
+ */
+export async function invokeReviewerBatch(
+  tasks: Task[],
+  sectionName: string,
+  projectPath: string
+): Promise<BatchReviewerResult> {
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`BATCH REVIEWER: Section "${sectionName}"`);
+  console.log(`Tasks: ${tasks.length}`);
+  tasks.forEach((t, i) => console.log(`  ${i + 1}. ${t.title} (${t.id})`));
+  console.log(`${'='.repeat(60)}\n`);
+
+  // Get combined git diff for all tasks (compare against base before batch started)
+  // We look for the earliest task's commit and diff from there
+  const gitDiff = getGitDiff(projectPath, 'HEAD~' + tasks.length);
+  const modifiedFiles = getModifiedFiles(projectPath);
+
+  // Load config for quality settings
+  const config = loadConfig(projectPath);
+
+  const context: BatchReviewerPromptContext = {
+    tasks,
+    projectPath,
+    sectionName,
+    gitDiff,
+    modifiedFiles,
+    config,
+  };
+
+  const prompt = generateBatchReviewerPrompt(context);
+  const promptFile = writePromptToTempFile(prompt);
+
+  try {
+    // Longer timeout for batch: base 20 minutes + 3 minutes per task
+    const timeoutMs = 20 * 60 * 1000 + tasks.length * 3 * 60 * 1000;
+    const result = await invokeCodexCli(promptFile, timeoutMs);
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`BATCH REVIEWER COMPLETED`);
+    console.log(`Duration: ${(result.duration / 1000).toFixed(1)}s`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    return { ...result, taskCount: tasks.length };
+  } finally {
     if (existsSync(promptFile)) {
       unlinkSync(promptFile);
     }

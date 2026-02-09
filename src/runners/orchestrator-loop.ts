@@ -13,7 +13,8 @@ import {
 } from '../orchestrator/task-selector.js';
 import { invokeCoder, invokeCoderBatch } from '../orchestrator/coder.js';
 import { loadConfig } from '../config/loader.js';
-import { invokeReviewer } from '../orchestrator/reviewer.js';
+import { invokeReviewer, invokeReviewerBatch } from '../orchestrator/reviewer.js';
+import { listTasks } from '../database/queries.js';
 import { logActivity } from './activity-log.js';
 import { execSync } from 'node:child_process';
 
@@ -76,6 +77,85 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           // Invoke batch coder
           console.log('\n>>> Invoking BATCH CODER...\n');
           await invokeCoderBatch(batch.tasks, batch.sectionName, projectPath);
+
+          // Check which tasks are now in review status
+          const tasksInReview = batch.tasks
+            .map(t => getTask(db, t.id))
+            .filter((t): t is NonNullable<typeof t> => t !== null && t.status === 'review');
+
+          if (tasksInReview.length > 0) {
+            console.log(`\n[BATCH MODE] ${tasksInReview.length} tasks ready for batch review\n`);
+
+            // Invoke batch reviewer
+            console.log('\n>>> Invoking BATCH REVIEWER...\n');
+            await invokeReviewerBatch(tasksInReview, batch.sectionName, projectPath);
+
+            // Handle results for each reviewed task
+            for (const task of tasksInReview) {
+              const updatedTask = getTask(db, task.id);
+              if (!updatedTask) continue;
+
+              const section = task.section_id ? getSection(db, task.section_id) : null;
+              const sectionName = section?.name ?? null;
+
+              if (updatedTask.status === 'completed' && options.runnerId) {
+                // Get commit message for activity log
+                let commitMessage: string | null = null;
+                try {
+                  commitMessage = execSync('git log -1 --format=%B', {
+                    cwd: projectPath,
+                    encoding: 'utf-8',
+                  }).trim();
+                } catch {
+                  // Ignore error
+                }
+
+                logActivity(
+                  projectPath,
+                  options.runnerId,
+                  task.id,
+                  task.title,
+                  sectionName,
+                  'completed',
+                  commitMessage
+                );
+              } else if (updatedTask.status === 'failed' && options.runnerId) {
+                logActivity(
+                  projectPath,
+                  options.runnerId,
+                  task.id,
+                  task.title,
+                  sectionName,
+                  'failed'
+                );
+              } else if (updatedTask.status === 'disputed' && options.runnerId) {
+                logActivity(
+                  projectPath,
+                  options.runnerId,
+                  task.id,
+                  task.title,
+                  sectionName,
+                  'disputed'
+                );
+              }
+            }
+
+            // Push changes after batch review if any tasks were approved
+            const approvedTasks = tasksInReview.filter(t => {
+              const updated = getTask(db, t.id);
+              return updated?.status === 'completed';
+            });
+
+            if (approvedTasks.length > 0) {
+              try {
+                console.log('Pushing batch changes to git...');
+                execSync('git push', { cwd: projectPath, stdio: 'inherit' });
+                console.log(`Pushed ${approvedTasks.length} approved task(s)`);
+              } catch (error) {
+                console.warn('Failed to push:', error);
+              }
+            }
+          }
 
           // Notify completion for each task
           for (const task of batch.tasks) {
