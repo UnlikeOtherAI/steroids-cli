@@ -4,6 +4,8 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import {
   getRegisteredProjects,
   registerProject,
@@ -411,6 +413,57 @@ router.get('/projects/status', (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get project status',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/projects/open
+ * Open a project folder in Finder
+ * Body: { path: string }
+ */
+router.post('/projects/open', (req: Request, res: Response) => {
+  try {
+    const validation = validatePathRequest(req.body);
+    if (!validation.valid) {
+      res.status(400).json({
+        success: false,
+        error: validation.error,
+      });
+      return;
+    }
+
+    const { path } = validation;
+
+    // Verify path exists
+    if (!existsSync(path!)) {
+      res.status(404).json({
+        success: false,
+        error: 'Path does not exist',
+      });
+      return;
+    }
+
+    // Open in Finder (macOS)
+    try {
+      execSync(`open "${path}"`, { encoding: 'utf-8' });
+      res.json({
+        success: true,
+        message: 'Folder opened in Finder',
+      });
+    } catch (err) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to open folder',
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  } catch (error) {
+    console.error('Error opening project folder:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to open project folder',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

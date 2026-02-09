@@ -48,9 +48,13 @@ export const ProjectDetailPage: React.FC = () => {
     }
   };
 
-  const handleOpenPath = () => {
-    // Open in Finder using file:// protocol
-    window.open(`file://${project?.path}`, '_blank');
+  const handleOpenPath = async () => {
+    if (!project?.path) return;
+    try {
+      await projectsApi.openFolder(project.path);
+    } catch (err) {
+      console.error('Failed to open folder:', err);
+    }
   };
 
   const loadProject = async () => {
@@ -278,9 +282,9 @@ export const ProjectDetailPage: React.FC = () => {
               <Tooltip content={pathCopied ? 'Copied!' : 'Copy path'}>
                 <button
                   onClick={handleCopyPath}
-                  className={`text-gray-400 hover:text-gray-600 transition-colors ${pathCopied ? 'text-green-500' : ''}`}
+                  className={`p-1 text-sm transition-colors ${pathCopied ? 'text-green-500' : 'text-gray-400 hover:text-gray-600'}`}
                 >
-                  <i className={`fa-regular ${pathCopied ? 'fa-circle-check' : 'fa-copy'}`}></i>
+                  <i className={`fa-solid ${pathCopied ? 'fa-check' : 'fa-copy'}`}></i>
                 </button>
               </Tooltip>
             </div>

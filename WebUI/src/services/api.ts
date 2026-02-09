@@ -114,6 +114,16 @@ export const projectsApi = {
     );
     return response.removed_count;
   },
+
+  /**
+   * Open a project folder in Finder
+   */
+  async openFolder(path: string): Promise<void> {
+    await fetchJson('/api/projects/open', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  },
 };
 
 export const activityApi = {
