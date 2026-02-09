@@ -1,8 +1,20 @@
-# CLI Contract
+# CLI Contract Implementation
 
-> **Status:** ✅ Implemented in Phase 0.5
+> **Status:** ✅ Complete
+>
+> This document describes the comprehensive CLI contract system implemented for Steroids.
 
-This document defines the cross-cutting contract that ALL Steroids CLI commands follow.
+---
+
+## Overview
+
+The Steroids CLI now has a complete, consistent contract that applies to **all commands**:
+- Global flags work everywhere
+- JSON output follows a standard envelope
+- Exit codes are semantic and consistent
+- Environment variables are respected
+- Error messages are helpful and parseable
+- Help text is comprehensive with examples
 
 ---
 
