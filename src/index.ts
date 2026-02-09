@@ -32,6 +32,7 @@ import { statsCommand } from './commands/stats.js';
 import { hooksCommand } from './commands/hooks.js';
 import { aiCommand } from './commands/ai.js';
 import { webCommand } from './commands/web.js';
+import { checkForNewVersion } from './cli/version-check.js';
 
 // Read version from package.json - search up from dist folder
 function getVersion(): string {
@@ -127,6 +128,9 @@ async function main(): Promise<void> {
 
     // Apply global flags (e.g., set NO_COLOR)
     applyGlobalFlags(flags);
+
+    // Check for new version (async, non-blocking, fails silently)
+    checkForNewVersion(VERSION).catch(() => {/* ignore */});
 
     // Handle --help at top level
     if (flags.help && remaining.length === 0) {
