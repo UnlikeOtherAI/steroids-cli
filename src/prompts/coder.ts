@@ -94,13 +94,7 @@ git show <commit-hash> --stat  # Verify it matches the spec
 \`\`\`
 
 2. Note which commit contains the work in your response
-3. **Do NOT implement duplicate code** - just finish and your work will be auto-submitted for review
-
-**OPTIONAL:** You can manually submit with notes about the existing work:
-
-\`\`\`bash
-steroids tasks update ${task.id} --status review --notes "Work exists in commit <hash>. Files: <list>. Verified against spec."
-\`\`\`
+3. **Do NOT implement duplicate code** - state "TASK COMPLETE" and the orchestrator will submit for review
 
 ---
 
@@ -119,12 +113,7 @@ steroids tasks update ${task.id} --status review --notes "Work exists in commit 
 ### Security Notes
 
 - When executing shell commands with user-controlled arguments, use array-based APIs (e.g., \`execFileSync(cmd, [args])\`). Add a comment like \`// hardcoded command, no user input\` when using \`execSync\` intentionally for fixed commands or shell features.
-- If you make a security-relevant decision (e.g., choosing \`execSync\` over \`execFileSync\` because you need pipes), explain your reasoning in your submission notes with \`--notes\`.
-- If you notice a pre-existing security concern or something a human should review, create a feedback task:
-\`\`\`bash
-steroids tasks add "Description of the concern" --feedback
-\`\`\`
-This goes to a skipped section for human review and will NOT block the pipeline.
+- If you make a security-relevant decision (e.g., choosing \`execSync\` over \`execFileSync\` because you need pipes), explain your reasoning in your commit message or output.
 
 ---
 
@@ -144,10 +133,8 @@ Even if it fails, that failure is valuable information. The reviewer wants to se
 - \`> SKIP\` markers, "manual setup", "handled manually", "external setup"
 - Cloud infrastructure tasks with NO automation scripts provided
 
-**If you must skip:**
-\`\`\`bash
-steroids tasks skip ${task.id} --notes "SKIP REASON: <why>. WHAT'S NEEDED: <human action>. BLOCKING: <dependent tasks>."
-\`\`\`
+**If you must skip, output:** "TASK SHOULD BE SKIPPED: <reason>. WHAT'S NEEDED: <human action>."
+The orchestrator will handle the skip status.
 
 ---
 
@@ -155,8 +142,8 @@ steroids tasks skip ${task.id} --notes "SKIP REASON: <why>. WHAT'S NEEDED: <huma
 
 1. **NEVER touch .steroids/ directory** (no .db, .yaml, .yml files)
 2. **BUILD MUST PASS before submitting** (run build and tests, fix errors)
-3. **Use CLI for status updates:** \`steroids tasks update ${task.id} --status review\`
-4. **Commit your work** with a meaningful message before submitting
+3. **COMMIT YOUR WORK** with a meaningful message when complete
+4. **DO NOT run any \`steroids tasks\` commands** - the orchestrator handles all status updates
 5. **Never modify TODO.md directly** - the CLI manages task status
 
 ---
@@ -170,13 +157,9 @@ git add <your-changed-files>
 git commit -m "<type>: <descriptive message>"
 \`\`\`
 
-Your work will be **automatically submitted for review** when you finish. The orchestrator will detect that you're done and move the task to review status.
+**Output "TASK COMPLETE" followed by a summary of your changes.**
 
-**OPTIONAL:** You can manually update the status yourself if you want to include submission notes:
-
-\`\`\`bash
-steroids tasks update ${task.id} --status review --notes "Implementation complete. Added X, Y, Z."
-\`\`\`
+The orchestrator will automatically detect your completion and submit the task for review. Do NOT run any \`steroids tasks\` commands - the orchestrator handles all status updates.
 
 ---
 ${task.rejection_count > 0 ? `
@@ -255,10 +238,10 @@ For EACH task:
 2. Implement the feature/fix
 3. Run tests if applicable
 4. Commit: \`git add <files> && git commit -m "<type>: <message>"\`
-5. Update status: \`steroids tasks update <task-id> --status review\`
+5. Output "TASK COMPLETE: <task-id>" when done
 6. Move to next task
 
-**CRITICAL:** Each task MUST have its own commit and status update.
+**CRITICAL:** Each task MUST have its own commit. The orchestrator will handle status updates.
 
 ---
 
@@ -267,7 +250,7 @@ For EACH task:
 1. **NEVER touch .steroids/ directory**
 2. **BUILD MUST PASS after each task**
 3. **Commit after EACH task** with a descriptive message
-4. **Update status after EACH commit**
+4. **DO NOT run \`steroids tasks\` commands** - the orchestrator handles status
 
 ---
 
@@ -348,10 +331,9 @@ ${sourceContent}
 ## CRITICAL RULES
 
 1. **NEVER touch .steroids/ directory**
-2. **Commit your work before submitting**
-3. **Run \`steroids tasks update ${task.id} --status review\` when done**
-
-If you do NOT update the task status, you will be restarted.
+2. **COMMIT YOUR WORK** when complete
+3. **Output "TASK COMPLETE"** when done - the orchestrator will submit for review
+4. **DO NOT run any \`steroids tasks\` commands** - the orchestrator handles all status updates
 
 ---
 

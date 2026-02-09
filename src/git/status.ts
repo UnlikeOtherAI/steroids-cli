@@ -266,3 +266,95 @@ export function getFileContentHash(
     return null;
   }
 }
+
+/**
+ * Get recent commits with SHA and message
+ */
+export function getRecentCommits(
+  projectPath: string = process.cwd(),
+  count: number = 5
+): Array<{ sha: string; message: string }> {
+  try {
+    const log = execSync(`git log -${count} --format=%H||%s`, {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return log.trim().split('\n').filter(Boolean).map(line => {
+      const [sha, ...messageParts] = line.split('||');
+      return { sha, message: messageParts.join('||') };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get changed files since last commit
+ */
+export function getChangedFiles(
+  projectPath: string = process.cwd()
+): string[] {
+  try {
+    // Get both staged and unstaged files
+    const output = execSync('git diff --name-only HEAD', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return output.trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get diff summary (additions/deletions)
+ */
+export function getDiffSummary(
+  projectPath: string = process.cwd()
+): string {
+  try {
+    const output = execSync('git diff --stat HEAD', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return output.trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Get diff additions and deletions count
+ */
+export function getDiffStats(
+  projectPath: string = process.cwd(),
+  ref?: string
+): { additions: number; deletions: number } {
+  try {
+    const cmd = ref
+      ? `git diff --numstat ${ref}`
+      : 'git diff --numstat HEAD~1';
+    const output = execSync(cmd, {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let additions = 0;
+    let deletions = 0;
+
+    for (const line of output.trim().split('\n')) {
+      if (!line) continue;
+      const [add, del] = line.split(/\s+/);
+      additions += parseInt(add) || 0;
+      deletions += parseInt(del) || 0;
+    }
+
+    return { additions, deletions };
+  } catch {
+    return { additions: 0, deletions: 0 };
+  }
+}

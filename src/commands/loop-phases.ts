@@ -1,8 +1,9 @@
 /**
  * Loop phase functions for coder and reviewer invocation
- * Extracted from loop.ts to keep files under 500 lines
+ * ORCHESTRATOR-DRIVEN: The orchestrator makes ALL status decisions
  */
 
+import { execSync } from 'node:child_process';
 import {
   getTask,
   updateTaskStatus,
@@ -14,11 +15,22 @@ import {
   addAuditEntry,
 } from '../database/queries.js';
 import type { openDatabase } from '../database/connection.js';
-import { invokeCoder } from '../orchestrator/coder.js';
-import { invokeReviewer } from '../orchestrator/reviewer.js';
+import { invokeCoder, type CoderResult } from '../orchestrator/coder.js';
+import { invokeReviewer, type ReviewerResult } from '../orchestrator/reviewer.js';
 import { invokeCoordinator, type CoordinatorContext, type CoordinatorResult } from '../orchestrator/coordinator.js';
 import { pushToRemote } from '../git/push.js';
-import { getCurrentCommitSha, getModifiedFiles } from '../git/status.js';
+import {
+  getCurrentCommitSha,
+  getModifiedFiles,
+  getRecentCommits,
+  getChangedFiles,
+  hasUncommittedChanges,
+  getDiffSummary,
+  getDiffStats,
+} from '../git/status.js';
+import { invokeCoderOrchestrator, invokeReviewerOrchestrator } from '../orchestrator/invoke.js';
+import { OrchestrationFallbackHandler } from '../orchestrator/fallback-handler.js';
+import type { CoderContext, ReviewerContext } from '../orchestrator/types.js';
 
 export { type CoordinatorResult };
 
@@ -36,9 +48,7 @@ export async function runCoderPhase(
   let coordinatorGuidance: string | undefined;
   const thresholds = coordinatorThresholds || [2, 5, 9];
 
-  // Check if we should run the coordinator at this rejection count
-  // Only runs at specific thresholds to avoid redundant/costly LLM calls
-  // But always reuse cached results between thresholds
+  // Run coordinator at rejection thresholds (same as before)
   const shouldInvokeCoordinator = thresholds.includes(task.rejection_count);
   const cachedResult = coordinatorCache?.get(task.id);
 
@@ -51,7 +61,6 @@ export async function runCoderPhase(
       const rejectionHistory = getTaskRejections(db, task.id);
       const coordExtra: CoordinatorContext = {};
 
-      // Section tasks - so coordinator knows what other tasks handle
       if (task.section_id) {
         const allSectionTasks = listTasks(db, { sectionId: task.section_id });
         coordExtra.sectionTasks = allSectionTasks.map(t => ({
@@ -59,16 +68,13 @@ export async function runCoderPhase(
         }));
       }
 
-      // Coder's latest submission notes
       coordExtra.submissionNotes = getLatestSubmissionNotes(db, task.id);
 
-      // What files were modified (lightweight diff summary)
       const modified = getModifiedFiles(projectPath);
       if (modified.length > 0) {
         coordExtra.gitDiffSummary = modified.join('\n');
       }
 
-      // Include previous coordinator guidance so it doesn't repeat itself
       if (cachedResult) {
         coordExtra.previousGuidance = cachedResult.guidance;
       }
@@ -77,10 +83,8 @@ export async function runCoderPhase(
 
       if (coordResult) {
         coordinatorGuidance = coordResult.guidance;
-        // Store in cache for both coder reuse and reviewer phase
         coordinatorCache?.set(task.id, coordResult);
 
-        // Log coordinator intervention to audit trail so it's visible in WebUI
         addAuditEntry(db, task.id, task.status, task.status, 'coordinator', {
           actorType: 'orchestrator',
           notes: `[${coordResult.decision}] ${coordResult.guidance}`,
@@ -92,50 +96,143 @@ export async function runCoderPhase(
         }
       }
     } catch (error) {
-      // Coordinator failure is non-fatal - continue without guidance
       if (!jsonMode) {
         console.warn('Coordinator invocation failed, continuing without guidance:', error);
       }
     }
   } else if (cachedResult) {
-    // Reuse cached coordinator guidance between thresholds
     coordinatorGuidance = cachedResult.guidance;
     if (!jsonMode && task.rejection_count >= 2) {
       console.log(`\nReusing cached coordinator guidance (decision: ${cachedResult.decision})`);
     }
   }
 
+  // STEP 1: Invoke coder (no status commands in prompt anymore)
   if (!jsonMode) {
     console.log('\n>>> Invoking CODER...\n');
   }
 
-  const result = await invokeCoder(task, projectPath, action, coordinatorGuidance);
+  const coderResult: CoderResult = await invokeCoder(task, projectPath, action, coordinatorGuidance);
 
-  if (result.timedOut) {
+  if (coderResult.timedOut) {
     console.warn('Coder timed out. Will retry next iteration.');
     return;
   }
 
-  // Re-read task to see if status was updated
-  const updatedTask = getTask(db, task.id);
-  if (!updatedTask) return;
+  // STEP 2: Gather git state
+  const commits = getRecentCommits(projectPath, 5);
+  const files_changed = getChangedFiles(projectPath);
+  const has_uncommitted = hasUncommittedChanges(projectPath);
+  const diff_summary = getDiffSummary(projectPath);
 
-  // AUTO-SUBMIT: If coder finished but didn't update status, automatically move to review
-  // This prevents infinite loops where coder completes work but forgets to run status update command
-  if (updatedTask.status === 'in_progress') {
-    const commitSha = getCurrentCommitSha(projectPath) ?? undefined;
-    updateTaskStatus(db, updatedTask.id, 'review', 'orchestrator',
-      'Auto-submitted to review (coder finished without status update)', commitSha);
+  const gitState = {
+    commits,
+    files_changed,
+    has_uncommitted_changes: has_uncommitted,
+    diff_summary,
+  };
 
-    if (!jsonMode) {
-      console.log('\nCoder finished without updating status. Auto-submitted to review.');
-    }
-  } else if (!jsonMode) {
-    if (updatedTask.status === 'review') {
-      console.log('\nCoder submitted for review. Ready for reviewer.');
-    } else {
-      console.log(`Task status: ${updatedTask.status}`);
-    }
+  // STEP 3: Build orchestrator context
+  // Get rejection notes if any
+  const lastRejectionNotes = task.rejection_count > 0
+    ? getTaskRejections(db, task.id).slice(-1)[0]?.notes ?? undefined
+    : undefined;
+
+  const context: CoderContext = {
+    task: {
+      id: task.id,
+      title: task.title,
+      description: task.title, // Use title as description for now
+      rejection_notes: lastRejectionNotes,
+      rejection_count: task.rejection_count,
+    },
+    coder_output: {
+      stdout: coderResult.stdout,
+      stderr: coderResult.stderr,
+      exit_code: coderResult.exitCode,
+      timed_out: coderResult.timedOut,
+      duration_ms: coderResult.duration,
+    },
+    git_state: gitState,
+  };
+
+  // STEP 4: Invoke orchestrator
+  let orchestratorOutput: string;
+  try {
+    orchestratorOutput = await invokeCoderOrchestrator(context, projectPath);
+  } catch (error) {
+    console.error('Orchestrator invocation failed:', error);
+    // Fallback to safe default: retry
+    orchestratorOutput = JSON.stringify({
+      action: 'retry',
+      reasoning: 'Orchestrator failed, defaulting to retry',
+      commits: [],
+      next_status: 'in_progress',
+      metadata: {
+        files_changed: 0,
+        confidence: 'low',
+        exit_clean: true,
+        has_commits: false,
+      }
+    });
+  }
+
+  // STEP 5: Parse orchestrator output with fallback
+  const handler = new OrchestrationFallbackHandler();
+  const decision = handler.parseCoderOutput(orchestratorOutput);
+
+  // STEP 6: Log orchestrator decision for audit trail
+  addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
+    actorType: 'orchestrator',
+    notes: `[${decision.action}] ${decision.reasoning} (confidence: ${decision.metadata.confidence})`,
+  });
+
+  // STEP 7: Execute the decision
+  switch (decision.action) {
+    case 'submit':
+      updateTaskStatus(db, task.id, 'review', 'orchestrator', decision.reasoning);
+      if (!jsonMode) {
+        console.log(`\n✓ Coder complete, submitted to review (confidence: ${decision.metadata.confidence})`);
+      }
+      break;
+
+    case 'stage_commit_submit':
+      // Stage all changes
+      try {
+        execSync('git add -A', { cwd: projectPath, stdio: 'pipe' });
+        const message = decision.commit_message || 'feat: implement task specification';
+        execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
+          cwd: projectPath,
+          stdio: 'pipe'
+        });
+        updateTaskStatus(db, task.id, 'review', 'orchestrator',
+          `Auto-committed and submitted (${decision.reasoning})`);
+        if (!jsonMode) {
+          console.log(`\n✓ Auto-committed and submitted to review (confidence: ${decision.metadata.confidence})`);
+        }
+      } catch (error) {
+        console.error('Failed to stage/commit:', error);
+        // Fallback to retry
+        if (!jsonMode) {
+          console.log('\n⟳ Failed to commit, will retry');
+        }
+      }
+      break;
+
+    case 'retry':
+      if (!jsonMode) {
+        console.log(`\n⟳ Retrying coder (${decision.reasoning}, confidence: ${decision.metadata.confidence})`);
+      }
+      break;
+
+    case 'error':
+      updateTaskStatus(db, task.id, 'failed', 'orchestrator',
+        `Task failed: ${decision.reasoning}`);
+      if (!jsonMode) {
+        console.log(`\n✗ Task failed (${decision.reasoning})`);
+        console.log('Human intervention required.');
+      }
+      break;
   }
 }
 
@@ -148,6 +245,7 @@ export async function runReviewerPhase(
 ): Promise<void> {
   if (!task) return;
 
+  // STEP 1: Invoke reviewer (no status commands in prompt anymore)
   if (!jsonMode) {
     console.log('\n>>> Invoking REVIEWER...\n');
     if (coordinatorResult) {
@@ -155,112 +253,129 @@ export async function runReviewerPhase(
     }
   }
 
-  const result = await invokeReviewer(
+  const reviewerResult: ReviewerResult = await invokeReviewer(
     task,
     projectPath,
     coordinatorResult?.guidance,
     coordinatorResult?.decision
   );
 
-  if (result.timedOut) {
+  if (reviewerResult.timedOut) {
     if (!jsonMode) {
       console.warn('Reviewer timed out. Will retry next iteration.');
     }
     return;
   }
 
-  // Re-read task to see what the reviewer decided
-  // (Codex runs steroids commands directly to update the database)
-  const updatedTask = getTask(db, task.id);
-  if (!updatedTask) return;
+  // STEP 2: Gather git context
+  const commit_sha = getCurrentCommitSha(projectPath) || '';
+  const files_changed = getModifiedFiles(projectPath);
+  const diffStats = getDiffStats(projectPath);
 
-  if (updatedTask.status === 'completed') {
-    handleApproved(projectPath, jsonMode);
-  } else if (updatedTask.status === 'in_progress') {
-    if (!jsonMode) {
-      console.log(`\n✗ Task REJECTED (${updatedTask.rejection_count}/15)`);
-      console.log('Returning to coder for fixes.');
-    }
-  } else if (updatedTask.status === 'disputed') {
-    handleDisputed(projectPath, jsonMode);
-  } else if (updatedTask.status === 'failed') {
-    if (!jsonMode) {
-      console.log('\n✗ Task FAILED (exceeded 15 rejections)');
-      console.log('Human intervention required.');
-    }
-  } else if (updatedTask.status === 'review') {
-    handleReviewFallback(db, task.id, result, projectPath, jsonMode);
-  }
-}
+  const gitContext = {
+    commit_sha,
+    files_changed,
+    additions: diffStats.additions,
+    deletions: diffStats.deletions,
+  };
 
-function handleApproved(projectPath: string, jsonMode: boolean): void {
-  if (!jsonMode) {
-    console.log('\n✓ Task APPROVED');
-    console.log('Pushing to git...');
-  }
+  // STEP 3: Build orchestrator context
+  const context: ReviewerContext = {
+    task: {
+      id: task.id,
+      title: task.title,
+      rejection_count: task.rejection_count,
+    },
+    reviewer_output: {
+      stdout: reviewerResult.stdout,
+      stderr: reviewerResult.stderr,
+      exit_code: reviewerResult.exitCode,
+      timed_out: reviewerResult.timedOut,
+      duration_ms: reviewerResult.duration,
+    },
+    git_context: gitContext,
+  };
 
-  const pushResult = pushToRemote(projectPath);
-
-  if (!jsonMode) {
-    if (pushResult.success) {
-      console.log(`Pushed successfully (${pushResult.commitHash})`);
-    } else {
-      console.warn('Push failed. Will stack and retry on next completion.');
-    }
-  }
-}
-
-function handleDisputed(projectPath: string, jsonMode: boolean): void {
-  if (!jsonMode) {
-    console.log('\n! Task DISPUTED');
-    console.log('Pushing current work and moving to next task.');
-  }
-
-  const pushResult = pushToRemote(projectPath);
-  if (!jsonMode && pushResult.success) {
-    console.log(`Pushed disputed work (${pushResult.commitHash})`);
-  }
-}
-
-function handleReviewFallback(
-  db: ReturnType<typeof openDatabase>['db'],
-  taskId: string,
-  result: { decision?: string; notes?: string },
-  projectPath: string,
-  jsonMode: boolean
-): void {
-  if (!result.decision) {
-    if (!jsonMode) {
-      console.log('\nReviewer did not take action (status unchanged). Will retry.');
-    }
-    return;
+  // STEP 4: Invoke orchestrator
+  let orchestratorOutput: string;
+  try {
+    orchestratorOutput = await invokeReviewerOrchestrator(context, projectPath);
+  } catch (error) {
+    console.error('Orchestrator invocation failed:', error);
+    // Fallback to safe default: unclear
+    orchestratorOutput = JSON.stringify({
+      decision: 'unclear',
+      reasoning: 'Orchestrator failed, retrying review',
+      notes: 'Review unclear, retrying',
+      next_status: 'review',
+      metadata: {
+        rejection_count: task.rejection_count,
+        confidence: 'low',
+        push_to_remote: false,
+        repeated_issue: false,
+      }
+    });
   }
 
-  if (!jsonMode) {
-    console.log(`\nReviewer indicated ${result.decision.toUpperCase()} but command may have failed.`);
-    console.log('Attempting fallback...');
-  }
+  // STEP 5: Parse orchestrator output with fallback
+  const handler = new OrchestrationFallbackHandler();
+  const decision = handler.parseReviewerOutput(orchestratorOutput);
 
-  const commitSha = getCurrentCommitSha(projectPath) ?? undefined;
+  // STEP 6: Log orchestrator decision for audit trail
+  addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
+    actorType: 'orchestrator',
+    notes: `[${decision.decision}] ${decision.reasoning} (confidence: ${decision.metadata.confidence})`,
+  });
 
-  if (result.decision === 'approve') {
-    approveTask(db, taskId, 'codex', result.notes, commitSha);
-    if (!jsonMode) {
-      console.log('✓ Task APPROVED (via fallback)');
-    }
-    const pushResult = pushToRemote(projectPath);
-    if (!jsonMode && pushResult.success) {
-      console.log(`Pushed successfully (${pushResult.commitHash})`);
-    }
-  } else if (result.decision === 'reject') {
-    rejectTask(db, taskId, 'codex', result.notes, commitSha);
-    if (!jsonMode) {
-      console.log('✗ Task REJECTED (via fallback)');
-    }
-  } else if (result.decision === 'dispute') {
-    updateTaskStatus(db, taskId, 'disputed', 'codex', result.notes, commitSha);
-    if (!jsonMode) {
-      console.log('! Task DISPUTED (via fallback)');
-    }
+  // STEP 7: Execute the decision
+  const commitSha = commit_sha || undefined;
+
+  switch (decision.decision) {
+    case 'approve':
+      approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
+      if (!jsonMode) {
+        console.log(`\n✓ Task APPROVED (confidence: ${decision.metadata.confidence})`);
+        console.log('Pushing to git...');
+      }
+      const pushResult = pushToRemote(projectPath);
+      if (!jsonMode && pushResult.success) {
+        console.log(`Pushed successfully (${pushResult.commitHash})`);
+      } else if (!jsonMode) {
+        console.warn('Push failed. Will stack and retry on next completion.');
+      }
+      break;
+
+    case 'reject':
+      rejectTask(db, task.id, 'orchestrator', decision.notes, commitSha);
+      if (!jsonMode) {
+        console.log(`\n✗ Task REJECTED (${task.rejection_count + 1}/15, confidence: ${decision.metadata.confidence})`);
+        console.log('Returning to coder for fixes.');
+      }
+      break;
+
+    case 'dispute':
+      updateTaskStatus(db, task.id, 'disputed', 'orchestrator', decision.notes, commitSha);
+      if (!jsonMode) {
+        console.log(`\n! Task DISPUTED (confidence: ${decision.metadata.confidence})`);
+        console.log('Pushing current work and moving to next task.');
+      }
+      const disputePush = pushToRemote(projectPath);
+      if (!jsonMode && disputePush.success) {
+        console.log(`Pushed disputed work (${disputePush.commitHash})`);
+      }
+      break;
+
+    case 'skip':
+      updateTaskStatus(db, task.id, 'skipped', 'orchestrator', decision.notes, commitSha);
+      if (!jsonMode) {
+        console.log(`\n⏭ Task SKIPPED (confidence: ${decision.metadata.confidence})`);
+      }
+      break;
+
+    case 'unclear':
+      if (!jsonMode) {
+        console.log(`\n? Review unclear (${decision.reasoning}), will retry`);
+      }
+      break;
   }
 }

@@ -118,6 +118,10 @@ export interface SteroidsConfig {
  */
 export const DEFAULT_CONFIG: SteroidsConfig = {
   ai: {
+    orchestrator: {
+      provider: 'claude',
+      model: 'claude-sonnet-4',
+    },
     coder: {
       provider: 'claude',
       model: 'claude-sonnet-4',

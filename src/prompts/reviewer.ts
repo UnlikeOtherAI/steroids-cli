@@ -256,44 +256,28 @@ ${getTestCoverageInstructions(config, modifiedFiles)}
 
 ## Your Decision
 
-You MUST run ONE of these commands to record your decision:
+You MUST output ONE of these decision statements clearly:
 
 ### APPROVE (implementation is correct)
 If the code correctly implements the specification:
-\`\`\`bash
-steroids tasks approve ${task.id} --model codex
-\`\`\`
+**Output:** "APPROVE - Implementation meets all requirements"
 
 ### APPROVE WITH NOTE (minor issues, not blocking)
 If you have minor concerns but the implementation is acceptable:
-\`\`\`bash
-steroids tasks approve ${task.id} --model codex --notes "Minor: your feedback here"
-\`\`\`
+**Output:** "APPROVE - <your feedback here>"
 
-### APPROVE SKIP (external setup required)
+### SKIP (external setup required)
 If the coder requested a SKIP and it's legitimate:
 1. **Verify** the spec section says SKIP, MANUAL, or requires external action
 2. **Verify** the skip notes explain WHAT human action is needed
 3. If valid:
-\`\`\`bash
-steroids tasks skip ${task.id} --notes "Verified: spec says SKIP. Human must [action]. Approved to unblock pipeline."
-\`\`\`
-
-For **partial** skips (coder did some work, rest is external):
-1. **Review the code** the coder submitted - it must be correct
-2. **Verify** the external part truly cannot be automated
-3. If valid:
-\`\`\`bash
-steroids tasks skip ${task.id} --partial --notes "Code reviewed and correct. External setup verified as manual-only."
-\`\`\`
+**Output:** "SKIP - Verified: spec says SKIP. Human must [action]. Approved to unblock pipeline."
 
 ### REJECT (needs changes)
 If there are issues that must be fixed:
-\`\`\`bash
-steroids tasks reject ${task.id} --model codex --notes "specific feedback for coder"
-\`\`\`
+**Output:** "REJECT" followed by specific feedback
 
-**CRITICAL: Format rejection notes with checkboxes for EACH actionable item:**
+**CRITICAL: Format rejection feedback with checkboxes for EACH actionable item:**
 
 \`\`\`
 - [ ] Fix type error in src/foo.ts:42 - change \`string\` to \`number\`
@@ -314,10 +298,11 @@ This will be rejection #${task.rejection_count + 1}.
 
 ### DISPUTE (fundamental disagreement)
 Only if there's a genuine specification or architecture conflict:
-\`\`\`bash
-steroids dispute create ${task.id} --reason "explanation" --type reviewer
-\`\`\`
+**Output:** "DISPUTE - <explanation>"
+
 Use sparingly. Most issues should be resolved via reject/fix cycle.
+
+**The orchestrator will parse your decision and update task status accordingly. Do NOT run any \`steroids tasks\` commands.**
 
 ---
 
@@ -326,37 +311,33 @@ Use sparingly. Most issues should be resolved via reject/fix cycle.
 1. **NEVER modify code yourself** - only review it
 2. **Be specific in rejection notes** - vague feedback wastes cycles
 3. **Approve if it works** - don't reject for style preferences
-4. **You MUST run one of the commands above** to record your decision
+4. **You MUST clearly state your decision** (APPROVE/REJECT/DISPUTE/SKIP)
 5. **Verify coder's claims** - if coder says work exists in a commit, CHECK IT before rejecting
 6. **Empty diff ≠ no work** - work may exist in earlier commits the coder referenced
 7. **SKIP requests are valid** - if spec says SKIP/manual, approve the skip to unblock the pipeline
 8. **Don't reject skips for infrastructure tasks** - Cloud SQL, GKE, etc. truly need human action
-
-If you do NOT run a command, the task will remain in review and you will be invoked again.
+9. **DO NOT run any \`steroids tasks\` commands** - the orchestrator handles all status updates
 
 ---
 
-## Feedback Tasks
+## Feedback Notes
 
-**After making your decision**, create feedback tasks for anything a human should review later. These go to a skipped section and will NOT block the pipeline.
+**After making your decision**, you may include feedback notes for anything a human should review later. These are advisory only and will NOT block the pipeline.
 
-Create a feedback task when you notice:
+Include feedback notes when you notice:
 - A pre-existing security concern in unchanged code
 - A minor design dispute even if you approved
 - Something uncertain that a human should verify
 - A suggestion the coder should consider for a future task
 
-\`\`\`bash
-steroids tasks add "Description of the concern" --feedback
-\`\`\`
-
-You may create multiple feedback tasks. Do this AFTER your approve/reject/dispute decision, not instead of it.
+Simply include these as notes in your decision output. They will be logged for human review.
 
 ---
 
 ## Review Now
 
-Examine the diff above, then run the appropriate command to record your decision.
+Examine the diff above, then clearly state your decision (APPROVE/REJECT/DISPUTE/SKIP) with any notes.
+The orchestrator will parse your decision and update task status accordingly.
 `;
 }
 
@@ -447,20 +428,19 @@ For EACH task, verify:
 
 ## YOUR WORKFLOW
 
-Review all tasks, then record your decision for EACH one:
+Review all tasks, then state your decision for EACH one:
 
 **For each task that passes review:**
-\`\`\`bash
-steroids tasks approve <task-id> --model codex
-\`\`\`
+Output: "APPROVE <task-id> - Implementation correct"
 
 **For each task that needs changes:**
-\`\`\`bash
-steroids tasks reject <task-id> --model codex --notes "- [ ] specific issue 1
-- [ ] specific issue 2"
+Output: "REJECT <task-id>" followed by checkbox list:
+\`\`\`
+- [ ] specific issue 1
+- [ ] specific issue 2
 \`\`\`
 
-**CRITICAL:** You MUST run a command for EACH task. Use checkboxes in rejection notes.
+**CRITICAL:** You MUST state a decision for EACH task. Use checkboxes in rejection notes. The orchestrator will parse your decisions and update task status accordingly.
 
 ---
 
@@ -476,12 +456,14 @@ ${taskIds.map((id, i) => `- Task ${i + 1}: ${id}`).join('\n')}
 2. **Review ALL tasks** - don't skip any
 3. **Be specific in rejection notes** - use checkboxes for each issue
 4. **Consider tasks as a unit** - they were implemented together
-5. **You MUST run approve/reject for EACH task**
+5. **You MUST state approve/reject for EACH task**
+6. **DO NOT run \`steroids tasks\` commands** - the orchestrator handles status updates
 
 ---
 
 ## Review Now
 
-Examine the diff, verify each task's specification is met, then run the appropriate commands.
+Examine the diff, verify each task's specification is met, then clearly state your decision for each task.
+The orchestrator will parse your decisions and update task status accordingly.
 `;
 }
