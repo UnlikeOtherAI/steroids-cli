@@ -170,13 +170,13 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     if (flags.json) {
       out.error(ErrorCode.CONFIG_ERROR, 'Project is disabled', {
         project: projectPath,
-        hint: 'Run "steroids projects enable <path>" to enable it.',
+        hint: 'Run "steroids projects enable" to enable it.',
       });
     } else {
       console.error('Error: Project is disabled');
       console.error('  Project: ' + projectPath);
       console.error('');
-      console.error('Run "steroids projects enable <path>" to enable it.');
+      console.error('Run "steroids projects enable" to enable it.');
     }
     process.exit(getExitCode(ErrorCode.CONFIG_ERROR));
   }

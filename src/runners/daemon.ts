@@ -179,7 +179,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
   const registeredProject = getRegisteredProject(effectiveProjectPath);
   if (registeredProject && !registeredProject.enabled) {
     console.error(`Project is disabled: ${effectiveProjectPath}`);
-    console.error('Run "steroids projects enable <path>" to enable it.');
+    console.error('Run "steroids projects enable" to enable it.');
     process.exit(7); // Project disabled exit code
   }
 
@@ -285,7 +285,7 @@ export function canStartDaemon(projectPath?: string): {
   if (registeredProject && !registeredProject.enabled) {
     return {
       canStart: false,
-      reason: `Project is disabled: ${effectivePath}. Run "steroids projects enable <path>" to enable it.`,
+      reason: `Project is disabled: ${effectivePath}. Run "steroids projects enable" to enable it.`,
     };
   }
 
