@@ -52,6 +52,8 @@ export interface ActivityLogEntry {
   section_name: string | null;
   final_status: ActivityStatusType;
   commit_message: string | null;
+  commit_sha: string | null;
+  github_url: string | null;
   created_at: string;
 }
 

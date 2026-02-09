@@ -153,9 +153,30 @@ export const ActivityListPage: React.FC = () => {
                   {entry.task_title}
                 </div>
                 {entry.commit_message && (
-                  <div className="text-sm text-text-secondary mt-1 line-clamp-2">
-                    <i className="fa-solid fa-code-commit text-xs text-text-muted mr-1"></i>
-                    {entry.commit_message.split('\n')[0]}
+                  <div className="text-sm text-text-secondary mt-1 flex items-center gap-2">
+                    <span className="line-clamp-1 flex-1">
+                      <i className="fa-solid fa-code-commit text-xs text-text-muted mr-1"></i>
+                      {entry.commit_message.split('\n')[0]}
+                    </span>
+                    {entry.commit_sha && (
+                      entry.github_url ? (
+                        <a
+                          href={`${entry.github_url}/commit/${entry.commit_sha}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-accent transition-colors shrink-0"
+                        >
+                          <i className="fa-brands fa-github"></i>
+                          <code className="bg-bg-surface px-1 rounded">{entry.commit_sha.slice(0, 7)}</code>
+                        </a>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs text-text-muted shrink-0">
+                          <i className="fa-solid fa-code-commit"></i>
+                          <code className="bg-bg-surface px-1 rounded">{entry.commit_sha.slice(0, 7)}</code>
+                        </span>
+                      )
+                    )}
                   </div>
                 )}
                 <div className="text-xs text-text-muted flex gap-2 mt-1">

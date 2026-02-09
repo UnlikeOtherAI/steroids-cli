@@ -107,7 +107,15 @@ const GLOBAL_SCHEMA_V6_SQL = `
 ALTER TABLE activity_log ADD COLUMN commit_message TEXT;
 `;
 
-const GLOBAL_SCHEMA_VERSION = '6';
+/**
+ * Schema upgrade from version 6 to version 7: Add commit_sha to activity_log
+ */
+const GLOBAL_SCHEMA_V7_SQL = `
+-- Add commit_sha column to activity_log for GitHub links
+ALTER TABLE activity_log ADD COLUMN commit_sha TEXT;
+`;
+
+const GLOBAL_SCHEMA_VERSION = '7';
 
 /**
  * Get the path to the global steroids directory
@@ -166,6 +174,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V4_SQL);
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
+    db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
       'version',
       GLOBAL_SCHEMA_VERSION
@@ -181,6 +190,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V4_SQL);
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
+    db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -191,6 +201,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V4_SQL);
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
+    db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -200,6 +211,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V4_SQL);
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
+    db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -208,13 +220,22 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     // Upgrade from version 4 to latest
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
+    db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
     );
   } else if (currentVersion === '5') {
-    // Upgrade from version 5 to version 6
+    // Upgrade from version 5 to latest
     db.exec(GLOBAL_SCHEMA_V6_SQL);
+    db.exec(GLOBAL_SCHEMA_V7_SQL);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '6') {
+    // Upgrade from version 6 to version 7
+    db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
