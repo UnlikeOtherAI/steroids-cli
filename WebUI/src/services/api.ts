@@ -311,8 +311,8 @@ export interface AIModel {
 export interface AIProvider {
   id: string;
   name: string;
-  hasApiKey: boolean;
-  envVar: string | null;
+  installed: boolean;
+  cliCommand: string;
 }
 
 export interface AIModelsResponse {

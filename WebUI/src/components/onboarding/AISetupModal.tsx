@@ -32,10 +32,10 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
       const providerList = await aiApi.getProviders();
       setProviders(providerList);
 
-      // Load models for providers that have API keys
+      // Load models for installed providers
       const modelsMap: Record<string, AIModel[]> = {};
       for (const provider of providerList) {
-        if (provider.hasApiKey) {
+        if (provider.installed) {
           try {
             const response = await aiApi.getModels(provider.id);
             modelsMap[provider.id] = response.models;
@@ -96,8 +96,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
     }
   };
 
-  const availableProviders = providers.filter(p => p.hasApiKey);
-  const unavailableProviders = providers.filter(p => !p.hasApiKey);
+  const unavailableProviders = providers.filter(p => !p.installed);
 
   const renderRoleSelector = (
     label: string,
@@ -121,8 +120,10 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
             className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent"
           >
             <option value="">Select provider...</option>
-            {availableProviders.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+            {providers.map(p => (
+              <option key={p.id} value={p.id} disabled={!p.installed}>
+                {p.name}{!p.installed ? ' (not installed)' : ''}
+              </option>
             ))}
           </select>
         </div>
@@ -171,49 +172,26 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
             </div>
           ) : (
             <>
-              {/* Available providers notice */}
-              {availableProviders.length > 0 && (
-                <div className="mb-4 p-3 bg-success/10 border border-success/20 rounded-lg">
-                  <div className="flex items-center gap-2 text-success text-sm">
-                    <i className="fa-solid fa-check-circle"></i>
-                    <span>
-                      Found {availableProviders.length} provider{availableProviders.length !== 1 ? 's' : ''} with API keys:{' '}
-                      {availableProviders.map(p => p.name).join(', ')}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* Unavailable providers notice */}
+              {/* Unavailable CLI tools notice */}
               {unavailableProviders.length > 0 && (
-                <div className="mb-4 p-3 bg-warning/10 border border-warning/20 rounded-lg">
-                  <div className="flex items-start gap-2 text-warning text-sm">
-                    <i className="fa-solid fa-exclamation-triangle mt-0.5"></i>
+                <div className="mb-4 p-3 bg-bg-base border border-border rounded-lg">
+                  <div className="flex items-start gap-2 text-text-muted text-sm">
+                    <i className="fa-solid fa-info-circle mt-0.5"></i>
                     <div>
-                      <span>Missing API keys for: {unavailableProviders.map(p => p.name).join(', ')}</span>
-                      <div className="text-xs text-text-muted mt-1">
-                        Set environment variables: {unavailableProviders.map(p => p.envVar).filter(Boolean).join(', ')}
+                      <span>CLI tools not found: {unavailableProviders.map(p => p.cliCommand).join(', ')}</span>
+                      <div className="text-xs mt-1">
+                        Install the CLI tools to use these providers.
                       </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {availableProviders.length === 0 ? (
-                <div className="text-center py-8">
-                  <i className="fa-solid fa-exclamation-circle text-4xl text-danger mb-3"></i>
-                  <p className="text-text-primary font-medium">No AI providers configured</p>
-                  <p className="text-sm text-text-muted mt-2">
-                    Please set at least one API key environment variable and restart the API server.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {renderRoleSelector('Orchestrator', 'fa-sitemap', orchestrator, handleProviderChange, setOrchestrator, 'orchestrator')}
-                  {renderRoleSelector('Coder', 'fa-code', coder, handleProviderChange, setCoder, 'coder')}
-                  {renderRoleSelector('Reviewer', 'fa-magnifying-glass', reviewer, handleProviderChange, setReviewer, 'reviewer')}
-                </div>
-              )}
+              <div className="space-y-4">
+                {renderRoleSelector('Orchestrator', 'fa-sitemap', orchestrator, handleProviderChange, setOrchestrator, 'orchestrator')}
+                {renderRoleSelector('Coder', 'fa-code', coder, handleProviderChange, setCoder, 'coder')}
+                {renderRoleSelector('Reviewer', 'fa-magnifying-glass', reviewer, handleProviderChange, setReviewer, 'reviewer')}
+              </div>
 
               {error && (
                 <div className="mt-4 p-3 bg-danger/10 border border-danger/20 rounded-lg text-danger text-sm">
@@ -229,7 +207,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete }) => {
         <div className="px-6 py-4 border-t border-border bg-bg-base">
           <button
             onClick={handleSave}
-            disabled={saving || availableProviders.length === 0}
+            disabled={saving}
             className="w-full px-4 py-3 bg-accent hover:bg-accent/80 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {saving ? (

@@ -498,66 +498,67 @@ async function fetchGeminiModels(): Promise<FetchModelsResult> {
 }
 
 // GET /api/ai/models/:provider - Get models for a provider
-router.get('/ai/models/:provider', async (req: Request, res: Response) => {
+// Uses static/fallback model lists - no API keys needed
+router.get('/ai/models/:provider', (req: Request, res: Response) => {
   const { provider } = req.params;
 
-  let result: FetchModelsResult;
+  const models = FALLBACK_MODELS[provider];
 
-  switch (provider) {
-    case 'claude':
-      result = await fetchClaudeModels();
-      break;
-    case 'openai':
-      result = await fetchOpenAIModels();
-      break;
-    case 'gemini':
-      result = await fetchGeminiModels();
-      break;
-    case 'codex':
-      result = { success: true, models: FALLBACK_MODELS.codex, source: 'fallback' };
-      break;
-    default:
-      return res.status(400).json({
-        success: false,
-        error: `Unknown provider: ${provider}`,
-      });
+  if (!models) {
+    return res.status(400).json({
+      success: false,
+      error: `Unknown provider: ${provider}`,
+    });
   }
 
   res.json({
     success: true,
     provider,
-    source: result.source,
-    models: result.models,
-    error: result.error,
+    source: 'static',
+    models,
   });
 });
 
+/**
+ * Check if a CLI tool is installed
+ */
+function isCliInstalled(command: string): boolean {
+  try {
+    execSync(`which ${command}`, { encoding: 'utf-8', stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // GET /api/ai/providers - Get list of available providers
 router.get('/ai/providers', (req: Request, res: Response) => {
+  // Check for CLI tool availability instead of API keys
+  // CLI tools handle their own authentication
   const providers = [
     {
       id: 'claude',
       name: 'Claude (Anthropic)',
-      hasApiKey: !!process.env.ANTHROPIC_API_KEY,
-      envVar: 'ANTHROPIC_API_KEY',
+      installed: isCliInstalled('claude'),
+      cliCommand: 'claude',
     },
     {
       id: 'openai',
       name: 'OpenAI',
-      hasApiKey: !!process.env.OPENAI_API_KEY,
-      envVar: 'OPENAI_API_KEY',
+      installed: isCliInstalled('openai') || isCliInstalled('chatgpt'),
+      cliCommand: 'openai',
     },
     {
       id: 'gemini',
       name: 'Gemini (Google)',
-      hasApiKey: !!(process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY),
-      envVar: 'GOOGLE_API_KEY',
+      installed: isCliInstalled('gemini'),
+      cliCommand: 'gemini',
     },
     {
       id: 'codex',
-      name: 'Codex',
-      hasApiKey: true, // Codex doesn't need API key
-      envVar: null,
+      name: 'Codex (OpenAI)',
+      installed: isCliInstalled('codex'),
+      cliCommand: 'codex',
     },
   ];
 
