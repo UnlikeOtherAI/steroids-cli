@@ -1,17 +1,18 @@
 # Steroids CLI Makefile
 
-.PHONY: build install clean test lint help restart launch launch-detached stop-ui
+.PHONY: build install clean test test-migrations lint help restart launch launch-detached stop-ui
 
 # Default target
 help:
 	@echo "Steroids CLI Development Commands"
 	@echo ""
-	@echo "  make build     - Build CLI and link globally"
-	@echo "  make restart   - Stop runners, rebuild, restart runner"
-	@echo "  make install   - Install dependencies"
-	@echo "  make clean     - Remove build artifacts"
-	@echo "  make test      - Run tests"
-	@echo "  make lint      - Run linter"
+	@echo "  make build           - Build CLI and link globally"
+	@echo "  make restart         - Stop runners, rebuild, restart runner"
+	@echo "  make install         - Install dependencies"
+	@echo "  make clean           - Remove build artifacts"
+	@echo "  make test            - Run tests"
+	@echo "  make test-migrations - Test DB migrations on fresh database"
+	@echo "  make lint            - Run linter"
 	@echo ""
 	@echo "WebUI/API targets:"
 	@echo "  make launch          - Start WebUI and API (foreground, shows logs)"
@@ -41,6 +42,10 @@ clean:
 # Run tests
 test:
 	npm test
+
+# Test database migrations on a fresh test database
+test-migrations: build
+	@./scripts/test-migrations.sh
 
 # Run linter
 lint:
