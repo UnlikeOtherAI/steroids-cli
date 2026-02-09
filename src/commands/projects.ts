@@ -33,10 +33,10 @@ LLM agents to only work on their own project and not modify other projects.`,
   ],
   subcommands: [
     { name: 'list', description: 'List all registered projects' },
-    { name: 'add', args: '<path>', description: 'Register a project' },
-    { name: 'remove', args: '<path>', description: 'Unregister a project' },
-    { name: 'enable', args: '<path>', description: 'Enable a project (include in wakeup)' },
-    { name: 'disable', args: '<path>', description: 'Disable a project (skip in wakeup)' },
+    { name: 'add', args: '[path]', description: 'Register a project (defaults to current dir)' },
+    { name: 'remove', args: '[path]', description: 'Unregister a project (defaults to current dir)' },
+    { name: 'enable', args: '[path]', description: 'Enable a project (defaults to current dir)' },
+    { name: 'disable', args: '[path]', description: 'Disable a project (defaults to current dir)' },
     { name: 'prune', description: 'Remove projects that no longer exist' },
   ],
   options: [
@@ -45,10 +45,11 @@ LLM agents to only work on their own project and not modify other projects.`,
   examples: [
     { command: 'steroids projects list', description: 'List enabled projects' },
     { command: 'steroids projects list --all', description: 'List all projects (including disabled)' },
-    { command: 'steroids projects add ~/code/my-app', description: 'Register a project' },
-    { command: 'steroids projects remove ~/old-project', description: 'Unregister a project' },
-    { command: 'steroids projects disable ~/code/on-hold', description: 'Disable a project' },
-    { command: 'steroids projects enable ~/code/on-hold', description: 'Re-enable a project' },
+    { command: 'steroids projects add', description: 'Register current directory' },
+    { command: 'steroids projects add ~/code/my-app', description: 'Register a specific project' },
+    { command: 'steroids projects remove', description: 'Unregister current directory' },
+    { command: 'steroids projects disable', description: 'Disable current project' },
+    { command: 'steroids projects enable', description: 'Re-enable current project' },
     { command: 'steroids projects prune', description: 'Remove stale entries' },
   ],
   related: [
@@ -87,39 +88,19 @@ export async function projectsCommand(args: string[], flags: GlobalFlags): Promi
       break;
 
     case 'add':
-      if (positionals.length < 2) {
-        out.error('INVALID_ARGUMENTS', 'Missing required argument: <path>');
-        out.log('Usage: steroids projects add <path>');
-        process.exit(1);
-      }
-      await addProject(out, positionals[1], flags);
+      await addProject(out, positionals[1] ?? process.cwd(), flags);
       break;
 
     case 'remove':
-      if (positionals.length < 2) {
-        out.error('INVALID_ARGUMENTS', 'Missing required argument: <path>');
-        out.log('Usage: steroids projects remove <path>');
-        process.exit(1);
-      }
-      await removeProject(out, positionals[1], flags);
+      await removeProject(out, positionals[1] ?? process.cwd(), flags);
       break;
 
     case 'enable':
-      if (positionals.length < 2) {
-        out.error('INVALID_ARGUMENTS', 'Missing required argument: <path>');
-        out.log('Usage: steroids projects enable <path>');
-        process.exit(1);
-      }
-      await enableProjectCmd(out, positionals[1], flags);
+      await enableProjectCmd(out, positionals[1] ?? process.cwd(), flags);
       break;
 
     case 'disable':
-      if (positionals.length < 2) {
-        out.error('INVALID_ARGUMENTS', 'Missing required argument: <path>');
-        out.log('Usage: steroids projects disable <path>');
-        process.exit(1);
-      }
-      await disableProjectCmd(out, positionals[1], flags);
+      await disableProjectCmd(out, positionals[1] ?? process.cwd(), flags);
       break;
 
     case 'prune':
