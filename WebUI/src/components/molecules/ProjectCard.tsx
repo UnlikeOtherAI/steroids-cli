@@ -48,7 +48,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
       </div>
 
       {project.stats && (
-        <div className="grid grid-cols-2 gap-2 mb-3">
+        <div className="grid grid-cols-2 gap-3 mb-3">
           <div className="bg-gray-50 rounded-lg p-2 text-center">
             <div className="text-xl font-bold text-gray-900">{project.stats.pending}</div>
             <div className="text-xs text-gray-500">Pending</div>
