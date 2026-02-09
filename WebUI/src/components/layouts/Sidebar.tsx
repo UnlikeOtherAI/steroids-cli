@@ -84,7 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   };
 
   return (
-    <aside className="w-60 bg-sidebar flex flex-col h-full max-h-screen lg:max-h-full lg:rounded-l-xl">
+    <aside className="w-60 bg-sidebar flex flex-col h-full max-h-screen lg:rounded-l-xl">
       <div className="py-4 pr-4 flex items-center justify-between overflow-hidden">
         <div className="flex items-center">
           <img src="/logo-hand.png" alt="" className="h-20 w-auto" style={{ marginLeft: '-2px' }} />
@@ -99,23 +99,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           </button>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto">
-        <nav className="px-3 space-y-1">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={onClose}
-              className={({ isActive }) =>
-                isActive ? 'sidebar-item-active' : 'sidebar-item'
-              }
-            >
-              <item.icon className="w-5 h-5" />
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-        </nav>
-        <div className="sticky bottom-0 p-4 bg-sidebar">
+      <nav className="flex-1 overflow-y-auto px-3 space-y-1">
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            onClick={onClose}
+            className={({ isActive }) =>
+              isActive ? 'sidebar-item-active' : 'sidebar-item'
+            }
+          >
+            <item.icon className="w-5 h-5" />
+            <span>{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
+      <div className="flex-shrink-0 p-4">
         <button
           onClick={handleCronToggle}
           disabled={loading || cronInstalled === null}
@@ -142,7 +141,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
             Last wakeup: {formatRelativeTime(lastWakeup)}
           </p>
         )}
-        </div>
       </div>
     </aside>
   );
