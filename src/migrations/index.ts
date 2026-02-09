@@ -9,6 +9,7 @@ export {
   MigrationManifest,
   AppliedMigration,
   getBundledManifestPath,
+  getMigrationFilePath,
   getCachedManifestPath,
   readBundledManifest,
   readCachedManifest,
@@ -37,4 +38,5 @@ export {
   runMigrations,
   rollbackToVersion,
   getMigrationStatus,
+  autoMigrate,
 } from './runner.js';

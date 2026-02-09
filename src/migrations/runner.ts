@@ -11,6 +11,7 @@ import {
   MigrationEntry,
   AppliedMigration,
   readBundledManifest,
+  getMigrationFilePath,
   calculateChecksum,
   verifyChecksum,
   findPendingMigrations,
@@ -70,18 +71,10 @@ export function parseMigrationFile(content: string): MigrationSql {
 }
 
 /**
- * Get path to migration file
- */
-function getMigrationFilePath(entry: MigrationEntry): string {
-  // Resolve relative to project root (same as manifest)
-  return join(process.cwd(), 'migrations', entry.file);
-}
-
-/**
  * Read migration file content
  */
 export function readMigrationFile(entry: MigrationEntry): string {
-  const filePath = getMigrationFilePath(entry);
+  const filePath = getMigrationFilePath(entry.file);
 
   if (!existsSync(filePath)) {
     throw new Error(`Migration file not found: ${filePath}`);
@@ -391,4 +384,55 @@ export function getMigrationStatus(
     pending,
     applied,
   };
+}
+
+/**
+ * Check and apply any pending migrations automatically
+ * Returns true if migrations were applied, false if already up to date
+ */
+export function autoMigrate(db: Database.Database, dbPath?: string): {
+  applied: boolean;
+  migrations: string[];
+  error?: string;
+} {
+  try {
+    const manifest = readBundledManifest();
+    const status = getMigrationStatus(db, manifest);
+
+    if (status.isUpToDate) {
+      return { applied: false, migrations: [] };
+    }
+
+    // Create backup before migrating if path provided
+    if (dbPath) {
+      try {
+        createBackup(dbPath);
+      } catch (backupErr) {
+        // Log but don't fail - backup is optional
+        console.error('Warning: Could not create backup before migration:', backupErr);
+      }
+    }
+
+    // Apply pending migrations
+    const result = runMigrations(db, manifest);
+
+    if (!result.success) {
+      return {
+        applied: false,
+        migrations: result.applied,
+        error: `Migration failed at ${result.failed}: ${result.error}`,
+      };
+    }
+
+    return {
+      applied: result.applied.length > 0,
+      migrations: result.applied,
+    };
+  } catch (err) {
+    return {
+      applied: false,
+      migrations: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }

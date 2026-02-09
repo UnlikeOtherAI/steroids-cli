@@ -8,6 +8,76 @@ import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 
+// Cache for package root to avoid repeated filesystem operations
+let _packageRoot: string | null = null;
+
+/**
+ * Get the CLI package root directory
+ * Works whether running from src/ or dist/
+ */
+function getPackageRoot(): string {
+  if (_packageRoot) return _packageRoot;
+
+  // Try multiple strategies to find the package root
+  const candidates: string[] = [];
+
+  // Strategy 1: Check process.argv[1] - this is the executed script path
+  if (process.argv[1]) {
+    let dir = dirname(process.argv[1]);
+    for (let i = 0; i < 5; i++) {
+      candidates.push(dir);
+      dir = dirname(dir);
+    }
+  }
+
+  // Strategy 2: Check require.main.filename if available
+  if (require.main?.filename) {
+    let dir = dirname(require.main.filename);
+    for (let i = 0; i < 5; i++) {
+      candidates.push(dir);
+      dir = dirname(dir);
+    }
+  }
+
+  // Strategy 3: Check __dirname of this module (works in CommonJS)
+  // In compiled output this will be dist/migrations/
+  if (typeof __dirname !== 'undefined') {
+    let dir = __dirname;
+    for (let i = 0; i < 5; i++) {
+      candidates.push(dir);
+      dir = dirname(dir);
+    }
+  }
+
+  // Find the first candidate that contains package.json with name 'steroids-cli'
+  for (const dir of candidates) {
+    const pkgPath = join(dir, 'package.json');
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        if (pkg.name === 'steroids-cli') {
+          _packageRoot = dir;
+          return dir;
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  // Last resort: try cwd (useful during development)
+  const cwdPkg = join(process.cwd(), 'package.json');
+  if (existsSync(cwdPkg)) {
+    try {
+      const pkg = JSON.parse(readFileSync(cwdPkg, 'utf-8'));
+      if (pkg.name === 'steroids-cli') {
+        _packageRoot = process.cwd();
+        return process.cwd();
+      }
+    } catch { /* ignore */ }
+  }
+
+  throw new Error('Could not locate steroids-cli package root');
+}
+
 /**
  * Single migration entry in the manifest
  */
@@ -56,8 +126,15 @@ const CACHE_FILE = join(CACHE_DIR, 'manifest-cache.json');
  * Get the path to the bundled manifest (in the package)
  */
 export function getBundledManifestPath(): string {
-  // Resolve relative to project root
-  return join(process.cwd(), 'migrations', 'manifest.json');
+  // Resolve relative to CLI package root, not cwd
+  return join(getPackageRoot(), 'migrations', 'manifest.json');
+}
+
+/**
+ * Get the path to a migration file (in the package)
+ */
+export function getMigrationFilePath(filename: string): string {
+  return join(getPackageRoot(), 'migrations', filename);
 }
 
 /**

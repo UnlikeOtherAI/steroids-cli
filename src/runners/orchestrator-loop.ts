@@ -3,7 +3,8 @@
  * Used by both the daemon and the loop command
  */
 
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, getDbPath } from '../database/connection.js';
+import { autoMigrate } from '../migrations/index.js';
 import { getTask, getSection } from '../database/queries.js';
 import {
   selectNextTask,
@@ -42,6 +43,17 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
   const { projectPath, once = false, shouldStop, sectionId } = options;
 
   const { db, close } = openDatabase(projectPath);
+
+  // Auto-migrate database if needed
+  const dbPath = getDbPath(projectPath);
+  const migrationResult = autoMigrate(db, dbPath);
+  if (migrationResult.applied) {
+    console.log(`Applied ${migrationResult.migrations.length} migration(s): ${migrationResult.migrations.join(', ')}`);
+  } else if (migrationResult.error) {
+    console.error(`Migration error: ${migrationResult.error}`);
+    close();
+    throw new Error(`Database migration failed: ${migrationResult.error}`);
+  }
 
   // Load batch mode config
   const config = loadConfig(projectPath);
