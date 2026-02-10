@@ -3,7 +3,15 @@
  * Logs all LLM invocations for debugging and audit purposes
  */
 
-import { existsSync, mkdirSync, writeFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { InvokeResult } from './interface.js';
 
@@ -11,29 +19,17 @@ import type { InvokeResult } from './interface.js';
  * Log entry for an LLM invocation
  */
 export interface InvocationLogEntry {
-  /** Timestamp of invocation start */
   timestamp: string;
-  /** Role (orchestrator, coder, reviewer) */
   role: 'orchestrator' | 'coder' | 'reviewer';
-  /** Provider name (claude, openai, gemini, codex) */
   provider: string;
-  /** Model identifier */
   model: string;
-  /** Task ID if applicable */
   taskId?: string;
-  /** Duration in milliseconds */
   duration: number;
-  /** Exit code */
   exitCode: number;
-  /** Whether the invocation succeeded */
   success: boolean;
-  /** Whether the invocation timed out */
   timedOut: boolean;
-  /** Prompt text */
   prompt: string;
-  /** Response text (stdout) */
   response: string;
-  /** Error text (stderr) */
   error?: string;
 }
 
@@ -41,15 +37,10 @@ export interface InvocationLogEntry {
  * Configuration for invocation logging
  */
 export interface InvocationLoggerConfig {
-  /** Enable logging (default: true) */
   enabled?: boolean;
-  /** Directory to store logs (default: .steroids/logs) */
   logsDir?: string;
-  /** Log retention in days (default: 7, 0 = keep forever) */
   retentionDays?: number;
-  /** Whether to include prompts in logs (default: true) */
   includePrompts?: boolean;
-  /** Whether to include responses in logs (default: true) */
   includeResponses?: boolean;
 }
 
@@ -319,13 +310,30 @@ export function resetInvocationLogger(): void {
   globalLogger = null;
 }
 
-/**
- * Helper to log an invocation result
- * Logs to both file system and database (if taskId provided)
- */
-export function logInvocation(
+type InvocationActivityEntry = Record<string, unknown> & { type: string };
+type InvocationInvokeContext = { onActivity?: (activity: InvocationActivityEntry) => void };
+
+function ensureInvocationsDir(projectPath: string): string {
+  const dir = join(projectPath, '.steroids', 'invocations');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  try {
+    writeFileSync(join(dir, 'README.txt'), 'Activity logs for invocations (JSONL).\n', { flag: 'wx' });
+  } catch {}
+  return dir;
+}
+
+function appendJsonlLine(filePath: string, entry: Record<string, unknown>): void {
+  // Best-effort logging: never fail the invocation on log I/O issues.
+  try {
+    appendFileSync(filePath, `${JSON.stringify(entry)}\n`, 'utf-8');
+  } catch (error) {
+    console.warn(`Failed to append invocation activity log: ${error}`);
+  }
+}
+
+export async function logInvocation(
   prompt: string,
-  result: InvokeResult,
+  invokeOrResult: ((ctx?: InvocationInvokeContext) => Promise<InvokeResult>) | InvokeResult,
   metadata: {
     role: 'orchestrator' | 'coder' | 'reviewer';
     provider: string;
@@ -334,54 +342,158 @@ export function logInvocation(
     projectPath?: string;
     rejectionNumber?: number;
   }
-): void {
+): Promise<InvokeResult> {
   const logger = getInvocationLogger();
+  const startedAtMs = Date.now();
 
-  // Log to file system
-  logger.log({
-    timestamp: new Date().toISOString(),
-    role: metadata.role,
-    provider: metadata.provider,
-    model: metadata.model,
-    taskId: metadata.taskId,
-    duration: result.duration,
-    exitCode: result.exitCode,
-    success: result.success,
-    timedOut: result.timedOut,
-    prompt,
-    response: result.stdout,
-    error: result.stderr || undefined,
-  });
+  const canDbLog =
+    Boolean(metadata.taskId && metadata.projectPath) &&
+    (metadata.role === 'coder' || metadata.role === 'reviewer');
 
-  // Also log to database if we have a task ID
-  if (metadata.taskId && (metadata.role === 'coder' || metadata.role === 'reviewer')) {
+  const projectPath = metadata.projectPath;
+  let invocationId: number | null = null;
+  let activityLogFile: string | null = null;
+  let dbConn: { db: any; close: () => void } | null = null;
+
+  const activity = (entry: InvocationActivityEntry): void => {
+    if (!activityLogFile) return;
+    appendJsonlLine(activityLogFile, { ts: Date.now(), ...entry });
+  };
+
+  if (canDbLog && projectPath) {
     try {
-      // Dynamic import to avoid circular dependencies
-      const { openDatabase } = require('../database/connection.js');
-      const { createTaskInvocation } = require('../database/queries.js');
+      const { openDatabase } = await import('../database/connection.js');
+      const conn = openDatabase(projectPath);
+      dbConn = conn;
 
-      const { db, close } = openDatabase(metadata.projectPath);
-      try {
-        createTaskInvocation(db, {
-          taskId: metadata.taskId,
-          role: metadata.role,
-          provider: metadata.provider,
-          model: metadata.model,
-          prompt,
-          response: result.stdout,
-          error: result.stderr || undefined,
-          exitCode: result.exitCode,
-          durationMs: result.duration,
-          success: result.success,
-          timedOut: result.timedOut,
-          rejectionNumber: metadata.rejectionNumber,
-        });
-      } finally {
-        close();
-      }
+      const insert = conn.db.prepare(
+        `INSERT INTO task_invocations (task_id, role, provider, model, prompt, started_at_ms, status, rejection_number)
+         VALUES (?, ?, ?, ?, ?, ?, 'running', ?)`
+      );
+
+      const info = insert.run(
+        metadata.taskId,
+        metadata.role,
+        metadata.provider,
+        metadata.model,
+        prompt,
+        startedAtMs,
+        metadata.rejectionNumber ?? null
+      );
+
+      invocationId = Number(info.lastInsertRowid);
+      const invDir = ensureInvocationsDir(projectPath);
+      activityLogFile = join(invDir, `${invocationId}.log`);
+      activity({ type: 'start', role: metadata.role, provider: metadata.provider, model: metadata.model });
     } catch (error) {
-      // Don't fail the invocation if database logging fails
-      console.warn(`Failed to log invocation to database: ${error}`);
+      console.warn(`Failed to create running invocation record: ${error}`);
+      if (dbConn) {
+        try {
+          dbConn.close();
+        } catch {}
+      }
+      dbConn = null;
     }
+  }
+
+  try {
+    const result: InvokeResult =
+      typeof invokeOrResult === 'function'
+        ? await invokeOrResult({ onActivity: (a) => activity(a) })
+        : invokeOrResult;
+
+    const completedAtMs = Date.now();
+    const status = result.timedOut ? 'timeout' : result.success ? 'completed' : 'failed';
+
+    activity({ type: 'complete', success: result.success, duration: result.duration, exitCode: result.exitCode, timedOut: result.timedOut });
+
+    // Human-readable log (legacy: .steroids/logs) for `steroids logs`
+    logger.log({
+      timestamp: new Date(startedAtMs).toISOString(),
+      role: metadata.role,
+      provider: metadata.provider,
+      model: metadata.model,
+      taskId: metadata.taskId,
+      duration: result.duration,
+      exitCode: result.exitCode,
+      success: result.success,
+      timedOut: result.timedOut,
+      prompt,
+      response: result.stdout,
+      error: result.stderr || undefined,
+    });
+
+    if (canDbLog && dbConn && invocationId !== null) {
+      try {
+        dbConn.db.prepare(
+          `UPDATE task_invocations
+           SET completed_at_ms = ?, status = ?, response = ?, error = ?, exit_code = ?, duration_ms = ?, success = ?, timed_out = ?, rejection_number = ?
+           WHERE id = ?`
+        ).run(
+          completedAtMs,
+          status,
+          result.stdout,
+          result.stderr || null,
+          result.exitCode,
+          result.duration,
+          result.success ? 1 : 0,
+          result.timedOut ? 1 : 0,
+          metadata.rejectionNumber ?? null,
+          invocationId
+        );
+      } catch (error) {
+        console.warn(`Failed to update invocation record: ${error}`);
+      } finally {
+        try {
+          dbConn.close();
+        } catch {}
+      }
+    }
+
+    return result;
+  } catch (error) {
+    const completedAtMs = Date.now();
+    const durationMs = completedAtMs - startedAtMs;
+    const message = error instanceof Error ? error.message : String(error);
+
+    activity({ type: 'error', error: message });
+
+    // Human-readable fallback log
+    logger.log({
+      timestamp: new Date(startedAtMs).toISOString(),
+      role: metadata.role,
+      provider: metadata.provider,
+      model: metadata.model,
+      taskId: metadata.taskId,
+      duration: durationMs,
+      exitCode: 1,
+      success: false,
+      timedOut: false,
+      prompt,
+      response: '',
+      error: message,
+    });
+
+    if (canDbLog && dbConn && invocationId !== null) {
+      try {
+        dbConn.db.prepare(
+          `UPDATE task_invocations
+           SET completed_at_ms = ?, status = 'failed', error = ?, exit_code = 1, duration_ms = ?, success = 0, timed_out = 0
+           WHERE id = ?`
+        ).run(completedAtMs, message, durationMs, invocationId);
+      } catch (e) {
+        console.warn(`Failed to update failed invocation record: ${e}`);
+      } finally {
+        try {
+          dbConn.close();
+        } catch {}
+      }
+    } else if (dbConn) {
+      try {
+        dbConn.close();
+      } catch {}
+    }
+
+    throw error;
   }
 }

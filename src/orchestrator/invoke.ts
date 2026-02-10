@@ -48,7 +48,10 @@ async function invokeOrchestrator(
   const config = loadConfig(projectPath);
   const orchestratorConfig = config.ai?.orchestrator;
 
-  if (!orchestratorConfig?.provider || !orchestratorConfig?.model) {
+  const providerName = orchestratorConfig?.provider;
+  const modelName = orchestratorConfig?.model;
+
+  if (!providerName || !modelName) {
     throw new Error(
       'Orchestrator AI provider not configured. Run "steroids config ai orchestrator" to configure.'
     );
@@ -56,12 +59,12 @@ async function invokeOrchestrator(
 
   // Get the provider from registry
   const registry = getProviderRegistry();
-  const provider = registry.get(orchestratorConfig.provider);
+  const provider = registry.get(providerName);
 
   // Check if provider is available
   if (!(await provider.isAvailable())) {
     throw new Error(
-      `Provider '${orchestratorConfig.provider}' is not available. ` +
+      `Provider '${providerName}' is not available. ` +
       `Ensure the CLI is installed and in PATH.`
     );
   }
@@ -71,24 +74,25 @@ async function invokeOrchestrator(
   writeFileSync(promptFile, prompt, 'utf-8');
 
   try {
-    // Invoke the provider (short timeout for orchestrator - 30 seconds)
-    const result = await provider.invoke(prompt, {
-      model: orchestratorConfig.model,
-      timeout: 30_000,
-      cwd: projectPath,
-      promptFile,
-      role,
-      streamOutput: false, // Don't stream orchestrator output
-    });
-
-    // Log the invocation
-    logInvocation(prompt, result, {
-      role,
-      provider: orchestratorConfig.provider,
-      model: orchestratorConfig.model,
-      taskId,
-      projectPath,
-    });
+    const result = await logInvocation(
+      prompt,
+      () =>
+        provider.invoke(prompt, {
+          model: modelName,
+          timeout: 30_000,
+          cwd: projectPath,
+          promptFile,
+          role,
+          streamOutput: false, // Don't stream orchestrator output
+        }),
+      {
+        role,
+        provider: providerName,
+        model: modelName,
+        taskId,
+        projectPath,
+      }
+    );
 
     return result.stdout;
   } finally {

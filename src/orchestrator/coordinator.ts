@@ -264,23 +264,25 @@ export async function invokeCoordinator(
   writeFileSync(tempPath, prompt, 'utf-8');
 
   try {
-    const result = await provider.invoke(prompt, {
-      model: modelName,
-      timeout: 300_000, // 5 minutes for coordinator
-      cwd: projectPath,
-      promptFile: tempPath,
-      role: 'orchestrator',
-      streamOutput: false,
-    });
-
-    // Log the invocation
-    logInvocation(prompt, result, {
-      role: 'orchestrator',
-      provider: providerName,
-      model: modelName,
-      taskId: task.id,
-      projectPath,
-    });
+    const result = await logInvocation(
+      prompt,
+      () =>
+        provider.invoke(prompt, {
+          model: modelName,
+          timeout: 300_000, // 5 minutes for coordinator
+          cwd: projectPath,
+          promptFile: tempPath,
+          role: 'orchestrator',
+          streamOutput: false,
+        }),
+      {
+        role: 'orchestrator',
+        provider: providerName,
+        model: modelName,
+        taskId: task.id,
+        projectPath,
+      }
+    );
 
     if (!result.success) {
       console.warn('Coordinator invocation failed - continuing without guidance');

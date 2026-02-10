@@ -99,7 +99,10 @@ async function invokeProvider(
   const config = loadConfig(projectPath);
   const reviewerConfig = config.ai?.reviewer;
 
-  if (!reviewerConfig?.provider || !reviewerConfig?.model) {
+  const providerName = reviewerConfig?.provider;
+  const modelName = reviewerConfig?.model;
+
+  if (!providerName || !modelName) {
     throw new Error(
       'Reviewer AI provider not configured. Run "steroids config ai reviewer" to configure.'
     );
@@ -107,12 +110,12 @@ async function invokeProvider(
 
   // Get the provider from registry
   const registry = getProviderRegistry();
-  const provider = registry.get(reviewerConfig.provider);
+  const provider = registry.get(providerName);
 
   // Check if provider is available
   if (!(await provider.isAvailable())) {
     throw new Error(
-      `Provider '${reviewerConfig.provider}' is not available. ` +
+      `Provider '${providerName}' is not available. ` +
       `Ensure the CLI is installed and in PATH.`
     );
   }
@@ -120,24 +123,25 @@ async function invokeProvider(
   // Read prompt content
   const promptContent = readFileSync(promptFile, 'utf-8');
 
-  // Invoke the provider
-  const result = await provider.invoke(promptContent, {
-    model: reviewerConfig.model,
-    timeout: timeoutMs,
-    cwd: process.cwd(),
-    promptFile,
-    role: 'reviewer',
-    streamOutput: true,
-  });
-
-  // Log the invocation (to both file and database)
-  logInvocation(promptContent, result, {
-    role: 'reviewer',
-    provider: reviewerConfig.provider,
-    model: reviewerConfig.model,
-    taskId,
-    projectPath,
-  });
+  const result = await logInvocation(
+    promptContent,
+    () =>
+      provider.invoke(promptContent, {
+        model: modelName,
+        timeout: timeoutMs,
+        cwd: process.cwd(),
+        promptFile,
+        role: 'reviewer',
+        streamOutput: true,
+      }),
+    {
+      role: 'reviewer',
+      provider: providerName,
+      model: modelName,
+      taskId,
+      projectPath,
+    }
+  );
 
   // Parse the decision from output
   const { decision, notes } = parseReviewerDecision(result.stdout);

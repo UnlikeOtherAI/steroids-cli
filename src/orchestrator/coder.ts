@@ -64,7 +64,10 @@ async function invokeProvider(
   const config = loadConfig(projectPath);
   const coderConfig = config.ai?.coder;
 
-  if (!coderConfig?.provider || !coderConfig?.model) {
+  const providerName = coderConfig?.provider;
+  const modelName = coderConfig?.model;
+
+  if (!providerName || !modelName) {
     throw new Error(
       'Coder AI provider not configured. Run "steroids config ai coder" to configure.'
     );
@@ -72,12 +75,12 @@ async function invokeProvider(
 
   // Get the provider from registry
   const registry = getProviderRegistry();
-  const provider = registry.get(coderConfig.provider);
+  const provider = registry.get(providerName);
 
   // Check if provider is available
   if (!(await provider.isAvailable())) {
     throw new Error(
-      `Provider '${coderConfig.provider}' is not available. ` +
+      `Provider '${providerName}' is not available. ` +
       `Ensure the CLI is installed and in PATH.`
     );
   }
@@ -85,24 +88,25 @@ async function invokeProvider(
   // Read prompt content
   const promptContent = require('fs').readFileSync(promptFile, 'utf-8');
 
-  // Invoke the provider
-  const result = await provider.invoke(promptContent, {
-    model: coderConfig.model,
-    timeout: timeoutMs,
-    cwd: process.cwd(),
-    promptFile,
-    role: 'coder',
-    streamOutput: true,
-  });
-
-  // Log the invocation (to both file and database)
-  logInvocation(promptContent, result, {
-    role: 'coder',
-    provider: coderConfig.provider,
-    model: coderConfig.model,
-    taskId,
-    projectPath,
-  });
+  const result = await logInvocation(
+    promptContent,
+    () =>
+      provider.invoke(promptContent, {
+        model: modelName,
+        timeout: timeoutMs,
+        cwd: process.cwd(),
+        promptFile,
+        role: 'coder',
+        streamOutput: true,
+      }),
+    {
+      role: 'coder',
+      provider: providerName,
+      model: modelName,
+      taskId,
+      projectPath,
+    }
+  );
 
   return {
     success: result.success,
