@@ -258,6 +258,13 @@ export function mergeConfigs(
     const baseValue = (base as Record<string, unknown>)[key];
     const overrideValue = (override as Record<string, unknown>)[key];
 
+    // Skip "unset" values - empty strings, null, or undefined should not override base values
+    // This preserves base config when override has empty/unset values
+    // Note: We intentionally DO NOT skip false or 0, as these are legitimate override values
+    if (overrideValue === undefined || overrideValue === null || overrideValue === '') {
+      continue;
+    }
+
     if (
       baseValue !== null &&
       typeof baseValue === 'object' &&
