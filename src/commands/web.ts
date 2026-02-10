@@ -155,7 +155,7 @@ function launchProcesses(out: ReturnType<typeof createOutput>): void {
   // Start API
   const apiLogPath = join(LOGS_DIR, 'api.log');
   const apiLog = openSync(apiLogPath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC);
-  const apiProcess = spawn('node', ['dist/API/src/index.js'], {
+  const apiProcess = spawn('node', ['dist/index.js'], {
     cwd: apiDir,
     detached: true,
     stdio: ['ignore', apiLog, apiLog],
