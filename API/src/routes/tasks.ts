@@ -263,6 +263,55 @@ async function streamJsonlFileToSSE(
   }
 }
 
+async function readSampledJsonlEntries(
+  filePath: string,
+  opts: { keepEveryN: number; shouldKeep?: (entry: any, index: number) => boolean }
+): Promise<any[]> {
+  const rs = createReadStream(filePath, { encoding: 'utf8' });
+  let buffer = '';
+  let index = 0;
+  const out: any[] = [];
+
+  const keep = (entry: any, i: number): boolean => {
+    if (opts.shouldKeep) return opts.shouldKeep(entry, i);
+    // Keep all tools, and sample the rest.
+    return entry?.type === 'tool' || i % opts.keepEveryN === 0;
+  };
+
+  for await (const chunk of rs) {
+    buffer += chunk;
+    let nl = buffer.indexOf('\n');
+    while (nl >= 0) {
+      const line = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      nl = buffer.indexOf('\n');
+
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const entry = JSON.parse(trimmed);
+        if (keep(entry, index)) out.push(entry);
+      } catch {
+        // ignore malformed JSONL lines
+      } finally {
+        index++;
+      }
+    }
+  }
+
+  const tailLine = buffer.trim();
+  if (tailLine) {
+    try {
+      const entry = JSON.parse(tailLine);
+      if (keep(entry, index)) out.push(entry);
+    } catch {
+      // ignore
+    }
+  }
+
+  return out;
+}
+
 /**
  * GET /api/tasks/:taskId
  * Get detailed information about a task including audit history
@@ -571,6 +620,105 @@ router.get('/tasks/:taskId/stream', async (req: Request, res: Response) => {
     });
     close();
   }
+});
+
+/**
+ * GET /api/tasks/:taskId/timeline
+ * Parse invocation JSONL activity logs on demand and return a sampled timeline.
+ * Query params:
+ *   - project: string (required) - project path
+ */
+router.get('/tasks/:taskId/timeline', async (req: Request, res: Response) => {
+  const { taskId } = req.params;
+  const projectPath = req.query.project as string | undefined;
+
+  if (!projectPath) {
+    res.status(400).json({
+      success: false,
+      error: 'Missing required query parameter: project',
+    });
+    return;
+  }
+
+  const db = openProjectDatabase(projectPath);
+  if (!db) {
+    res.status(404).json({
+      success: false,
+      error: 'Project database not found',
+      project: projectPath,
+    });
+    return;
+  }
+
+  type InvocationTimelineRow = {
+    id: number;
+    role: string;
+    provider: string;
+    model: string;
+    started_at_ms: number;
+    completed_at_ms: number | null;
+    status: string;
+  };
+
+  let invocations: InvocationTimelineRow[] = [];
+  try {
+    invocations = db
+      .prepare(
+        `SELECT id, role, provider, model, started_at_ms, completed_at_ms, status
+         FROM task_invocations
+         WHERE task_id = ?
+         ORDER BY started_at_ms ASC`
+      )
+      .all(taskId) as InvocationTimelineRow[];
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to query invocations (is the database migrated?)',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  } finally {
+    try {
+      db.close();
+    } catch {}
+  }
+
+  const timeline: any[] = [];
+
+  for (const inv of invocations) {
+    // Invocation start event (from DB lifecycle timestamps).
+    timeline.push({
+      ts: inv.started_at_ms,
+      type: 'invocation.started',
+      invocationId: inv.id,
+      role: inv.role,
+      provider: inv.provider,
+      model: inv.model,
+    });
+
+    const logFile = join(projectPath, '.steroids', 'invocations', `${inv.id}.log`);
+    if (existsSync(logFile)) {
+      try {
+        const sampled = await readSampledJsonlEntries(logFile, { keepEveryN: 10 });
+        for (const e of sampled) timeline.push({ ...e, invocationId: inv.id });
+      } catch {
+        // ignore per spec: timeline is best-effort
+      }
+    }
+
+    // Invocation completion event, when available.
+    if (inv.completed_at_ms) {
+      timeline.push({
+        ts: inv.completed_at_ms,
+        type: 'invocation.completed',
+        invocationId: inv.id,
+        success: inv.status === 'completed',
+        duration: inv.completed_at_ms - inv.started_at_ms,
+      });
+    }
+  }
+
+  res.json({ success: true, timeline });
 });
 
 /**
