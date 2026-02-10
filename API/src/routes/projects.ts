@@ -19,6 +19,7 @@ import {
 } from '../../../dist/runners/projects.js';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 import { isValidProjectPath, validatePathRequest } from '../utils/validation.js';
+import { openSqliteForRead } from '../utils/sqlite.js';
 
 const router = Router();
 
@@ -37,7 +38,7 @@ function getProjectLiveStats(projectPath: string): {
   }
 
   try {
-    const projectDb = new Database(dbPath, { readonly: true });
+    const projectDb = openSqliteForRead(dbPath);
     try {
       const row = projectDb
         .prepare(

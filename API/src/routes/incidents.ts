@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { openSqliteForRead } from '../utils/sqlite.js';
 
 const router = Router();
 
@@ -27,7 +28,7 @@ function openProjectDatabaseReadonly(projectPath: string): Database.Database | n
   const dbPath = join(projectPath, '.steroids', 'steroids.db');
   if (!existsSync(dbPath)) return null;
   try {
-    return new Database(dbPath, { readonly: true });
+    return openSqliteForRead(dbPath);
   } catch {
     return null;
   }
@@ -128,4 +129,3 @@ router.get('/incidents', (req: Request, res: Response) => {
 });
 
 export default router;
-

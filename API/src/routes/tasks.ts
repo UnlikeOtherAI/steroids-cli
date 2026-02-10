@@ -9,6 +9,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { Tail } from 'tail';
+import { openSqliteForRead } from '../utils/sqlite.js';
 
 const router = Router();
 
@@ -132,7 +133,7 @@ function openProjectDatabase(projectPath: string): Database.Database | null {
     return null;
   }
   try {
-    return new Database(dbPath, { readonly: true });
+    return openSqliteForRead(dbPath);
   } catch {
     return null;
   }

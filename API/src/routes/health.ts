@@ -13,6 +13,7 @@ import {
   type StuckTaskDetectionConfig,
 } from '../../../dist/health/stuck-task-detector.js';
 import { getGlobalDbPath } from '../../../dist/runners/global-db.js';
+import { openSqliteForRead } from '../utils/sqlite.js';
 
 const router = Router();
 
@@ -20,7 +21,7 @@ function openProjectDatabaseReadonly(projectPath: string): Database.Database | n
   const dbPath = join(projectPath, '.steroids', 'steroids.db');
   if (!existsSync(dbPath)) return null;
   try {
-    return new Database(dbPath, { readonly: true });
+    return openSqliteForRead(dbPath);
   } catch {
     return null;
   }
@@ -29,7 +30,7 @@ function openProjectDatabaseReadonly(projectPath: string): Database.Database | n
 function openGlobalDatabaseReadonlyOrMemory(): { db: Database.Database; close: () => void } {
   const dbPath = getGlobalDbPath();
   if (existsSync(dbPath)) {
-    const db = new Database(dbPath, { readonly: true });
+    const db = openSqliteForRead(dbPath);
     return { db, close: () => db.close() };
   }
 
@@ -188,4 +189,3 @@ router.get('/health', (req: Request, res: Response) => {
 });
 
 export default router;
-
