@@ -76,7 +76,7 @@ async function invokeOrchestrator(
   try {
     const result = await logInvocation(
       prompt,
-      () =>
+      (ctx) =>
         provider.invoke(prompt, {
           model: modelName,
           timeout: 30_000,
@@ -84,6 +84,7 @@ async function invokeOrchestrator(
           promptFile,
           role,
           streamOutput: false, // Don't stream orchestrator output
+          onActivity: ctx?.onActivity,
         }),
       {
         role,

@@ -21,7 +21,18 @@ export interface InvokeOptions {
   invocationTemplate?: string;
   /** Whether to stream output to stdout/stderr */
   streamOutput?: boolean;
+  /**
+   * Optional activity callback for live monitoring.
+   * Providers should emit lightweight JSON-serializable events as work progresses.
+   */
+  onActivity?: (activity: InvocationActivity) => void;
 }
+
+/**
+ * Activity entry emitted during a provider invocation.
+ * Kept intentionally flexible (JSONL logger appends arbitrary fields).
+ */
+export type InvocationActivity = Record<string, unknown> & { type: string };
 
 /**
  * Result of an AI provider invocation

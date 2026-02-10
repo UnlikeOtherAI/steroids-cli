@@ -13,7 +13,7 @@ import {
   statSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import type { InvokeResult } from './interface.js';
+import type { InvocationActivity, InvokeResult } from './interface.js';
 
 /**
  * Log entry for an LLM invocation
@@ -310,8 +310,7 @@ export function resetInvocationLogger(): void {
   globalLogger = null;
 }
 
-type InvocationActivityEntry = Record<string, unknown> & { type: string };
-type InvocationInvokeContext = { onActivity?: (activity: InvocationActivityEntry) => void };
+type InvocationInvokeContext = { onActivity?: (activity: InvocationActivity) => void };
 
 function ensureInvocationsDir(projectPath: string): string {
   const dir = join(projectPath, '.steroids', 'invocations');
@@ -355,7 +354,7 @@ export async function logInvocation(
   let activityLogFile: string | null = null;
   let dbConn: { db: any; close: () => void } | null = null;
 
-  const activity = (entry: InvocationActivityEntry): void => {
+  const activity = (entry: InvocationActivity): void => {
     if (!activityLogFile) return;
     appendJsonlLine(activityLogFile, { ts: Date.now(), ...entry });
   };

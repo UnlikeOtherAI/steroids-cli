@@ -101,6 +101,7 @@ export class GeminiProvider extends BaseAIProvider {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT;
     const cwd = options.cwd ?? process.cwd();
     const streamOutput = options.streamOutput ?? true;
+    const onActivity = options.onActivity;
 
     // Apply custom invocation template if provided in options
     if (options.invocationTemplate) {
@@ -112,7 +113,7 @@ export class GeminiProvider extends BaseAIProvider {
     const createdTempFile = !options.promptFile;
 
     try {
-      return await this.invokeWithFile(promptFile, options.model, timeout, cwd, streamOutput);
+      return await this.invokeWithFile(promptFile, options.model, timeout, cwd, streamOutput, onActivity);
     } finally {
       if (createdTempFile) {
         this.cleanupPromptFile(promptFile);
@@ -128,7 +129,8 @@ export class GeminiProvider extends BaseAIProvider {
     model: string,
     timeout: number,
     cwd: string,
-    streamOutput: boolean
+    streamOutput: boolean,
+    onActivity?: InvokeOptions['onActivity']
   ): Promise<InvokeResult> {
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -160,6 +162,7 @@ export class GeminiProvider extends BaseAIProvider {
       child.stdout?.on('data', (data: Buffer) => {
         const text = data.toString();
         stdout += text;
+        onActivity?.({ type: 'output', stream: 'stdout', msg: text });
         if (streamOutput) {
           process.stdout.write(text);
         }
@@ -168,6 +171,7 @@ export class GeminiProvider extends BaseAIProvider {
       child.stderr?.on('data', (data: Buffer) => {
         const text = data.toString();
         stderr += text;
+        onActivity?.({ type: 'output', stream: 'stderr', msg: text });
         if (streamOutput) {
           process.stderr.write(text);
         }

@@ -266,7 +266,7 @@ export async function invokeCoordinator(
   try {
     const result = await logInvocation(
       prompt,
-      () =>
+      (ctx) =>
         provider.invoke(prompt, {
           model: modelName,
           timeout: 300_000, // 5 minutes for coordinator
@@ -274,6 +274,7 @@ export async function invokeCoordinator(
           promptFile: tempPath,
           role: 'orchestrator',
           streamOutput: false,
+          onActivity: ctx?.onActivity,
         }),
       {
         role: 'orchestrator',

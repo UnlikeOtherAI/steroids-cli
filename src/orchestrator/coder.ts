@@ -90,7 +90,7 @@ async function invokeProvider(
 
   const result = await logInvocation(
     promptContent,
-    () =>
+    (ctx) =>
       provider.invoke(promptContent, {
         model: modelName,
         timeout: timeoutMs,
@@ -98,6 +98,7 @@ async function invokeProvider(
         promptFile,
         role: 'coder',
         streamOutput: true,
+        onActivity: ctx?.onActivity,
       }),
     {
       role: 'coder',

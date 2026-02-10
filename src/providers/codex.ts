@@ -91,6 +91,7 @@ export class CodexProvider extends BaseAIProvider {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT;
     const cwd = options.cwd ?? process.cwd();
     const streamOutput = options.streamOutput ?? true;
+    const onActivity = options.onActivity;
 
     // Apply custom invocation template if provided in options
     if (options.invocationTemplate) {
@@ -102,7 +103,7 @@ export class CodexProvider extends BaseAIProvider {
     const createdTempFile = !options.promptFile;
 
     try {
-      return await this.invokeWithFile(promptFile, options.model, timeout, cwd, streamOutput);
+      return await this.invokeWithFile(promptFile, options.model, timeout, cwd, streamOutput, onActivity);
     } finally {
       if (createdTempFile) {
         this.cleanupPromptFile(promptFile);
@@ -118,13 +119,16 @@ export class CodexProvider extends BaseAIProvider {
     model: string,
     timeout: number,
     cwd: string,
-    streamOutput: boolean
+    streamOutput: boolean,
+    onActivity?: InvokeOptions['onActivity']
   ): Promise<InvokeResult> {
     return new Promise((resolve) => {
       const startTime = Date.now();
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let stdoutParseBuffer = '';
+      let expectingToolCmd = false;
 
       // Build command from invocation template
       const command = this.buildCommand(promptFile, model);
@@ -153,11 +157,41 @@ export class CodexProvider extends BaseAIProvider {
         if (streamOutput) {
           process.stdout.write(text);
         }
+
+        if (!onActivity) return;
+
+        // Best-effort parsing for Codex CLI tool execution markers:
+        // Some versions emit lines like:
+        //   exec
+        //   <command>
+        // We interpret that as a tool event and otherwise forward text as output.
+        stdoutParseBuffer += text;
+        while (true) {
+          const nl = stdoutParseBuffer.indexOf('\n');
+          if (nl === -1) break;
+          const line = stdoutParseBuffer.slice(0, nl);
+          stdoutParseBuffer = stdoutParseBuffer.slice(nl + 1);
+
+          if (expectingToolCmd) {
+            const cmd = line.trim();
+            if (cmd) onActivity({ type: 'tool', cmd });
+            expectingToolCmd = false;
+            continue;
+          }
+
+          if (line === 'exec') {
+            expectingToolCmd = true;
+            continue;
+          }
+
+          onActivity({ type: 'output', stream: 'stdout', msg: `${line}\n` });
+        }
       });
 
       child.stderr?.on('data', (data: Buffer) => {
         const text = data.toString();
         stderr += text;
+        onActivity?.({ type: 'output', stream: 'stderr', msg: text });
         if (streamOutput) {
           process.stderr.write(text);
         }
@@ -166,6 +200,16 @@ export class CodexProvider extends BaseAIProvider {
       child.on('close', (code) => {
         clearTimeout(timeoutHandle);
         const duration = Date.now() - startTime;
+
+        if (onActivity && stdoutParseBuffer) {
+          // Flush remaining unterminated line.
+          if (expectingToolCmd) {
+            const cmd = stdoutParseBuffer.trim();
+            if (cmd) onActivity({ type: 'tool', cmd });
+          } else {
+            onActivity({ type: 'output', stream: 'stdout', msg: stdoutParseBuffer });
+          }
+        }
 
         resolve({
           success: code === 0 && !timedOut,
