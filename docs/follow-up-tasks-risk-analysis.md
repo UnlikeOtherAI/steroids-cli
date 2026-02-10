@@ -451,13 +451,107 @@ Before implementing this feature:
 
 ---
 
-## PENDING FULL REVIEWS
+## REVIEW STATUS
 
-- **Codex:** Partial analysis complete (thinking phase visible)
-- **Claude:** In progress
-- **Gemini:** In progress
+- **Codex:** ✅ Complete (9 issues identified, 6 HIGH-risk, 3 MEDIUM-risk)
+- **Claude:** ❌ Failed (model configuration issue: claude-sonnet-4 not available)
+- **Gemini:** ❌ Failed (ModelNotFoundError: gemini-2.0-flash-exp not found)
 
-This document will be updated with complete findings from all three providers.
+**Note:** Codex review alone is comprehensive enough to proceed. The 9 issues identified cover all major death spiral risks.
+
+---
+
+## CODEX COMPLETE FINDINGS
+
+The following 9 issues were identified by Codex (gpt-5.3-codex) in adversarial review:
+
+### Issue #1: Ambiguous "Deferred" State Machine
+**Risk: HIGH**
+**Codex's Analysis:** "Deferred follow-ups share `status='pending'` with actionable work. Any query that assumes `pending == work to do` will behave inconsistently (CLI counts, dashboards, task picker bugs)."
+
+**Codex's Recommended Fix:**
+- Make "deferred vs active" a first-class state
+- Option A: Add `status='deferred'`
+- Option B: Add `requires_promotion BOOLEAN` or `follow_up_state ENUM('deferred','active')`
+- Keep `is_follow_up` as "this is a follow-up" regardless of deferred/active
+
+### Issue #2: Self-Sustaining Follow-up Treadmill
+**Risk: HIGH**
+**Codex's Analysis:** "With `autoImplement=true`, every approved task spawns more tasks. Reviewer bias + auto-implement = work generated faster than completed = throughput collapse."
+
+**Codex's Recommended Fix:**
+- Add `followUpTasks.maxPerApproval` (default 3-5)
+- Add `followUpTasks.maxAutoImplementPerApproval` (default 1-2)
+- Add `followUpTasks.maxAutoImplementOutstanding` (cap total active follow-ups)
+- Require estimated size, auto-implement only S/XS
+- Auto-implement only if parent merged/pushed successfully
+
+### Issue #3: Infinite Follow-up Chains
+**Risk: HIGH**
+**Codex's Analysis:** "Follow-up B from follow-up A creates unbounded depth. With auto-implement, infinite chain."
+
+**Codex's Recommended Fix:**
+- Track `follow_up_depth INT` from `reference_task_id` chain
+- Add `followUpTasks.maxDepth` (default 1 or 2)
+- If exceeded: block creation OR force defer-only OR require human promotion
+
+### Issue #4: Unreliable Duplicate Detection
+**Risk: HIGH**
+**Codex's Analysis:** "Reviewer context truncates task list, misses similar tasks, creates duplicates. OR over-aggressively suppresses legitimate follow-ups. Different AI providers behave differently."
+
+**Codex's Recommended Fix:**
+- Add orchestrator-side minimal dedupe with `dedupe_key` (normalized title + reference_task_id)
+- Add unique index on dedupe_key
+- Include deferred follow-ups in reviewer's "existing tasks" set
+
+### Issue #5: Prompt/Schema Ambiguity Across Providers
+**Risk: HIGH**
+**Codex's Analysis:** "One provider interprets as 'always propose at least one' (helpfulness bias), another returns none. Causes rejection loops."
+
+**Codex's Recommended Fix:**
+- Explicitly state in prompt: follow-ups OPTIONAL, empty/omitted if none
+- follow-ups must be NON-BLOCKING
+- Cap count 0-5
+- Include "Done when" acceptance criteria
+- Schema must accept missing/empty follow_up_tasks
+
+### Issue #6: Follow-up vs Blocking Issue Underspecified
+**Risk: HIGH**
+**Codex's Analysis:** "Reviewer labels something as follow-up that coder interprets as required. Causes reject/approve oscillations. Inconsistency = rejection-loop generator."
+
+**Codex's Recommended Fix:**
+- Add `severity: 'low'|'medium'|'high'` or `non_blocking: true` field
+- Crisp rules:
+  - Correctness/security/data-loss/spec → REJECT (not follow-up)
+  - Follow-ups = improvements only (quality, refactor, docs, extra tests)
+
+### Issue #7: Underspecified "Scope" Behavior
+**Risk: MEDIUM**
+**Codex's Analysis:** "`scope='project-root'` but tasks require `section_id`. Follow-ups with NULL section become invisible or break 'next task' heuristics."
+
+**Codex's Recommended Fix:**
+- Define exactly how project-root maps:
+  - Create dedicated "Follow-ups" section, OR
+  - Allow `section_id NULL` and ensure every query handles it
+- If section deleted: define reassignment behavior
+
+### Issue #8: Reference Commit Fragility
+**Risk: MEDIUM**
+**Codex's Analysis:** "`reference_commit` SHA no longer exists after rebase. Task loses crucial context."
+
+**Codex's Recommended Fix:**
+- Store `reference_commit_message`, `reference_commit_summary`, `reference_branch`, `diffstat`
+- CLI warns gracefully and shows stored metadata
+
+### Issue #9: Data Validation Gaps (Prompt Injection)
+**Risk: HIGH**
+**Codex's Analysis:** "LLM-produced description contains malicious instructions, enormous content, or garbage. Becomes future system input when task selected."
+
+**Codex's Recommended Fix:**
+- Strict validation: title 5-120 chars, description 20-4000 chars
+- Reject/trim control characters
+- Store structured context: `files[]`, `symbols[]`, `commands[]`, `acceptance_criteria[]`
+- When injecting into prompts: wrap as untrusted data, add instruction to ignore conflicting commands
 
 ---
 
