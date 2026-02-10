@@ -12,6 +12,7 @@ import { getRegisteredProjects } from './projects.js';
 import { openDatabase } from '../database/connection.js';
 import { loadConfig } from '../config/loader.js';
 import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
+import { cleanupInvocationLogs } from '../cleanup/invocation-logs.js';
 
 export interface WakeupOptions {
   quiet?: boolean;
@@ -28,6 +29,7 @@ export interface WakeupResult {
   projectPath?: string;
   recoveredActions?: number;
   skippedRecoveryDueToSafetyLimit?: boolean;
+  deletedInvocationLogs?: number;
 }
 
 /**
@@ -228,6 +230,19 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
       continue;
     }
 
+    // Phase 6 (live monitoring): best-effort retention cleanup of invocation activity logs.
+    // This is safe to run even if the project has no pending tasks.
+    let deletedInvocationLogs = 0;
+    try {
+      const cleanup = cleanupInvocationLogs(project.path, { retentionDays: 7, dryRun });
+      deletedInvocationLogs = cleanup.deletedFiles;
+      if (cleanup.deletedFiles > 0 && !quiet) {
+        log(`Cleaned ${cleanup.deletedFiles} old invocation log(s) in ${project.path}`);
+      }
+    } catch {
+      // Ignore cleanup errors; wakeup must remain robust.
+    }
+
     // Skip if project already has an active runner
     // Check for pending work
     const hasWork = await projectHasPendingWork(project.path);
@@ -237,6 +252,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         action: 'none',
         reason: 'No pending tasks',
         projectPath: project.path,
+        deletedInvocationLogs,
       });
       continue;
     }
@@ -283,6 +299,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         projectPath: project.path,
         recoveredActions,
         skippedRecoveryDueToSafetyLimit,
+        deletedInvocationLogs,
       });
       continue;
     }
@@ -297,6 +314,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         projectPath: project.path,
         recoveredActions,
         skippedRecoveryDueToSafetyLimit,
+        deletedInvocationLogs,
       });
       continue;
     }
@@ -310,6 +328,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         projectPath: project.path,
         recoveredActions,
         skippedRecoveryDueToSafetyLimit,
+        deletedInvocationLogs,
       });
     } else {
       results.push({
@@ -318,6 +337,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         projectPath: project.path,
         recoveredActions,
         skippedRecoveryDueToSafetyLimit,
+        deletedInvocationLogs,
       });
     }
   }

@@ -393,36 +393,13 @@ app.get('/api/tasks/:id/timeline', async (req, res) => {
 **Simple file deletion:**
 
 ```typescript
-// src/cleanup/invocation-logs.ts
-
-export async function cleanupInvocationLogs(
-  projectPath: string,
-  retentionDays = 7
-): Promise<number> {
-  const logsDir = join(projectPath, '.steroids', 'invocations');
-  const cutoffMs = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
-
-  const files = readdirSync(logsDir).filter(f => f.endsWith('.log'));
-  let deleted = 0;
-
-  for (const file of files) {
-    const filePath = join(logsDir, file);
-    const stat = statSync(filePath);
-
-    // Delete if older than retention period
-    if (stat.mtimeMs < cutoffMs) {
-      unlinkSync(filePath);
-      deleted++;
-    }
-  }
-
-  return deleted;
-}
+// Implemented at: src/cleanup/invocation-logs.ts
+// Called by wakeup + exposed via: steroids cleanup logs
 ```
 
 **Automatic cleanup:**
 - Run cleanup during wakeup (like stuck task recovery)
-- Or add `steroids cleanup logs` command
+- Or use `steroids cleanup logs`
 - Or scheduled cron job
 
 ## Comparison: Database vs Files

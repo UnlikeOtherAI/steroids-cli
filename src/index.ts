@@ -24,6 +24,7 @@ import { completionCommand } from './commands/completion.js';
 import { locksCommand } from './commands/locks.js';
 import { disputeCommand } from './commands/disputes.js';
 import { purgeCommand } from './commands/purge.js';
+import { cleanupCommand } from './commands/cleanup.js';
 import { gitCommand } from './commands/git.js';
 import { aboutCommand } from './commands/about.js';
 import { projectsCommand } from './commands/projects.js';
@@ -79,6 +80,7 @@ COMMANDS:
   scan              Scan directory for projects
   backup            Manage backups
   logs              View invocation logs
+  cleanup           Cleanup utilities (retention-based)
   gc                Garbage collection
   purge             Purge old data
   git               Git integration commands
@@ -197,6 +199,9 @@ async function main(): Promise<void> {
         break;
       case 'logs':
         await logsCommand(commandArgs, flags);
+        break;
+      case 'cleanup':
+        await cleanupCommand(commandArgs, flags);
         break;
       case 'gc':
         await gcCommand(commandArgs, flags);

@@ -56,6 +56,7 @@ const COMMANDS = {
   scan: [],
   backup: ['create', 'restore', 'list', 'clean'],
   logs: ['show', 'list', 'tail', 'purge'],
+  cleanup: ['logs'],
   gc: [],
   disputes: ['create', 'list', 'show', 'resolve', 'log'],
   purge: ['tasks', 'ids', 'logs', 'all'],
