@@ -240,7 +240,7 @@ export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation, taskId
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-bg-base flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
           <div className="bg-bg-surface rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 border-b border-border flex items-center justify-between bg-bg-base">
               <h2 className="text-xl font-bold text-text-primary">
