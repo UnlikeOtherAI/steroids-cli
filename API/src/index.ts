@@ -5,6 +5,9 @@
 
 import express from 'express';
 import cors from 'cors';
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import projectsRouter from './routes/projects.js';
 import activityRouter from './routes/activity.js';
 import runnersRouter from './routes/runners.js';
@@ -118,16 +121,23 @@ export function startServer(): void {
   });
 }
 
-// Only start listening when executed as the entrypoint (safe to import in tests).
-if (process.argv[1]) {
+function normalizePath(p: string): string {
   try {
-    const { fileURLToPath } = await import('node:url');
-    const entryPath = process.argv[1];
-    const thisPath = fileURLToPath(import.meta.url);
-    if (thisPath === entryPath) startServer();
+    return realpathSync(p);
   } catch {
-    // If entrypoint detection fails, do not auto-start.
+    return resolve(p);
   }
 }
+
+// Only start listening when executed as the entrypoint (safe to import in tests).
+// This works for `node dist/.../index.js` and `tsx watch src/index.ts` (tsx keeps the entry file in argv).
+const shouldAutoStart = (() => {
+  if (process.env.NODE_ENV === 'test') return false;
+  const thisPath = normalizePath(fileURLToPath(import.meta.url));
+  const argvPaths = process.argv.slice(1).map((a) => normalizePath(a));
+  return argvPaths.includes(thisPath);
+})();
+
+if (shouldAutoStart) startServer();
 
 export default app;
