@@ -504,7 +504,21 @@ export function listTasks(
     params.push(`%${options.search}%`);
   }
 
-  sql += ' ORDER BY COALESCE(s.position, 999999), t.created_at';
+  // Sort by status priority (in_progress first, completed/skipped last)
+  sql += ` ORDER BY
+    CASE t.status
+      WHEN 'in_progress' THEN 1
+      WHEN 'review' THEN 2
+      WHEN 'pending' THEN 3
+      WHEN 'disputed' THEN 4
+      WHEN 'failed' THEN 5
+      WHEN 'partial' THEN 6
+      WHEN 'skipped' THEN 7
+      WHEN 'completed' THEN 8
+      ELSE 9
+    END,
+    COALESCE(s.position, 999999),
+    t.created_at`;
 
   return db.prepare(sql).all(...params) as Task[];
 }
