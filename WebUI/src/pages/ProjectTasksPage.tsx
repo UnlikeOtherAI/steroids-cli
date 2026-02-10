@@ -80,16 +80,29 @@ export const ProjectTasksPage: React.FC = () => {
         limit: 100,
       });
 
+      // Sort by status priority (in_progress first, completed/skipped last)
+      const statusPriority: Record<string, number> = {
+        'in_progress': 1,
+        'review': 2,
+        'pending': 3,
+        'disputed': 4,
+        'failed': 5,
+        'partial': 6,
+        'skipped': 7,
+        'completed': 8,
+      };
+
       let sortedTasks = [...response.tasks];
-      if (statusParam && QUEUE_STATUSES.includes(statusParam) && statusParam !== 'completed') {
-        sortedTasks.sort((a, b) =>
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
-      } else {
-        sortedTasks.sort((a, b) =>
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-        );
-      }
+      sortedTasks.sort((a, b) => {
+        // Sort by status priority first
+        const priorityA = statusPriority[a.status] || 9;
+        const priorityB = statusPriority[b.status] || 9;
+        if (priorityA !== priorityB) {
+          return priorityA - priorityB;
+        }
+        // Within same status, sort by creation time
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
 
       setTasks(sortedTasks);
       setStatusCounts(response.status_counts);
