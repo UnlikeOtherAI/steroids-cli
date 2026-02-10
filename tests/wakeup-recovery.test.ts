@@ -13,7 +13,7 @@ interface TestProject {
 }
 
 function createTestProjectWithPendingWork(name: string): TestProject {
-  const projectPath = join('/tmp', `steroids-test-${name}-${Date.now()}`);
+  const projectPath = join('/tmp', `steroids-test-${name}-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(projectPath, { recursive: true });
   mkdirSync(join(projectPath, '.steroids'), { recursive: true });
 

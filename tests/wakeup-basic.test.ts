@@ -19,7 +19,7 @@ function createTestProject(name: string, taskCounts: {
   review?: number;
   completed?: number;
 } = {}): TestProject {
-  const projectPath = join('/tmp', `steroids-test-${name}-${Date.now()}`);
+  const projectPath = join('/tmp', `steroids-test-${name}-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(projectPath, { recursive: true });
   const steroidsDir = join(projectPath, '.steroids');
   mkdirSync(steroidsDir, { recursive: true });
