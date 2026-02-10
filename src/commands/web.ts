@@ -10,6 +10,18 @@ import { execSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, constants as fsConstants } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Get CLI version from package.json
+const packageJson = JSON.parse(
+  readFileSync(join(__dirname, '../../package.json'), 'utf-8')
+);
+const CLI_VERSION = packageJson.version;
 
 const WEB_DIR = join(homedir(), '.steroids', 'webui');
 const LOGS_DIR = join(homedir(), '.steroids', 'logs');
@@ -82,15 +94,16 @@ function ensureRepo(out: ReturnType<typeof createOutput>): boolean {
     return false; // Already cloned
   }
 
-  out.log('Cloning Steroids repository...');
+  out.log(`Cloning Steroids repository (v${CLI_VERSION})...`);
   const parentDir = join(homedir(), '.steroids');
   if (!existsSync(parentDir)) {
     mkdirSync(parentDir, { recursive: true });
   }
 
-  // hardcoded command, no user input - shallow clone for speed
-  execSync(`git clone --depth 1 ${REPO_URL} "${WEB_DIR}"`, { stdio: 'inherit' });
-  out.log('Repository cloned.');
+  // hardcoded command, no user input - clone specific version tag
+  const tag = `v${CLI_VERSION}`;
+  execSync(`git clone --depth 1 --branch ${tag} ${REPO_URL} "${WEB_DIR}"`, { stdio: 'inherit' });
+  out.log(`Repository cloned (${tag}).`);
   return true;
 }
 
@@ -185,18 +198,26 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
       if (freshClone) {
         installAndBuild(out);
       } else {
-        // Always pull latest before launching
-        out.log('Checking for updates...');
+        // Check if we need to update to match CLI version
+        out.log('Checking version...');
         try {
-          const result = execSync('git pull', { cwd: WEB_DIR, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
-          if (result.includes('Already up to date')) {
-            out.log('Already up to date.');
+          const currentTag = execSync('git describe --tags --exact-match', {
+            cwd: WEB_DIR,
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe']
+          }).trim();
+          const expectedTag = `v${CLI_VERSION}`;
+
+          if (currentTag === expectedTag) {
+            out.log(`Already on ${expectedTag}.`);
           } else {
-            out.log('Updated. Reinstalling...');
+            out.log(`Updating from ${currentTag} to ${expectedTag}...`);
+            execSync(`git fetch --depth 1 origin tag ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
+            execSync(`git checkout ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
             installAndBuild(out);
           }
         } catch {
-          out.log('Could not check for updates (offline?). Launching with current version.');
+          out.log('Could not verify version. Launching with current code.');
         }
       }
       launchProcesses(out);
