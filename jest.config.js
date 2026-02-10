@@ -10,6 +10,7 @@ export default {
     '^.+\\.tsx?$': [
       'ts-jest',
       {
+        tsconfig: 'tsconfig.jest.json',
         useESM: true,
       },
     ],

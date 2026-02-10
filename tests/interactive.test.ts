@@ -28,9 +28,9 @@ describe('isInteractive', () => {
   });
 
   afterEach(() => {
-    // Restore TTY state
-    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true });
+    // Restore TTY state (keep configurable so other tests can redefine safely)
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true, configurable: true });
   });
 
   afterAll(() => {
@@ -38,37 +38,37 @@ describe('isInteractive', () => {
   });
 
   it('should return true when stdin and stdout are TTY and not in CI', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
 
     expect(isInteractive()).toBe(true);
   });
 
   it('should return false when CI env var is set', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
     process.env.CI = '1';
 
     expect(isInteractive()).toBe(false);
   });
 
   it('should return false when stdin is not TTY', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
 
     expect(isInteractive()).toBe(false);
   });
 
   it('should return false when stdout is not TTY', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: false, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: false, writable: true, configurable: true });
 
     expect(isInteractive()).toBe(false);
   });
 
   it('should return false when stdin is undefined', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: undefined, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: undefined, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
 
     expect(isInteractive()).toBe(false);
   });
@@ -155,9 +155,9 @@ describe('requireInteractive', () => {
   });
 
   afterEach(() => {
-    // Restore TTY state
-    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true });
+    // Restore TTY state (keep configurable so other tests can redefine safely)
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true, configurable: true });
   });
 
   afterAll(() => {
@@ -165,15 +165,15 @@ describe('requireInteractive', () => {
   });
 
   it('should not throw when in interactive mode', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
 
     expect(() => requireInteractive('Test message')).not.toThrow();
   });
 
   it('should throw CliError when not in interactive mode', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
 
     expect(() => requireInteractive('Test message')).toThrow(CliError);
     expect(() => requireInteractive('Test message')).toThrow(
@@ -182,8 +182,8 @@ describe('requireInteractive', () => {
   });
 
   it('should throw CliError with INVALID_ARGUMENTS code', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
 
     try {
       requireInteractive('Test message');
@@ -195,8 +195,8 @@ describe('requireInteractive', () => {
   });
 
   it('should throw when in CI environment', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
     process.env.CI = '1';
 
     expect(() => requireInteractive('Test message')).toThrow(CliError);
@@ -225,9 +225,9 @@ describe('warnNonInteractive', () => {
     if (consoleWarnSpy && consoleWarnSpy.mockRestore) {
       consoleWarnSpy.mockRestore();
     }
-    // Restore TTY state
-    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true });
+    // Restore TTY state (keep configurable so other tests can redefine safely)
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true, configurable: true });
   });
 
   afterAll(() => {
@@ -235,24 +235,24 @@ describe('warnNonInteractive', () => {
   });
 
   it('should not warn in interactive mode', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
 
     warnNonInteractive('Test warning');
     expect(consoleWarnSpy).not.toHaveBeenCalled();
   });
 
   it('should warn in non-interactive mode', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
 
     warnNonInteractive('Test warning');
     expect(consoleWarnSpy).toHaveBeenCalledWith('Warning: Test warning');
   });
 
   it('should not warn in quiet mode', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
     process.env.STEROIDS_QUIET = '1';
 
     warnNonInteractive('Test warning');
@@ -260,8 +260,8 @@ describe('warnNonInteractive', () => {
   });
 
   it('should include CI hint when in CI', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
     process.env.CI = '1';
 
     warnNonInteractive('Test warning');
@@ -288,9 +288,9 @@ describe('getEnvironmentInfo', () => {
   });
 
   afterEach(() => {
-    // Restore TTY state
-    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true });
+    // Restore TTY state (keep configurable so other tests can redefine safely)
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTTY, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTTY, writable: true, configurable: true });
   });
 
   afterAll(() => {
@@ -298,8 +298,8 @@ describe('getEnvironmentInfo', () => {
   });
 
   it('should return correct info for interactive mode', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, writable: true, configurable: true });
 
     const info = getEnvironmentInfo();
     expect(info.interactive).toBe(true);
@@ -310,8 +310,8 @@ describe('getEnvironmentInfo', () => {
   });
 
   it('should detect GitHub Actions', () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: false, writable: true });
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: false, writable: true, configurable: true });
     process.env.GITHUB_ACTIONS = 'true';
 
     const info = getEnvironmentInfo();
@@ -350,3 +350,4 @@ describe('getEnvironmentInfo', () => {
     expect(info.ciSystem).toBe('Generic CI');
   });
 });
+
