@@ -257,6 +257,83 @@ Remove stale projects (directories that no longer exist)
 }
 ```
 
+### GET /api/tasks/:taskId/stream
+Stream live invocation activity for the currently running invocation using Server-Sent Events (SSE).
+
+**Query Parameters:**
+- `project` - Project path (required)
+
+**Responses:**
+- `200 text/event-stream` - SSE stream where each `data:` block is a JSON object
+- `400 application/json` - Missing `project`
+- `404 application/json` - Project database not found
+- `429 application/json` - Too many active streams
+
+**Event payloads (examples):**
+```json
+{ "type": "start", "ts": 1707567540123, "role": "coder", "provider": "codex", "model": "codex" }
+{ "type": "tool", "ts": 1707567545678, "cmd": "rg -n 'verified email' src/" }
+{ "type": "output", "ts": 1707567545890, "stream": "stdout", "msg": "Found 15 matches\n" }
+{ "type": "complete", "ts": 1707567560456, "success": true, "duration": 20333 }
+```
+
+**Non-activity status events (examples):**
+```json
+{ "type": "no_active_invocation", "taskId": "task-123" }
+{ "type": "waiting_for_log", "taskId": "task-123", "invocationId": 456 }
+{ "type": "log_not_found", "taskId": "task-123", "invocationId": 456 }
+{ "type": "error", "error": "Failed to stream invocation log", "message": "..." }
+```
+
+**Usage:**
+```bash
+curl -N "http://127.0.0.1:3501/api/tasks/<taskId>/stream?project=$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$PWD")"
+```
+
+Notes:
+- The stream follows the JSONL file at `.steroids/invocations/<invocationId>.log`.
+- The server periodically sends SSE comments as a heartbeat (lines starting with `:`).
+
+### GET /api/tasks/:taskId/timeline
+Parse invocation JSONL activity logs on demand and return a sampled timeline.
+
+**Query Parameters:**
+- `project` - Project path (required)
+
+**Response:**
+```json
+{
+  "success": true,
+  "timeline": [
+    {
+      "ts": 1707567540123,
+      "type": "invocation.started",
+      "invocationId": 456,
+      "role": "coder",
+      "provider": "codex",
+      "model": "codex"
+    },
+    {
+      "ts": 1707567545678,
+      "type": "tool",
+      "cmd": "rg -n 'verified email' src/",
+      "invocationId": 456
+    },
+    {
+      "ts": 1707567560456,
+      "type": "invocation.completed",
+      "invocationId": 456,
+      "success": true,
+      "duration": 20333
+    }
+  ]
+}
+```
+
+Notes:
+- The timeline includes DB-derived lifecycle events (`invocation.started`, `invocation.completed`) plus sampled JSONL activity entries.
+- Sampling is best-effort and intended to keep payload sizes reasonable.
+
 ## Error Responses
 
 All endpoints return errors in this format:

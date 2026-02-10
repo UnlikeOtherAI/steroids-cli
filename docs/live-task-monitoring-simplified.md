@@ -282,6 +282,12 @@ app.get('/api/tasks/:id/stream', async (req, res) => {
 - ✅ No database polling
 - ✅ Simple cleanup (just stop tailing)
 
+**As-implemented notes (repository):**
+- The SSE endpoint emits a few helper events while waiting for a new invocation to create its JSONL file:
+  - `waiting_for_log` then `log_not_found` if the log file never appears
+  - `no_active_invocation` when there is no `status='running'` invocation for the task
+- A heartbeat is sent as SSE comments (lines starting with `:`) to keep proxies from timing out idle connections.
+
 ## Activity Callback (Provider Integration)
 
 Providers just call the callback for each activity:
@@ -465,12 +471,27 @@ app.get('/api/tasks/:id/timeline', async (req, res) => {
 - [ ] Test with live tasks
 
 ### Phase 8: Testing & Docs (2 hours)
-- [ ] Integration tests for log streaming
-- [ ] Test with all providers
-- [ ] Update API documentation
-- [ ] Add troubleshooting guide
+- [x] Integration tests for log streaming
+- [x] Test with all providers
+- [x] Update API documentation
+- [x] Add troubleshooting guide
 
 **Total Estimated Time: 14-18 hours**
+
+## Integration Tests (Repository)
+
+- `tests/invocation-activity-jsonl.test.ts`: verifies JSONL log creation and DB lifecycle updates
+- `tests/api-tasks-stream-sse.test.ts`: verifies SSE streams existing JSONL and tails new lines for running invocations
+- `tests/api-tasks-timeline.test.ts`: verifies timeline parses and samples JSONL activity logs
+- `tests/providers-onactivity.test.ts`: verifies all providers emit `onActivity` events (including Codex tool marker parsing)
+
+## Troubleshooting
+
+- Stream returns `no_active_invocation`: the task has no invocation with `status='running'` in `task_invocations`. Verify the runner is actually executing the task.
+- Stream returns `waiting_for_log` then `log_not_found`: the invocation row exists, but the JSONL log file never appeared at `.steroids/invocations/<invocationId>.log` within a few seconds. Check filesystem permissions and that the invocation logger is enabled.
+- Stream closes immediately: a `complete` or `error` entry was written to the log, or the client disconnected.
+- Timeline is missing activity details: timeline parsing is best-effort and only reads the JSONL file if it exists; it also samples entries to keep payload size down.
+- SSE behind a proxy/load balancer: ensure buffering is disabled and keep-alives are supported (the server also sends periodic heartbeats).
 
 ## Migration Guide
 
