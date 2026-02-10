@@ -134,6 +134,9 @@ CREATE TABLE IF NOT EXISTS task_invocations (
     prompt TEXT NOT NULL,
     response TEXT,
     error TEXT,
+    started_at_ms INTEGER,
+    completed_at_ms INTEGER,
+    status TEXT DEFAULT 'completed' CHECK(status IN ('running', 'completed', 'failed', 'timeout')),
     exit_code INTEGER NOT NULL DEFAULT 0,
     duration_ms INTEGER NOT NULL DEFAULT 0,
     success INTEGER NOT NULL DEFAULT 0,
@@ -145,6 +148,7 @@ CREATE TABLE IF NOT EXISTS task_invocations (
 CREATE INDEX IF NOT EXISTS idx_task_invocations_task ON task_invocations(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_invocations_role ON task_invocations(role);
 CREATE INDEX IF NOT EXISTS idx_task_invocations_created ON task_invocations(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_task_invocations_task_status ON task_invocations(task_id, status, started_at_ms DESC);
 
 -- Incidents (stuck-task detection/recovery)
 CREATE TABLE IF NOT EXISTS incidents (
@@ -178,4 +182,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (6, '006_add_task_
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (7, '007_add_file_anchor', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (8, '008_add_section_skipped', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (9, '009_add_incidents_and_failure_tracking', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (10, '010_add_lifecycle_timestamps', 'builtin');
 `;

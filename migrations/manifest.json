@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 9,
+  "latestDbVersion": 10,
   "migrations": [
     {
       "id": 1,
@@ -73,6 +73,14 @@
       "description": "Add incidents table and task failure counters for stuck-task recovery",
       "checksum": "",
       "cliVersion": "0.6.5"
+    },
+    {
+      "id": 10,
+      "name": "010_add_lifecycle_timestamps",
+      "file": "010_add_lifecycle_timestamps.sql",
+      "description": "Add started_at_ms, completed_at_ms, and status columns to task_invocations for lifecycle tracking",
+      "checksum": "",
+      "cliVersion": "0.7.0"
     }
   ]
 }

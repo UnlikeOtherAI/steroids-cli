@@ -273,6 +273,21 @@ if [[ "$INVOCATIONS_COLS" != *"rejection_number"* ]]; then
     exit 1
 fi
 
+if [[ "$INVOCATIONS_COLS" != *"started_at_ms"* ]]; then
+    echo -e "${RED}FAILED: task_invocations.started_at_ms column missing${NC}"
+    exit 1
+fi
+
+if [[ "$INVOCATIONS_COLS" != *"completed_at_ms"* ]]; then
+    echo -e "${RED}FAILED: task_invocations.completed_at_ms column missing${NC}"
+    exit 1
+fi
+
+if [[ "$INVOCATIONS_COLS" != *"status"* ]]; then
+    echo -e "${RED}FAILED: task_invocations.status column missing${NC}"
+    exit 1
+fi
+
 # Test: Fresh database (using SCHEMA_SQL) should also work and be up to date
 echo ""
 echo "Testing fresh database (SCHEMA_SQL path)..."
@@ -280,14 +295,15 @@ FRESH_DIR="/tmp/steroids-fresh-test-$$"
 mkdir -p "$FRESH_DIR"
 cd "$FRESH_DIR"
 git init -q  # Required for steroids init
-steroids init -y --no-register 2>&1 | head -3
+# Use the local CLI build under test (not a globally-installed steroids binary).
+node "$PROJECT_ROOT/dist/index.js" init -y --no-register 2>&1 | head -3
 FRESH_DB="$FRESH_DIR/.steroids/steroids.db"
 
 FRESH_MIGRATIONS=$(sqlite3 "$FRESH_DB" "SELECT COUNT(*) FROM _migrations;")
 echo "  Fresh DB migrations recorded: $FRESH_MIGRATIONS"
 
-if [ "$FRESH_MIGRATIONS" -ne 8 ]; then
-    echo -e "${RED}FAILED: Fresh database should have 8 migrations recorded, got $FRESH_MIGRATIONS${NC}"
+if [ "$FRESH_MIGRATIONS" -ne 10 ]; then
+    echo -e "${RED}FAILED: Fresh database should have 10 migrations recorded, got $FRESH_MIGRATIONS${NC}"
     rm -rf "$FRESH_DIR"
     exit 1
 fi
