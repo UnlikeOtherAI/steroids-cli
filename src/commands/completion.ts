@@ -52,7 +52,7 @@ const COMMANDS = {
   loop: [],
   runners: ['list', 'start', 'stop', 'status', 'logs', 'wakeup', 'cron'],
   config: ['init', 'show', 'get', 'set', 'validate', 'path', 'edit', 'browse'],
-  health: [],
+  health: ['check', 'incidents'],
   scan: [],
   backup: ['create', 'restore', 'list', 'clean'],
   logs: ['show', 'list', 'tail', 'purge'],
@@ -354,6 +354,10 @@ function getSubcommandDescription(cmd: string, sub: string): string {
       logs: 'View runner logs',
       wakeup: 'Check and start runners for projects with work',
       cron: 'Manage cron job for auto-wakeup',
+    },
+    health: {
+      check: 'Detect and recover stuck tasks/runners',
+      incidents: 'View and manage stuck-task incident history',
     },
     config: {
       init: 'Create configuration file',

@@ -19,6 +19,7 @@ import { listTasks } from '../database/queries.js';
 import { hasUncommittedChanges, isGitRepo } from '../git/status.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
+import { runHealthSubcommand } from './health-stuck.js';
 
 // Health check weights (must sum to 100)
 const WEIGHTS = {
@@ -52,7 +53,11 @@ const HELP = generateHelp({
   details: `Runs multiple health checks against your project and calculates an overall health score.
 Each check is weighted, and the total score ranges from 0-100.
 Use --threshold to enforce minimum health requirements in CI/CD pipelines.`,
-  usage: ['steroids health [options]'],
+  usage: ['steroids health [options]', 'steroids health <check|incidents> [options]'],
+  subcommands: [
+    { name: 'check', description: 'Detect and recover stuck tasks/runners (stuck-task health check)' },
+    { name: 'incidents', description: 'View and manage stuck-task incident history' },
+  ],
   options: [
     { long: 'threshold', description: 'Exit with code 7 if score below threshold', values: '<number>' },
     { long: 'fix', description: 'Attempt auto-fixes for failing checks' },
@@ -99,6 +104,15 @@ Non-fixable checks require manual intervention:
 
 export async function healthCommand(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'health', flags });
+
+  // Subcommands for stuck-task detection/recovery and incident management.
+  if (args.length > 0 && !args[0]?.startsWith('-')) {
+    const sub = args[0];
+    if (sub === 'check' || sub === 'incidents') {
+      await runHealthSubcommand(sub, args.slice(1), flags);
+      return;
+    }
+  }
 
   const { values } = parseArgs({
     args,
