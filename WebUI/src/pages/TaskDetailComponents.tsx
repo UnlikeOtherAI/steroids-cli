@@ -338,6 +338,49 @@ export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation, taskId
   );
 };
 
+// ============ InvocationsPanel ============
+
+interface InvocationsPanelProps {
+  invocations: TaskInvocation[] | undefined;
+  taskId: string;
+  projectPath: string;
+}
+
+export const InvocationsPanel: React.FC<InvocationsPanelProps> = ({ invocations, taskId, projectPath }) => {
+  const count = invocations?.length || 0;
+
+  return (
+    <div className="mt-6">
+      <h2 className="text-lg font-semibold text-text-primary mb-3">
+        <i className="fa-solid fa-layer-group mr-2"></i>
+        Invocations
+        <span className="text-sm font-normal text-text-muted ml-2">({count})</span>
+      </h2>
+      <div className="card overflow-hidden">
+        {!invocations || invocations.length === 0 ? (
+          <div className="p-6 text-center text-text-muted">
+            <p>No invocations recorded yet</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {invocations
+              .slice()
+              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+              .map((inv) => (
+                <InvocationRow
+                  key={`invocation-${inv.id}`}
+                  invocation={inv}
+                  taskId={taskId}
+                  projectPath={projectPath}
+                />
+              ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ============ DisputePanel ============
 
 interface DisputePanelProps {

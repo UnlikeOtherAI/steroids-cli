@@ -32,6 +32,24 @@ export interface TaskInvocation {
   created_at: string;
 }
 
+/**
+ * Timeline events returned by GET /api/tasks/:taskId/timeline.
+ * This is intentionally flexible because the timeline can include sampled JSONL
+ * entries from invocation logs (tool/output/etc) as well as synthesized lifecycle
+ * events (invocation.started/invocation.completed).
+ */
+export interface TaskTimelineEvent {
+  ts: number; // epoch millis
+  type: string;
+  invocationId?: number;
+  [key: string]: unknown;
+}
+
+export interface TaskTimelineResponse {
+  success: boolean;
+  timeline: TaskTimelineEvent[];
+}
+
 export interface TaskDispute {
   id: string;
   task_id: string;

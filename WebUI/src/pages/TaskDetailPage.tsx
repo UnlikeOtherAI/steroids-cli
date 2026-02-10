@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { TaskDetails, TaskStatus } from '../types';
-import { tasksApi, projectsApi } from '../services/api';
+import { AuditEntry, TaskDetails, TaskStatus, TaskTimelineEvent } from '../types';
+import { API_BASE_URL, tasksApi, projectsApi } from '../services/api';
 import { Badge } from '../components/atoms/Badge';
 import { PageLayout } from '../components/templates/PageLayout';
-import { AuditLogRow, InvocationRow, DisputePanel, formatDuration, formatTimestamp } from './TaskDetailComponents';
+import { AuditLogRow, DisputePanel, formatDuration, formatTimestamp, InvocationsPanel } from './TaskDetailComponents';
+import { LiveInvocationActivityPanel, InvocationTimelineEventRow, StreamState } from './TaskLiveTimelineComponents';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   pending: 'Pending',
@@ -42,9 +43,15 @@ export const TaskDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(true);
+  const [timeline, setTimeline] = useState<TaskTimelineEvent[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [streamState, setStreamState] = useState<StreamState>({ status: 'disconnected' });
+  const [liveActivity, setLiveActivity] = useState<TaskTimelineEvent[]>([]);
   const [restarting, setRestarting] = useState(false);
   const [restartNotes, setRestartNotes] = useState('');
   const intervalRef = useRef<number | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   const fetchTask = useCallback(async () => {
     if (!taskId || !projectPath) return;
@@ -65,9 +72,27 @@ export const TaskDetailPage: React.FC = () => {
     }
   }, [taskId, projectPath]);
 
+  const fetchTimeline = useCallback(async () => {
+    if (!taskId || !projectPath) return;
+    setTimelineLoading(true);
+    try {
+      const events = await tasksApi.getTimeline(taskId, projectPath);
+      setTimeline(events);
+      setTimelineError(null);
+    } catch (err) {
+      setTimelineError(err instanceof Error ? err.message : 'Failed to load timeline');
+    } finally {
+      setTimelineLoading(false);
+    }
+  }, [taskId, projectPath]);
+
   useEffect(() => {
     fetchTask();
   }, [fetchTask]);
+
+  useEffect(() => {
+    fetchTimeline();
+  }, [fetchTimeline]);
 
   const handleRestart = async (notes?: string) => {
     if (!taskId || !projectPath || restarting || !task) return;
@@ -122,6 +147,92 @@ export const TaskDetailPage: React.FC = () => {
     };
   }, [isLive, fetchTask]);
 
+  useEffect(() => {
+    if (!taskId || !projectPath) return;
+
+    // Only stream while live updates are enabled and the task is not terminal.
+    if (!isLive || (task && ['completed', 'failed', 'skipped', 'disputed'].includes(task.status))) {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      setStreamState({ status: 'disconnected' });
+      return;
+    }
+
+    // Close any previous stream before opening a new one.
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    setStreamState({ status: 'connecting' });
+    const url = `${API_BASE_URL}/api/tasks/${encodeURIComponent(taskId)}/stream?project=${encodeURIComponent(projectPath)}`;
+    const es = new EventSource(url);
+    eventSourceRef.current = es;
+
+    es.onopen = () => {
+      setStreamState({ status: 'connected' });
+    };
+
+    es.onmessage = (ev) => {
+      let entry: any;
+      try {
+        entry = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+
+      const type = String(entry?.type ?? '');
+      if (type === 'no_active_invocation') {
+        setStreamState({ status: 'no_active_invocation' });
+        try { es.close(); } catch {}
+        return;
+      }
+      if (type === 'waiting_for_log') {
+        setStreamState({ status: 'waiting_for_log', invocationId: typeof entry?.invocationId === 'number' ? entry.invocationId : undefined });
+        return;
+      }
+      if (type === 'log_not_found') {
+        setStreamState({ status: 'log_not_found', invocationId: typeof entry?.invocationId === 'number' ? entry.invocationId : undefined });
+        try { es.close(); } catch {}
+        return;
+      }
+      if (type === 'error' && (typeof entry?.error === 'string' || typeof entry?.message === 'string')) {
+        setStreamState({ status: 'error', message: String(entry?.error ?? entry?.message) });
+      }
+
+      if (typeof entry?.ts !== 'number') {
+        entry.ts = Date.now();
+      }
+
+      // Append activity entries; keep bounded history to avoid unbounded memory growth.
+      if (type) {
+        setLiveActivity((prev) => {
+          const next = [...prev, entry as TaskTimelineEvent];
+          return next.length > 300 ? next.slice(next.length - 300) : next;
+        });
+      }
+
+      // When an invocation completes, refresh the sampled timeline.
+      if (type === 'complete' || type === 'error') {
+        void fetchTimeline().finally(() => {
+          try { es.close(); } catch {}
+        });
+      }
+    };
+
+    es.onerror = () => {
+      setStreamState({ status: 'error', message: 'Stream connection error' });
+      try { es.close(); } catch {}
+    };
+
+    return () => {
+      try { es.close(); } catch {}
+      eventSourceRef.current = null;
+    };
+  }, [fetchTimeline, isLive, projectPath, task?.status, taskId]);
+
   const projectName = projectPath?.split('/').pop() || 'Project';
 
   if (!projectPath) {
@@ -135,6 +246,31 @@ export const TaskDetailPage: React.FC = () => {
       </PageLayout>
     );
   }
+
+  const mergedTimelineItems: Array<
+    | { kind: 'audit'; key: string; ts: number; entry: AuditEntry }
+    | { kind: 'invocation'; key: string; ts: number; event: TaskTimelineEvent }
+  > = [
+    ...(task?.audit_trail || []).map((entry) => ({
+      kind: 'audit' as const,
+      key: `audit-${entry.id}`,
+      ts: new Date(entry.created_at).getTime(),
+      entry,
+    })),
+    ...timeline
+      .filter((e) => {
+        // De-dupe lifecycle events: the timeline API synthesizes invocation.started/completed.
+        // Raw JSONL entries ('start'/'complete') are not needed in the UI timeline.
+        const t = e.type;
+        return t !== 'start' && t !== 'complete';
+      })
+      .map((event, idx) => ({
+        kind: 'invocation' as const,
+        key: `inv-${String(event.invocationId ?? 'none')}-${event.ts}-${idx}`,
+        ts: event.ts,
+        event,
+      })),
+  ].sort((a, b) => b.ts - a.ts);
 
   return (
     <PageLayout
@@ -265,7 +401,10 @@ export const TaskDetailPage: React.FC = () => {
                 {isLive ? 'Pause' : 'Resume'}
               </button>
               <button
-                onClick={fetchTask}
+                onClick={() => {
+                  fetchTask();
+                  fetchTimeline();
+                }}
                 className="px-3 py-1 text-sm bg-bg-surface text-text-muted hover:text-text-primary rounded transition-colors"
               >
                 <i className="fa-solid fa-refresh mr-1"></i>
@@ -274,40 +413,53 @@ export const TaskDetailPage: React.FC = () => {
             </div>
           </div>
 
+          <LiveInvocationActivityPanel
+            isLive={isLive}
+            streamState={streamState}
+            liveActivity={liveActivity}
+            onClear={() => setLiveActivity([])}
+          />
+
           {/* Merged Timeline */}
           <div className="card overflow-hidden">
-            {task.audit_trail.length === 0 && (!task.invocations || task.invocations.length === 0) ? (
+            {(task.audit_trail.length === 0 && timeline.length === 0 && !timelineLoading) ? (
               <div className="p-8 text-center text-text-muted">
                 <i className="fa-solid fa-list text-4xl mb-4"></i>
                 <p>No activity recorded yet</p>
               </div>
             ) : (
               <div className="divide-y divide-border">
-                {[
-                  ...task.audit_trail.map(entry => ({ type: 'audit' as const, data: entry, timestamp: entry.created_at })),
-                  ...(task.invocations || []).map(inv => ({ type: 'invocation' as const, data: inv, timestamp: inv.created_at }))
-                ]
-                  .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-                  .map((item, index) =>
-                    item.type === 'audit' ? (
+                {timelineError && (
+                  <div className="p-4 text-sm text-danger">
+                    <i className="fa-solid fa-triangle-exclamation mr-2"></i>
+                    Failed to load invocation timeline: {timelineError}
+                  </div>
+                )}
+                {timelineLoading && (
+                  <div className="p-4 text-sm text-text-muted">
+                    <i className="fa-solid fa-spinner fa-spin mr-2"></i>
+                    Loading invocation timeline...
+                  </div>
+                )}
+                {mergedTimelineItems.map((item, index) => {
+                  if (item.kind === 'audit') {
+                    return (
                       <AuditLogRow
-                        key={`audit-${item.data.id}`}
-                        entry={item.data}
+                        key={item.key}
+                        entry={item.entry}
                         isLatest={index === 0}
                         githubUrl={task.github_url}
                       />
-                    ) : (
-                      <InvocationRow
-                        key={`invocation-${item.data.id}`}
-                        invocation={item.data}
-                        taskId={taskId!}
-                        projectPath={projectPath!}
-                      />
-                    )
-                  )}
+                    );
+                  }
+
+                  return <InvocationTimelineEventRow key={item.key} event={item.event} ts={item.ts} />;
+                })}
               </div>
             )}
           </div>
+
+          <InvocationsPanel invocations={task.invocations} taskId={taskId!} projectPath={projectPath!} />
 
           {/* Metadata */}
           <div className="mt-6 text-xs text-text-muted flex items-center gap-4">

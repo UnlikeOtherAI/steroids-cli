@@ -235,15 +235,6 @@ export const RunnersPage: React.FC = () => {
                               </div>
                             )}
 
-                            {task.file_path && (
-                              <div className="flex items-center gap-2 text-gray-600">
-                                <i className="fa-solid fa-code text-xs w-4"></i>
-                                <span className="font-medium">File:</span>
-                                <span className="truncate">{task.file_path}</span>
-                                {task.file_line && <span className="text-gray-500">:{task.file_line}</span>}
-                              </div>
-                            )}
-
                             {task.rejection_count > 0 && (
                               <div className="flex items-center gap-2 text-orange-600">
                                 <i className="fa-solid fa-exclamation-triangle text-xs w-4"></i>

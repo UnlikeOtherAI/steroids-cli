@@ -18,11 +18,13 @@ import {
   TaskLogsResponse,
   TaskListResponse,
   SectionsListResponse,
+  TaskTimelineEvent,
+  TaskTimelineResponse,
 } from '../types';
 
 // Auto-detect API URL: use the same host as the WebUI but port 3501
 // This allows accessing from mobile devices on the local network
-const API_BASE_URL =
+export const API_BASE_URL =
   import.meta.env.VITE_API_URL ||
   (typeof window !== 'undefined'
     ? `${window.location.protocol}//${window.location.hostname}:3501`
@@ -245,6 +247,15 @@ export const tasksApi = {
     const url = `/api/tasks/${encodeURIComponent(taskId)}?project=${encodeURIComponent(projectPath)}`;
     const response = await fetchJson<TaskDetailsResponse>(url);
     return response.task;
+  },
+
+  /**
+   * Get a sampled invocation activity timeline for this task.
+   */
+  async getTimeline(taskId: string, projectPath: string): Promise<TaskTimelineEvent[]> {
+    const url = `/api/tasks/${encodeURIComponent(taskId)}/timeline?project=${encodeURIComponent(projectPath)}`;
+    const response = await fetchJson<TaskTimelineResponse>(url);
+    return response.timeline;
   },
 
   /**
