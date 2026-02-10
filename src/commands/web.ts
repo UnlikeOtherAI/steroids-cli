@@ -11,17 +11,17 @@ import { existsSync, mkdirSync, openSync, constants as fsConstants } from 'node:
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Get CLI version from package.json
-const packageJson = JSON.parse(
-  readFileSync(join(__dirname, '../../package.json'), 'utf-8')
-);
-const CLI_VERSION = packageJson.version;
+// Get CLI version from package.json (relative to dist/commands/)
+function getCLIVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
+    return pkg.version;
+  } catch {
+    return '0.0.0'; // Fallback
+  }
+}
+const CLI_VERSION = getCLIVersion();
 
 const WEB_DIR = join(homedir(), '.steroids', 'webui');
 const LOGS_DIR = join(homedir(), '.steroids', 'logs');
