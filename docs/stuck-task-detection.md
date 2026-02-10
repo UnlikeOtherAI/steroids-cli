@@ -778,24 +778,53 @@ async function runLoop() {
 The health check system should expose data for the Monitor app:
 
 ```typescript
-// API endpoint: GET /api/health
+// API endpoint: GET /api/health?project=<path>
 {
-  "status": "healthy" | "degraded" | "unhealthy",
-  "lastCheck": "2026-02-10T13:45:00Z",
-  "checks": [
+  "success": true,
+  "project": "<path>",
+  "health": {
+    "status": "healthy" | "degraded" | "unhealthy",
+    "lastCheck": "2026-02-10T13:45:00Z",
+    "checks": [
+      {
+        "type": "orphaned_tasks",
+        "healthy": true,
+        "found": 0
+      },
+      {
+        "type": "hanging_invocations",
+        "healthy": false,
+        "found": 1
+      }
+    ],
+    "activeIncidents": 1,
+    "recentIncidents": 3  // last 24 hours
+  }
+}
+```
+
+Incidents are exposed for history views:
+
+```typescript
+// API endpoint: GET /api/incidents?project=<path>&limit=<n>&task=<prefix>&unresolved=<true|false>
+{
+  "success": true,
+  "project": "<path>",
+  "total": 2,
+  "incidents": [
     {
-      "type": "orphaned_tasks",
-      "healthy": true,
-      "found": 0
-    },
-    {
-      "type": "hanging_invocations",
-      "healthy": false,
-      "found": 1
+      "id": "i1",
+      "task_id": "t1",
+      "task_title": "Task title",
+      "runner_id": null,
+      "failure_mode": "orphaned_task",
+      "detected_at": "2026-02-10 13:45:00",
+      "resolved_at": null,
+      "resolution": null,
+      "details": null,
+      "created_at": "2026-02-10 13:45:00"
     }
-  ],
-  "activeIncidents": 1,
-  "recentIncidents": 3  // last 24 hours
+  ]
 }
 ```
 
