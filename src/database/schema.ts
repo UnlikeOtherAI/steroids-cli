@@ -44,12 +44,15 @@ CREATE TABLE IF NOT EXISTS tasks (
     file_commit_sha TEXT,
     file_content_hash TEXT,
     rejection_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    last_failure_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_section ON tasks(section_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_failures ON tasks(failure_count) WHERE failure_count > 0;
 
 -- Audit trail (immutable log of status changes)
 CREATE TABLE IF NOT EXISTS audit (
@@ -142,6 +145,23 @@ CREATE TABLE IF NOT EXISTS task_invocations (
 CREATE INDEX IF NOT EXISTS idx_task_invocations_task ON task_invocations(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_invocations_role ON task_invocations(role);
 CREATE INDEX IF NOT EXISTS idx_task_invocations_created ON task_invocations(created_at DESC);
+
+-- Incidents (stuck-task detection/recovery)
+CREATE TABLE IF NOT EXISTS incidents (
+    id TEXT PRIMARY KEY,
+    task_id TEXT REFERENCES tasks(id),
+    runner_id TEXT,
+    failure_mode TEXT NOT NULL,
+    detected_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolution TEXT,
+    details TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_incidents_task ON incidents(task_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_detected ON incidents(detected_at);
+CREATE INDEX IF NOT EXISTS idx_incidents_unresolved ON incidents(resolved_at) WHERE resolved_at IS NULL;
 `;
 
 export const INITIAL_SCHEMA_DATA = `
@@ -157,4 +177,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (5, '005_add_audit
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (6, '006_add_task_invocations', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (7, '007_add_file_anchor', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (8, '008_add_section_skipped', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (9, '009_add_incidents_and_failure_tracking', 'builtin');
 `;

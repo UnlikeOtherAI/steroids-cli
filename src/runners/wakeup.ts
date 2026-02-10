@@ -9,6 +9,9 @@ import { checkLockStatus, removeLock } from './lock.js';
 import { openGlobalDatabase } from './global-db.js';
 import { findStaleRunners } from './heartbeat.js';
 import { getRegisteredProjects } from './projects.js';
+import { openDatabase } from '../database/connection.js';
+import { loadConfig } from '../config/loader.js';
+import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
 
 export interface WakeupOptions {
   quiet?: boolean;
@@ -23,6 +26,8 @@ export interface WakeupResult {
   staleRunners?: number;
   pendingTasks?: number;
   projectPath?: string;
+  recoveredActions?: number;
+  skippedRecoveryDueToSafetyLimit?: boolean;
 }
 
 /**
@@ -161,28 +166,29 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
   }
 
   // Step 1: Clean up stale runners first
-  const { db, close } = openGlobalDatabase();
+  const global = openGlobalDatabase();
   try {
-    const staleRunners = findStaleRunners(db);
-    if (staleRunners.length > 0) {
-      log(`Found ${staleRunners.length} stale runner(s), cleaning up...`);
-      if (!dryRun) {
-        for (const runner of staleRunners) {
-          if (runner.pid) {
-            killProcess(runner.pid);
+    try {
+      const staleRunners = findStaleRunners(global.db);
+      if (staleRunners.length > 0) {
+        log(`Found ${staleRunners.length} stale runner(s), cleaning up...`);
+        if (!dryRun) {
+          for (const runner of staleRunners) {
+            if (runner.pid) {
+              killProcess(runner.pid);
+            }
+            global.db.prepare('DELETE FROM runners WHERE id = ?').run(runner.id);
           }
-          db.prepare('DELETE FROM runners WHERE id = ?').run(runner.id);
         }
+        results.push({
+          action: 'cleaned',
+          reason: `Cleaned ${staleRunners.length} stale runner(s)`,
+          staleRunners: staleRunners.length,
+        });
       }
-      results.push({
-        action: 'cleaned',
-        reason: `Cleaned ${staleRunners.length} stale runner(s)`,
-        staleRunners: staleRunners.length,
-      });
+    } catch {
+      // ignore global DB issues; wakeup will still attempt per-project checks
     }
-  } finally {
-    close();
-  }
 
   // Step 2: Clean zombie lock if present
   const lockStatus = checkLockStatus();
@@ -223,23 +229,60 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
     }
 
     // Skip if project already has an active runner
-    if (hasActiveRunnerForProject(project.path)) {
-      log(`Skipping ${project.path}: runner already active`);
-      results.push({
-        action: 'none',
-        reason: 'Runner already active',
-        projectPath: project.path,
-      });
-      continue;
-    }
-
     // Check for pending work
-    if (!(await projectHasPendingWork(project.path))) {
+    const hasWork = await projectHasPendingWork(project.path);
+    if (!hasWork) {
       log(`Skipping ${project.path}: no pending tasks`);
       results.push({
         action: 'none',
         reason: 'No pending tasks',
         projectPath: project.path,
+      });
+      continue;
+    }
+
+    // Step 4a: Recover stuck tasks (best-effort) before deciding whether to (re)start a runner.
+    // This is what unblocks orphaned/infinite-hang scenarios without manual intervention.
+    let recoveredActions = 0;
+    let skippedRecoveryDueToSafetyLimit = false;
+    try {
+      const { db: projectDb, close: closeProjectDb } = openDatabase(project.path);
+      try {
+        const config = loadConfig(project.path);
+        const recovery = await recoverStuckTasks({
+          projectPath: project.path,
+          projectDb,
+          globalDb: global.db,
+          config,
+          dryRun,
+        });
+        recoveredActions = recovery.actions.length;
+        skippedRecoveryDueToSafetyLimit = recovery.skippedDueToSafetyLimit;
+        if (recoveredActions > 0 && !quiet) {
+          log(`Recovered ${recoveredActions} stuck item(s) in ${project.path}`);
+        }
+        if (skippedRecoveryDueToSafetyLimit && !quiet) {
+          log(`Skipping auto-recovery in ${project.path}: safety limit hit (maxIncidentsPerHour)`);
+        }
+      } finally {
+        closeProjectDb();
+      }
+    } catch {
+      // If recovery can't run (DB missing/corrupt), we still proceed with runner checks.
+    }
+
+    // Skip if project already has an active runner (after recovery, which may have killed/removed it).
+    if (hasActiveRunnerForProject(project.path)) {
+      log(`Skipping ${project.path}: runner already active`);
+      results.push({
+        action: 'none',
+        reason:
+          recoveredActions > 0
+            ? `Runner already active (recovered ${recoveredActions} stuck item(s))`
+            : 'Runner already active',
+        projectPath: project.path,
+        recoveredActions,
+        skippedRecoveryDueToSafetyLimit,
       });
       continue;
     }
@@ -250,8 +293,10 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
     if (dryRun) {
       results.push({
         action: 'would_start',
-        reason: `Would start runner (dry-run)`,
+        reason: recoveredActions > 0 ? `Recovered ${recoveredActions} stuck item(s); would start runner (dry-run)` : `Would start runner (dry-run)`,
         projectPath: project.path,
+        recoveredActions,
+        skippedRecoveryDueToSafetyLimit,
       });
       continue;
     }
@@ -260,15 +305,19 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
     if (startResult) {
       results.push({
         action: 'started',
-        reason: `Started runner`,
+        reason: recoveredActions > 0 ? `Recovered ${recoveredActions} stuck item(s); started runner` : `Started runner`,
         pid: startResult.pid,
         projectPath: project.path,
+        recoveredActions,
+        skippedRecoveryDueToSafetyLimit,
       });
     } else {
       results.push({
         action: 'none',
-        reason: 'Failed to start runner',
+        reason: recoveredActions > 0 ? `Recovered ${recoveredActions} stuck item(s); failed to start runner` : 'Failed to start runner',
         projectPath: project.path,
+        recoveredActions,
+        skippedRecoveryDueToSafetyLimit,
       });
     }
   }
@@ -281,7 +330,10 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
     });
   }
 
-  return results;
+    return results;
+  } finally {
+    global.close();
+  }
 }
 
 /**

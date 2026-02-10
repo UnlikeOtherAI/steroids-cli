@@ -39,6 +39,8 @@ export interface Task {
   file_commit_sha: string | null;
   file_content_hash: string | null;
   rejection_count: number;
+  failure_count?: number;
+  last_failure_at?: string | null;
   created_at: string;
   updated_at: string;
 }

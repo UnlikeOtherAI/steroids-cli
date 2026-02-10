@@ -57,6 +57,15 @@ export interface SteroidsConfig {
       tests?: boolean;
       lint?: boolean;
     };
+    // Stuck task detection/recovery (seconds unless otherwise noted)
+    orphanedTaskTimeout?: number;
+    maxCoderDuration?: number;
+    maxReviewerDuration?: number;
+    runnerHeartbeatTimeout?: number;
+    invocationStaleness?: number;
+    autoRecover?: boolean;
+    maxRecoveryAttempts?: number;
+    maxIncidentsPerHour?: number;
   };
   locking?: {
     taskTimeout?: string;
@@ -158,6 +167,14 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       tests: true,
       lint: true,
     },
+    orphanedTaskTimeout: 600,
+    maxCoderDuration: 1800,
+    maxReviewerDuration: 900,
+    runnerHeartbeatTimeout: 300,
+    invocationStaleness: 600,
+    autoRecover: true,
+    maxRecoveryAttempts: 3,
+    maxIncidentsPerHour: 10,
   },
   locking: {
     taskTimeout: '60m',

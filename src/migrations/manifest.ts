@@ -31,7 +31,8 @@ function getPackageRoot(): string {
   }
 
   // Strategy 2: Check require.main.filename if available
-  if (require.main?.filename) {
+  // In ESM, `require` is not defined, so guard with typeof.
+  if (typeof require !== 'undefined' && require.main?.filename) {
     let dir = dirname(require.main.filename);
     for (let i = 0; i < 5; i++) {
       candidates.push(dir);

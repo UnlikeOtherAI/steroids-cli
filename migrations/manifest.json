@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 8,
+  "latestDbVersion": 9,
   "migrations": [
     {
       "id": 1,
@@ -65,6 +65,14 @@
       "description": "Add skipped column to sections table for excluding sections from runner",
       "checksum": "",
       "cliVersion": "0.4.51"
+    },
+    {
+      "id": 9,
+      "name": "009_add_incidents_and_failure_tracking",
+      "file": "009_add_incidents_and_failure_tracking.sql",
+      "description": "Add incidents table and task failure counters for stuck-task recovery",
+      "checksum": "",
+      "cliVersion": "0.6.5"
     }
   ]
 }

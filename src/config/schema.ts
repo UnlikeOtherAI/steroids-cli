@@ -202,6 +202,46 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _default: true,
       },
     },
+    orphanedTaskTimeout: {
+      _description: 'Seconds before an in_progress task without an active runner is considered orphaned',
+      _type: 'number',
+      _default: 600,
+    },
+    maxCoderDuration: {
+      _description: 'Seconds before an in_progress task with an active runner is treated as hanging (coder phase)',
+      _type: 'number',
+      _default: 1800,
+    },
+    maxReviewerDuration: {
+      _description: 'Seconds before a review task with an active runner is treated as hanging (reviewer phase)',
+      _type: 'number',
+      _default: 900,
+    },
+    runnerHeartbeatTimeout: {
+      _description: 'Seconds before a runner heartbeat is considered stale for stuck-task detection',
+      _type: 'number',
+      _default: 300,
+    },
+    invocationStaleness: {
+      _description: 'Seconds since last task invocation to consider the task inactive (used for orphan checks)',
+      _type: 'number',
+      _default: 600,
+    },
+    autoRecover: {
+      _description: 'Automatically attempt recovery actions for detected stuck tasks during wakeup',
+      _type: 'boolean',
+      _default: true,
+    },
+    maxRecoveryAttempts: {
+      _description: 'Maximum recovery attempts per task before escalating by skipping it',
+      _type: 'number',
+      _default: 3,
+    },
+    maxIncidentsPerHour: {
+      _description: 'Safety limit: stop auto-recovery if too many incidents occur in one hour',
+      _type: 'number',
+      _default: 10,
+    },
   },
   locking: {
     _description: 'Task and section locking settings',
