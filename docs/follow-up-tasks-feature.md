@@ -2,27 +2,25 @@
 
 ## Problem Statement
 
-Currently, when a reviewer approves work but identifies non-blocking issues or future improvements, they can only add notes to the approval. These notes are unstructured and don't become actionable tasks. Examples:
+When a reviewer approves work but identifies non-blocking improvements or future enhancements, they currently can only add freeform notes. These notes are unstructured and don't become actionable tasks, causing technical debt to be lost.
 
-- "Consider adding unit tests later"
-- "Some hardcoded classes remain (tracked separately)"
-- "Documentation could be improved"
-
-**Issues with current approach:**
-- Notes disappear into history, not actionable
-- No way to track technical debt identified during review
+**Current limitations:**
+- Notes disappear into history
+- No way to track identified technical debt
 - Manual intervention required to create follow-up tasks
 - Context is lost (what code? which commit? why needed?)
 
 ## Solution Overview
 
-Enable reviewers to create **structured follow-up tasks** with rich context when approving work. These tasks:
+Enable reviewers to create **structured follow-up tasks** with rich context when approving work. These tasks are:
 
-1. ✅ Are created automatically by the orchestrator
-2. ✅ Include detailed descriptions and context
-3. ✅ Link back to the originating commit and task
-4. ✅ Can be deferred (require human approval) or auto-implemented
-5. ✅ Prevent duplicates through reviewer-side checking
+1. Created automatically by the orchestrator
+2. Include detailed descriptions and context
+3. Link back to the originating commit and task
+4. Can be deferred (require human approval) or auto-implemented
+5. Deduplicated to prevent redundant work
+
+**Critical Design Principle:** Follow-ups are OPTIONAL. Most approvals should have zero follow-ups. Only genuine technical debt or valuable improvements should become follow-up tasks.
 
 ## Architecture
 
@@ -33,147 +31,162 @@ Enable reviewers to create **structured follow-up tasks** with rich context when
 │ REVIEWER PHASE                                              │
 ├─────────────────────────────────────────────────────────────┤
 │ 1. Review completed work                                    │
-│ 2. Identify potential follow-up tasks                       │
-│ 3. GET list of pending/in_progress tasks from database      │
+│ 2. Identify potential follow-up tasks (if any)             │
+│ 3. GET list of existing tasks (pending, deferred, recent)  │
 │ 4. Check: "Is this follow-up already covered?"             │
-│ 5. Return only unique follow-ups with full context         │
+│ 5. Return 0-3 unique follow-ups with full context          │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ ORCHESTRATOR PHASE                                          │
 ├─────────────────────────────────────────────────────────────┤
-│ 1. Receive reviewer output with follow_up_tasks            │
-│ 2. Check config: followUpTasks.autoImplement               │
-│ 3. Create tasks with appropriate status:                   │
-│    • autoImplement=true  → status='pending' (work next)    │
-│    • autoImplement=false → is_follow_up=1 (deferred)       │
-│ 4. Populate description, reference_commit, reference_task  │
+│ 1. Validate reviewer output (max 3, min lengths, etc.)     │
+│ 2. Check depth limit (prevent infinite chains)             │
+│ 3. Deduplicate against existing tasks                      │
+│ 4. Check pending task cap (prevent backlog explosion)      │
+│ 5. Create tasks with appropriate state                     │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ TASK SELECTION PHASE                                        │
 ├─────────────────────────────────────────────────────────────┤
-│ • autoImplement=true  → Follow-ups picked like normal      │
-│ • autoImplement=false → Follow-ups skipped (need promote)  │
+│ • Deferred follow-ups: Skipped until promoted              │
+│ • Active follow-ups: Picked like normal tasks              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Key Design Decisions
+### State Machine
 
-**1. Duplicate Detection in Reviewer (not Orchestrator)**
-- **Why:** Prevents polluting orchestrator context with full task list
-- **How:** Reviewer gets pending tasks, checks before suggesting follow-ups
-- **Benefit:** Cleaner separation of concerns, reviewer has better context
+```
+Follow-up Task States:
 
-**2. Rich Context Required**
-- **Why:** Follow-up tasks need context to be actionable weeks later
-- **What:** Title, description, reference commit, reference task
-- **Benefit:** Anyone can understand "why" and "how" when picking up the task
+DEFERRED (requires_promotion=true)
+  ↓ (human promotes via CLI)
+ACTIVE (requires_promotion=false)
+  ↓ (auto-selected by loop)
+IN_PROGRESS → COMPLETED
 
-**3. Configuration-Driven Behavior**
-- **Why:** Different teams have different workflows
-- **Options:** Auto-implement follow-ups OR defer for human approval
-- **Default:** Deferred (safer, requires explicit promotion)
+Note: is_follow_up flag is IMMUTABLE (never changes after creation)
+```
 
 ## Schema Changes
 
 ### 1. Reviewer Output Schema
 
-**Before:**
 ```typescript
 {
   decision: 'approve' | 'reject' | 'dispute' | 'skip' | 'unclear',
-  reasoning: string,
-  notes?: string,
-  next_status: 'completed' | 'in_progress' | ...,
-  metadata: { ... }
+  reasoning: string,  // min 20 chars
+  notes?: string,     // optional
+  follow_up_tasks?: Array<{      // OPTIONAL (empty/missing is valid)
+    title: string,               // 10-100 chars
+    description: string,         // 100-4000 chars, must explain WHAT/WHY/HOW
+  }>,  // MAX 3 items
+  next_status: 'completed' | 'in_progress' | 'disputed' | 'skipped',
+  metadata: {
+    rejection_count: number,
+    confidence: 'high' | 'medium' | 'low',
+    push_to_remote: boolean
+  }
 }
 ```
 
-**After:**
-```typescript
-{
-  decision: 'approve' | 'reject' | 'dispute' | 'skip' | 'unclear',
-  reasoning: string,
-  notes?: string,
-  follow_up_tasks?: Array<{           // NEW
-    title: string,                    // Short task title
-    description: string,              // Detailed context (what/why/how)
-    // reference_commit: auto-populated by orchestrator
-    // reference_task_id: auto-populated by orchestrator
-  }>,
-  next_status: 'completed' | 'in_progress' | ...,
-  metadata: { ... }
-}
-```
+**Validation Rules:**
+- `follow_up_tasks` is optional - absence or empty array is valid
+- Maximum 3 follow-ups per approval (hard limit)
+- Title: 10-100 characters
+- Description: 100-4000 characters (forces detailed context)
+- Description must include actionable details (files, reasoning, approach)
 
 ### 2. Database Schema
 
-**Migration: Add follow-up context fields**
 ```sql
--- Add to tasks table
-ALTER TABLE tasks ADD COLUMN description TEXT;
+-- Add follow-up context fields
+ALTER TABLE tasks ADD COLUMN description TEXT CHECK(length(description) <= 4000);
 ALTER TABLE tasks ADD COLUMN reference_commit TEXT;
-ALTER TABLE tasks ADD COLUMN reference_task_id TEXT;
-ALTER TABLE tasks ADD COLUMN is_follow_up INTEGER DEFAULT 0;
+ALTER TABLE tasks ADD COLUMN reference_commit_message TEXT;
+ALTER TABLE tasks ADD COLUMN reference_task_id TEXT REFERENCES tasks(id);
+ALTER TABLE tasks ADD COLUMN is_follow_up INTEGER NOT NULL DEFAULT 0 CHECK(is_follow_up IN (0, 1));
+ALTER TABLE tasks ADD COLUMN requires_promotion INTEGER NOT NULL DEFAULT 0 CHECK(requires_promotion IN (0, 1));
+ALTER TABLE tasks ADD COLUMN follow_up_depth INTEGER NOT NULL DEFAULT 0 CHECK(follow_up_depth >= 0);
+ALTER TABLE tasks ADD COLUMN dedupe_key TEXT;
 
--- Index for finding follow-ups of a specific task
-CREATE INDEX idx_tasks_reference_task ON tasks(reference_task_id);
-
--- Index for filtering deferred follow-ups
-CREATE INDEX idx_tasks_is_follow_up ON tasks(is_follow_up) WHERE is_follow_up = 1;
+-- Indexes
+CREATE INDEX idx_tasks_reference_task ON tasks(reference_task_id) WHERE reference_task_id IS NOT NULL;
+CREATE INDEX idx_tasks_follow_up_state ON tasks(is_follow_up, requires_promotion) WHERE is_follow_up = 1;
+CREATE UNIQUE INDEX idx_tasks_dedupe ON tasks(dedupe_key) WHERE dedupe_key IS NOT NULL;
+CREATE INDEX idx_tasks_selection ON tasks(status, is_follow_up, requires_promotion);
 ```
+
+**Key Fields:**
+- `description`: Full context for follow-up (what/why/how)
+- `reference_commit`: SHA of commit that spawned this follow-up
+- `reference_commit_message`: Commit message (survives rebases)
+- `reference_task_id`: Parent task that spawned this follow-up
+- `is_follow_up`: Immutable flag indicating this is a follow-up
+- `requires_promotion`: Whether task needs human approval before auto-implementation
+- `follow_up_depth`: Chain depth (0 = original task, 1 = direct follow-up, 2 = follow-up of follow-up)
+- `dedupe_key`: Normalized title + reference for deduplication
 
 ### 3. Configuration Schema
 
-**Add to SteroidsConfig:**
 ```yaml
 followUpTasks:
-  autoImplement: false  # Default: require human approval to start work
-  scope: 'section'      # Where to create: 'section' | 'project-root'
+  # Core behavior
+  autoImplement: false              # Default: deferred (requires promotion)
+  scope: 'section'                  # Where to create: 'section' | 'project-root'
+
+  # Limits (prevent runaway task generation)
+  maxPerApproval: 3                 # Hard cap per approval
+  maxDepth: 2                       # Prevent infinite chains (0 = original, 1 = follow-up, 2 = follow-up of follow-up)
+  maxPendingTasks: 50               # Cap pending backlog (applies when autoImplement=true)
+
+  # Validation
+  minDescriptionLength: 100         # Force detailed descriptions
+  requireAcceptanceCriteria: true   # Require "WHAT/WHY/HOW" in description
+
+  # Deduplication
+  duplicateCheckScope: 'section'    # Check duplicates in: 'section' | 'project' | 'recent-20'
 ```
 
-**Global config (`~/.steroids/config.yaml`):**
-```yaml
-followUpTasks:
-  autoImplement: false  # Conservative default for all projects
-```
-
-**Project config (`.steroids/config.yaml`):**
-```yaml
-followUpTasks:
-  autoImplement: true   # Override: auto-implement in this project
-  scope: 'section'      # Create in same section as parent task
-```
+**Config Precedence:** defaults < global < project < environment
 
 ## Example End-to-End
 
 ### 1. Reviewer Identifies Follow-ups
 
-**Reviewer receives pending tasks:**
+**Reviewer receives:**
 ```
-Existing pending tasks in project:
-- "Add comprehensive test suite for Auth module"
-- "Refactor CSS to use design tokens"
-- "Document API endpoints"
+Task: "Build theme engine: apply colors, radii, button styles"
+Status: Completed
+
+Existing tasks (for duplicate checking):
+- Pending: "Add comprehensive test suite for Auth module"
+- Pending: "Refactor CSS to use design tokens"
+- Deferred: "Document API endpoints"
 ```
 
-**Reviewer considers follow-ups:**
+**Reviewer considers:**
 1. "Add unit tests for theme-utils.ts"
-   - Check: Covered by "Add comprehensive test suite"? → YES, skip
+   → Check: Covered by "Add comprehensive test suite"?
+   → Analysis: Different scope (theme vs Auth), suggest it
 2. "Document theme configuration format"
-   - Check: Covered by existing tasks? → NO, suggest it
+   → Check: Covered by existing tasks?
+   → Analysis: Not covered, suggest it
 
 **Reviewer output:**
 ```json
 {
   "decision": "approve",
-  "reasoning": "Theme engine works correctly; identified follow-up work",
-  "notes": "Implementation is solid. Only missing documentation for theme config.",
+  "reasoning": "Theme engine works correctly; two follow-ups for completeness",
   "follow_up_tasks": [
     {
-      "title": "Document theme configuration format in README",
-      "description": "The theme engine expects specific config structure in config.ui_theme but this isn't documented. Need to add:\n\n- Schema documentation (colors, radii, typography, button, card, logo, density)\n- Example configurations for light/dark themes\n- Validation rules and defaults\n- How to test theme changes\n\nSee Auth/src/theme/theme-utils.ts for current implementation details."
+      "title": "Add unit tests for theme-utils.ts color validation",
+      "description": "WHAT: Add unit tests for validateColorFormat() and normalizeColor() in Auth/src/theme/theme-utils.ts\n\nWHY: These functions handle user input and could fail silently with invalid colors. Need validation coverage before adding more theme features.\n\nHOW: Test cases should cover: valid hex colors (#RGB, #RRGGBB), invalid formats, edge cases (empty, null, wrong type), and normalized output format. See existing pattern in Auth/src/theme/__tests__/"
+    },
+    {
+      "title": "Document theme configuration in README",
+      "description": "WHAT: Add theme configuration section to Auth/README.md documenting config.ui_theme structure\n\nWHY: The theme engine expects specific config structure but this isn't documented anywhere. Developers need to know available options and validation rules.\n\nHOW: Document: colors (primary, secondary, etc.), radii, typography, button/card styles, logo, density. Include example config and link to theme-utils.ts for implementation details."
     }
   ],
   "next_status": "completed",
@@ -185,80 +198,77 @@ Existing pending tasks in project:
 }
 ```
 
-### 2. Orchestrator Creates Follow-up Task
+### 2. Orchestrator Processes Follow-ups
 
 **With `autoImplement: false` (default):**
+
 ```
-[Orchestrator] Reviewer approved with 1 follow-up task
-[Orchestrator] Creating follow-up task (deferred)
-[Orchestrator] ✓ Task created: "Document theme configuration format in README"
-[Orchestrator]   ID: abc-123-def-456
+[Orchestrator] Validating reviewer output...
+[Orchestrator] ✓ 2 follow-ups (within limit of 3)
+[Orchestrator] ✓ Titles and descriptions valid
+
+[Orchestrator] Checking depth limit...
+[Orchestrator] Parent task depth: 0 (original task)
+[Orchestrator] Follow-up depth will be: 1 (within limit of 2)
+
+[Orchestrator] Deduplicating...
+[Orchestrator] ✓ No duplicates found
+
+[Orchestrator] Checking pending task cap...
+[Orchestrator] Current pending: 12 (limit: 50)
+[Orchestrator] ✓ Within limit
+
+[Orchestrator] Creating 2 deferred follow-up tasks...
+[Orchestrator] ✓ Created: "Add unit tests for theme-utils.ts color validation"
+[Orchestrator]   ID: abc-123
 [Orchestrator]   Status: pending
-[Orchestrator]   is_follow_up: true (requires promotion)
+[Orchestrator]   requires_promotion: true (deferred)
+[Orchestrator]   Reference: e7da26b9 (Build theme engine)
+[Orchestrator]   Commit: b0a53ed
+[Orchestrator] ✓ Created: "Document theme configuration in README"
+[Orchestrator]   ID: abc-124
+[Orchestrator]   Status: pending
+[Orchestrator]   requires_promotion: true (deferred)
 [Orchestrator]   Reference: e7da26b9 (Build theme engine)
 [Orchestrator]   Commit: b0a53ed
 ```
 
-**Database record:**
-```sql
-INSERT INTO tasks (
-  id, title, description, status, section_id,
-  is_follow_up, reference_commit, reference_task_id,
-  source_file, created_at
-) VALUES (
-  'abc-123-def-456',
-  'Document theme configuration format in README',
-  'The theme engine expects specific config structure in config.ui_theme but this isn''t documented. Need to add:\n\n- Schema documentation (colors, radii, typography, button, card, logo, density)\n- Example configurations for light/dark themes\n- Validation rules and defaults\n- How to test theme changes\n\nSee Auth/src/theme/theme-utils.ts for current implementation details.',
-  'pending',
-  '1fc395a6-efa3-4704-b8c3-6c6db3ef818e',  -- Same section as parent
-  1,  -- is_follow_up
-  'b0a53ed3c017839e7b0a3a60f8fe0e625439bacb',
-  'e7da26b9-1daf-4a72-8efc-b35368681a0e',
-  'Docs/brief.md',
-  '2026-02-10 08:15:00'
-);
-```
-
 ### 3. Human Reviews Follow-ups
 
-**CLI:**
 ```bash
 $ steroids tasks --follow-ups
 
-Follow-up Tasks (Deferred):
-  abc-123  Document theme configuration format in README  [Phase 9: UI & Theming]
+Deferred Follow-up Tasks (require promotion):
+  abc-123  Add unit tests for theme-utils.ts color validation  [Phase 9: UI & Theming]
+  abc-124  Document theme configuration in README               [Phase 9: UI & Theming]
 
 $ steroids tasks show abc-123
 
-Follow-up Task: Document theme configuration format in README
+Follow-up Task: Add unit tests for theme-utils.ts color validation
 Section: Phase 9: UI & Theming
 Status: pending (deferred, requires promotion)
 
 Description:
-  The theme engine expects specific config structure in config.ui_theme
-  but this isn't documented. Need to add:
+  WHAT: Add unit tests for validateColorFormat() and normalizeColor() in
+  Auth/src/theme/theme-utils.ts
 
-  - Schema documentation (colors, radii, typography, button, card, logo, density)
-  - Example configurations for light/dark themes
-  - Validation rules and defaults
-  - How to test theme changes
+  WHY: These functions handle user input and could fail silently with invalid
+  colors. Need validation coverage before adding more theme features.
 
-  See Auth/src/theme/theme-utils.ts for current implementation details.
+  HOW: Test cases should cover: valid hex colors (#RGB, #RRGGBB), invalid
+  formats, edge cases (empty, null, wrong type), and normalized output format.
+  See existing pattern in Auth/src/theme/__tests__/
 
 Context:
   Spawned by: e7da26b9 (Build theme engine: apply colors, radii...)
   Reference commit: b0a53ed
-  View diff: git show b0a53ed
+  Depth: 1 (direct follow-up)
 
 Commands:
-  steroids tasks promote abc-123         # Enable auto-implementation
-  steroids tasks update abc-123 --skip   # Mark as not needed
-```
+  steroids tasks promote abc-123  # Enable auto-implementation
 
-**Promote task:**
-```bash
 $ steroids tasks promote abc-123
-✓ Task promoted to regular status (auto-implementation enabled)
+✓ Task promoted (auto-implementation enabled)
   The orchestrator will now work on this task automatically
 ```
 
@@ -269,381 +279,426 @@ $ steroids tasks promote abc-123
 ```bash
 # List all deferred follow-up tasks
 steroids tasks --follow-ups
-steroids tasks list --status pending --follow-up
+steroids tasks list --follow-ups
 
 # List follow-ups from a specific task
 steroids tasks --follow-ups --reference e7da26b9
 
 # List follow-ups in a section
 steroids tasks --follow-ups --section "Phase 9: UI & Theming"
+
+# Show full context
+steroids tasks show <task-id>
+
+# View reference commit
+steroids tasks show <task-id> --commit
 ```
 
 ### Manage Follow-ups
 
 ```bash
-# Promote single task (enable auto-implementation)
+# Promote (enable auto-implementation)
 steroids tasks promote <task-id>
+steroids tasks promote --section "Phase 9"
+steroids tasks promote --all
 
-# Promote all follow-ups in section
-steroids tasks promote --section "Phase 9: UI & Theming"
-
-# Promote all follow-ups
-steroids tasks promote --all-follow-ups
-
-# Skip a follow-up (mark as not needed)
-steroids tasks update <task-id> --status skipped
-
-# Convert regular task to follow-up (mark as deferred)
-steroids tasks demote <task-id>
+# Skip (mark as not needed)
+steroids tasks skip <task-id>
 ```
 
-### View Context
+## Reviewer Prompt Requirements
 
-```bash
-# Show follow-up with full context
-steroids tasks show <task-id>
+The reviewer prompt MUST include these explicit instructions to prevent death spirals:
 
-# View the reference commit
-steroids tasks show <task-id> --commit
-# (equivalent to: git show <reference_commit>)
+### 1. "Zero is Okay" Permission
 
-# View the parent task
-steroids tasks show <task-id> --parent
+```
+CRITICAL: Follow-up tasks are OPTIONAL. Only suggest them when you identify:
+1. Genuine technical debt that wasn't in the task scope
+2. Future improvements that would add significant value
+3. Non-blocking issues discovered during review
+
+DO NOT suggest follow-ups just to be thorough or complete.
+Most approvals should have ZERO follow-ups.
+
+If you cannot identify a meaningful follow-up that would take >30 minutes
+to implement and provides clear value, DO NOT suggest one.
 ```
 
-## WebUI Changes
+### 2. Non-Blocking Criteria
 
-### Task Detail Page
-
-**Add section for follow-up context:**
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ 📋 Follow-up Task                                           │
-│ Document theme configuration format in README               │
-├─────────────────────────────────────────────────────────────┤
-│ Status: pending (deferred)                                  │
-│ Section: Phase 9: UI & Theming                             │
-│ Created: 2026-02-10 08:15:00                               │
-│                                                             │
-│ Description:                                                │
-│ The theme engine expects specific config structure in       │
-│ config.ui_theme but this isn't documented. Need to add:    │
-│ • Schema documentation (colors, radii, typography...)      │
-│ • Example configurations for light/dark themes             │
-│ • Validation rules and defaults                            │
-│ • How to test theme changes                                │
-│                                                             │
-│ See Auth/src/theme/theme-utils.ts for implementation.      │
-│                                                             │
-│ 🔗 Context:                                                │
-│ • Spawned by: Build theme engine (e7da26b9) [View Task]   │
-│ • Reference: b0a53ed [View Commit] [View Diff]            │
-│                                                             │
-│ ⚠️  Deferred (requires promotion to start)                 │
-│ [Promote to Active] [Mark as Not Needed] [Edit]           │
-└─────────────────────────────────────────────────────────────┘
+FOLLOW-UPS MUST BE NON-BLOCKING
+
+A follow-up is NON-BLOCKING if ALL of these are true:
+✓ The code works correctly as implemented
+✓ Tests pass (if they exist)
+✓ No security vulnerabilities introduced
+✓ No data loss or corruption possible
+✓ The improvement would enhance quality but isn't required for deployment
+
+If an issue is BLOCKING, you must REJECT the task (not create a follow-up).
+
+Examples of NON-BLOCKING follow-ups:
+- Adding more comprehensive tests where basic tests exist
+- Refactoring for readability (if code is functional)
+- Performance optimizations (if current performance is acceptable)
+- Documentation improvements
+- Extracting hardcoded values to config (if unlikely to change)
+
+Examples of BLOCKING issues (REJECT instead):
+- Missing critical functionality from task requirements
+- Security vulnerabilities
+- Data corruption risks
+- Test failures
+- Required functionality not working
 ```
 
-### Task List Filters
+### 3. Duplicate Detection Rules
 
-**Add filter for follow-ups:**
-- Show/hide follow-up tasks
-- Filter by follow-up status (deferred/promoted)
-- Show follow-up badge in task list
-
-### Parent Task Link
-
-**On parent task detail page, show follow-ups:**
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Task: Build theme engine                                    │
-│ Status: completed                                           │
-│                                                             │
-│ Follow-up Tasks (1):                                       │
-│ • Document theme configuration format (deferred) [View]    │
-└─────────────────────────────────────────────────────────────┘
+DUPLICATE DETECTION (check before suggesting):
+
+Before suggesting a follow-up, check if it's covered by existing tasks:
+- Existing pending tasks (provided below)
+- Existing deferred follow-ups (provided below)
+- Recently completed tasks (last 10, provided below)
+
+Rules:
+1. Check if task titles contain >60% of the same keywords
+2. Check if task descriptions mention the same files/modules
+3. If BOTH are true → SKIP (it's a duplicate)
+4. If unsure → SUGGEST (orchestrator will check again)
 ```
 
-## Implementation Plan
+### 4. Description Requirements
 
-### Phase 1: Schema & Database (1-2 hours)
-- [ ] Update reviewer schema in `src/orchestrator/schemas.ts`
-- [ ] Create database migration for new columns
-- [ ] Update `createTask()` to accept description + references
-- [ ] Add `is_follow_up` flag handling
-- [ ] Test migration on sample database
+```
+FOLLOW-UP DESCRIPTION REQUIREMENTS:
 
-### Phase 2: Reviewer Prompt (1 hour)
-- [ ] Update reviewer prompt to explain follow-up tasks
-- [ ] Add instructions for duplicate checking
-- [ ] Add pending tasks list to reviewer context
-- [ ] Add examples of good follow-up task descriptions
-- [ ] Test with Claude, Codex, Gemini
+Each follow-up MUST include (minimum 100 characters):
+1. WHAT: Specific work to be done (files, modules, functions)
+2. WHY: Reason it's needed (technical debt, missing functionality, etc.)
+3. HOW: Suggested approach or implementation hints
 
-### Phase 3: Orchestrator Logic (2-3 hours)
-- [ ] Update orchestrator to handle `follow_up_tasks` array
-- [ ] Add config loading for `followUpTasks.autoImplement`
-- [ ] Implement task creation with context population
-- [ ] Handle deferred vs auto-implement logic
-- [ ] Add logging for created follow-ups
-- [ ] Test with sample reviewer output
+Example GOOD follow-up:
+{
+  "title": "Add error handling tests for theme-utils.ts",
+  "description": "WHAT: Add unit tests for error cases in validateColorFormat()
+  and normalizeColor() functions in Auth/src/theme/theme-utils.ts\n\n
+  WHY: Current tests only cover happy paths. Need to verify graceful handling
+  of invalid inputs before production use.\n\n
+  HOW: Test invalid hex formats, null/undefined, wrong types, and malformed
+  objects. Use existing test pattern in theme-utils.test.ts"
+}
 
-### Phase 4: CLI Commands (2-3 hours)
-- [ ] Add `--follow-ups` flag to `steroids tasks list`
-- [ ] Implement `steroids tasks promote` command
-- [ ] Add `--reference` filter for finding follow-ups of a task
-- [ ] Update `steroids tasks show` to display follow-up context
-- [ ] Add `--commit` and `--parent` flags
-- [ ] Test all new commands
+Example BAD follow-up (too vague):
+{
+  "title": "Add tests",
+  "description": "Need more tests for theme stuff"
+}
+```
 
-### Phase 5: WebUI Updates (2-3 hours)
-- [ ] Update task detail component for follow-up display
-- [ ] Add promote/demote buttons
-- [ ] Add follow-up filter to task list
-- [ ] Add follow-up badge/indicator
-- [ ] Show follow-ups on parent task page
-- [ ] Test UI flows
+### 5. Limits
 
-### Phase 6: Configuration (1 hour)
-- [ ] Add `followUpTasks` to config schema
-- [ ] Update config loader
-- [ ] Add validation
-- [ ] Update `steroids config` command
-- [ ] Document in README
+```
+LIMITS:
+- Maximum 3 follow-ups per approval (strict)
+- If you identify >3, prioritize the most impactful
+- Combine related follow-ups into a single task if possible
+```
 
-### Phase 7: Testing & Validation (2-3 hours)
-- [ ] Write unit tests for schema validation
-- [ ] Write integration tests for task creation
-- [ ] Test with all three AI providers (Claude, Codex, Gemini)
-- [ ] Test auto-implement vs deferred modes
-- [ ] Test duplicate detection in reviewer
-- [ ] Test CLI commands
-- [ ] Test WebUI flows
+## Orchestrator Safeguards
 
-### Phase 8: Documentation (1 hour)
-- [ ] Update main README with follow-up tasks section
-- [ ] Add configuration examples
-- [ ] Add CLI command reference
-- [ ] Update architecture docs
-- [ ] Add migration guide for existing projects
+### 1. Validation
 
-**Total Estimated Time: 12-17 hours**
-
-## Edge Cases & Considerations
-
-### 1. Duplicate Detection False Negatives
-**Problem:** Reviewer might miss existing task that covers follow-up
-**Solution:**
-- Reviewer gets full pending task list with descriptions
-- Uses semantic matching, not just title comparison
-- When uncertain, reviewer can suggest anyway (orchestrator logs it)
-
-### 2. Follow-up Creates Another Follow-up
-**Problem:** Chain of follow-up tasks (A → B → C)
-**Solution:**
-- Allow it, but track depth (reference_task_id forms a chain)
-- CLI command to show follow-up tree
-- Limit depth in config? (e.g., max 2 levels deep)
-
-### 3. Reference Commit Gets Rebased/Deleted
-**Problem:** reference_commit SHA becomes invalid
-**Solution:**
-- Store commit message as well for context
-- CLI shows warning if commit not found
-- Description should be self-contained enough
-
-### 4. Auto-implement Flood
-**Problem:** Reviewer creates 10 follow-ups, all run automatically
-**Solution:**
-- Default to deferred (autoImplement: false)
-- Add config for max auto-implement per approval
-- Log clearly when follow-ups are created
-
-### 5. Section Deleted
-**Problem:** Follow-up references deleted section
-**Solution:**
-- Follow-up task remains, section_id becomes null
-- Shows as "orphaned" in CLI
-- Can be reassigned to new section
-
-## Testing Strategy
-
-### Unit Tests
 ```typescript
-describe('Follow-up Tasks', () => {
-  it('should validate reviewer schema with follow_up_tasks', () => {
-    const validOutput = {
-      decision: 'approve',
-      reasoning: 'Good work',
-      follow_up_tasks: [
-        { title: 'Add tests', description: 'Need unit tests for X' }
-      ],
-      next_status: 'completed',
-      metadata: { ... }
-    };
-    expect(validateReviewerResult(validOutput)).toBe(true);
+// Validate reviewer output
+function validateReviewerOutput(output: unknown): ReviewerOutput {
+  // Schema validation
+  const validated = ReviewerOutputSchema.parse(output);
+
+  // Enforce limits
+  if (validated.follow_up_tasks && validated.follow_up_tasks.length > 3) {
+    throw new ValidationError('Maximum 3 follow-ups per approval');
+  }
+
+  // Validate descriptions
+  validated.follow_up_tasks?.forEach(task => {
+    if (task.description.length < 100) {
+      throw new ValidationError(`Description too short: ${task.title}`);
+    }
+    if (!containsWhatWhyHow(task.description)) {
+      throw new ValidationError(`Description must include WHAT/WHY/HOW: ${task.title}`);
+    }
   });
 
-  it('should create follow-up task with context', () => {
-    const followUp = {
-      title: 'Add tests',
-      description: 'Need unit tests for X'
-    };
-    const task = createFollowUpTask(db, followUp, {
-      parentTaskId: 'parent-123',
-      referenceCommit: 'abc123',
-      sectionId: 'section-456',
-      autoImplement: false
-    });
-    expect(task.is_follow_up).toBe(1);
-    expect(task.reference_task_id).toBe('parent-123');
-    expect(task.reference_commit).toBe('abc123');
-    expect(task.description).toBe('Need unit tests for X');
-  });
-
-  it('should skip follow-up creation if autoImplement=false and is_follow_up=1', () => {
-    const task = getNextPendingTask(db);
-    // Should not return deferred follow-ups
-    expect(task?.is_follow_up).not.toBe(1);
-  });
-});
+  return validated;
+}
 ```
 
-### Integration Tests
+### 2. Depth Limiting
+
 ```typescript
-describe('Follow-up Tasks Integration', () => {
-  it('should create follow-up from reviewer output', async () => {
-    const reviewerOutput = {
-      decision: 'approve',
-      reasoning: 'Good',
-      follow_up_tasks: [
-        { title: 'Add tests', description: 'Add unit tests' }
-      ],
-      next_status: 'completed',
-      metadata: { ... }
-    };
+// Check depth before creating follow-up
+function checkDepthLimit(db: Database, parentTaskId: string, config: Config): void {
+  const depth = getFollowUpDepth(db, parentTaskId);
+  const maxDepth = config.followUpTasks?.maxDepth ?? 2;
 
-    await processReviewerOutput(db, reviewerOutput, {
-      taskId: 'task-123',
-      commitSha: 'abc123',
-      sectionId: 'section-456'
-    });
+  if (depth >= maxDepth) {
+    throw new DepthLimitError(
+      `Follow-up depth limit reached (${depth}/${maxDepth}). ` +
+      `Cannot create follow-up of follow-up of follow-up.`
+    );
+  }
+}
 
-    const followUps = getFollowUpTasks(db, 'task-123');
-    expect(followUps).toHaveLength(1);
-    expect(followUps[0].title).toBe('Add tests');
-    expect(followUps[0].reference_task_id).toBe('task-123');
-  });
+function getFollowUpDepth(db: Database, taskId: string): number {
+  let depth = 0;
+  let currentId = taskId;
 
-  it('should respect autoImplement config', async () => {
-    const config = { followUpTasks: { autoImplement: true } };
-    // Create follow-up with auto-implement
-    const task = await createFollowUpTask(db, followUp, {
-      ...options,
-      config
-    });
-    expect(task.is_follow_up).toBe(0); // Not deferred
-  });
-});
+  while (currentId && depth < 10) { // Safety limit
+    const task = db.prepare('SELECT reference_task_id, is_follow_up FROM tasks WHERE id = ?').get(currentId);
+    if (!task?.is_follow_up) break;
+    currentId = task.reference_task_id;
+    depth++;
+  }
+
+  return depth;
+}
 ```
 
-### E2E Tests
-- Run full orchestrator loop
-- Reviewer creates follow-up
-- Verify task created with context
-- Promote task and verify it's picked up by loop
-- Complete follow-up and verify audit trail
+### 3. Deduplication
+
+```typescript
+// Deduplicate before creating
+function deduplicateFollowUp(db: Database, followUp: FollowUpTask, referenceTaskId: string): boolean {
+  // Generate dedupe key
+  const dedupeKey = generateDedupeKey(followUp.title, referenceTaskId);
+
+  // Check if exists
+  const existing = db.prepare(
+    'SELECT id, title FROM tasks WHERE dedupe_key = ?'
+  ).get(dedupeKey);
+
+  if (existing) {
+    logWarning(`Skipping duplicate follow-up: "${followUp.title}"`);
+    logWarning(`  Similar to existing task: ${existing.id} "${existing.title}"`);
+    return false; // Skip creation
+  }
+
+  return true; // Proceed with creation
+}
+
+function generateDedupeKey(title: string, referenceTaskId: string): string {
+  // Normalize: lowercase, remove punctuation, stem words
+  const normalized = title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(word => word.length > 3)
+    .sort()
+    .join('-');
+
+  return `${referenceTaskId}:${normalized}`;
+}
+```
+
+### 4. Pending Task Cap
+
+```typescript
+// Check pending task limit (prevents backlog explosion)
+function checkPendingTaskLimit(db: Database, config: Config): void {
+  if (!config.followUpTasks?.autoImplement) {
+    return; // Deferred tasks don't add to pending immediately
+  }
+
+  const pendingCount = db.prepare(
+    'SELECT COUNT(*) as count FROM tasks WHERE status = ? AND requires_promotion = 0'
+  ).get('pending').count;
+
+  const maxPending = config.followUpTasks?.maxPendingTasks ?? 50;
+
+  if (pendingCount >= maxPending) {
+    logWarning(`Pending task limit reached (${pendingCount}/${maxPending})`);
+    logWarning('Skipping follow-up creation to prevent backlog explosion');
+    logWarning('Configure followUpTasks.maxPendingTasks to change this limit');
+    throw new PendingLimitError('Pending task cap reached');
+  }
+}
+```
+
+### 5. Monitoring
+
+```typescript
+// Monitor follow-up creation rate
+function monitorFollowUpRate(db: Database): void {
+  const hourAgo = new Date(Date.now() - 3600000).toISOString();
+
+  const stats = db.prepare(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN is_follow_up = 1 THEN 1 ELSE 0 END) as follow_ups
+    FROM tasks
+    WHERE created_at > ?
+  `).get(hourAgo);
+
+  if (stats.total > 0) {
+    const ratio = stats.follow_ups / stats.total;
+
+    if (ratio > 0.5) {
+      logWarning('⚠️  Follow-up creation rate is high (>50% of recent tasks)');
+      logWarning('   Consider:');
+      logWarning('     - Setting followUpTasks.autoImplement=false (defer for human review)');
+      logWarning('     - Reducing followUpTasks.maxPerApproval');
+      logWarning('     - Reviewing reviewer prompt for "always suggest" bias');
+    }
+  }
+}
+```
+
+## Task Selection Logic
+
+```typescript
+// Get next task (skip deferred follow-ups)
+function getNextPendingTask(db: Database): Task | null {
+  return db.prepare(`
+    SELECT * FROM tasks
+    WHERE status = 'pending'
+    AND (requires_promotion = 0 OR is_follow_up = 0)  -- Skip deferred follow-ups
+    AND (section_id IS NULL OR section_id IN (SELECT id FROM sections))  -- Valid section or root
+    ORDER BY created_at ASC
+    LIMIT 1
+  `).get();
+}
+```
 
 ## Migration Guide
 
 ### For Existing Projects
 
-**1. Update steroids-cli:**
 ```bash
+# 1. Update CLI
 npm install -g steroids-cli@latest
 steroids --version  # Should be >= 0.7.0
-```
 
-**2. Migrate database:**
-```bash
+# 2. Migrate database (adds new columns)
 cd /path/to/project
 steroids migrate
 
-# Migration will add:
-# - tasks.description
-# - tasks.reference_commit
-# - tasks.reference_task_id
-# - tasks.is_follow_up
+# 3. Configure (optional, defaults are conservative)
+steroids config set followUpTasks.autoImplement false  # Default
+steroids config set followUpTasks.maxDepth 2           # Default
+steroids config set followUpTasks.maxPerApproval 3     # Default
 ```
 
-**3. Configure behavior (optional):**
-```bash
-# Keep default (deferred follow-ups)
-# OR enable auto-implement
-steroids config set followUpTasks.autoImplement true
+### Migration SQL
+
+```sql
+-- 001_add_follow_up_fields.sql
+BEGIN TRANSACTION;
+
+ALTER TABLE tasks ADD COLUMN description TEXT CHECK(length(description) <= 4000);
+ALTER TABLE tasks ADD COLUMN reference_commit TEXT;
+ALTER TABLE tasks ADD COLUMN reference_commit_message TEXT;
+ALTER TABLE tasks ADD COLUMN reference_task_id TEXT;
+ALTER TABLE tasks ADD COLUMN is_follow_up INTEGER NOT NULL DEFAULT 0 CHECK(is_follow_up IN (0, 1));
+ALTER TABLE tasks ADD COLUMN requires_promotion INTEGER NOT NULL DEFAULT 0 CHECK(requires_promotion IN (0, 1));
+ALTER TABLE tasks ADD COLUMN follow_up_depth INTEGER NOT NULL DEFAULT 0 CHECK(follow_up_depth >= 0);
+ALTER TABLE tasks ADD COLUMN dedupe_key TEXT;
+
+CREATE INDEX idx_tasks_reference_task ON tasks(reference_task_id) WHERE reference_task_id IS NOT NULL;
+CREATE INDEX idx_tasks_follow_up_state ON tasks(is_follow_up, requires_promotion) WHERE is_follow_up = 1;
+CREATE UNIQUE INDEX idx_tasks_dedupe ON tasks(dedupe_key) WHERE dedupe_key IS NOT NULL;
+CREATE INDEX idx_tasks_selection ON tasks(status, is_follow_up, requires_promotion);
+
+COMMIT;
 ```
 
-**4. Review existing tasks:**
-```bash
-# Check if any tasks should be marked as follow-ups
-steroids tasks list
-steroids tasks update <task-id> --follow-up  # Mark as deferred
-```
+## Implementation Checklist
 
-### For New Projects
+### Phase 1: Core Schema & Validation (2-3 hours)
+- [ ] Update reviewer schema in `src/orchestrator/schemas.ts`
+  - [ ] Add `follow_up_tasks` array (max 3)
+  - [ ] Add validation: title 10-100 chars, description 100-4000 chars
+- [ ] Create database migration
+  - [ ] Add columns: description, reference_*, is_follow_up, requires_promotion, follow_up_depth, dedupe_key
+  - [ ] Add indexes
+- [ ] Update `createTask()` to accept new fields
+- [ ] Test migration on sample database
 
-Follow-up tasks feature is enabled by default. No configuration needed unless you want to change `autoImplement` behavior.
+### Phase 2: Orchestrator Logic (3-4 hours)
+- [ ] Implement depth checking (`getFollowUpDepth()`, `checkDepthLimit()`)
+- [ ] Implement deduplication (`generateDedupeKey()`, `deduplicateFollowUp()`)
+- [ ] Implement pending task cap check (`checkPendingTaskLimit()`)
+- [ ] Implement validation (`validateReviewerOutput()`, `containsWhatWhyHow()`)
+- [ ] Implement monitoring (`monitorFollowUpRate()`)
+- [ ] Add config loading for `followUpTasks` section
+- [ ] Integrate into reviewer phase
+- [ ] Add comprehensive logging
+
+### Phase 3: Reviewer Prompt (1-2 hours)
+- [ ] Add "zero is okay" section
+- [ ] Add non-blocking criteria with examples
+- [ ] Add duplicate detection rules
+- [ ] Add description requirements (WHAT/WHY/HOW)
+- [ ] Add limits (max 3)
+- [ ] Add existing tasks context injection
+- [ ] Test prompt with all three providers (Claude, Codex, Gemini)
+
+### Phase 4: Task Selection (1 hour)
+- [ ] Update `getNextPendingTask()` to skip `requires_promotion=1`
+- [ ] Centralize eligibility logic
+- [ ] Test deferred tasks are skipped
+- [ ] Test promoted tasks are selected
+
+### Phase 5: CLI Commands (2-3 hours)
+- [ ] Implement `steroids tasks --follow-ups`
+- [ ] Implement `steroids tasks promote <id>`
+- [ ] Implement `steroids tasks promote --section <name>`
+- [ ] Update `steroids tasks show` to display follow-up context
+- [ ] Add `--commit` flag to show reference commit
+- [ ] Test all commands
+
+### Phase 6: Configuration (1 hour)
+- [ ] Add `followUpTasks` to config schema
+- [ ] Add validation for config values
+- [ ] Update `steroids config` command
+- [ ] Add warning when `autoImplement=true`
+- [ ] Document in README
+
+### Phase 7: Testing (3-4 hours)
+- [ ] Unit tests for validation
+- [ ] Unit tests for depth checking
+- [ ] Unit tests for deduplication
+- [ ] Integration tests for task creation
+- [ ] Test with all three providers (Claude, Codex, Gemini)
+- [ ] Test edge cases (max limit, depth limit, pending cap)
+- [ ] Test deferred vs active workflows
+
+### Phase 8: Documentation (1-2 hours)
+- [ ] Update main README
+- [ ] Add configuration examples
+- [ ] Update CLI reference
+- [ ] Update architecture docs
+
+**Total Estimated Time: 14-21 hours**
 
 ## Future Enhancements
 
-### 1. Smart Duplicate Detection
-- Use vector embeddings for semantic task comparison
+### Smart Duplicate Detection
+- Use vector embeddings for semantic comparison
 - Detect duplicates across different wording
 
-### 2. Follow-up Templates
-- Predefined templates for common follow-ups
-- "Add tests for X", "Document Y", "Refactor Z"
-
-### 3. Batch Operations
-- Promote/skip multiple follow-ups at once
-- Filter by confidence/priority
-
-### 4. Priority/Urgency
+### Priority/Urgency
 - Reviewer specifies urgency: high/medium/low
 - Affects task ordering in auto-implement mode
 
-### 5. Dependencies
-- Follow-up task depends on other tasks
+### Dependencies
+- Follow-up depends on other tasks
 - Only promote when dependencies complete
 
-### 6. Follow-up Dashboard
+### Follow-up Dashboard
 - WebUI view showing all deferred follow-ups
-- Group by section, priority, age
-- Bulk promote/skip
-
-## Related Files
-
-- `src/orchestrator/schemas.ts` - Reviewer output schema
-- `src/prompts/reviewer.ts` - Reviewer prompt
-- `src/commands/loop-phases.ts` - Orchestrator task creation logic
-- `src/database/queries.ts` - Task creation functions
-- `src/config/loader.ts` - Configuration schema
-- `migrations/` - Database migrations
-- `tests/` - Unit and integration tests
-
-## Questions & Discussion
-
-**Q: Should follow-ups be created in same section or separate section?**
-A: Configurable via `followUpTasks.scope`. Default: same section as parent.
-
-**Q: Can coder create follow-up tasks?**
-A: Not in initial implementation. Reviewer only, as they have better context for identifying technical debt.
-
-**Q: What if reviewer suggests 20 follow-ups?**
-A: Reviewer prompt should encourage judicious use. Orchestrator can log warning if excessive (e.g., > 5).
-
-**Q: Can human manually create follow-up task?**
-A: Yes, via CLI: `steroids tasks create "Title" --follow-up --reference <task-id>`
-
-**Q: Should follow-ups affect health score?**
-A: Future enhancement. Could track "technical debt ratio" (follow-ups / completed tasks).
+- Group by section, age, depth
+- Bulk promote/skip operations
