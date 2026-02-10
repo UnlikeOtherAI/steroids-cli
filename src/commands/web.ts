@@ -110,6 +110,10 @@ function installAndBuild(out: ReturnType<typeof createOutput>): void {
   out.log('Installing root dependencies...');
   run('npm install', WEB_DIR);
 
+  // Build main project (creates dist/ files needed by API)
+  out.log('Building main project...');
+  run('npm run build', WEB_DIR);
+
   out.log('Installing API dependencies...');
   run('npm install', apiDir);
 
