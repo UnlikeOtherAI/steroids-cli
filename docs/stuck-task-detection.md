@@ -292,406 +292,55 @@ CREATE INDEX idx_runners_heartbeat ON runners(last_heartbeat);
 
 ```yaml
 health:
-  # Detection thresholds (seconds)
+  # Health scoring (steroids health)
+  threshold: 80                    # Minimum passing score (0-100)
+  checks:
+    git: true
+    deps: true
+    tests: true
+    lint: true
+
+  # Stuck-task detection & recovery (steroids health check, steroids runners wakeup)
+  # All values below are seconds unless otherwise noted.
   orphanedTaskTimeout: 600          # 10 minutes
   maxCoderDuration: 1800            # 30 minutes
   maxReviewerDuration: 900          # 15 minutes
   runnerHeartbeatTimeout: 300       # 5 minutes
-  toolExecutionStaleness: 300       # 5 minutes
-
-  # Health check intervals
-  checkInterval: 60                 # Check every 60 seconds
-  runInBackground: true             # Run health checks in background
-
-  # Recovery behavior
-  autoRecover: true                 # Automatically attempt recovery
-  maxRecoveryAttempts: 3            # Max retries before escalation
-  autoRestartRunners: true          # Auto-restart dead/zombie runners
-
-  # Escalation
-  escalateAfterFailures: 3          # Escalate task after 3 failures
-  notifyOnIncident: false           # Send notifications (future: email/slack)
-
-  # Safety limits
-  maxIncidentsPerHour: 10           # Stop auto-recovery if too many incidents
-  pauseOnRepeatedFailures: true     # Pause runner if same task fails 3x
+  invocationStaleness: 600          # 10 minutes (task_invocations.created_at based)
+  autoRecover: true                 # Attempt safe recovery actions
+  maxRecoveryAttempts: 3            # Escalate by skipping task after N failures
+  maxIncidentsPerHour: 10           # Safety limit: stop auto-recovery if too many incidents/hour
 ```
 
-## Health Check Implementation
+## Health Check Implementation (Current Repo)
 
-### 1. Health Check Service
+The design sections above describe the intended behaviors and signals. The current implementation in this repo is split into:
 
-```typescript
-// src/health/health-check.ts
+- Detection-only: `src/health/stuck-task-detector.ts`
+- Recovery actions: `src/health/stuck-task-recovery.ts`
+- CLI wiring/output: `src/commands/health-stuck.ts` (`steroids health check`, `steroids health incidents`)
+- Background automation: `src/runners/wakeup.ts` (`steroids runners wakeup`)
 
-export class HealthCheckService {
-  constructor(
-    private readonly db: Database,
-    private readonly config: SteroidsConfig
-  ) {}
+### Important Implementation Notes
 
-  async runHealthCheck(): Promise<HealthCheckReport> {
-    const report: HealthCheckReport = {
-      timestamp: new Date(),
-      checks: [],
-      incidents: [],
-      actions: [],
-    };
-
-    // Check 1: Orphaned tasks
-    const orphanedTasks = await this.detectOrphanedTasks();
-    report.checks.push({
-      type: 'orphaned_tasks',
-      found: orphanedTasks.length,
-      healthy: orphanedTasks.length === 0,
-    });
-
-    for (const task of orphanedTasks) {
-      const action = await this.recoverOrphanedTask(task);
-      report.incidents.push(this.createIncident(task, 'orphaned_task'));
-      report.actions.push(action);
-    }
-
-    // Check 2: Hanging invocations
-    const hangingInvocations = await this.detectHangingInvocations();
-    report.checks.push({
-      type: 'hanging_invocations',
-      found: hangingInvocations.length,
-      healthy: hangingInvocations.length === 0,
-    });
-
-    for (const invocation of hangingInvocations) {
-      const action = await this.recoverHangingInvocation(invocation);
-      report.incidents.push(this.createIncident(invocation, 'hanging_invocation'));
-      report.actions.push(action);
-    }
-
-    // Check 3: Zombie runners
-    const zombieRunners = await this.detectZombieRunners();
-    report.checks.push({
-      type: 'zombie_runners',
-      found: zombieRunners.length,
-      healthy: zombieRunners.length === 0,
-    });
-
-    for (const runner of zombieRunners) {
-      const action = await this.recoverZombieRunner(runner);
-      report.incidents.push(this.createIncident(runner, 'zombie_runner'));
-      report.actions.push(action);
-    }
-
-    // Check 4: Dead runners
-    const deadRunners = await this.detectDeadRunners();
-    report.checks.push({
-      type: 'dead_runners',
-      found: deadRunners.length,
-      healthy: deadRunners.length === 0,
-    });
-
-    for (const runner of deadRunners) {
-      const action = await this.recoverDeadRunner(runner);
-      report.incidents.push(this.createIncident(runner, 'dead_runner'));
-      report.actions.push(action);
-    }
-
-    return report;
-  }
-
-  private async detectOrphanedTasks(): Promise<OrphanedTaskSignal[]> {
-    const threshold = this.config.health?.orphanedTaskTimeout ?? 600;
-    const cutoff = new Date(Date.now() - threshold * 1000).toISOString();
-
-    const tasks = this.db.prepare(`
-      SELECT
-        t.id,
-        t.title,
-        t.status,
-        t.started_at,
-        t.updated_at,
-        COUNT(i.id) as invocation_count,
-        MAX(i.completed_at) as last_invocation_completed
-      FROM tasks t
-      LEFT JOIN invocations i ON i.task_id = t.id
-      WHERE t.status = 'in_progress'
-        AND t.started_at < ?
-      GROUP BY t.id
-    `).all(cutoff);
-
-    const orphaned: OrphanedTaskSignal[] = [];
-
-    for (const task of tasks) {
-      // Check if there's an active coder/reviewer process
-      const hasActiveProcess = await this.hasActiveProcess(task.id);
-
-      if (!hasActiveProcess &&
-          (task.invocation_count === 0 ||
-           this.isInvocationStale(task.last_invocation_completed))) {
-        orphaned.push({
-          taskId: task.id,
-          title: task.title,
-          status: task.status,
-          startedAt: new Date(task.started_at),
-          invocationCount: task.invocation_count,
-          lastInvocationCompleted: task.last_invocation_completed ?
-            new Date(task.last_invocation_completed) : null,
-          hasActiveProcess: false,
-        });
-      }
-    }
-
-    return orphaned;
-  }
-
-  private async recoverOrphanedTask(signal: OrphanedTaskSignal): Promise<RecoveryAction> {
-    // Check failure count
-    const task = getTaskById(this.db, signal.taskId);
-    const failureCount = task.failure_count ?? 0;
-    const maxAttempts = this.config.health?.maxRecoveryAttempts ?? 3;
-
-    if (failureCount >= maxAttempts) {
-      // Escalate: skip task, notify human
-      updateTask(this.db, signal.taskId, {
-        status: 'skipped',
-        updated_at: new Date().toISOString(),
-        actor: 'system:health-check',
-      });
-
-      return {
-        type: 'escalate',
-        taskId: signal.taskId,
-        reason: `Task failed ${failureCount} times, skipping`,
-        timestamp: new Date(),
-      };
-    }
-
-    // Attempt recovery
-    try {
-      // Kill any lingering processes
-      await this.killProcessesForTask(signal.taskId);
-
-      // Reset task to pending
-      updateTask(this.db, signal.taskId, {
-        status: 'pending',
-        started_at: null,
-        updated_at: new Date().toISOString(),
-        failure_count: failureCount + 1,
-        last_failure_at: new Date().toISOString(),
-        actor: 'system:health-check',
-      });
-
-      return {
-        type: 'auto_restart',
-        taskId: signal.taskId,
-        reason: 'Orphaned task recovered, reset to pending',
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      return {
-        type: 'failed',
-        taskId: signal.taskId,
-        reason: `Recovery failed: ${error.message}`,
-        timestamp: new Date(),
-      };
-    }
-  }
-
-  private async detectHangingInvocations(): Promise<HangingInvocationSignal[]> {
-    const coderTimeout = this.config.health?.maxCoderDuration ?? 1800;
-    const reviewerTimeout = this.config.health?.maxReviewerDuration ?? 900;
-
-    const invocations = this.db.prepare(`
-      SELECT
-        i.id,
-        i.task_id,
-        i.phase,
-        i.started_at,
-        i.completed_at,
-        i.last_tool_execution
-      FROM invocations i
-      WHERE i.completed_at IS NULL
-        AND i.started_at IS NOT NULL
-    `).all();
-
-    const hanging: HangingInvocationSignal[] = [];
-
-    for (const inv of invocations) {
-      const duration = Date.now() - new Date(inv.started_at).getTime();
-      const maxDuration = inv.phase === 'coder' ? coderTimeout : reviewerTimeout;
-
-      if (duration > maxDuration * 1000) {
-        const processAlive = await this.isInvocationProcessAlive(inv.id);
-        const lastToolStale = inv.last_tool_execution ?
-          this.isToolExecutionStale(inv.last_tool_execution) : true;
-
-        if (lastToolStale) {
-          hanging.push({
-            invocationId: inv.id,
-            taskId: inv.task_id,
-            phase: inv.phase,
-            startedAt: new Date(inv.started_at),
-            duration: Math.floor(duration / 1000),
-            lastToolExecution: inv.last_tool_execution ?
-              new Date(inv.last_tool_execution) : null,
-            processAlive,
-          });
-        }
-      }
-    }
-
-    return hanging;
-  }
-
-  private async recoverHangingInvocation(signal: HangingInvocationSignal): Promise<RecoveryAction> {
-    try {
-      // Kill the hanging process
-      await this.killInvocationProcess(signal.invocationId);
-
-      // Mark invocation as failed
-      this.db.prepare(`
-        UPDATE invocations
-        SET completed_at = ?,
-            status = 'failed',
-            error = ?
-        WHERE id = ?
-      `).run(
-        new Date().toISOString(),
-        `Timeout after ${signal.duration}s`,
-        signal.invocationId
-      );
-
-      // Check task failure count
-      const task = getTaskById(this.db, signal.taskId);
-      const failureCount = (task.failure_count ?? 0) + 1;
-      const maxAttempts = this.config.health?.maxRecoveryAttempts ?? 3;
-
-      if (failureCount >= maxAttempts) {
-        // Skip task
-        updateTask(this.db, signal.taskId, {
-          status: 'skipped',
-          failure_count: failureCount,
-          last_failure_at: new Date().toISOString(),
-          actor: 'system:health-check',
-        });
-
-        return {
-          type: 'escalate',
-          taskId: signal.taskId,
-          reason: `Task exceeded timeout ${failureCount} times, skipping`,
-          timestamp: new Date(),
-        };
-      }
-
-      // Reset to pending
-      updateTask(this.db, signal.taskId, {
-        status: 'pending',
-        started_at: null,
-        failure_count: failureCount,
-        last_failure_at: new Date().toISOString(),
-        actor: 'system:health-check',
-      });
-
-      return {
-        type: 'auto_restart',
-        taskId: signal.taskId,
-        reason: `Hanging ${signal.phase} killed, task reset`,
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      return {
-        type: 'failed',
-        taskId: signal.taskId,
-        reason: `Recovery failed: ${error.message}`,
-        timestamp: new Date(),
-      };
-    }
-  }
-
-  // Helper methods
-  private async hasActiveProcess(taskId: string): Promise<boolean> {
-    // Check for claude/codex/gemini processes with this task ID in command line
-    // Implementation depends on platform (ps + grep on Unix)
-    return false; // Placeholder
-  }
-
-  private isInvocationStale(lastCompleted: string | null): boolean {
-    if (!lastCompleted) return true;
-    const threshold = this.config.health?.toolExecutionStaleness ?? 300;
-    const elapsed = Date.now() - new Date(lastCompleted).getTime();
-    return elapsed > threshold * 1000;
-  }
-
-  private async killProcessesForTask(taskId: string): Promise<void> {
-    // Find and kill processes related to this task
-    // Implementation: ps aux | grep taskId | kill
-  }
-
-  private async killInvocationProcess(invocationId: string): Promise<void> {
-    // Kill specific invocation process
-  }
-}
-```
-
-### 2. Health Check Daemon
-
-```typescript
-// src/health/daemon.ts
-
-export class HealthCheckDaemon {
-  private intervalId: NodeJS.Timeout | null = null;
-  private running = false;
-
-  constructor(
-    private readonly service: HealthCheckService,
-    private readonly config: SteroidsConfig
-  ) {}
-
-  start(): void {
-    if (this.running) {
-      throw new Error('Health check daemon already running');
-    }
-
-    const interval = (this.config.health?.checkInterval ?? 60) * 1000;
-
-    this.running = true;
-    this.intervalId = setInterval(async () => {
-      try {
-        const report = await this.service.runHealthCheck();
-        this.logReport(report);
-      } catch (error) {
-        console.error('Health check failed:', error);
-      }
-    }, interval);
-
-    console.log(`Health check daemon started (interval: ${interval}ms)`);
-  }
-
-  stop(): void {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
-    }
-    this.running = false;
-  }
-
-  private logReport(report: HealthCheckReport): void {
-    if (report.incidents.length > 0) {
-      console.warn(`⚠️  Health check found ${report.incidents.length} incident(s):`);
-      for (const incident of report.incidents) {
-        console.warn(`   - ${incident.failure_mode}: ${incident.task_id}`);
-      }
-      console.warn(`   Actions taken: ${report.actions.length}`);
-    }
-  }
-}
-```
+1. The current project DB schema does not store explicit "invocation started/completed" timestamps.
+   Detection approximates "staleness" using existing timestamps:
+   - `tasks.updated_at`
+   - `task_invocations.created_at`
+   - global runners DB `runners.heartbeat_at`
+2. `health.autoRecover` controls whether `steroids health check` / `steroids runners wakeup` will mutate databases (unless `--dry-run` is provided).
+3. Safety limit: if `health.maxIncidentsPerHour` is hit, recovery is skipped to avoid flapping; detection still runs and reports signals.
 
 ## CLI Commands
 
 ### Check Health
 
 ```bash
-# Run health check once
+# Run stuck-task health check once (detect + recover if health.autoRecover=true)
 steroids health check
+
+# Preview recovery actions without making changes
+steroids health check --dry-run
 
 # Output:
 # ┌─────────────────────────────────────────────────────────────┐
@@ -714,14 +363,26 @@ steroids health check
 # Run health check in watch mode
 steroids health check --watch
 
+# Customize the watch interval (defaults to 5s)
+steroids health check --watch --watch-interval 10s
+
+# Machine-readable output (global flag)
+steroids health check --json
+
 # View incident history
 steroids health incidents
 
 # View incidents for a specific task
 steroids health incidents --task 9cefe1b1
 
+# Limit rows
+steroids health incidents --limit 200
+
 # Clear resolved incidents (older than 7 days)
 steroids health incidents --clear
+
+# Preview incident deletion (global flag)
+steroids health incidents --clear --dry-run
 ```
 
 ### Configure Health Checks
@@ -732,46 +393,36 @@ steroids config set health.autoRecover true
 
 # Set timeouts
 steroids config set health.orphanedTaskTimeout 600  # 10 minutes
+steroids config set health.invocationStaleness 600  # 10 minutes
 steroids config set health.maxCoderDuration 1800    # 30 minutes
+steroids config set health.maxReviewerDuration 900  # 15 minutes
 
-# Set check interval
-steroids config set health.checkInterval 60  # Check every 60 seconds
+# Escalation behavior
+steroids config set health.maxRecoveryAttempts 3
 
-# Disable auto-restart
-steroids config set health.autoRestartRunners false
+# Safety limit (set to 0 to disable the hourly safety limit)
+steroids config set health.maxIncidentsPerHour 10
+
+# Write to global config instead of project config
+steroids config set health.autoRecover false --global
 ```
 
-## Integration with Orchestrator Loop
+## Integration with Wakeup
 
-The orchestrator loop should include health checks:
+Stuck-task recovery is invoked in two places:
 
-```typescript
-// src/commands/loop.ts
+1. Manual on-demand checks: `steroids health check`
+2. Background automation via wakeup: `steroids runners wakeup`
 
-async function runLoop() {
-  const healthCheck = new HealthCheckService(db, config);
+To run recovery continuously, schedule wakeups (macOS uses launchd; Linux uses cron):
 
-  while (true) {
-    // Run health check every N iterations
-    if (iteration % 10 === 0) {
-      const report = await healthCheck.runHealthCheck();
-      if (report.incidents.length > 0) {
-        logWarning(`Health check found ${report.incidents.length} incidents`);
-        // Actions already taken by health check service
-      }
-    }
-
-    // Continue with normal loop logic
-    const task = getNextPendingTask(db);
-    if (!task) {
-      await sleep(30000);
-      continue;
-    }
-
-    await executeTask(task);
-  }
-}
+```bash
+steroids runners cron install
+steroids runners cron status
+steroids runners cron uninstall
 ```
+
+Note: `steroids runners wakeup` runs stuck-task recovery before it decides whether to restart a runner for a project with pending work.
 
 ## Dashboard/Monitor Integration
 
