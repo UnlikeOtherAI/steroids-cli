@@ -50,6 +50,7 @@ export const TaskDetailPage: React.FC = () => {
   const [liveActivity, setLiveActivity] = useState<TaskTimelineEvent[]>([]);
   const [restarting, setRestarting] = useState(false);
   const [restartNotes, setRestartNotes] = useState('');
+  const [showLiveModal, setShowLiveModal] = useState(false);
   const intervalRef = useRef<number | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -390,6 +391,13 @@ export const TaskDetailPage: React.FC = () => {
                 </span>
               )}
               <button
+                onClick={() => setShowLiveModal(true)}
+                className="px-3 py-1 text-sm bg-info/20 text-info hover:bg-info/30 rounded transition-colors"
+              >
+                <i className="fa-solid fa-bolt mr-1"></i>
+                Live Stream
+              </button>
+              <button
                 onClick={() => setIsLive(!isLive)}
                 className={`px-3 py-1 text-sm rounded transition-colors ${
                   isLive
@@ -413,12 +421,38 @@ export const TaskDetailPage: React.FC = () => {
             </div>
           </div>
 
-          <LiveInvocationActivityPanel
-            isLive={isLive}
-            streamState={streamState}
-            liveActivity={liveActivity}
-            onClear={() => setLiveActivity([])}
-          />
+          {/* Live Stream Modal */}
+          {showLiveModal && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowLiveModal(false)}>
+              <div className="bg-bg-primary rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden m-4" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-border">
+                  <h3 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+                    <i className="fa-solid fa-bolt text-info"></i>
+                    Live Invocation Stream
+                    {liveActivity.length > 0 && (
+                      <span className="text-sm font-normal text-text-muted">
+                        ({liveActivity.length} events)
+                      </span>
+                    )}
+                  </h3>
+                  <button
+                    onClick={() => setShowLiveModal(false)}
+                    className="text-text-muted hover:text-text-primary transition-colors"
+                  >
+                    <i className="fa-solid fa-times text-xl"></i>
+                  </button>
+                </div>
+                <div className="overflow-y-auto max-h-[calc(80vh-64px)]">
+                  <LiveInvocationActivityPanel
+                    isLive={isLive}
+                    streamState={streamState}
+                    liveActivity={liveActivity}
+                    onClear={() => setLiveActivity([])}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Merged Timeline */}
           <div className="card overflow-hidden">
