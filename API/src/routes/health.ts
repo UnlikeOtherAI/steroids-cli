@@ -7,12 +7,12 @@ import { Router, Request, Response } from 'express';
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadConfig } from '../../../src/config/loader.js';
+import { loadConfig } from '../../../dist/config/loader.js';
 import {
   detectStuckTasks,
   type StuckTaskDetectionConfig,
-} from '../../../src/health/stuck-task-detector.js';
-import { getGlobalDbPath } from '../../../src/runners/global-db.js';
+} from '../../../dist/health/stuck-task-detector.js';
+import { getGlobalDbPath } from '../../../dist/runners/global-db.js';
 
 const router = Router();
 

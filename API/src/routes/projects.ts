@@ -16,8 +16,8 @@ import {
   disableProject,
   pruneProjects,
   getRegisteredProject,
-} from '../../../src/runners/projects.js';
-import { openGlobalDatabase } from '../../../src/runners/global-db.js';
+} from '../../../dist/runners/projects.js';
+import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 import { isValidProjectPath, validatePathRequest } from '../utils/validation.js';
 
 const router = Router();

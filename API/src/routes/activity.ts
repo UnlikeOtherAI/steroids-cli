@@ -11,7 +11,7 @@ import {
   ProjectActivityStats,
   ActivityStatus,
   ActivityLogEntry,
-} from '../../../src/runners/activity-log.js';
+} from '../../../dist/runners/activity-log.js';
 
 /**
  * Get GitHub URL from git remote for a project

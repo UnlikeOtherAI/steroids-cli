@@ -4,10 +4,10 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { openGlobalDatabase } from '../../../src/runners/global-db.js';
-import { cronStatus, cronInstall, cronUninstall } from '../../../src/runners/cron.js';
-import { getLastWakeupTime } from '../../../src/runners/wakeup.js';
-import { listRunners } from '../../../src/runners/daemon.js';
+import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
+import { cronStatus, cronInstall, cronUninstall } from '../../../dist/runners/cron.js';
+import { getLastWakeupTime } from '../../../dist/runners/wakeup.js';
+import { listRunners } from '../../../dist/runners/daemon.js';
 
 const router = Router();
 
