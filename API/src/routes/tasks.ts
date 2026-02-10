@@ -5,11 +5,15 @@
 
 import { Router, Request, Response } from 'express';
 import Database from 'better-sqlite3';
-import { existsSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
+import { Tail } from 'tail';
 
 const router = Router();
+
+const MAX_SSE_CONNECTIONS = Math.max(1, parseInt(process.env.MAX_SSE_CONNECTIONS || '100', 10) || 100);
+let activeSseConnections = 0;
 
 interface TaskDetails {
   id: string;
@@ -161,6 +165,104 @@ function calculateDurations(auditTrail: AuditEntry[]): AuditEntry[] {
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function writeSSE(res: Response, payload: unknown): Promise<void> {
+  if (res.writableEnded) return;
+  const chunk = `data: ${JSON.stringify(payload)}\n\n`;
+  const ok = res.write(chunk);
+  if (ok) return;
+  await new Promise<void>((resolve, reject) => {
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: unknown): void => {
+      cleanup();
+      reject(err);
+    };
+    const cleanup = (): void => {
+      res.off('drain', onDrain);
+      res.off('error', onError);
+    };
+    res.on('drain', onDrain);
+    res.on('error', onError);
+  });
+}
+
+async function writeSSEComment(res: Response, comment: string): Promise<void> {
+  if (res.writableEnded) return;
+  const chunk = `: ${comment}\n\n`;
+  const ok = res.write(chunk);
+  if (ok) return;
+  await new Promise<void>((resolve, reject) => {
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: unknown): void => {
+      cleanup();
+      reject(err);
+    };
+    const cleanup = (): void => {
+      res.off('drain', onDrain);
+      res.off('error', onError);
+    };
+    res.on('drain', onDrain);
+    res.on('error', onError);
+  });
+}
+
+async function waitForFile(filePath: string, opts: { timeoutMs: number; pollMs: number; isAborted: () => boolean }): Promise<boolean> {
+  const deadline = Date.now() + opts.timeoutMs;
+  while (Date.now() < deadline) {
+    if (opts.isAborted()) return false;
+    if (existsSync(filePath)) return true;
+    await sleep(opts.pollMs);
+  }
+  return existsSync(filePath);
+}
+
+async function streamJsonlFileToSSE(
+  res: Response,
+  filePath: string,
+  opts: { isAborted: () => boolean }
+): Promise<void> {
+  const rs = createReadStream(filePath, { encoding: 'utf8' });
+  let buffer = '';
+
+  for await (const chunk of rs) {
+    if (opts.isAborted()) return;
+    buffer += chunk;
+    let nl = buffer.indexOf('\n');
+    while (nl >= 0) {
+      const line = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      nl = buffer.indexOf('\n');
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const entry = JSON.parse(trimmed);
+        await writeSSE(res, entry);
+      } catch {
+        // ignore malformed JSONL lines
+      }
+    }
+  }
+
+  const tailLine = buffer.trim();
+  if (tailLine && !opts.isAborted()) {
+    try {
+      const entry = JSON.parse(tailLine);
+      await writeSSE(res, entry);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 /**
  * GET /api/tasks/:taskId
  * Get detailed information about a task including audit history
@@ -291,6 +393,183 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
       error: 'Failed to get task details',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
+  }
+});
+
+/**
+ * GET /api/tasks/:taskId/stream
+ * Stream invocation activity (JSONL) for the currently-running invocation using SSE.
+ * Query params:
+ *   - project: string (required) - project path
+ */
+router.get('/tasks/:taskId/stream', async (req: Request, res: Response) => {
+  const { taskId } = req.params;
+  const projectPath = req.query.project as string | undefined;
+
+  if (!projectPath) {
+    res.status(400).json({
+      success: false,
+      error: 'Missing required query parameter: project',
+    });
+    return;
+  }
+
+  if (activeSseConnections >= MAX_SSE_CONNECTIONS) {
+    res.status(429).json({
+      success: false,
+      error: 'Too many active streams',
+      max: MAX_SSE_CONNECTIONS,
+    });
+    return;
+  }
+
+  activeSseConnections++;
+
+  let closed = false;
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    activeSseConnections = Math.max(0, activeSseConnections - 1);
+    try {
+      res.end();
+    } catch {
+      // ignore
+    }
+  };
+
+  req.on('close', close);
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const db = openProjectDatabase(projectPath);
+  if (!db) {
+    await writeSSE(res, { type: 'error', error: 'Project database not found', project: projectPath });
+    close();
+    return;
+  }
+
+  let invocation: { id: number; status: string } | undefined;
+  try {
+    invocation = db
+      .prepare(
+        `SELECT id, status
+         FROM task_invocations
+         WHERE task_id = ? AND status = 'running'
+         ORDER BY started_at_ms DESC
+         LIMIT 1`
+      )
+      .get(taskId) as { id: number; status: string } | undefined;
+  } catch (error) {
+    await writeSSE(res, {
+      type: 'error',
+      error: 'Failed to query running invocation (is the database migrated?)',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    close();
+    return;
+  } finally {
+    try {
+      db.close();
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!invocation) {
+    await writeSSE(res, { type: 'no_active_invocation', taskId });
+    close();
+    return;
+  }
+
+  const logFile = join(projectPath, '.steroids', 'invocations', `${invocation.id}.log`);
+  const isAborted = (): boolean => closed || res.writableEnded;
+
+  // If the invocation just started, the log file may not exist yet.
+  if (!existsSync(logFile)) {
+    await writeSSE(res, { type: 'waiting_for_log', taskId, invocationId: invocation.id });
+    const ok = await waitForFile(logFile, { timeoutMs: 5000, pollMs: 100, isAborted });
+    if (!ok) {
+      await writeSSE(res, { type: 'log_not_found', taskId, invocationId: invocation.id });
+      close();
+      return;
+    }
+  }
+
+  try {
+    // 1) Send existing log entries first
+    await streamJsonlFileToSSE(res, logFile, { isAborted });
+
+    if (isAborted()) return;
+
+    // 2) Tail for new entries
+    const tail = new Tail(logFile, { follow: true, useWatchFile: true });
+    let writeChain: Promise<void> = Promise.resolve();
+
+    const heartbeat = setInterval(() => {
+      // Keep proxies from timing out the connection.
+      writeChain = writeChain.then(() => writeSSEComment(res, 'heartbeat')).catch(() => {});
+    }, 30000);
+
+    const cleanup = (): void => {
+      clearInterval(heartbeat);
+      try {
+        tail.unwatch();
+      } catch {
+        // ignore
+      }
+      close();
+    };
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      try {
+        tail.unwatch();
+      } catch {}
+    });
+
+    tail.on('line', (line: string) => {
+      if (isAborted()) return;
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      writeChain = writeChain
+        .then(async () => {
+          try {
+            const entry = JSON.parse(trimmed) as any;
+            await writeSSE(res, entry);
+            if (entry?.type === 'complete' || entry?.type === 'error') {
+              cleanup();
+            }
+          } catch {
+            // ignore malformed JSONL lines
+          }
+        })
+        .catch(() => {});
+    });
+
+    tail.on('error', (err: unknown) => {
+      void writeChain
+        .then(() =>
+          writeSSE(res, {
+            type: 'error',
+            error: 'Tail error',
+            message: err instanceof Error ? err.message : String(err),
+          })
+        )
+        .finally(cleanup);
+    });
+  } catch (error) {
+    await writeSSE(res, {
+      type: 'error',
+      error: 'Failed to stream invocation log',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    close();
   }
 });
 
