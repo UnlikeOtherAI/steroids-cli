@@ -186,6 +186,29 @@ describe('Tasks SSE stream endpoint', () => {
     }
   });
 
+  it('emits an SSE error event and closes when the project database is missing', async () => {
+    process.env.NODE_ENV = 'test';
+
+    const projectPath = createTempDir('steroids-project');
+    const taskId = 't-missing-db';
+
+    const app = createApp();
+    const server = http.createServer(app);
+    const port = await listen(server);
+
+    try {
+      const url = `http://127.0.0.1:${port}/api/tasks/${taskId}/stream?project=${encodeURIComponent(projectPath)}`;
+      const events = await readSseEvents(url, { expected: 1, timeoutMs: 1500 });
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('error');
+      expect(events[0].error).toBe('Project database not found');
+      expect(events[0].project).toBe(projectPath);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it('returns no_active_invocation when there is no running invocation', async () => {
     process.env.NODE_ENV = 'test';
 

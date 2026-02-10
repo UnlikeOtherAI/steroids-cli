@@ -266,8 +266,10 @@ Stream live invocation activity for the currently running invocation using Serve
 **Responses:**
 - `200 text/event-stream` - SSE stream where each `data:` block is a JSON object
 - `400 application/json` - Missing `project`
-- `404 application/json` - Project database not found
 - `429 application/json` - Too many active streams
+
+**Error behavior (SSE):**
+- If the project database cannot be opened (for example, the project has no `.steroids/steroids.db`), the server still responds with `200 text/event-stream`, emits a single `data:` event like `{ "type": "error", "error": "Project database not found", "project": "<path>" }`, and then closes the connection.
 
 **Event payloads (examples):**
 ```json
