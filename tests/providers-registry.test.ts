@@ -149,8 +149,8 @@ describe('ProviderRegistry', () => {
   });
 
   describe('default registry', () => {
-    it('should have all built-in providers', () => {
-      const { createDefaultRegistry } = require('../src/providers/registry.js');
+    it('should have all built-in providers', async () => {
+      const { createDefaultRegistry } = await import('../src/providers/registry.js');
       const defaultRegistry = createDefaultRegistry();
 
       expect(defaultRegistry.has('claude')).toBe(true);

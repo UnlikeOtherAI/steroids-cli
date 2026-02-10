@@ -23,6 +23,9 @@ build/
 .DS_Store
 Thumbs.db
 
+# Stray local assets
+Assets/banner_no_logo.jpeg
+
 # Temporary files
 tmp/
 

@@ -213,10 +213,12 @@ describe('InvocationLogger', () => {
     });
 
     it('should return sorted log files', () => {
+      // Use timestamps close to "now" so retention cleanup (7 days) does not delete them.
+      const base = Date.now();
       const timestamps = [
-        new Date('2024-01-01T10:00:00.000Z'),
-        new Date('2024-01-01T11:00:00.000Z'),
-        new Date('2024-01-01T09:00:00.000Z'),
+        new Date(base - 60 * 60 * 1000),      // -1h
+        new Date(base - 30 * 60 * 1000),      // -30m
+        new Date(base - 90 * 60 * 1000),      // -90m
       ];
 
       for (let i = 0; i < timestamps.length; i++) {
