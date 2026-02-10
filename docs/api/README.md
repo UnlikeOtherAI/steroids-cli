@@ -50,6 +50,65 @@ Health check endpoint
 }
 ```
 
+### GET /api/health
+Stuck-task health status summary for a single project.
+
+**Query Parameters:**
+- `project` - Project path (required)
+- `includeSignals` - Include raw signal arrays (default: false)
+
+**Response:**
+```json
+{
+  "success": true,
+  "project": "/Users/john/code/myapp",
+  "health": {
+    "status": "healthy",
+    "lastCheck": "2026-02-10T12:00:00.000Z",
+    "checks": [
+      { "type": "orphaned_tasks", "healthy": true, "found": 0 },
+      { "type": "hanging_invocations", "healthy": true, "found": 0 },
+      { "type": "zombie_runners", "healthy": true, "found": 0 },
+      { "type": "dead_runners", "healthy": true, "found": 0 }
+    ],
+    "activeIncidents": 0,
+    "recentIncidents": 0
+  }
+}
+```
+
+### GET /api/incidents
+Incident history for a single project.
+
+**Query Parameters:**
+- `project` - Project path (required)
+- `limit` - Max rows to return (default: 50, max: 200)
+- `task` - Filter by task ID prefix (optional)
+- `unresolved` - `true` => only unresolved, `false` => only resolved (optional)
+
+**Response:**
+```json
+{
+  "success": true,
+  "project": "/Users/john/code/myapp",
+  "total": 2,
+  "incidents": [
+    {
+      "id": "i1",
+      "task_id": "t1",
+      "runner_id": null,
+      "failure_mode": "orphaned_task",
+      "detected_at": "2026-02-10 12:00:00",
+      "resolved_at": null,
+      "resolution": null,
+      "details": null,
+      "created_at": "2026-02-10 12:00:00",
+      "task_title": "Orphaned task"
+    }
+  ]
+}
+```
+
 ### GET /api/projects
 List all registered projects with stats and runner info
 
