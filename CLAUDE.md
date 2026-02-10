@@ -77,6 +77,40 @@ Steroids manages tasks and runs coders/reviewers. It doesn't care what language 
 
 ## Workflow (CRITICAL)
 
+### Use Tasks for All Development Work
+
+**ALWAYS use the Steroids task system for development work.** Never implement features or fixes directly without creating tasks first.
+
+**Why this is mandatory:**
+- We dogfood our own system - Steroids must be developed using Steroids
+- This tests the automated coder/reviewer loop on real work
+- It validates that the system actually works in production
+- It catches issues in the task workflow before users hit them
+
+**Process:**
+```bash
+# 1. Create tasks for the work (or have them created by planning)
+steroids tasks add "Feature name" --section <section-id> --source <spec-file>
+
+# 2. Start the automated runner
+steroids runners start --detach
+
+# 3. Monitor progress
+steroids tasks list
+tail -f ~/.steroids/runners/logs/daemon-*.log
+
+# 4. Let the automation do the work (coder → reviewer → complete)
+```
+
+**Exceptions (only these):**
+- Emergency fixes when the CLI itself is completely broken
+- Documentation-only updates to CLAUDE.md
+- Critical infrastructure issues blocking all automation
+
+For everything else: **Use tasks. No exceptions.**
+
+### Commit and Push After Each Turn
+
 **Always commit and push after each turn unless explicitly told otherwise.** Every time you complete a unit of work (a task, a fix, a feature), you MUST:
 
 1. `git add` the relevant files
