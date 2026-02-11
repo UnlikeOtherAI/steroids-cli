@@ -56,6 +56,13 @@ export interface TemplateContext {
     type: string;
     status: string;
   };
+  /** Credit data (if credit event) */
+  credit?: {
+    provider: string;
+    model: string;
+    role: string;
+    message: string;
+  };
 }
 
 /**
@@ -157,6 +164,8 @@ export function resolveVariable(
       return resolveHealthVariable(rest, context.health);
     case 'dispute':
       return resolveDisputeVariable(rest, context.dispute);
+    case 'credit':
+      return resolveCreditVariable(rest, context.credit);
     default:
       return undefined;
   }
@@ -275,6 +284,30 @@ function resolveDisputeVariable(
 }
 
 /**
+ * Resolve credit.* variables
+ */
+function resolveCreditVariable(
+  path: string[],
+  credit: TemplateContext['credit']
+): string | undefined {
+  if (!credit) return undefined;
+
+  const key = path[0];
+  switch (key) {
+    case 'provider':
+      return credit.provider;
+    case 'model':
+      return credit.model;
+    case 'role':
+      return credit.role;
+    case 'message':
+      return credit.message;
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Create template context from hook payload
  *
  * @param payload - Hook event payload
@@ -334,6 +367,16 @@ export function createTemplateContext(payload: HookPayload): TemplateContext {
         sectionId: payload.task.sectionId,
       };
       break;
+
+    case 'credit.exhausted':
+    case 'credit.resolved':
+      context.credit = {
+        provider: payload.credit.provider,
+        model: payload.credit.model,
+        role: payload.credit.role,
+        message: payload.credit.message,
+      };
+      break;
   }
 
   return context;
@@ -381,6 +424,16 @@ export function getAvailableVariables(event: string): string[] {
       'task.id',
       'task.title',
       'task.status',
+    ];
+  }
+
+  if (event.startsWith('credit.')) {
+    return [
+      ...baseVars,
+      'credit.provider',
+      'credit.model',
+      'credit.role',
+      'credit.message',
     ];
   }
 
