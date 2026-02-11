@@ -93,7 +93,8 @@ function App() {
     );
   }
 
-  const blurContent = showAISetup || !!creditAlert;
+  const isCreditModalVisible = Boolean(creditAlert && selectedProject);
+  const blurContent = showAISetup || isCreditModalVisible;
 
   return (
     <>

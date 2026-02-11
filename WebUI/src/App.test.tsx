@@ -134,16 +134,32 @@ describe('App credit alert integration', () => {
     });
   });
 
-  it('does not show the modal when no project is selected even if alert exists', async () => {
+  it('does not show the modal or blur UI when no project is selected even if alert exists', async () => {
     mockCreditAlertsApi.getActive.mockResolvedValue([fakeAlert]);
 
-    renderApp({ withProject: false });
+    const { container } = renderApp({ withProject: false });
 
     await waitFor(() => {
       expect(mockCreditAlertsApi.getActive).toHaveBeenCalled();
     });
 
+    // Modal must not render
     expect(screen.queryByText('Out of Credits')).not.toBeInTheDocument();
+    // Blur/lock class must NOT be applied (regression: hidden-lock prevention)
+    expect(container.querySelector('.blur-sm.pointer-events-none')).toBeNull();
+  });
+
+  it('shows the modal and applies blur when alert exists and project is selected', async () => {
+    mockCreditAlertsApi.getActive.mockResolvedValue([fakeAlert]);
+
+    const { container } = renderApp({ withProject: true });
+
+    await waitFor(() => {
+      expect(screen.getByText('Out of Credits')).toBeInTheDocument();
+    });
+
+    // Blur/lock class must be applied when modal is visible
+    expect(container.querySelector('.blur-sm.pointer-events-none')).not.toBeNull();
   });
 
   it('does not show the modal when there are no alerts', async () => {
