@@ -54,9 +54,9 @@ const DEFAULT_TIMEOUT = 900_000;
 
 /**
  * Default invocation template for Gemini CLI
- * Uses -p flag for non-interactive (headless) mode with prompt from file
+ * Uses -p flag for non-interactive mode with stream-json for realtime output
  */
-const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" -m {model}';
+const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" -m {model} --output-format stream-json';
 
 /**
  * Gemini AI Provider implementation
@@ -124,6 +124,33 @@ export class GeminiProvider extends BaseAIProvider {
   /**
    * Invoke Gemini CLI with a prompt file using the invocation template
    */
+  /**
+   * Parse a stream-json line from Gemini CLI
+   */
+  private parseStreamJsonLine(line: string): { text?: string; tool?: string; result?: string } {
+    try {
+      const event = JSON.parse(line);
+
+      // Assistant message with delta text
+      if (event.type === 'message' && event.role === 'assistant' && event.content) {
+        return { text: event.content };
+      }
+
+      // Tool call events
+      if (event.type === 'tool_call' || event.type === 'function_call') {
+        return { tool: event.name || event.function?.name || 'tool' };
+      }
+
+      // Final result
+      if (event.type === 'result') {
+        return { result: event.content || '' };
+      }
+    } catch {
+      if (line.trim()) return { text: line };
+    }
+    return {};
+  }
+
   private invokeWithFile(
     promptFile: string,
     model: string,
@@ -137,6 +164,8 @@ export class GeminiProvider extends BaseAIProvider {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let stdoutLineBuffer = '';
+      const isStreamJson = this.getInvocationTemplate().includes('stream-json');
 
       // Build command from invocation template
       const command = this.buildCommand(promptFile, model);
@@ -147,6 +176,9 @@ export class GeminiProvider extends BaseAIProvider {
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+
+      // Close stdin immediately to prevent CLI tools from hanging
+      child.stdin?.end();
 
       // Activity-based timeout: resettable timer that only kills when silent
       const MAX_BUFFER = 2_000_000; // Cap stdout/stderr at ~2MB
@@ -175,12 +207,37 @@ export class GeminiProvider extends BaseAIProvider {
       resetActivityTimer();
 
       child.stdout?.on('data', (data: Buffer) => {
-        const text = data.toString();
-        if (stdout.length < MAX_BUFFER) stdout += text;
+        const raw = data.toString();
         resetActivityTimer();
-        onActivity?.({ type: 'output', stream: 'stdout', msg: text });
-        if (streamOutput) {
-          process.stdout.write(text);
+
+        if (!isStreamJson) {
+          if (stdout.length < MAX_BUFFER) stdout += raw;
+          onActivity?.({ type: 'output', stream: 'stdout', msg: raw });
+          if (streamOutput) process.stdout.write(raw);
+          return;
+        }
+
+        // Stream-json mode: parse JSONL events
+        stdoutLineBuffer += raw;
+        while (true) {
+          const nl = stdoutLineBuffer.indexOf('\n');
+          if (nl === -1) break;
+          const line = stdoutLineBuffer.slice(0, nl).trim();
+          stdoutLineBuffer = stdoutLineBuffer.slice(nl + 1);
+          if (!line) continue;
+
+          const parsed = this.parseStreamJsonLine(line);
+
+          if (parsed.result !== undefined) {
+            if (parsed.result) stdout = parsed.result;
+          } else if (parsed.text) {
+            if (stdout.length < MAX_BUFFER) stdout += parsed.text;
+            onActivity?.({ type: 'output', stream: 'stdout', msg: parsed.text });
+            if (streamOutput) process.stdout.write(parsed.text);
+          } else if (parsed.tool) {
+            onActivity?.({ type: 'tool', cmd: parsed.tool });
+            if (streamOutput) process.stdout.write(`[tool: ${parsed.tool}]\n`);
+          }
         }
       });
 

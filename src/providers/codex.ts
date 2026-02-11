@@ -140,6 +140,9 @@ export class CodexProvider extends BaseAIProvider {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
+      // Close stdin immediately to prevent CLI tools from hanging
+      child.stdin?.end();
+
       // Activity-based timeout: resettable timer that only kills when silent
       const MAX_BUFFER = 2_000_000; // Cap stdout/stderr at ~2MB
       let activityTimer: ReturnType<typeof setTimeout>;

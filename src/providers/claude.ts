@@ -183,6 +183,10 @@ export class ClaudeProvider extends BaseAIProvider {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
+      // Close stdin immediately — CLI tools (especially Claude with --verbose)
+      // hang when stdin pipe stays open, waiting for input that never comes.
+      child.stdin?.end();
+
       // Activity-based timeout: resettable timer that only kills when silent
       const MAX_BUFFER = 2_000_000; // Cap stdout/stderr at ~2MB
       let activityTimer: ReturnType<typeof setTimeout>;
