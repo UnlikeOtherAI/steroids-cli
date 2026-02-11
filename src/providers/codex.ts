@@ -140,20 +140,25 @@ export class CodexProvider extends BaseAIProvider {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      const timeoutHandle = setTimeout(() => {
-        timedOut = true;
-        child.kill('SIGTERM');
-        // Force kill after 5 seconds if still running
-        setTimeout(() => {
-          if (!child.killed) {
-            child.kill('SIGKILL');
-          }
-        }, 5000);
-      }, timeout);
+      // Activity-based timeout: only kill when process goes silent
+      let lastActivity = Date.now();
+      const activityCheck = setInterval(() => {
+        if (Date.now() - lastActivity > timeout) {
+          timedOut = true;
+          child.kill('SIGTERM');
+          setTimeout(() => {
+            if (!child.killed) {
+              child.kill('SIGKILL');
+            }
+          }, 5000);
+          clearInterval(activityCheck);
+        }
+      }, 60_000);
 
       child.stdout?.on('data', (data: Buffer) => {
         const text = data.toString();
         stdout += text;
+        lastActivity = Date.now();
         if (streamOutput) {
           process.stdout.write(text);
         }
@@ -191,6 +196,7 @@ export class CodexProvider extends BaseAIProvider {
       child.stderr?.on('data', (data: Buffer) => {
         const text = data.toString();
         stderr += text;
+        lastActivity = Date.now();
         onActivity?.({ type: 'output', stream: 'stderr', msg: text });
         if (streamOutput) {
           process.stderr.write(text);
@@ -198,7 +204,7 @@ export class CodexProvider extends BaseAIProvider {
       });
 
       child.on('close', (code) => {
-        clearTimeout(timeoutHandle);
+        clearInterval(activityCheck);
         const duration = Date.now() - startTime;
 
         if (onActivity && stdoutParseBuffer) {
@@ -222,7 +228,7 @@ export class CodexProvider extends BaseAIProvider {
       });
 
       child.on('error', (error) => {
-        clearTimeout(timeoutHandle);
+        clearInterval(activityCheck);
         const duration = Date.now() - startTime;
 
         resolve({
