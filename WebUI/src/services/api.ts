@@ -20,6 +20,8 @@ import {
   SectionsListResponse,
   TaskTimelineEvent,
   TaskTimelineResponse,
+  StorageInfo,
+  ClearLogsResult,
 } from '../types';
 
 // Auto-detect API URL: use the same host as the WebUI but port 3501
@@ -131,6 +133,17 @@ export const projectsApi = {
     await fetchJson('/api/projects/open', {
       method: 'POST',
       body: JSON.stringify({ path }),
+    });
+  },
+
+  async getStorage(projectPath: string): Promise<StorageInfo> {
+    return fetchJson(`/api/projects/storage?path=${encodeURIComponent(projectPath)}`);
+  },
+
+  async clearLogs(projectPath: string, retentionDays = 7): Promise<ClearLogsResult> {
+    return fetchJson('/api/projects/clear-logs', {
+      method: 'POST',
+      body: JSON.stringify({ path: projectPath, retention_days: retentionDays }),
     });
   },
 };

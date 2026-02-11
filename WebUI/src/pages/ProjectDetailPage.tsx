@@ -8,7 +8,7 @@ import {
   CheckIcon,
 } from '@heroicons/react/24/outline';
 import { projectsApi, activityApi, configApi, sectionsApi, ApiError, ConfigSchema } from '../services/api';
-import { Project, ActivityStats, TimeRangeOption, Section } from '../types';
+import { Project, ActivityStats, TimeRangeOption, Section, StorageInfo } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
 import { Tooltip } from '../components/atoms/Tooltip';
@@ -16,6 +16,28 @@ import { StatTile } from '../components/molecules/StatTile';
 import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
 import { SchemaForm } from '../components/settings/SchemaForm';
 import { PageLayout } from '../components/templates/PageLayout';
+
+function StorageBar({ label, item, color, total }: {
+  label: string;
+  item: { bytes: number; human: string; file_count?: number; backup_count?: number };
+  color: string;
+  total: number;
+}) {
+  const pct = total > 0 ? (item.bytes / total) * 100 : 0;
+  const count = item.file_count ?? item.backup_count;
+  return (
+    <div>
+      <div className="flex justify-between text-xs text-text-secondary mb-0.5">
+        <span>{label}</span>
+        <span>{item.human}{count ? ` (${count} files)` : ''}</span>
+      </div>
+      <div className="h-1.5 bg-bg-surface2 rounded-full overflow-hidden">
+        <div className={`h-full ${color} rounded-full`}
+             style={{ width: `${Math.max(pct, 1)}%` }} />
+      </div>
+    </div>
+  );
+}
 
 export const ProjectDetailPage: React.FC = () => {
   const { projectPath } = useParams<{ projectPath: string }>();
@@ -29,6 +51,11 @@ export const ProjectDetailPage: React.FC = () => {
   // Sections state
   const [sections, setSections] = useState<Section[]>([]);
   const [sectionsLoading, setSectionsLoading] = useState(false);
+
+  // Storage state
+  const [storage, setStorage] = useState<StorageInfo | null>(null);
+  const [clearing, setClearing] = useState(false);
+  const [clearMsg, setClearMsg] = useState<string | null>(null);
 
   // Settings state
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -112,6 +139,32 @@ export const ProjectDetailPage: React.FC = () => {
     }
   };
 
+  const loadStorage = async () => {
+    if (!decodedPath) return;
+    try {
+      const data = await projectsApi.getStorage(decodedPath);
+      setStorage(data);
+    } catch (err) {
+      console.error('Failed to load storage:', err);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (!decodedPath) return;
+    setClearing(true);
+    setClearMsg(null);
+    try {
+      const result = await projectsApi.clearLogs(decodedPath, 7);
+      setClearMsg(`Freed ${result.freed_human}`);
+      setTimeout(() => setClearMsg(null), 3000);
+      await loadStorage();
+    } catch (err) {
+      setClearMsg(err instanceof ApiError ? err.message : 'Failed to clear logs');
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const loadSettings = useCallback(async () => {
     if (!decodedPath) return;
 
@@ -190,6 +243,7 @@ export const ProjectDetailPage: React.FC = () => {
   useEffect(() => {
     loadProject();
     loadSections();
+    loadStorage();
   }, [decodedPath]);
 
   useEffect(() => {
@@ -398,6 +452,44 @@ export const ProjectDetailPage: React.FC = () => {
               onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=completed`)}
             />
           </div>
+        </div>
+      )}
+
+      {/* Storage */}
+      {storage && (
+        <div className="mb-8 bg-bg-surface rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-text-primary">Storage</h3>
+            {storage.total_bytes > 0 && (
+              <span className="text-lg font-semibold text-text-primary">{storage.total_human}</span>
+            )}
+          </div>
+          <div className="space-y-2">
+            <StorageBar label="Database" item={storage.breakdown?.database ?? { bytes: 0, human: '0 B' }} color="bg-info" total={storage.total_bytes} />
+            <StorageBar label="Invocation Logs" item={storage.breakdown?.invocations ?? { bytes: 0, human: '0 B' }} color="bg-warning" total={storage.total_bytes} />
+            <StorageBar label="Text Logs" item={storage.breakdown?.logs ?? { bytes: 0, human: '0 B' }} color="bg-accent" total={storage.total_bytes} />
+            <StorageBar label="Backups" item={storage.breakdown?.backups ?? { bytes: 0, human: '0 B' }} color="bg-success" total={storage.total_bytes} />
+          </div>
+          {storage.threshold_warning && (
+            <div className={`mt-4 p-3 rounded-lg flex items-center justify-between ${
+              storage.threshold_warning === 'red' ? 'bg-danger-soft' : 'bg-warning-soft'
+            }`}>
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-triangle-exclamation text-sm" />
+                <span className="text-sm">{storage.clearable_human} of old logs can be cleared</span>
+              </div>
+              <button
+                onClick={handleClearLogs}
+                disabled={clearing}
+                className="px-3 py-1.5 text-sm font-medium bg-bg-elevated rounded-lg hover:bg-bg-surface2 transition-colors disabled:opacity-50"
+              >
+                {clearing ? <ArrowPathIcon className="w-4 h-4 animate-spin inline" /> : 'Clear Old Logs'}
+              </button>
+            </div>
+          )}
+          {clearMsg && (
+            <p className={`mt-2 text-sm ${clearMsg.startsWith('Freed') ? 'text-success' : 'text-danger'}`}>{clearMsg}</p>
+          )}
         </div>
       )}
 

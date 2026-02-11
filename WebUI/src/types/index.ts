@@ -44,6 +44,35 @@ export interface ProjectsListResponse {
   count: number;
 }
 
+export interface StorageSize {
+  bytes: number;
+  human: string;
+  file_count?: number;
+  backup_count?: number;
+}
+
+export interface StorageInfo {
+  total_bytes: number;
+  total_human: string;
+  breakdown: {
+    database: StorageSize;
+    invocations: StorageSize;
+    logs: StorageSize;
+    backups: StorageSize;
+    other: StorageSize;
+  };
+  clearable_bytes: number;
+  clearable_human: string;
+  threshold_warning: 'orange' | 'red' | null;
+}
+
+export interface ClearLogsResult {
+  ok: boolean;
+  deleted_files: number;
+  freed_bytes: number;
+  freed_human: string;
+}
+
 export interface Section {
   id: string;
   name: string;
