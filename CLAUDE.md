@@ -1,5 +1,17 @@
 # Steroids Coding Standards
 
+> **IMPORTANT:** This file is linked to [AGENTS.md](./AGENTS.md). You MUST read both files before starting any work. CLAUDE.md covers coding standards and workflow. AGENTS.md covers design reviews, cross-provider review process, and agent behavior rules.
+
+## Cross-Provider Design Reviews (CRITICAL)
+
+**For significant changes (3+ files, new features, architectural decisions), get a second opinion from a different AI provider before implementing.** See [AGENTS.md](./AGENTS.md) for the full process.
+
+Key rules:
+- The reviewing model is **advisory, not the source of truth** — assess each finding independently
+- Document both perspectives in the design doc (finding + your assessment + decision)
+- Don't blindly implement reviewer suggestions; don't skip review on big changes
+- Skip review only for: typo fixes, single-file bug fixes under 50 lines, urgent hotfixes
+
 ## AI Providers (CRITICAL)
 
 **OpenAI's development tool CLI is Codex.** There is no separate `openai` CLI.
