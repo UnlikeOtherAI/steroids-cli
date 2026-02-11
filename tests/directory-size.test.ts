@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, openSync, ftruncateSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -50,6 +50,13 @@ describe('sumDirectorySize', () => {
   });
 });
 
+/** Create a sparse file that reports `sizeBytes` via stat but uses no disk */
+function createSparseFile(filePath: string, sizeBytes: number): void {
+  const fd = openSync(filePath, 'w');
+  ftruncateSync(fd, sizeBytes);
+  closeSync(fd);
+}
+
 describe('getStorageBreakdown', () => {
   let steroidsDir: string;
   beforeEach(() => {
@@ -71,6 +78,15 @@ describe('getStorageBreakdown', () => {
   it('returns empty breakdown for non-existent dir', async () => {
     const result = await getStorageBreakdown('/tmp/definitely-does-not-exist-xyz');
     expect(result.total_bytes).toBe(0);
+    expect(result.threshold_warning).toBeNull();
+  });
+
+  it('database-only: clearable_bytes=0 and threshold_warning=null', async () => {
+    writeFileSync(join(steroidsDir, 'steroids.db'), 'x'.repeat(1024));
+
+    const result = await getStorageBreakdown(steroidsDir);
+    expect(result.breakdown.database.bytes).toBe(1024);
+    expect(result.clearable_bytes).toBe(0);
     expect(result.threshold_warning).toBeNull();
   });
 
@@ -150,21 +166,31 @@ describe('getStorageBreakdown', () => {
     expect(result.threshold_warning).toBeNull();
   });
 
-  it('threshold orange when clearable >= 50MB', async () => {
+  it('threshold orange when clearable >= 50MB (sparse file)', async () => {
     mkdirSync(join(steroidsDir, 'invocations'));
-    const buf = Buffer.alloc(55 * 1024 * 1024, 'x');
-    writeFileSync(join(steroidsDir, 'invocations', 'big.log'), buf);
+    createSparseFile(join(steroidsDir, 'invocations', 'big.log'), 55 * 1024 * 1024);
 
     const result = await getStorageBreakdown(steroidsDir);
     expect(result.threshold_warning).toBe('orange');
   });
 
-  it('threshold red when clearable >= 100MB', async () => {
+  it('threshold red when clearable >= 100MB (sparse file)', async () => {
     mkdirSync(join(steroidsDir, 'invocations'));
-    const buf = Buffer.alloc(105 * 1024 * 1024, 'x');
-    writeFileSync(join(steroidsDir, 'invocations', 'big.log'), buf);
+    createSparseFile(join(steroidsDir, 'invocations', 'big.log'), 105 * 1024 * 1024);
 
     const result = await getStorageBreakdown(steroidsDir);
     expect(result.threshold_warning).toBe('red');
+  });
+
+  it('file count accuracy matches actual log files', async () => {
+    mkdirSync(join(steroidsDir, 'invocations'));
+    for (let i = 0; i < 5; i++) writeFileSync(join(steroidsDir, 'invocations', `${i}.log`), 'x');
+    const dateDir = join(steroidsDir, 'logs', '2025-03-01');
+    mkdirSync(dateDir, { recursive: true });
+    for (let i = 0; i < 3; i++) writeFileSync(join(dateDir, `run${i}.log`), 'y');
+
+    const result = await getStorageBreakdown(steroidsDir);
+    expect(result.breakdown.invocations.file_count).toBe(5);
+    expect(result.breakdown.logs.file_count).toBe(3);
   });
 });

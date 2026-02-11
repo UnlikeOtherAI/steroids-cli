@@ -2,8 +2,7 @@ import http from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, realpathSync, utimesSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import Database from 'better-sqlite3';
+import { openGlobalDatabase } from '../dist/runners/global-db.js';
 import { createApp } from '../API/src/index.js';
 
 function listen(srv: http.Server): Promise<number> {
@@ -22,27 +21,14 @@ function tmpDir(prefix: string): string {
   return realpathSync(d);
 }
 
-const GLOBAL_DB_PATH = join(homedir(), '.steroids', 'steroids.db');
-const PROJECTS_DDL = `CREATE TABLE IF NOT EXISTS projects (
-  path TEXT PRIMARY KEY, name TEXT, registered_at TEXT NOT NULL,
-  last_seen_at TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
-  pending_count INTEGER DEFAULT 0, in_progress_count INTEGER DEFAULT 0,
-  review_count INTEGER DEFAULT 0, completed_count INTEGER DEFAULT 0,
-  stats_updated_at TEXT)`;
-
+/** Register a project in the isolated global DB (uses current HOME) */
 function registerProject(path: string): void {
-  mkdirSync(join(homedir(), '.steroids'), { recursive: true });
-  const db = new Database(GLOBAL_DB_PATH);
+  const { db, close } = openGlobalDatabase();
   try {
-    db.exec(PROJECTS_DDL);
-    db.prepare("INSERT OR REPLACE INTO projects (path,name,registered_at,last_seen_at) VALUES (?,?,datetime('now'),datetime('now'))").run(path, 'test');
-  } finally { db.close(); }
-}
-
-function unregisterProject(path: string): void {
-  if (!existsSync(GLOBAL_DB_PATH)) return;
-  const db = new Database(GLOBAL_DB_PATH);
-  try { db.prepare('DELETE FROM projects WHERE path = ?').run(path); } catch { /**/ } finally { db.close(); }
+    db.prepare(
+      "INSERT OR REPLACE INTO projects (path,name,registered_at,last_seen_at,enabled) VALUES (?,?,datetime('now'),datetime('now'),1)",
+    ).run(path, 'test');
+  } finally { close(); }
 }
 
 function populateProject(projectPath: string): void {
@@ -64,12 +50,16 @@ function populateProject(projectPath: string): void {
 }
 
 describe('Storage API endpoints', () => {
+  const originalHome = process.env.HOME;
+  let homeDir: string;
   let projectPath: string;
   let server: http.Server;
   let port: number;
 
   beforeEach(async () => {
     process.env.NODE_ENV = 'test';
+    homeDir = tmpDir('steroids-home');
+    process.env.HOME = homeDir;
     projectPath = tmpDir('storage-proj');
     registerProject(projectPath);
     populateProject(projectPath);
@@ -79,9 +69,10 @@ describe('Storage API endpoints', () => {
   });
 
   afterEach(async () => {
+    process.env.HOME = originalHome;
     await new Promise<void>((r) => server.close(() => r()));
-    unregisterProject(projectPath);
     await rm(projectPath, { recursive: true, force: true });
+    await rm(homeDir, { recursive: true, force: true });
   });
 
   const storageUrl = () => `http://127.0.0.1:${port}/api/projects/storage?path=${encodeURIComponent(projectPath)}`;
@@ -120,6 +111,25 @@ describe('Storage API endpoints', () => {
     } finally { await rm(unreg, { recursive: true, force: true }); }
   });
 
+  it('GET /api/projects/storage with database-only returns clearable_bytes=0', async () => {
+    const dbOnlyProject = tmpDir('storage-dbonly');
+    registerProject(dbOnlyProject);
+    const sd = join(dbOnlyProject, '.steroids');
+    mkdirSync(sd, { recursive: true });
+    writeFileSync(join(sd, 'steroids.db'), 'x'.repeat(800));
+
+    try {
+      const resp = await fetch(
+        `http://127.0.0.1:${port}/api/projects/storage?path=${encodeURIComponent(dbOnlyProject)}`,
+      );
+      expect(resp.status).toBe(200);
+      const body = (await resp.json()) as any;
+      expect(body.breakdown.database.bytes).toBe(800);
+      expect(body.clearable_bytes).toBe(0);
+      expect(body.threshold_warning).toBeNull();
+    } finally { await rm(dbOnlyProject, { recursive: true, force: true }); }
+  });
+
   it('POST /api/projects/clear-logs deletes old logs and returns freed bytes', async () => {
     const resp = await clearLogs({ path: projectPath, retention_days: 1 });
     expect(resp.status).toBe(200);
@@ -149,10 +159,11 @@ describe('Storage API endpoints', () => {
     expect(((await resp.json()) as any).ok).toBe(false);
   });
 
-  it('cache invalidation: GET storage returns updated size after clear-logs', async () => {
+  it('cache invalidation: GET storage returns reduced clearable_bytes after clear-logs', async () => {
     const before = await fetch(storageUrl()).then((r) => r.json()) as any;
+    expect(before.clearable_bytes).toBe(450); // 100 + 200 + 150
     await clearLogs({ path: projectPath, retention_days: 1 });
     const after = await fetch(storageUrl()).then((r) => r.json()) as any;
-    expect(after.clearable_bytes).toBeLessThanOrEqual(before.clearable_bytes);
+    expect(after.clearable_bytes).toBe(0);
   });
 });
