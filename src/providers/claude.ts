@@ -57,7 +57,7 @@ const DEFAULT_TIMEOUT = 900_000;
  * Default invocation template for Claude CLI
  * Uses -p flag for print mode with stream-json for realtime output
  */
-const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" --model {model} --output-format stream-json';
+const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" --model {model} --output-format stream-json --verbose';
 
 /**
  * Claude AI Provider implementation
@@ -123,12 +123,22 @@ export class ClaudeProvider extends BaseAIProvider {
     try {
       const event = JSON.parse(line);
 
-      // Text delta from assistant response
+      // Assistant message — extract text and tool_use from content blocks
+      if (event.type === 'assistant' && event.message?.content) {
+        const parts: string[] = [];
+        for (const block of event.message.content) {
+          if (block.type === 'text' && block.text) parts.push(block.text);
+          if (block.type === 'tool_use') return { tool: `${block.name}` };
+        }
+        if (parts.length > 0) return { text: parts.join('') };
+      }
+
+      // Content block delta (raw streaming events)
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
         return { text: event.delta.text };
       }
 
-      // Tool use events
+      // Tool use events from content_block_start
       if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
         return { tool: event.content_block.name };
       }
