@@ -45,8 +45,8 @@ export interface CreditPauseResult {
  */
 function sanitizeMessage(message: string): string {
   if (!message) return '';
-  const sanitized = message.slice(0, MAX_MESSAGE_LENGTH);
-  return sanitized.length < message.length ? sanitized + '...' : sanitized;
+  if (message.length <= MAX_MESSAGE_LENGTH) return message;
+  return message.slice(0, MAX_MESSAGE_LENGTH - 3) + '...';
 }
 
 /**

@@ -223,7 +223,7 @@ describe('Credit Pause Handler', () => {
       expect(mockRecordCreditIncident).toHaveBeenCalledWith(
         opts.db,
         expect.objectContaining({
-          message: 'A'.repeat(200) + '...',
+          message: 'A'.repeat(197) + '...',
         }),
         'runner-1',
       );
