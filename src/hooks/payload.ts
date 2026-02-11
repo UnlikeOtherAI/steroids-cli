@@ -5,7 +5,7 @@
  * Payloads contain all context needed by hook handlers.
  */
 
-import type { HookEvent, TaskEvent, HealthEvent, DisputeEvent } from './events';
+import type { HookEvent, TaskEvent, HealthEvent, DisputeEvent, CreditEvent } from './events';
 
 /**
  * Task status values
@@ -258,6 +258,46 @@ export interface DisputeResolvedPayload extends BasePayload {
 }
 
 /**
+ * Credit exhaustion data for credit-related events
+ */
+export interface CreditData {
+  /** Provider name (e.g. 'claude', 'codex', 'gemini') */
+  provider: string;
+  /** Model name */
+  model: string;
+  /** Role that was affected */
+  role: 'orchestrator' | 'coder' | 'reviewer';
+  /** Error message from the provider */
+  message: string;
+  /** Runner ID if available */
+  runner_id?: string;
+}
+
+/**
+ * Payload for credit.exhausted event
+ */
+export interface CreditExhaustedPayload extends BasePayload {
+  event: 'credit.exhausted';
+  credit: CreditData;
+  project: ProjectContext;
+}
+
+/**
+ * Payload for credit.resolved event
+ */
+export interface CreditResolvedPayload extends BasePayload {
+  event: 'credit.resolved';
+  credit: CreditData;
+  project: ProjectContext;
+  resolution: 'config_changed';
+}
+
+/**
+ * Union of all credit event payloads
+ */
+export type CreditEventPayload = CreditExhaustedPayload | CreditResolvedPayload;
+
+/**
  * Union of all task event payloads
  */
 export type TaskEventPayload =
@@ -289,7 +329,9 @@ export type HookPayload =
   | HealthChangedPayload
   | HealthCriticalPayload
   | DisputeCreatedPayload
-  | DisputeResolvedPayload;
+  | DisputeResolvedPayload
+  | CreditExhaustedPayload
+  | CreditResolvedPayload;
 
 // ============================================================================
 // Payload Factory Functions
@@ -455,6 +497,36 @@ export function createDisputeResolvedPayload(
   };
 }
 
+/**
+ * Create a credit.exhausted payload
+ */
+export function createCreditExhaustedPayload(
+  credit: CreditData,
+  project: ProjectContext
+): CreditExhaustedPayload {
+  return {
+    ...createBasePayload('credit.exhausted'),
+    credit,
+    project,
+  };
+}
+
+/**
+ * Create a credit.resolved payload
+ */
+export function createCreditResolvedPayload(
+  credit: CreditData,
+  project: ProjectContext,
+  resolution: 'config_changed'
+): CreditResolvedPayload {
+  return {
+    ...createBasePayload('credit.resolved'),
+    credit,
+    project,
+    resolution,
+  };
+}
+
 // ============================================================================
 // Payload Validation
 // ============================================================================
@@ -498,6 +570,11 @@ export function validatePayload(payload: HookPayload): { valid: boolean; errors:
     case 'dispute.created':
     case 'dispute.resolved':
       validateDisputePayload(payload as DisputeEventPayload, errors);
+      break;
+
+    case 'credit.exhausted':
+    case 'credit.resolved':
+      validateCreditPayload(payload as CreditEventPayload, errors);
       break;
   }
 
@@ -593,6 +670,25 @@ function validateDisputePayload(payload: DisputeEventPayload, errors: string[]):
   }
   if (!payload.task) {
     errors.push('Missing required field: task');
+  }
+  if (!payload.project) {
+    errors.push('Missing required field: project');
+  }
+}
+
+function validateCreditPayload(payload: CreditEventPayload, errors: string[]): void {
+  if (!payload.credit) {
+    errors.push('Missing required field: credit');
+    return;
+  }
+  if (!payload.credit.provider) {
+    errors.push('Missing required field: credit.provider');
+  }
+  if (!payload.credit.model) {
+    errors.push('Missing required field: credit.model');
+  }
+  if (!payload.credit.role) {
+    errors.push('Missing required field: credit.role');
   }
   if (!payload.project) {
     errors.push('Missing required field: project');

@@ -104,15 +104,19 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           // Check for credit exhaustion in batch coder result
           const batchCoderCredit = checkBatchCreditExhaustion(batchCoderResult, 'coder', projectPath);
           if (batchCoderCredit) {
-            const pauseResult = await handleCreditExhaustion(batchCoderCredit, {
+            const pauseResult = await handleCreditExhaustion({
+              provider: batchCoderCredit.provider,
+              model: batchCoderCredit.model,
+              role: batchCoderCredit.role,
+              message: batchCoderCredit.message,
+              runnerId: options.runnerId ?? '',
               projectPath,
-              projectDb: db,
-              runnerId: options.runnerId,
-              shouldStop,
+              db,
+              shouldStop: shouldStop ?? (() => false),
               onHeartbeat: options.onHeartbeat,
-              once,
+              onceMode: once,
             });
-            if (!pauseResult.resumed) break;
+            if (!pauseResult.resolved) break;
             continue; // Retry iteration after config change
           }
 
@@ -131,15 +135,19 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             // Check for credit exhaustion in batch reviewer result
             const batchReviewerCredit = checkBatchCreditExhaustion(batchReviewerResult, 'reviewer', projectPath);
             if (batchReviewerCredit) {
-              const pauseResult = await handleCreditExhaustion(batchReviewerCredit, {
+              const pauseResult = await handleCreditExhaustion({
+                provider: batchReviewerCredit.provider,
+                model: batchReviewerCredit.model,
+                role: batchReviewerCredit.role,
+                message: batchReviewerCredit.message,
+                runnerId: options.runnerId ?? '',
                 projectPath,
-                projectDb: db,
-                runnerId: options.runnerId,
-                shouldStop,
+                db,
+                shouldStop: shouldStop ?? (() => false),
                 onHeartbeat: options.onHeartbeat,
-                once,
+                onceMode: once,
               });
-              if (!pauseResult.resumed) break;
+              if (!pauseResult.resolved) break;
               continue; // Retry iteration after config change
             }
 
@@ -266,15 +274,19 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
 
       // Check for credit exhaustion from single-task phase
       if (phaseResult?.action === 'pause_credit_exhaustion') {
-        const pauseResult = await handleCreditExhaustion(phaseResult, {
+        const pauseResult = await handleCreditExhaustion({
+          provider: phaseResult.provider,
+          model: phaseResult.model,
+          role: phaseResult.role,
+          message: phaseResult.message,
+          runnerId: options.runnerId ?? '',
           projectPath,
-          projectDb: db,
-          runnerId: options.runnerId,
-          shouldStop,
+          db,
+          shouldStop: shouldStop ?? (() => false),
           onHeartbeat: options.onHeartbeat,
-          once,
+          onceMode: once,
         });
-        if (!pauseResult.resumed) break;
+        if (!pauseResult.resolved) break;
         continue; // Retry iteration after config change
       }
 

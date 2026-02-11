@@ -18,8 +18,11 @@ import {
   createTaskFailedPayload,
   createSectionCompletedPayload,
   createProjectCompletedPayload,
+  createCreditExhaustedPayload,
+  createCreditResolvedPayload,
   type TaskSummary,
   type ProjectSummary,
+  type CreditData,
 } from './payload.js';
 import type { Task } from '../database/queries.js';
 
@@ -182,6 +185,33 @@ export async function triggerProjectCompleted(
   const payload = createProjectCompletedPayload(project, summary);
 
   return await executeHooks('project.completed', payload, options);
+}
+
+/**
+ * Trigger credit.exhausted hooks
+ */
+export async function triggerCreditExhausted(
+  credit: CreditData,
+  options: { verbose?: boolean; projectPath?: string } = {}
+): Promise<HookExecutionResult[]> {
+  const project = getProjectContext(options.projectPath);
+  const payload = createCreditExhaustedPayload(credit, project);
+
+  return await executeHooks('credit.exhausted', payload, options);
+}
+
+/**
+ * Trigger credit.resolved hooks
+ */
+export async function triggerCreditResolved(
+  credit: CreditData,
+  resolution: 'config_changed',
+  options: { verbose?: boolean; projectPath?: string } = {}
+): Promise<HookExecutionResult[]> {
+  const project = getProjectContext(options.projectPath);
+  const payload = createCreditResolvedPayload(credit, project, resolution);
+
+  return await executeHooks('credit.resolved', payload, options);
 }
 
 /**

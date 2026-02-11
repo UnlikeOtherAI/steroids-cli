@@ -13,100 +13,109 @@ import {
   recordCreditIncident,
   resolveCreditIncident,
 } from '../database/queries.js';
+import {
+  triggerCreditExhausted,
+  triggerCreditResolved,
+  triggerHooksSafely,
+} from '../hooks/integration.js';
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
+const MAX_MESSAGE_LENGTH = 200;
 
 export interface CreditPauseOptions {
-  /** Project path for config loading */
+  provider: string;
+  model: string;
+  role: 'orchestrator' | 'coder' | 'reviewer';
+  message: string;
+  runnerId: string;
   projectPath: string;
-  /** Project database for recording incidents */
-  projectDb: Database.Database;
-  /** Runner ID (for incident tracking and heartbeat) */
-  runnerId?: string;
-  /** Called to check if the loop should stop */
-  shouldStop?: () => boolean;
-  /** Called to update heartbeat during the pause */
+  db: Database.Database;
+  shouldStop: () => boolean;
   onHeartbeat?: () => void;
-  /** If true, fail immediately instead of entering pause loop */
-  once?: boolean;
+  onceMode?: boolean;
 }
 
 export interface CreditPauseResult {
-  /** Whether the pause was resolved (config changed) vs interrupted (shouldStop) */
-  resumed: boolean;
+  resolved: boolean;
+  resolution: 'config_changed' | 'stopped' | 'immediate_fail';
+}
+
+/**
+ * Sanitize error message: truncate to MAX_MESSAGE_LENGTH chars
+ */
+function sanitizeMessage(message: string): string {
+  if (!message) return '';
+  const sanitized = message.slice(0, MAX_MESSAGE_LENGTH);
+  return sanitized.length < message.length ? sanitized + '...' : sanitized;
 }
 
 /**
  * Handle a credit exhaustion event.
  *
- * In --once mode, throws immediately.
- * Otherwise, records an incident, fires hooks, prints output,
+ * Records the incident, fires hooks, prints CLI output,
  * and polls for config changes every 30 seconds.
+ * In onceMode, prints the message and returns immediately.
  */
 export async function handleCreditExhaustion(
-  alert: CreditExhaustionResult,
   options: CreditPauseOptions
 ): Promise<CreditPauseResult> {
-  const { projectPath, projectDb, runnerId, shouldStop, onHeartbeat, once } = options;
+  const {
+    provider, model, role, message,
+    runnerId, projectPath, db, shouldStop, onHeartbeat, onceMode,
+  } = options;
 
-  // --once mode: fail immediately
-  if (once) {
-    console.error('');
-    console.error('============================================================');
-    console.error('  OUT OF CREDITS');
-    console.error('============================================================');
-    console.error('');
-    console.error(`  Provider: ${alert.provider} (model: ${alert.model})`);
-    console.error(`  Role:     ${alert.role}`);
-    console.error(`  Message:  ${alert.message}`);
-    console.error('');
-    console.error('  Running with --once flag, exiting immediately.');
-    console.error('============================================================');
-    throw new CreditExhaustionError(alert);
-  }
+  const safeMessage = sanitizeMessage(message);
 
   // Record incident (with deduplication)
-  const incidentId = recordCreditIncident(projectDb, {
-    provider: alert.provider,
-    model: alert.model,
-    role: alert.role,
-    message: alert.message,
+  const incidentId = recordCreditIncident(db, {
+    provider, model, role, message: safeMessage,
   }, runnerId);
 
-  // Print console output
+  // Fire credit.exhausted hook
+  await triggerHooksSafely(() =>
+    triggerCreditExhausted(
+      { provider, model, role, message: safeMessage, runner_id: runnerId },
+      { projectPath }
+    )
+  );
+
+  // Print CLI output
   console.log('');
   console.log('============================================================');
   console.log('  OUT OF CREDITS');
   console.log('============================================================');
   console.log('');
-  console.log(`  Provider: ${alert.provider} (model: ${alert.model})`);
-  console.log(`  Role:     ${alert.role}`);
-  console.log(`  Message:  ${alert.message}`);
+  console.log(`  Provider: ${provider} (model: ${model})`);
+  console.log(`  Role:     ${role}`);
+  console.log(`  Message:  ${safeMessage}`);
   console.log('');
   console.log('  The runner is paused. To resume, either:');
-  console.log(`    1. Add credits to your ${alert.provider} account`);
-  console.log(`    2. Change the ${alert.role} provider:`);
-  console.log(`       steroids config set ai.${alert.role}.provider <new-provider>`);
+  console.log(`    1. Add credits to your ${provider} account`);
+  console.log(`    2. Change the ${role} provider:`);
+  console.log(`       steroids config set ai.${role}.provider <new-provider>`);
   console.log('');
   console.log('  Checking for config changes every 30 seconds...');
   console.log('============================================================');
 
-  // Snapshot original config
-  const originalProvider = alert.provider;
-  const originalModel = alert.model;
+  // onceMode: return immediately
+  if (onceMode) {
+    return { resolved: false, resolution: 'immediate_fail' };
+  }
+
+  const creditData = { provider, model, role, message: safeMessage, runner_id: runnerId };
 
   // Poll for config change
   while (true) {
-    if (shouldStop?.()) {
-      resolveCreditIncident(projectDb, incidentId, 'dismissed');
-      return { resumed: false };
+    if (shouldStop()) {
+      resolveCreditIncident(db, incidentId, 'dismissed');
+      return { resolved: false, resolution: 'stopped' };
     }
 
     // Wait, but check shouldStop more frequently than the full interval
     const waited = await interruptibleSleep(POLL_INTERVAL_MS, shouldStop);
     if (!waited) {
-      resolveCreditIncident(projectDb, incidentId, 'dismissed');
-      return { resumed: false };
+      resolveCreditIncident(db, incidentId, 'dismissed');
+      return { resolved: false, resolution: 'stopped' };
     }
 
     // Update heartbeat so the wakeup system doesn't kill us
@@ -114,13 +123,19 @@ export async function handleCreditExhaustion(
 
     // Check if config has changed
     const config = loadConfig(projectPath);
-    const currentProvider = config.ai?.[alert.role]?.provider;
-    const currentModel = config.ai?.[alert.role]?.model;
+    const currentProvider = config.ai?.[role]?.provider;
+    const currentModel = config.ai?.[role]?.model;
 
-    if (currentProvider !== originalProvider || currentModel !== originalModel) {
-      console.log(`\n  Configuration changed (${originalProvider}/${originalModel} → ${currentProvider}/${currentModel}). Resuming...`);
-      resolveCreditIncident(projectDb, incidentId, 'config_changed');
-      return { resumed: true };
+    if (currentProvider !== provider || currentModel !== model) {
+      console.log(`\n  Configuration changed (${provider}/${model} → ${currentProvider}/${currentModel}). Resuming...`);
+      resolveCreditIncident(db, incidentId, 'config_changed');
+
+      // Fire credit.resolved hook
+      await triggerHooksSafely(() =>
+        triggerCreditResolved(creditData, 'config_changed', { projectPath })
+      );
+
+      return { resolved: true, resolution: 'config_changed' };
     }
   }
 }
@@ -131,12 +146,12 @@ export async function handleCreditExhaustion(
  */
 async function interruptibleSleep(
   ms: number,
-  shouldStop?: () => boolean
+  shouldStop: () => boolean
 ): Promise<boolean> {
   const checkInterval = 2000; // Check every 2 seconds
   let elapsed = 0;
   while (elapsed < ms) {
-    if (shouldStop?.()) return false;
+    if (shouldStop()) return false;
     const remaining = ms - elapsed;
     const wait = Math.min(checkInterval, remaining);
     await new Promise<void>((resolve) => setTimeout(resolve, wait));
@@ -146,21 +161,7 @@ async function interruptibleSleep(
 }
 
 /**
- * Error thrown in --once mode when credits are exhausted
- */
-export class CreditExhaustionError extends Error {
-  public readonly alert: CreditExhaustionResult;
-
-  constructor(alert: CreditExhaustionResult) {
-    super(`Credit exhaustion: ${alert.provider}/${alert.model} (${alert.role}): ${alert.message}`);
-    this.name = 'CreditExhaustionError';
-    this.alert = alert;
-  }
-}
-
-/**
  * Check a batch result for credit exhaustion using the provider's classifier.
- * Batch results have the same shape as InvokeResult.
  */
 export function checkBatchCreditExhaustion(
   result: { success: boolean; exitCode: number; stdout: string; stderr: string; duration: number; timedOut: boolean },

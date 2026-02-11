@@ -2,9 +2,9 @@
  * Orchestrator Loop — Credit Pause Integration Tests
  *
  * Tests the credit exhaustion handling branches in orchestrator-loop.ts:
- * 1. Single-task path (line ~267): pause_credit_exhaustion from runCoderPhase → break vs continue
- * 2. Batch coder path (line ~99): checkBatchCreditExhaustion → handleCreditExhaustion → continue/break
- * 3. Batch reviewer path (line ~126): checkBatchCreditExhaustion → handleCreditExhaustion → continue/break
+ * 1. Single-task path: pause_credit_exhaustion from runCoderPhase → break vs continue
+ * 2. Batch coder path: checkBatchCreditExhaustion → handleCreditExhaustion → continue/break
+ * 3. Batch reviewer path: checkBatchCreditExhaustion → handleCreditExhaustion → continue/break
  */
 
 // @ts-nocheck
@@ -160,14 +160,12 @@ describe('Orchestrator Loop — Credit Pause', () => {
       const task = makeTask();
       const alert = makeCreditAlert('coder');
 
-      // First iteration: selectNextTask returns a task, phase returns credit exhaustion
-      // handleCreditExhaustion returns { resumed: false } → loop breaks
       mockSelectNextTask
         .mockReturnValueOnce({ task, action: 'start' })
         .mockReturnValue(null);
 
       mockRunCoderPhase.mockResolvedValue(alert);
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: false });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: false, resolution: 'stopped' });
 
       await runOrchestratorLoop({
         projectPath: '/tmp/test',
@@ -175,17 +173,20 @@ describe('Orchestrator Loop — Credit Pause', () => {
       });
 
       expect(mockHandleCreditExhaustion).toHaveBeenCalledWith(
-        alert,
         expect.objectContaining({
+          provider: 'claude',
+          model: 'claude-sonnet-4',
+          role: 'coder',
+          message: 'Insufficient credits',
           projectPath: '/tmp/test',
-          projectDb: mockDb,
           runnerId: 'runner-1',
-          once: false,
+          db: mockDb,
+          onceMode: false,
         })
       );
     });
 
-    it('breaks loop when handleCreditExhaustion returns { resumed: false }', async () => {
+    it('breaks loop when handleCreditExhaustion returns { resolved: false }', async () => {
       const task = makeTask();
 
       mockSelectNextTask
@@ -193,33 +194,29 @@ describe('Orchestrator Loop — Credit Pause', () => {
         .mockReturnValue(null);
 
       mockRunCoderPhase.mockResolvedValue(makeCreditAlert());
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: false });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: false, resolution: 'stopped' });
 
       await runOrchestratorLoop({
         projectPath: '/tmp/test',
       });
 
-      // Should only have selected a task once (loop broke after credit pause)
       expect(mockSelectNextTask).toHaveBeenCalledTimes(1);
     });
 
-    it('continues loop when handleCreditExhaustion returns { resumed: true }', async () => {
+    it('continues loop when handleCreditExhaustion returns { resolved: true }', async () => {
       const task = makeTask();
 
-      // First iteration: credit exhaustion → resumed
-      // Second iteration: no tasks → loop ends
       mockSelectNextTask
         .mockReturnValueOnce({ task, action: 'start' })
         .mockReturnValue(null);
 
       mockRunCoderPhase.mockResolvedValueOnce(makeCreditAlert());
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: true });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: true, resolution: 'config_changed' });
 
       await runOrchestratorLoop({
         projectPath: '/tmp/test',
       });
 
-      // Should have gone through two iterations (first = credit pause + continue, second = no tasks)
       expect(mockSelectNextTask).toHaveBeenCalledTimes(2);
     });
 
@@ -232,27 +229,29 @@ describe('Orchestrator Loop — Credit Pause', () => {
         .mockReturnValue(null);
 
       mockRunReviewerPhase.mockResolvedValue(alert);
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: false });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: false, resolution: 'stopped' });
 
       await runOrchestratorLoop({
         projectPath: '/tmp/test',
       });
 
       expect(mockHandleCreditExhaustion).toHaveBeenCalledWith(
-        alert,
         expect.objectContaining({
+          provider: 'claude',
+          model: 'claude-sonnet-4',
+          role: 'reviewer',
           projectPath: '/tmp/test',
-          projectDb: mockDb,
+          db: mockDb,
         })
       );
     });
 
-    it('passes once=true when running in --once mode', async () => {
+    it('passes onceMode=true when running in --once mode', async () => {
       const task = makeTask();
 
       mockSelectNextTask.mockReturnValueOnce({ task, action: 'start' });
       mockRunCoderPhase.mockResolvedValue(makeCreditAlert());
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: false });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: false, resolution: 'immediate_fail' });
 
       await runOrchestratorLoop({
         projectPath: '/tmp/test',
@@ -260,9 +259,8 @@ describe('Orchestrator Loop — Credit Pause', () => {
       });
 
       expect(mockHandleCreditExhaustion).toHaveBeenCalledWith(
-        expect.anything(),
         expect.objectContaining({
-          once: true,
+          onceMode: true,
         })
       );
     });
@@ -277,7 +275,7 @@ describe('Orchestrator Loop — Credit Pause', () => {
         .mockReturnValue(null);
 
       mockRunCoderPhase.mockResolvedValue(makeCreditAlert());
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: false });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: false, resolution: 'stopped' });
 
       await runOrchestratorLoop({
         projectPath: '/tmp/test',
@@ -286,7 +284,6 @@ describe('Orchestrator Loop — Credit Pause', () => {
       });
 
       expect(mockHandleCreditExhaustion).toHaveBeenCalledWith(
-        expect.anything(),
         expect.objectContaining({
           shouldStop,
           onHeartbeat,
@@ -299,7 +296,6 @@ describe('Orchestrator Loop — Credit Pause', () => {
 
   describe('batch coder path — credit exhaustion', () => {
     beforeEach(() => {
-      // Enable batch mode
       mockLoadConfig.mockReturnValue({
         sections: { batchMode: true, maxBatchSize: 10 },
       });
@@ -316,9 +312,8 @@ describe('Orchestrator Loop — Credit Pause', () => {
 
       mockInvokeCoderBatch.mockResolvedValue(batchResult);
       mockCheckBatchCreditExhaustion.mockReturnValue(makeCreditAlert());
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: false });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: false, resolution: 'stopped' });
 
-      // No single-task fallback needed since batch mode returns tasks
       mockSelectNextTask.mockReturnValue(null);
 
       await runOrchestratorLoop({
@@ -329,12 +324,16 @@ describe('Orchestrator Loop — Credit Pause', () => {
         batchResult, 'coder', '/tmp/test'
       );
       expect(mockHandleCreditExhaustion).toHaveBeenCalledWith(
-        makeCreditAlert(),
-        expect.objectContaining({ projectPath: '/tmp/test' })
+        expect.objectContaining({
+          provider: 'claude',
+          model: 'claude-sonnet-4',
+          role: 'coder',
+          projectPath: '/tmp/test',
+        })
       );
     });
 
-    it('breaks loop when batch coder credit pause returns { resumed: false }', async () => {
+    it('breaks loop when batch coder credit pause returns { resolved: false }', async () => {
       const tasks = [makeTask()];
       const batch = { tasks, sectionId: 'sec-1', sectionName: 'Section 1' };
 
@@ -343,22 +342,19 @@ describe('Orchestrator Loop — Credit Pause', () => {
         success: false, exitCode: 1, stdout: '', stderr: '', duration: 100, timedOut: false, taskCount: 1,
       });
       mockCheckBatchCreditExhaustion.mockReturnValue(makeCreditAlert());
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: false });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: false, resolution: 'stopped' });
 
       mockSelectNextTask.mockReturnValue(null);
 
       await runOrchestratorLoop({ projectPath: '/tmp/test' });
 
-      // Loop should have broken after the credit pause
       expect(mockSelectTaskBatch).toHaveBeenCalledTimes(1);
     });
 
-    it('continues loop when batch coder credit pause returns { resumed: true }', async () => {
+    it('continues loop when batch coder credit pause returns { resolved: true }', async () => {
       const tasks = [makeTask()];
       const batch = { tasks, sectionId: 'sec-1', sectionName: 'Section 1' };
 
-      // First iteration: batch with credit exhaustion → resume
-      // Second iteration: no batch → fall through to single-task → no task → exit
       mockSelectTaskBatch
         .mockReturnValueOnce(batch)
         .mockReturnValue(null);
@@ -368,11 +364,10 @@ describe('Orchestrator Loop — Credit Pause', () => {
         success: false, exitCode: 1, stdout: '', stderr: '', duration: 100, timedOut: false, taskCount: 1,
       });
       mockCheckBatchCreditExhaustion.mockReturnValue(makeCreditAlert());
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: true });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: true, resolution: 'config_changed' });
 
       await runOrchestratorLoop({ projectPath: '/tmp/test' });
 
-      // Should have gone through two iterations (continue after resume)
       expect(mockSelectTaskBatch).toHaveBeenCalledTimes(2);
     });
   });
@@ -392,37 +387,37 @@ describe('Orchestrator Loop — Credit Pause', () => {
 
       mockSelectTaskBatch.mockReturnValueOnce(batch).mockReturnValue(null);
 
-      // Batch coder succeeds (no credit issue)
       const coderResult = { success: true, exitCode: 0, stdout: 'done', stderr: '', duration: 100, timedOut: false, taskCount: 1 };
       mockInvokeCoderBatch.mockResolvedValue(coderResult);
       mockCheckBatchCreditExhaustion
-        .mockReturnValueOnce(null) // coder: no credit issue
-        .mockReturnValueOnce(makeCreditAlert('reviewer')); // reviewer: credit issue
+        .mockReturnValueOnce(null)
+        .mockReturnValueOnce(makeCreditAlert('reviewer'));
 
-      // Tasks are now in review status
       mockGetTask.mockReturnValue(makeTask({ id: 'task-1', status: 'review' }));
 
-      // Batch reviewer returns credit exhaustion
       const reviewerResult = { success: false, exitCode: 1, stdout: '', stderr: 'credits', duration: 100, timedOut: false, taskCount: 1 };
       mockInvokeReviewerBatch.mockResolvedValue(reviewerResult);
 
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: false });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: false, resolution: 'stopped' });
       mockSelectNextTask.mockReturnValue(null);
 
       await runOrchestratorLoop({ projectPath: '/tmp/test' });
 
-      // checkBatchCreditExhaustion called for both coder and reviewer
       expect(mockCheckBatchCreditExhaustion).toHaveBeenCalledTimes(2);
       expect(mockCheckBatchCreditExhaustion).toHaveBeenCalledWith(
         reviewerResult, 'reviewer', '/tmp/test'
       );
       expect(mockHandleCreditExhaustion).toHaveBeenCalledWith(
-        makeCreditAlert('reviewer'),
-        expect.objectContaining({ projectPath: '/tmp/test' })
+        expect.objectContaining({
+          provider: 'claude',
+          model: 'claude-sonnet-4',
+          role: 'reviewer',
+          projectPath: '/tmp/test',
+        })
       );
     });
 
-    it('breaks loop when batch reviewer credit pause returns { resumed: false }', async () => {
+    it('breaks loop when batch reviewer credit pause returns { resolved: false }', async () => {
       const tasks = [makeTask({ id: 'task-1' })];
       const batch = { tasks, sectionId: 'sec-1', sectionName: 'Section 1' };
 
@@ -432,14 +427,14 @@ describe('Orchestrator Loop — Credit Pause', () => {
         success: true, exitCode: 0, stdout: '', stderr: '', duration: 100, timedOut: false, taskCount: 1,
       });
       mockCheckBatchCreditExhaustion
-        .mockReturnValueOnce(null) // coder ok
+        .mockReturnValueOnce(null)
         .mockReturnValueOnce(makeCreditAlert('reviewer'));
 
       mockGetTask.mockReturnValue(makeTask({ status: 'review' }));
       mockInvokeReviewerBatch.mockResolvedValue({
         success: false, exitCode: 1, stdout: '', stderr: '', duration: 100, timedOut: false, taskCount: 1,
       });
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: false });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: false, resolution: 'stopped' });
       mockSelectNextTask.mockReturnValue(null);
 
       await runOrchestratorLoop({ projectPath: '/tmp/test' });
@@ -447,7 +442,7 @@ describe('Orchestrator Loop — Credit Pause', () => {
       expect(mockSelectTaskBatch).toHaveBeenCalledTimes(1);
     });
 
-    it('continues loop when batch reviewer credit pause returns { resumed: true }', async () => {
+    it('continues loop when batch reviewer credit pause returns { resolved: true }', async () => {
       const tasks = [makeTask({ id: 'task-1' })];
       const batch = { tasks, sectionId: 'sec-1', sectionName: 'Section 1' };
 
@@ -459,19 +454,18 @@ describe('Orchestrator Loop — Credit Pause', () => {
         success: true, exitCode: 0, stdout: '', stderr: '', duration: 100, timedOut: false, taskCount: 1,
       });
       mockCheckBatchCreditExhaustion
-        .mockReturnValueOnce(null) // coder ok
+        .mockReturnValueOnce(null)
         .mockReturnValueOnce(makeCreditAlert('reviewer'));
 
       mockGetTask.mockReturnValue(makeTask({ status: 'review' }));
       mockInvokeReviewerBatch.mockResolvedValue({
         success: false, exitCode: 1, stdout: '', stderr: '', duration: 100, timedOut: false, taskCount: 1,
       });
-      mockHandleCreditExhaustion.mockResolvedValue({ resumed: true });
+      mockHandleCreditExhaustion.mockResolvedValue({ resolved: true, resolution: 'config_changed' });
       mockSelectNextTask.mockReturnValue(null);
 
       await runOrchestratorLoop({ projectPath: '/tmp/test' });
 
-      // Should have continued to a second iteration
       expect(mockSelectTaskBatch).toHaveBeenCalledTimes(2);
     });
   });

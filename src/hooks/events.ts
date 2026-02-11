@@ -19,6 +19,8 @@ export const HOOK_EVENTS = [
   'health.critical',
   'dispute.created',
   'dispute.resolved',
+  'credit.exhausted',
+  'credit.resolved',
 ] as const;
 
 /**
@@ -67,6 +69,13 @@ export const DISPUTE_EVENTS = ['dispute.created', 'dispute.resolved'] as const;
 export type DisputeEvent = (typeof DISPUTE_EVENTS)[number];
 
 /**
+ * Credit-related events
+ */
+export const CREDIT_EVENTS = ['credit.exhausted', 'credit.resolved'] as const;
+
+export type CreditEvent = (typeof CREDIT_EVENTS)[number];
+
+/**
  * Event descriptions for documentation and help text
  */
 export const EVENT_DESCRIPTIONS: Record<HookEvent, string> = {
@@ -80,6 +89,8 @@ export const EVENT_DESCRIPTIONS: Record<HookEvent, string> = {
   'health.critical': 'Triggered when health drops below threshold',
   'dispute.created': 'Triggered when a dispute is opened',
   'dispute.resolved': 'Triggered when a dispute is resolved',
+  'credit.exhausted': 'Triggered when a provider runs out of credits',
+  'credit.resolved': 'Triggered when credit exhaustion is resolved (config changed)',
 };
 
 /**
@@ -134,5 +145,13 @@ export function getEventsByCategory(): Record<string, HookEvent[]> {
     project: [...PROJECT_EVENTS],
     health: [...HEALTH_EVENTS],
     dispute: [...DISPUTE_EVENTS],
+    credit: [...CREDIT_EVENTS],
   };
+}
+
+/**
+ * Check if an event is a credit event
+ */
+export function isCreditEvent(event: HookEvent): event is CreditEvent {
+  return CREDIT_EVENTS.includes(event as CreditEvent);
 }

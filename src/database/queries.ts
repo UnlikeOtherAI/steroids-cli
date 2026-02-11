@@ -1045,7 +1045,7 @@ export function getInvocationCount(
 export interface CreditExhaustionDetails {
   provider: string;
   model: string;
-  role: 'coder' | 'reviewer';
+  role: 'orchestrator' | 'coder' | 'reviewer';
   message: string;
 }
 
