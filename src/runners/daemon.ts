@@ -253,6 +253,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
         // Sync project stats to global DB for API/WebUI access
         syncProjectStats(effectiveProjectPath);
       },
+      onHeartbeat: () => {
+        updateRunnerHeartbeat(runnerId);
+      },
       onTaskStart: (taskId) => {
         updateRunnerCurrentTask(runnerId, taskId);
       },

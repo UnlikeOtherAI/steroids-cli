@@ -20,6 +20,7 @@ import { logActivity } from './activity-log.js';
 import { getRegisteredProject } from './projects.js';
 import { execSync } from 'node:child_process';
 import { runCoderPhase, runReviewerPhase } from '../commands/loop-phases.js';
+import { handleCreditExhaustion, checkBatchCreditExhaustion } from './credit-pause.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -34,6 +35,7 @@ export interface LoopOptions {
   onTaskStart?: (taskId: string, action: string) => void;
   onTaskComplete?: (taskId: string) => void;
   shouldStop?: () => boolean;
+  onHeartbeat?: () => void;  // Called during credit exhaustion pause to keep heartbeat alive
 }
 
 /**
@@ -97,7 +99,22 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
 
           // Invoke batch coder
           console.log('\n>>> Invoking BATCH CODER...\n');
-          await invokeCoderBatch(batch.tasks, batch.sectionName, projectPath);
+          const batchCoderResult = await invokeCoderBatch(batch.tasks, batch.sectionName, projectPath);
+
+          // Check for credit exhaustion in batch coder result
+          const batchCoderCredit = checkBatchCreditExhaustion(batchCoderResult, 'coder', projectPath);
+          if (batchCoderCredit) {
+            const pauseResult = await handleCreditExhaustion(batchCoderCredit, {
+              projectPath,
+              projectDb: db,
+              runnerId: options.runnerId,
+              shouldStop,
+              onHeartbeat: options.onHeartbeat,
+              once,
+            });
+            if (!pauseResult.resumed) break;
+            continue; // Retry iteration after config change
+          }
 
           // Check which tasks are now in review status
           const tasksInReview = batch.tasks
@@ -109,7 +126,22 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
 
             // Invoke batch reviewer
             console.log('\n>>> Invoking BATCH REVIEWER...\n');
-            await invokeReviewerBatch(tasksInReview, batch.sectionName, projectPath);
+            const batchReviewerResult = await invokeReviewerBatch(tasksInReview, batch.sectionName, projectPath);
+
+            // Check for credit exhaustion in batch reviewer result
+            const batchReviewerCredit = checkBatchCreditExhaustion(batchReviewerResult, 'reviewer', projectPath);
+            if (batchReviewerCredit) {
+              const pauseResult = await handleCreditExhaustion(batchReviewerCredit, {
+                projectPath,
+                projectDb: db,
+                runnerId: options.runnerId,
+                shouldStop,
+                onHeartbeat: options.onHeartbeat,
+                once,
+              });
+              if (!pauseResult.resumed) break;
+              continue; // Retry iteration after config change
+            }
 
             // Handle results for each reviewed task
             for (const task of tasksInReview) {
@@ -222,13 +254,28 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
 
       options.onTaskStart?.(task.id, action);
 
+      let phaseResult;
       if (action === 'start') {
         markTaskInProgress(db, task.id);
-        await runCoderPhase(db, task, projectPath, 'start', false);
+        phaseResult = await runCoderPhase(db, task, projectPath, 'start', false);
       } else if (action === 'resume') {
-        await runCoderPhase(db, task, projectPath, 'resume', false);
+        phaseResult = await runCoderPhase(db, task, projectPath, 'resume', false);
       } else if (action === 'review') {
-        await runReviewerPhase(db, task, projectPath, false);
+        phaseResult = await runReviewerPhase(db, task, projectPath, false);
+      }
+
+      // Check for credit exhaustion from single-task phase
+      if (phaseResult?.action === 'pause_credit_exhaustion') {
+        const pauseResult = await handleCreditExhaustion(phaseResult, {
+          projectPath,
+          projectDb: db,
+          runnerId: options.runnerId,
+          shouldStop,
+          onHeartbeat: options.onHeartbeat,
+          once,
+        });
+        if (!pauseResult.resumed) break;
+        continue; // Retry iteration after config change
       }
 
       // Log activity if task reached terminal status
