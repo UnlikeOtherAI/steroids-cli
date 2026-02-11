@@ -262,8 +262,9 @@ export const TaskDetailPage: React.FC = () => {
       .filter((e) => {
         // De-dupe lifecycle events: the timeline API synthesizes invocation.started/completed.
         // Raw JSONL entries ('start'/'complete') are not needed in the UI timeline.
+        // Output messages (stdout/stderr) are only shown in the Live Stream popup.
         const t = e.type;
-        return t !== 'start' && t !== 'complete';
+        return t !== 'start' && t !== 'complete' && t !== 'output';
       })
       .map((event, idx) => ({
         kind: 'invocation' as const,

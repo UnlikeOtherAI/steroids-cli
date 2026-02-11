@@ -701,7 +701,10 @@ router.get('/tasks/:taskId/timeline', async (req: Request, res: Response) => {
     if (existsSync(logFile)) {
       try {
         const sampled = await readSampledJsonlEntries(logFile, { keepEveryN: 10 });
-        for (const e of sampled) timeline.push({ ...e, invocationId: inv.id });
+        // Exclude output events from timeline - they're only shown in the live stream
+        for (const e of sampled) {
+          if (e.type !== 'output') timeline.push({ ...e, invocationId: inv.id });
+        }
       } catch {
         // ignore per spec: timeline is best-effort
       }

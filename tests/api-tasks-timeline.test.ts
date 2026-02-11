@@ -167,9 +167,10 @@ describe('Tasks timeline endpoint', () => {
       expect(timeline.some((e) => e.type === 'invocation.started' && e.invocationId === inv2 && e.ts === 3000)).toBe(true);
       expect(timeline.some((e) => e.type === 'invocation.completed' && e.invocationId === inv2)).toBe(false);
 
-      // Sampled log entries (all tools, and every 10th entry)
+      // Sampled log entries (all tools kept, output events excluded from timeline)
       expect(timeline.some((e) => e.invocationId === inv1 && e.type === 'tool' && e.cmd?.includes('rg -n'))).toBe(true);
-      expect(timeline.some((e) => e.invocationId === inv1 && e.type === 'output' && e.msg === 'ten')).toBe(true);
+      expect(timeline.some((e) => e.invocationId === inv1 && e.type === 'tool' && e.cmd?.includes('cat README'))).toBe(true);
+      expect(timeline.some((e) => e.invocationId === inv1 && e.type === 'output')).toBe(false);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await rm(projectPath, { recursive: true, force: true });
