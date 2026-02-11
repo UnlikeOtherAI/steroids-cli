@@ -55,9 +55,9 @@ const DEFAULT_TIMEOUT = 900_000;
 
 /**
  * Default invocation template for Claude CLI
- * Uses -p flag for print mode with prompt from file via shell substitution
+ * Uses -p flag for print mode with stream-json for realtime output
  */
-const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" --model {model}';
+const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" --model {model} --output-format stream-json';
 
 /**
  * Claude AI Provider implementation
@@ -117,6 +117,34 @@ export class ClaudeProvider extends BaseAIProvider {
   }
 
   /**
+   * Parse a stream-json line from Claude CLI and extract text content
+   */
+  private parseStreamJsonLine(line: string): { text?: string; tool?: string; result?: string } {
+    try {
+      const event = JSON.parse(line);
+
+      // Text delta from assistant response
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        return { text: event.delta.text };
+      }
+
+      // Tool use events
+      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+        return { tool: event.content_block.name };
+      }
+
+      // Final result contains the complete text
+      if (event.type === 'result') {
+        return { result: typeof event.result === 'string' ? event.result : '' };
+      }
+    } catch {
+      // Not JSON or unexpected format — treat as plain text
+      if (line.trim()) return { text: line };
+    }
+    return {};
+  }
+
+  /**
    * Invoke Claude CLI with a prompt file using the invocation template
    */
   private invokeWithFile(
@@ -132,6 +160,8 @@ export class ClaudeProvider extends BaseAIProvider {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let stdoutLineBuffer = '';
+      const isStreamJson = this.getInvocationTemplate().includes('stream-json');
 
       // Build command from invocation template
       const command = this.buildCommand(promptFile, model);
@@ -152,12 +182,10 @@ export class ClaudeProvider extends BaseAIProvider {
         activityTimer = setTimeout(() => {
           timedOut = true;
           child.kill('SIGTERM');
-          // Force kill after 5s if process hasn't exited
           setTimeout(() => {
             if (child.exitCode === null) {
               child.kill('SIGKILL');
             }
-            // Hard-resolve after another 5s if still stuck
             setTimeout(() => {
               if (child.exitCode === null) {
                 resolve({
@@ -172,12 +200,39 @@ export class ClaudeProvider extends BaseAIProvider {
       resetActivityTimer();
 
       child.stdout?.on('data', (data: Buffer) => {
-        const text = data.toString();
-        if (stdout.length < MAX_BUFFER) stdout += text;
+        const raw = data.toString();
         resetActivityTimer();
-        onActivity?.({ type: 'output', stream: 'stdout', msg: text });
-        if (streamOutput) {
-          process.stdout.write(text);
+
+        if (!isStreamJson) {
+          // Plain text mode (legacy or custom template)
+          if (stdout.length < MAX_BUFFER) stdout += raw;
+          onActivity?.({ type: 'output', stream: 'stdout', msg: raw });
+          if (streamOutput) process.stdout.write(raw);
+          return;
+        }
+
+        // Stream-json mode: parse JSONL events
+        stdoutLineBuffer += raw;
+        while (true) {
+          const nl = stdoutLineBuffer.indexOf('\n');
+          if (nl === -1) break;
+          const line = stdoutLineBuffer.slice(0, nl).trim();
+          stdoutLineBuffer = stdoutLineBuffer.slice(nl + 1);
+          if (!line) continue;
+
+          const parsed = this.parseStreamJsonLine(line);
+
+          if (parsed.result !== undefined) {
+            // Final result — use as the definitive stdout
+            stdout = parsed.result;
+          } else if (parsed.text) {
+            if (stdout.length < MAX_BUFFER) stdout += parsed.text;
+            onActivity?.({ type: 'output', stream: 'stdout', msg: parsed.text });
+            if (streamOutput) process.stdout.write(parsed.text);
+          } else if (parsed.tool) {
+            onActivity?.({ type: 'tool', cmd: parsed.tool });
+            if (streamOutput) process.stdout.write(`[tool: ${parsed.tool}]\n`);
+          }
         }
       });
 
