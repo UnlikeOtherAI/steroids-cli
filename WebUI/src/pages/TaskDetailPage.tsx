@@ -51,6 +51,7 @@ export const TaskDetailPage: React.FC = () => {
   const [restarting, setRestarting] = useState(false);
   const [restartNotes, setRestartNotes] = useState('');
   const [showLiveModal, setShowLiveModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'basic' | 'full'>('basic');
   const intervalRef = useRef<number | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -151,21 +152,10 @@ export const TaskDetailPage: React.FC = () => {
   useEffect(() => {
     if (!taskId || !projectPath) return;
 
-    // Only stream while live updates are enabled and the task is not terminal.
-    if (!isLive || (task && ['completed', 'failed', 'skipped', 'disputed'].includes(task.status))) {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-      setStreamState({ status: 'disconnected' });
-      return;
-    }
-
-    // Close any previous stream before opening a new one.
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
+    const isTerminal = task && ['completed', 'failed', 'skipped', 'disputed'].includes(task.status);
+    const closeStream = () => { try { eventSourceRef.current?.close(); } catch {} eventSourceRef.current = null; };
+    if (!isLive || isTerminal) { closeStream(); setStreamState({ status: 'disconnected' }); return; }
+    closeStream();
 
     setStreamState({ status: 'connecting' });
     const url = `${API_BASE_URL}/api/tasks/${encodeURIComponent(taskId)}/stream?project=${encodeURIComponent(projectPath)}`;
@@ -185,53 +175,19 @@ export const TaskDetailPage: React.FC = () => {
       }
 
       const type = String(entry?.type ?? '');
-      if (type === 'no_active_invocation') {
-        setStreamState({ status: 'no_active_invocation' });
-        try { es.close(); } catch {}
-        return;
-      }
-      if (type === 'waiting_for_log') {
-        setStreamState({ status: 'waiting_for_log', invocationId: typeof entry?.invocationId === 'number' ? entry.invocationId : undefined });
-        return;
-      }
-      if (type === 'log_not_found') {
-        setStreamState({ status: 'log_not_found', invocationId: typeof entry?.invocationId === 'number' ? entry.invocationId : undefined });
-        try { es.close(); } catch {}
-        return;
-      }
-      if (type === 'error' && (typeof entry?.error === 'string' || typeof entry?.message === 'string')) {
+      const invId = typeof entry?.invocationId === 'number' ? entry.invocationId : undefined;
+      if (type === 'no_active_invocation') { setStreamState({ status: 'no_active_invocation' }); try { es.close(); } catch {} return; }
+      if (type === 'waiting_for_log') { setStreamState({ status: 'waiting_for_log', invocationId: invId }); return; }
+      if (type === 'log_not_found') { setStreamState({ status: 'log_not_found', invocationId: invId }); try { es.close(); } catch {} return; }
+      if (type === 'error' && (typeof entry?.error === 'string' || typeof entry?.message === 'string'))
         setStreamState({ status: 'error', message: String(entry?.error ?? entry?.message) });
-      }
-
-      if (typeof entry?.ts !== 'number') {
-        entry.ts = Date.now();
-      }
-
-      // Append activity entries; keep bounded history to avoid unbounded memory growth.
-      if (type) {
-        setLiveActivity((prev) => {
-          const next = [...prev, entry as TaskTimelineEvent];
-          return next.length > 300 ? next.slice(next.length - 300) : next;
-        });
-      }
-
-      // When an invocation completes, refresh the sampled timeline.
-      if (type === 'complete' || type === 'error') {
-        void fetchTimeline().finally(() => {
-          try { es.close(); } catch {}
-        });
-      }
+      if (typeof entry?.ts !== 'number') entry.ts = Date.now();
+      if (type) setLiveActivity((prev) => { const next = [...prev, entry as TaskTimelineEvent]; return next.length > 300 ? next.slice(-300) : next; });
+      if (type === 'complete' || type === 'error') void fetchTimeline().finally(() => { try { es.close(); } catch {} });
     };
 
-    es.onerror = () => {
-      setStreamState({ status: 'error', message: 'Stream connection error' });
-      try { es.close(); } catch {}
-    };
-
-    return () => {
-      try { es.close(); } catch {}
-      eventSourceRef.current = null;
-    };
+    es.onerror = () => { setStreamState({ status: 'error', message: 'Stream connection error' }); try { es.close(); } catch {} };
+    return () => { closeStream(); };
   }, [fetchTimeline, isLive, projectPath, task?.status, taskId]);
 
   const projectName = projectPath?.split('/').pop() || 'Project';
@@ -260,11 +216,12 @@ export const TaskDetailPage: React.FC = () => {
     })),
     ...timeline
       .filter((e) => {
-        // De-dupe lifecycle events: the timeline API synthesizes invocation.started/completed.
-        // Raw JSONL entries ('start'/'complete') are not needed in the UI timeline.
-        // Output messages (stdout/stderr) are only shown in the Live Stream popup.
         const t = e.type;
-        return t !== 'start' && t !== 'complete' && t !== 'output';
+        // Always exclude raw JSONL lifecycle and output events
+        if (t === 'start' || t === 'complete' || t === 'output') return false;
+        // In basic mode, only keep invocation lifecycle markers
+        if (viewMode === 'basic' && t !== 'invocation.started' && t !== 'invocation.completed') return false;
+        return true;
       })
       .map((event, idx) => ({
         kind: 'invocation' as const,
@@ -385,6 +342,12 @@ export const TaskDetailPage: React.FC = () => {
               </span>
             </h2>
             <div className="flex items-center gap-2">
+              {/* View mode toggle */}
+              {(['basic', 'full'] as const).map((mode) => (
+                <button key={mode} onClick={() => setViewMode(mode)}
+                  className={`px-2.5 py-1 text-sm rounded transition-colors ${viewMode === mode ? 'bg-accent text-white' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
+                >{mode.charAt(0).toUpperCase() + mode.slice(1)}</button>
+              ))}
               {isLive && (
                 <span className="flex items-center gap-2 text-sm text-success">
                   <span className="w-2 h-2 bg-success rounded-full animate-pulse"></span>
@@ -457,7 +420,7 @@ export const TaskDetailPage: React.FC = () => {
 
           {/* Merged Timeline */}
           <div className="card overflow-hidden">
-            {(task.audit_trail.length === 0 && timeline.length === 0 && !timelineLoading) ? (
+            {(mergedTimelineItems.length === 0 && !timelineLoading) ? (
               <div className="p-8 text-center text-text-muted">
                 <i className="fa-solid fa-list text-4xl mb-4"></i>
                 <p>No activity recorded yet</p>
@@ -494,7 +457,9 @@ export const TaskDetailPage: React.FC = () => {
             )}
           </div>
 
-          <InvocationsPanel invocations={task.invocations} taskId={taskId!} projectPath={projectPath!} />
+          {viewMode === 'full' && (
+            <InvocationsPanel invocations={task.invocations} taskId={taskId!} projectPath={projectPath!} />
+          )}
 
           {/* Metadata */}
           <div className="mt-6 text-xs text-text-muted flex items-center gap-4">
