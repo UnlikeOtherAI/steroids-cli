@@ -456,42 +456,51 @@ export const ProjectDetailPage: React.FC = () => {
       )}
 
       {/* Storage */}
-      {storage && (
-        <div className="mb-8 bg-bg-surface rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-text-primary">Storage</h3>
-            {storage.total_bytes > 0 && (
-              <span className="text-lg font-semibold text-text-primary">{storage.total_human}</span>
-            )}
-          </div>
-          <div className="space-y-2">
-            <StorageBar label="Database" item={storage.breakdown?.database ?? { bytes: 0, human: '0 B' }} color="bg-info" total={storage.total_bytes} />
-            <StorageBar label="Invocation Logs" item={storage.breakdown?.invocations ?? { bytes: 0, human: '0 B' }} color="bg-warning" total={storage.total_bytes} />
-            <StorageBar label="Text Logs" item={storage.breakdown?.logs ?? { bytes: 0, human: '0 B' }} color="bg-accent" total={storage.total_bytes} />
-            <StorageBar label="Backups" item={storage.breakdown?.backups ?? { bytes: 0, human: '0 B' }} color="bg-success" total={storage.total_bytes} />
-          </div>
-          {storage.threshold_warning && (
-            <div className={`mt-4 p-3 rounded-lg flex items-center justify-between ${
-              storage.threshold_warning === 'red' ? 'bg-danger-soft' : 'bg-warning-soft'
-            }`}>
-              <div className="flex items-center gap-2">
-                <i className="fa-solid fa-triangle-exclamation text-sm" />
-                <span className="text-sm">{storage.clearable_human} of old logs can be cleared</span>
-              </div>
-              <button
-                onClick={handleClearLogs}
-                disabled={clearing}
-                className="px-3 py-1.5 text-sm font-medium bg-bg-elevated rounded-lg hover:bg-bg-surface2 transition-colors disabled:opacity-50"
-              >
-                {clearing ? <ArrowPathIcon className="w-4 h-4 animate-spin inline" /> : 'Clear Old Logs'}
-              </button>
-            </div>
-          )}
-          {clearMsg && (
-            <p className={`mt-2 text-sm ${clearMsg.startsWith('Freed') ? 'text-success' : 'text-danger'}`}>{clearMsg}</p>
-          )}
+      <div className="mb-8 bg-bg-surface rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-text-primary">Storage</h3>
+          <span className="text-lg font-semibold text-text-primary">{storage ? storage.total_human : ''}</span>
         </div>
-      )}
+        {!storage ? (
+          <div className="space-y-2" data-testid="storage-loading">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="animate-pulse">
+                <div className="h-3 bg-bg-surface2 rounded w-1/3 mb-1" />
+                <div className="h-1.5 bg-bg-surface2 rounded-full" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <StorageBar label="Database" item={storage.breakdown?.database ?? { bytes: 0, human: '0 B' }} color="bg-info" total={storage.total_bytes} />
+              <StorageBar label="Invocation Logs" item={storage.breakdown?.invocations ?? { bytes: 0, human: '0 B' }} color="bg-warning" total={storage.total_bytes} />
+              <StorageBar label="Text Logs" item={storage.breakdown?.logs ?? { bytes: 0, human: '0 B' }} color="bg-accent" total={storage.total_bytes} />
+              <StorageBar label="Backups" item={storage.breakdown?.backups ?? { bytes: 0, human: '0 B' }} color="bg-success" total={storage.total_bytes} />
+            </div>
+            {storage.threshold_warning && (
+              <div className={`mt-4 p-3 rounded-lg flex items-center justify-between ${
+                storage.threshold_warning === 'red' ? 'bg-danger-soft' : 'bg-warning-soft'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <i className="fa-solid fa-triangle-exclamation text-sm" />
+                  <span className="text-sm">{storage.clearable_human} of old logs can be cleared</span>
+                </div>
+                <button
+                  onClick={handleClearLogs}
+                  disabled={clearing}
+                  className="px-3 py-1.5 text-sm font-medium bg-bg-elevated rounded-lg hover:bg-bg-surface2 transition-colors disabled:opacity-50"
+                >
+                  {clearing ? <ArrowPathIcon className="w-4 h-4 animate-spin inline" /> : 'Clear Old Logs'}
+                </button>
+              </div>
+            )}
+            {clearMsg && (
+              <p className={`mt-2 text-sm ${clearMsg.startsWith('Freed') ? 'text-success' : 'text-danger'}`}>{clearMsg}</p>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Sections */}
       <div className="mb-8">
