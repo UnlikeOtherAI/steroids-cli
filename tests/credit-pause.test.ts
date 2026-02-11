@@ -31,6 +31,14 @@ jest.unstable_mockModule('uuid', () => ({
   v4: jest.fn().mockReturnValue('test-incident-id'),
 }));
 
+const mockRecordCreditIncident = jest.fn().mockReturnValue('test-incident-id');
+const mockResolveCreditIncident = jest.fn();
+
+jest.unstable_mockModule('../src/database/queries.js', () => ({
+  recordCreditIncident: mockRecordCreditIncident,
+  resolveCreditIncident: mockResolveCreditIncident,
+}));
+
 // ── Import module under test (after mocks) ──────────────────────────────
 
 const {
@@ -77,6 +85,7 @@ function makeBatchResult(overrides = {}) {
 describe('Credit Pause Handler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockRecordCreditIncident.mockReturnValue('test-incident-id');
     // Suppress console output in tests
     jest.spyOn(console, 'log').mockImplementation(() => {});
     jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -203,11 +212,7 @@ describe('Credit Pause Handler', () => {
     }, 120000);
 
     it('records an incident on pause entry and resolves it on resume', async () => {
-      const mockRun = jest.fn();
-      const db = {
-        prepare: jest.fn().mockReturnValue({ run: mockRun }),
-      } as any;
-
+      const db = makeMockDb();
       const alert = makeAlert();
 
       // Return changed config on first poll
@@ -221,12 +226,14 @@ describe('Credit Pause Handler', () => {
         shouldStop: () => false,
       });
 
-      // Should have called prepare at least twice (INSERT for record, UPDATE for resolve)
-      expect(db.prepare).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO incidents')
+      // Should have recorded and resolved the incident via query functions
+      expect(mockRecordCreditIncident).toHaveBeenCalledWith(
+        db,
+        expect.objectContaining({ provider: 'claude', model: 'claude-sonnet-4', role: 'coder' }),
+        undefined,
       );
-      expect(db.prepare).toHaveBeenCalledWith(
-        expect.stringContaining('UPDATE incidents')
+      expect(mockResolveCreditIncident).toHaveBeenCalledWith(
+        db, 'test-incident-id', 'config_changed',
       );
     }, 120000);
   });
@@ -248,11 +255,7 @@ describe('Credit Pause Handler', () => {
     });
 
     it('resolves the incident when interrupted by shouldStop', async () => {
-      const mockRun = jest.fn();
-      const db = {
-        prepare: jest.fn().mockReturnValue({ run: mockRun }),
-      } as any;
-
+      const db = makeMockDb();
       const alert = makeAlert();
 
       const result = await handleCreditExhaustion(alert, {
@@ -262,9 +265,9 @@ describe('Credit Pause Handler', () => {
       });
 
       expect(result.resumed).toBe(false);
-      // Should resolve the incident (UPDATE call)
-      expect(db.prepare).toHaveBeenCalledWith(
-        expect.stringContaining('UPDATE incidents')
+      // Should resolve the incident via the query function
+      expect(mockResolveCreditIncident).toHaveBeenCalledWith(
+        db, 'test-incident-id', 'none',
       );
     });
   });

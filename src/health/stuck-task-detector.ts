@@ -18,7 +18,8 @@ export type FailureMode =
   | 'hanging_invocation'
   | 'zombie_runner'
   | 'dead_runner'
-  | 'db_inconsistency';
+  | 'db_inconsistency'
+  | 'credit_exhaustion';
 
 export interface StuckTaskDetectionConfig {
   /**

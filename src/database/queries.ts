@@ -1039,3 +1039,114 @@ export function getInvocationCount(
   }
   return counts;
 }
+
+// ============ Credit Exhaustion Incidents ============
+
+export interface CreditExhaustionDetails {
+  provider: string;
+  model: string;
+  role: 'coder' | 'reviewer';
+  message: string;
+}
+
+export type CreditIncidentResolution = 'config_changed' | 'dismissed' | 'manual' | 'retry';
+
+export interface CreditIncident {
+  id: string;
+  provider: string;
+  model: string;
+  role: string;
+  created_at: string;
+}
+
+/**
+ * Record a credit_exhaustion incident, with deduplication.
+ * If an unresolved incident already exists for the same runner+role+provider+model,
+ * returns the existing incident ID instead of inserting a duplicate.
+ */
+export function recordCreditIncident(
+  db: Database.Database,
+  details: CreditExhaustionDetails,
+  runnerId?: string,
+  taskId?: string
+): string {
+  const detailsJson = JSON.stringify(details);
+
+  // Deduplication: check for existing unresolved incident with same runner+role+provider+model
+  const existing = db.prepare(
+    `SELECT id FROM incidents
+     WHERE failure_mode = 'credit_exhaustion'
+       AND resolved_at IS NULL
+       AND runner_id IS ?
+       AND json_extract(details, '$.role') = ?
+       AND json_extract(details, '$.provider') = ?
+       AND json_extract(details, '$.model') = ?
+     LIMIT 1`
+  ).get(runnerId ?? null, details.role, details.provider, details.model) as { id: string } | undefined;
+
+  if (existing) return existing.id;
+
+  const id = uuidv4();
+  db.prepare(
+    `INSERT INTO incidents (id, task_id, runner_id, failure_mode, detected_at, details)
+     VALUES (?, ?, ?, 'credit_exhaustion', datetime('now'), ?)`
+  ).run(id, taskId ?? null, runnerId ?? null, detailsJson);
+  return id;
+}
+
+/**
+ * Query unresolved credit_exhaustion incidents.
+ * Optionally filter by project path (requires globalDb with runners table).
+ */
+export function getActiveCreditIncidents(
+  db: Database.Database,
+  projectPath?: string,
+  globalDb?: Database.Database
+): CreditIncident[] {
+  if (projectPath && globalDb) {
+    const runnerIds = globalDb.prepare(
+      `SELECT id FROM runners WHERE project_path = ?`
+    ).all(projectPath) as Array<{ id: string }>;
+
+    if (runnerIds.length === 0) return [];
+
+    const placeholders = runnerIds.map(() => '?').join(',');
+    return db.prepare(
+      `SELECT id,
+              json_extract(details, '$.provider') as provider,
+              json_extract(details, '$.model') as model,
+              json_extract(details, '$.role') as role,
+              created_at
+       FROM incidents
+       WHERE failure_mode = 'credit_exhaustion'
+         AND resolved_at IS NULL
+         AND runner_id IN (${placeholders})
+       ORDER BY created_at DESC`
+    ).all(...runnerIds.map(r => r.id)) as CreditIncident[];
+  }
+
+  return db.prepare(
+    `SELECT id,
+            json_extract(details, '$.provider') as provider,
+            json_extract(details, '$.model') as model,
+            json_extract(details, '$.role') as role,
+            created_at
+     FROM incidents
+     WHERE failure_mode = 'credit_exhaustion'
+       AND resolved_at IS NULL
+     ORDER BY created_at DESC`
+  ).all() as CreditIncident[];
+}
+
+/**
+ * Resolve a credit_exhaustion incident.
+ */
+export function resolveCreditIncident(
+  db: Database.Database,
+  incidentId: string,
+  resolution: CreditIncidentResolution | string
+): void {
+  db.prepare(
+    `UPDATE incidents SET resolved_at = datetime('now'), resolution = ? WHERE id = ?`
+  ).run(resolution, incidentId);
+}

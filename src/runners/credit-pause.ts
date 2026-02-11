@@ -5,11 +5,14 @@
  * Used by both orchestrator-loop.ts (daemon path) and loop.ts (foreground path).
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import type Database from 'better-sqlite3';
 import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { CreditExhaustionResult } from '../commands/loop-phases.js';
+import {
+  recordCreditIncident,
+  resolveCreditIncident,
+} from '../database/queries.js';
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -62,8 +65,13 @@ export async function handleCreditExhaustion(
     throw new CreditExhaustionError(alert);
   }
 
-  // Record incident
-  const incidentId = recordCreditIncident(projectDb, alert, runnerId);
+  // Record incident (with deduplication)
+  const incidentId = recordCreditIncident(projectDb, {
+    provider: alert.provider,
+    model: alert.model,
+    role: alert.role,
+    message: alert.message,
+  }, runnerId);
 
   // Print console output
   console.log('');
@@ -114,49 +122,6 @@ export async function handleCreditExhaustion(
       resolveCreditIncident(projectDb, incidentId, 'config_changed');
       return { resumed: true };
     }
-  }
-}
-
-/**
- * Record a credit_exhaustion incident in the incidents table
- */
-function recordCreditIncident(
-  db: Database.Database,
-  alert: CreditExhaustionResult,
-  runnerId?: string
-): string {
-  const id = uuidv4();
-  const details = JSON.stringify({
-    provider: alert.provider,
-    model: alert.model,
-    role: alert.role,
-    message: alert.message,
-  });
-  try {
-    db.prepare(
-      `INSERT INTO incidents (id, task_id, runner_id, failure_mode, detected_at, details)
-       VALUES (?, NULL, ?, 'credit_exhaustion', datetime('now'), ?)`
-    ).run(id, runnerId ?? null, details);
-  } catch {
-    // Best-effort: incidents table may not exist if migrations haven't run
-  }
-  return id;
-}
-
-/**
- * Resolve a credit_exhaustion incident
- */
-function resolveCreditIncident(
-  db: Database.Database,
-  incidentId: string,
-  resolution: string
-): void {
-  try {
-    db.prepare(
-      `UPDATE incidents SET resolved_at = datetime('now'), resolution = ? WHERE id = ?`
-    ).run(resolution, incidentId);
-  } catch {
-    // Best-effort
   }
 }
 
