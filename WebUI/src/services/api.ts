@@ -379,6 +379,35 @@ export const aiApi = {
   },
 };
 
+export interface CreditAlert {
+  id: string;
+  provider: string;
+  model: string;
+  role: string;
+  message: string;
+  createdAt: string;
+}
+
+interface CreditAlertsResponse {
+  alerts: CreditAlert[];
+}
+
+export const creditAlertsApi = {
+  async getActive(projectPath?: string): Promise<CreditAlert[]> {
+    const params = projectPath ? `?project=${encodeURIComponent(projectPath)}` : '';
+    const response = await fetchJson<CreditAlertsResponse>(`/api/credit-alerts${params}`);
+    return response.alerts;
+  },
+
+  async dismiss(alertId: string): Promise<void> {
+    await fetchJson(`/api/credit-alerts/${encodeURIComponent(alertId)}/dismiss`, { method: 'POST' });
+  },
+
+  async retry(alertId: string): Promise<void> {
+    await fetchJson(`/api/credit-alerts/${encodeURIComponent(alertId)}/retry`, { method: 'POST' });
+  },
+};
+
 export const configApi = {
   /**
    * Get full configuration schema

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ActivityListPage } from './pages/ActivityListPage';
@@ -11,19 +11,39 @@ import { TaskDetailPage } from './pages/TaskDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AppShell } from './components/layouts';
 import { AISetupModal } from './components/onboarding/AISetupModal';
+import { CreditExhaustionModal } from './components/molecules/CreditExhaustionModal';
 import { useProject } from './contexts/ProjectContext';
-import { configApi } from './services/api';
+import { configApi, creditAlertsApi } from './services/api';
+import type { CreditAlert } from './services/api';
 import './App.css';
 
 function App() {
   const { selectedProject } = useProject();
   const location = useLocation();
+  const navigate = useNavigate();
   const [showAISetup, setShowAISetup] = useState(false);
   const [checkingConfig, setCheckingConfig] = useState(true);
+  const [creditAlert, setCreditAlert] = useState<CreditAlert | null>(null);
 
   useEffect(() => {
     checkAIConfiguration();
   }, []);
+
+  // Poll for credit alerts every 10 seconds
+  const checkCreditAlerts = useCallback(async () => {
+    try {
+      const alerts = await creditAlertsApi.getActive(selectedProject?.path);
+      setCreditAlert(alerts.length > 0 ? alerts[0] : null);
+    } catch {
+      // Silently ignore polling errors
+    }
+  }, [selectedProject?.path]);
+
+  useEffect(() => {
+    checkCreditAlerts();
+    const interval = setInterval(checkCreditAlerts, 10_000);
+    return () => clearInterval(interval);
+  }, [checkCreditAlerts]);
 
   const checkAIConfiguration = async () => {
     try {
@@ -73,12 +93,32 @@ function App() {
     );
   }
 
+  const blurContent = showAISetup || !!creditAlert;
+
   return (
     <>
       {showAISetup && (
         <AISetupModal onComplete={() => setShowAISetup(false)} />
       )}
-      <div className={showAISetup ? 'blur-[2px] pointer-events-none' : ''}>
+      {creditAlert && (
+        <CreditExhaustionModal
+          alert={creditAlert}
+          onDismiss={async () => {
+            await creditAlertsApi.dismiss(creditAlert.id);
+            setCreditAlert(null);
+          }}
+          onChangeModel={async () => {
+            await creditAlertsApi.dismiss(creditAlert.id);
+            setCreditAlert(null);
+            navigate('/settings');
+          }}
+          onRetry={async () => {
+            await creditAlertsApi.retry(creditAlert.id);
+            setCreditAlert(null);
+          }}
+        />
+      )}
+      <div className={blurContent ? 'blur-sm pointer-events-none' : ''}>
         <AppShell title={getPageTitle()} project={selectedProject}>
           <Routes>
             <Route path="/" element={<DashboardPage project={selectedProject} />} />
