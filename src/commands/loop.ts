@@ -21,6 +21,7 @@ import {
 import { hasActiveRunnerForProject } from '../runners/wakeup.js';
 import { getRegisteredProject } from '../runners/projects.js';
 import { runCoderPhase, runReviewerPhase, type CoordinatorResult } from './loop-phases.js';
+import { handleCreditExhaustion } from '../runners/credit-pause.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
@@ -369,17 +370,42 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
         status: task.status,
       });
 
+      let phaseResult;
       if (action === 'start') {
         // Starting a new task
         markTaskInProgress(db, task.id);
-        await runCoderPhase(db, task, projectPath, 'start', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
+        phaseResult = await runCoderPhase(db, task, projectPath, 'start', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
       } else if (action === 'resume') {
         // Resuming in-progress task
-        await runCoderPhase(db, task, projectPath, 'resume', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
+        phaseResult = await runCoderPhase(db, task, projectPath, 'resume', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
       } else if (action === 'review') {
         // Task ready for review - pass coordinator guidance if available
         const cachedCoord = coordinatorCache.get(task.id);
-        await runReviewerPhase(db, task, projectPath, flags.json, cachedCoord);
+        phaseResult = await runReviewerPhase(db, task, projectPath, flags.json, cachedCoord);
+      }
+
+      // Handle credit exhaustion: pause and wait for config change
+      if (phaseResult?.action === 'pause_credit_exhaustion') {
+        const pauseResult = await handleCreditExhaustion({
+          provider: phaseResult.provider,
+          model: phaseResult.model,
+          role: phaseResult.role,
+          message: phaseResult.message,
+          runnerId: 'foreground',
+          projectPath,
+          db,
+          shouldStop: () => false,
+          onceMode: !!values.once,
+        });
+
+        if (pauseResult.resolution === 'config_changed') {
+          continue; // Retry with new provider
+        } else if (pauseResult.resolution === 'immediate_fail') {
+          process.exit(1);
+        } else {
+          // 'stopped'
+          break;
+        }
       }
 
       // Check if we should continue
