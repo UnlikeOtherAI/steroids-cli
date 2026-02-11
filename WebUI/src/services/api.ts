@@ -399,12 +399,18 @@ export const creditAlertsApi = {
     return response.alerts;
   },
 
-  async dismiss(alertId: string): Promise<void> {
-    await fetchJson(`/api/credit-alerts/${encodeURIComponent(alertId)}/dismiss`, { method: 'POST' });
+  async dismiss(alertId: string, projectPath: string): Promise<void> {
+    await fetchJson(`/api/credit-alerts/${encodeURIComponent(alertId)}/dismiss`, {
+      method: 'POST',
+      body: JSON.stringify({ project: projectPath }),
+    });
   },
 
-  async retry(alertId: string): Promise<void> {
-    await fetchJson(`/api/credit-alerts/${encodeURIComponent(alertId)}/retry`, { method: 'POST' });
+  async retry(alertId: string, projectPath: string): Promise<void> {
+    await fetchJson(`/api/credit-alerts/${encodeURIComponent(alertId)}/retry`, {
+      method: 'POST',
+      body: JSON.stringify({ project: projectPath }),
+    });
   },
 };
 

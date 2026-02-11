@@ -100,20 +100,20 @@ function App() {
       {showAISetup && (
         <AISetupModal onComplete={() => setShowAISetup(false)} />
       )}
-      {creditAlert && (
+      {creditAlert && selectedProject && (
         <CreditExhaustionModal
           alert={creditAlert}
           onDismiss={async () => {
-            await creditAlertsApi.dismiss(creditAlert.id);
+            await creditAlertsApi.dismiss(creditAlert.id, selectedProject.path);
             setCreditAlert(null);
           }}
           onChangeModel={async () => {
-            await creditAlertsApi.dismiss(creditAlert.id);
+            await creditAlertsApi.dismiss(creditAlert.id, selectedProject.path);
             setCreditAlert(null);
             navigate('/settings');
           }}
           onRetry={async () => {
-            await creditAlertsApi.retry(creditAlert.id);
+            await creditAlertsApi.retry(creditAlert.id, selectedProject.path);
             setCreditAlert(null);
           }}
         />
