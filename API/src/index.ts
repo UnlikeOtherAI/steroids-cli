@@ -9,6 +9,7 @@ import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import projectsRouter from './routes/projects.js';
+import storageRouter from './routes/storage.js';
 import activityRouter from './routes/activity.js';
 import runnersRouter from './routes/runners.js';
 import tasksRouter from './routes/tasks.js';
@@ -40,6 +41,7 @@ export function createApp(): express.Express {
 
   // Routes
   app.use('/api', projectsRouter);
+  app.use('/api', storageRouter);
   app.use('/api', activityRouter);
   app.use('/api', runnersRouter);
   app.use('/api', tasksRouter);
@@ -66,6 +68,7 @@ export function createApp(): express.Express {
         'GET /health',
         'GET /api/projects',
         'GET /api/projects/status?path=<path>',
+        'GET /api/projects/storage?path=<path>',
         'GET /api/projects/<path>/tasks',
         'GET /api/projects/<path>/sections',
         'POST /api/projects',

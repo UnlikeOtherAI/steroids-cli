@@ -20,12 +20,7 @@ import {
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 import { isValidProjectPath, validatePathRequest } from '../utils/validation.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
-import {
-  validateProjectPath,
-  getCachedStorageBreakdown,
-  getCachedListStorage,
-  bustStorageCache,
-} from '../utils/storage-cache.js';
+import { getCachedListStorage } from '../utils/storage-cache.js';
 
 const router = Router();
 
@@ -440,30 +435,6 @@ router.get('/projects/status', (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get project status',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-/**
- * GET /api/projects/storage
- * Get storage breakdown for a project's .steroids/ directory
- * Query: path (required) — absolute path to the project
- */
-router.get('/projects/storage', async (req: Request, res: Response) => {
-  try {
-    const result = await validateProjectPath(req.query.path as string);
-    if (!result.valid) {
-      res.status(result.status).json({ success: false, error: result.error });
-      return;
-    }
-    const breakdown = await getCachedStorageBreakdown(result.realPath);
-    res.json(breakdown);
-  } catch (error) {
-    console.error('Error getting project storage:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get storage breakdown',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
