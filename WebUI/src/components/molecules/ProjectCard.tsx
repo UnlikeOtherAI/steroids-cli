@@ -88,6 +88,15 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
             : 'No runner'
         }
       </div>
+      {project.storage_human && (
+        <div className="flex items-center gap-1.5 text-xs text-text-muted mt-1">
+          <i className="fa-solid fa-database text-[10px]" />
+          <span>{project.storage_human}</span>
+          {project.storage_warning === 'red' && (
+            <span className="text-danger font-medium">cleanup recommended</span>
+          )}
+        </div>
+      )}
     </div>
   );
 };
