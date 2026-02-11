@@ -221,7 +221,7 @@ export abstract class BaseAIProvider implements IAIProvider {
 
     // 2. Special handling for Gemini RESOURCE_EXHAUSTED (can be rate_limit or credit_exhaustion)
     if (stderr.includes('RESOURCE_EXHAUSTED')) {
-      if (/per minute|per second|retry after/i.test(stderr)) {
+      if (/per.?minute|per.?second|retry after/i.test(stderr)) {
         return {
           type: 'rate_limit',
           message: 'Rate limit exceeded',
