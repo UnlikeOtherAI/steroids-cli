@@ -10,7 +10,9 @@ import {
 
 describe('formatBytes', () => {
   it('formats bytes', () => expect(formatBytes(500)).toBe('500 B'));
+  it('formats 1024 as 1.0 KB', () => expect(formatBytes(1024)).toBe('1.0 KB'));
   it('formats kilobytes', () => expect(formatBytes(2048)).toBe('2.0 KB'));
+  it('formats 1048576 as 1.0 MB', () => expect(formatBytes(1048576)).toBe('1.0 MB'));
   it('formats megabytes', () => expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB'));
   it('formats gigabytes', () => expect(formatBytes(2.5 * 1024 * 1024 * 1024)).toBe('2.5 GB'));
   it('formats zero', () => expect(formatBytes(0)).toBe('0 B'));
@@ -57,6 +59,13 @@ describe('getStorageBreakdown', () => {
   });
   afterEach(() => {
     rmSync(join(steroidsDir, '..'), { recursive: true, force: true });
+  });
+
+  it('returns all zeros and null warning for empty directory', async () => {
+    const result = await getStorageBreakdown(steroidsDir);
+    expect(result.total_bytes).toBe(0);
+    expect(result.clearable_bytes).toBe(0);
+    expect(result.threshold_warning).toBeNull();
   });
 
   it('returns empty breakdown for non-existent dir', async () => {
