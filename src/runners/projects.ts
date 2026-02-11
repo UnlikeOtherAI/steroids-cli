@@ -37,6 +37,20 @@ function normalizePath(p: string): string {
   }
 }
 
+/** Paths that should never be registered globally (temp dirs, system dirs) */
+const BLOCKED_PATH_PREFIXES = ['/tmp/', '/tmp', '/var/tmp/', '/var/tmp'];
+
+/**
+ * Check if a path is in a temporary/ephemeral directory
+ * Prevents test projects from polluting the global registry
+ */
+export function isTemporaryPath(path: string): boolean {
+  const normalized = normalizePath(path);
+  return BLOCKED_PATH_PREFIXES.some(
+    (prefix) => normalized === prefix.replace(/\/$/, '') || normalized.startsWith(prefix.endsWith('/') ? prefix : prefix + '/')
+  );
+}
+
 /**
  * Register a project in the global registry
  * Idempotent - updates last_seen_at if project already exists
@@ -46,6 +60,12 @@ function normalizePath(p: string): string {
  */
 export function registerProject(path: string, name?: string): void {
   const normalizedPath = normalizePath(path);
+
+  // Block temporary/ephemeral paths from polluting the global registry
+  if (isTemporaryPath(normalizedPath)) {
+    return;
+  }
+
   const { db, close } = openGlobalDatabase();
 
   try {
