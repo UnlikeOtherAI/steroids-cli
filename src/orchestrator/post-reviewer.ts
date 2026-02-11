@@ -22,7 +22,7 @@ export function buildPostReviewerPrompt(context: ReviewerContext): string {
   let stderrSection = '';
   if (stderr) {
     stderrSection = `
-**Errors:**
+**Stderr (informational - CLI tools commonly write progress, warnings, and debug info here):**
 \`\`\`
 ${stderr_tail}
 \`\`\`
@@ -68,9 +68,10 @@ ${stderrSection}
 
 ## Decision Rules
 
-### 1. Clear Approval
+### 1. Clear Approval (HIGHEST PRIORITY)
 - Output contains "APPROVE" / "LGTM" / "looks good" → \`approve\`
 - Exit 0 + positive language + no rejection phrases → \`approve\`
+- Stderr warnings/info do NOT override an explicit approval in stdout
 
 ### 2. Clear Rejection
 - Output contains "REJECT" / "needs work" / "issues found" → \`reject\`
@@ -88,7 +89,7 @@ ${stderrSection}
 ### 5. Unclear
 - Exit 0 but no clear decision words → \`unclear\`
 - Timeout → \`unclear\`
-- Stderr has errors → \`unclear\`
+- **IMPORTANT:** Stderr output alone does NOT make a decision unclear. AI CLI tools routinely write progress, warnings, and debug info to stderr. If stdout contains a clear APPROVE/REJECT/DISPUTE signal, honor it regardless of stderr content.
 
 ### 6. Rejection Threshold
 - Rejection count = 15 → automatically \`dispute\` (prevent infinite loops)
