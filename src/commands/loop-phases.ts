@@ -31,8 +31,71 @@ import {
 import { invokeCoderOrchestrator, invokeReviewerOrchestrator } from '../orchestrator/invoke.js';
 import { OrchestrationFallbackHandler } from '../orchestrator/fallback-handler.js';
 import type { CoderContext, ReviewerContext } from '../orchestrator/types.js';
+import { loadConfig } from '../config/loader.js';
+import { getProviderRegistry } from '../providers/registry.js';
 
 export { type CoordinatorResult };
+
+/**
+ * Returned when a provider invocation is classified as credit exhaustion.
+ * The main loop should pause and wait for a config change instead of retrying.
+ */
+export interface CreditExhaustionResult {
+  action: 'pause_credit_exhaustion';
+  provider: string;
+  model: string;
+  role: 'coder' | 'reviewer';
+  message: string;
+}
+
+/**
+ * Check a coder/reviewer result for credit exhaustion using the provider's classifier.
+ * Checks both stderr and stdout (some providers return JSON errors in stdout).
+ * Returns a CreditExhaustionResult if credits are exhausted, null otherwise.
+ */
+function checkCreditExhaustion(
+  result: { success: boolean; exitCode: number; stdout: string; stderr: string; duration: number; timedOut: boolean },
+  role: 'coder' | 'reviewer',
+  projectPath: string
+): CreditExhaustionResult | null {
+  if (result.success) return null;
+
+  const config = loadConfig(projectPath);
+  const roleConfig = config.ai?.[role];
+  const providerName = roleConfig?.provider;
+  const modelName = roleConfig?.model;
+
+  if (!providerName || !modelName) return null;
+
+  const registry = getProviderRegistry();
+  const provider = registry.tryGet(providerName);
+  if (!provider) return null;
+
+  // Check stderr first, then stdout (some providers put JSON errors in stdout)
+  const stderrClass = provider.classifyError(result.exitCode, result.stderr);
+  if (stderrClass?.type === 'credit_exhaustion') {
+    return {
+      action: 'pause_credit_exhaustion',
+      provider: providerName,
+      model: modelName,
+      role,
+      message: stderrClass.message,
+    };
+  }
+
+  const stdoutClass = provider.classifyError(result.exitCode, result.stdout);
+  if (stdoutClass?.type === 'credit_exhaustion') {
+    return {
+      action: 'pause_credit_exhaustion',
+      provider: providerName,
+      model: modelName,
+      role,
+      message: stdoutClass.message,
+    };
+  }
+
+  return null;
+}
 
 export async function runCoderPhase(
   db: ReturnType<typeof openDatabase>['db'],
@@ -42,7 +105,7 @@ export async function runCoderPhase(
   jsonMode = false,
   coordinatorCache?: Map<string, CoordinatorResult>,
   coordinatorThresholds?: number[]
-): Promise<void> {
+): Promise<CreditExhaustionResult | void> {
   if (!task) return;
 
   let coordinatorGuidance: string | undefined;
@@ -117,6 +180,12 @@ export async function runCoderPhase(
   if (coderResult.timedOut) {
     console.warn('Coder timed out. Will retry next iteration.');
     return;
+  }
+
+  // Check for credit exhaustion before proceeding to orchestrator
+  const creditCheck = checkCreditExhaustion(coderResult, 'coder', projectPath);
+  if (creditCheck) {
+    return creditCheck;
   }
 
   // STEP 2: Gather git state
@@ -242,7 +311,7 @@ export async function runReviewerPhase(
   projectPath: string,
   jsonMode = false,
   coordinatorResult?: CoordinatorResult
-): Promise<void> {
+): Promise<CreditExhaustionResult | void> {
   if (!task) return;
 
   // STEP 1: Invoke reviewer (no status commands in prompt anymore)
@@ -265,6 +334,12 @@ export async function runReviewerPhase(
       console.warn('Reviewer timed out. Will retry next iteration.');
     }
     return;
+  }
+
+  // Check for credit exhaustion before proceeding to orchestrator
+  const creditCheck = checkCreditExhaustion(reviewerResult, 'reviewer', projectPath);
+  if (creditCheck) {
+    return creditCheck;
   }
 
   // STEP 2: Gather git context
