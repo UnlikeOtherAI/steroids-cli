@@ -61,6 +61,7 @@ export type ProviderErrorType =
   | 'network_error'
   | 'model_not_found'
   | 'context_exceeded'
+  | 'credit_exhaustion'
   | 'subprocess_hung'
   | 'unknown';
 
@@ -204,6 +205,41 @@ export abstract class BaseAIProvider implements IAIProvider {
 
     const stderrLower = stderr.toLowerCase();
 
+    // Credit / quota exhaustion — check BEFORE rate_limit (more specific)
+    // 1. Try structured JSON parsing for error codes
+    const creditFromJson = this.detectCreditExhaustionFromJson(stderr);
+    if (creditFromJson) {
+      return creditFromJson;
+    }
+
+    // 2. Special handling for Gemini RESOURCE_EXHAUSTED (can be rate_limit or credit_exhaustion)
+    if (stderr.includes('RESOURCE_EXHAUSTED')) {
+      if (/per minute|per second|retry after/i.test(stderr)) {
+        return {
+          type: 'rate_limit',
+          message: 'Rate limit exceeded',
+          retryable: true,
+          retryAfterMs: 60000,
+        };
+      }
+      if (/billing|budget|hard limit/i.test(stderr)) {
+        return {
+          type: 'credit_exhaustion',
+          message: stderr.slice(0, 500) || 'Credit/quota exhausted',
+          retryable: false,
+        };
+      }
+    }
+
+    // 3. Regex fallback for credit/quota patterns
+    if (/insufficient.?(credit|fund|balance|quota)|quota.?exceed|billing|payment.?(required|failed)|out of (credits|tokens)|usage.?limit.?(reached|exceeded)|plan.?limit|subscription.?(expired|inactive)|exceeded your current quota/i.test(stderr)) {
+      return {
+        type: 'credit_exhaustion',
+        message: stderr.slice(0, 500) || 'Credit/quota exhausted',
+        retryable: false,
+      };
+    }
+
     if (stderrLower.includes('rate limit') || stderr.includes('429')) {
       return {
         type: 'rate_limit',
@@ -252,6 +288,53 @@ export abstract class BaseAIProvider implements IAIProvider {
       message: stderr.slice(0, 200) || 'Unknown error',
       retryable: true,
     };
+  }
+
+  /**
+   * Classify a full invocation result, checking both stderr and stdout
+   */
+  classifyResult(result: InvokeResult): ProviderError | null {
+    if (result.success) {
+      return null;
+    }
+
+    const stderrClassification = this.classifyError(result.exitCode, result.stderr);
+    if (stderrClassification && stderrClassification.type !== 'unknown') {
+      return stderrClassification;
+    }
+
+    // Some providers put JSON errors in stdout
+    const stdoutClassification = this.classifyError(result.exitCode, result.stdout);
+    if (stdoutClassification && stdoutClassification.type !== 'unknown') {
+      return stdoutClassification;
+    }
+
+    // Fallback to stderr classification (unknown)
+    return stderrClassification;
+  }
+
+  /**
+   * Try to detect credit exhaustion from structured JSON error responses
+   */
+  private detectCreditExhaustionFromJson(output: string): ProviderError | null {
+    try {
+      const parsed = JSON.parse(output);
+      const errorObj = parsed?.error ?? parsed;
+      const code = errorObj?.code ?? '';
+      const type = errorObj?.type ?? '';
+      const combined = `${code} ${type}`.toLowerCase();
+
+      if (/insufficient_quota|billing_hard_limit_reached/.test(combined)) {
+        return {
+          type: 'credit_exhaustion',
+          message: errorObj?.message ?? output.slice(0, 500) ?? 'Credit/quota exhausted',
+          retryable: false,
+        };
+      }
+    } catch {
+      // Not valid JSON — fall through to regex patterns
+    }
+    return null;
   }
 
   getCliPath(): string | undefined {
