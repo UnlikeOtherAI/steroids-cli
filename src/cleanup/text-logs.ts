@@ -27,8 +27,12 @@ export interface CleanupTextLogsOptions {
 function parseDateDir(name: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(name);
   if (!match) return null;
-  const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  if (isNaN(d.getTime())) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const d = new Date(year, month, day);
+  // Round-trip check: reject non-calendar dates like 2024-13-40
+  if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null;
   return d;
 }
 

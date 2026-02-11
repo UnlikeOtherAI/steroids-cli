@@ -39,6 +39,26 @@ router.get('/projects/storage', async (req: Request, res: Response) => {
   }
 });
 
+function parseRetentionDays(raw: unknown): { valid: true; days: number } | { valid: false; error: string } {
+  if (raw === undefined) return { valid: true, days: 7 };
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1 || raw > 365) {
+    return { valid: false, error: 'retention_days must be a positive integer (1-365)' };
+  }
+  return { valid: true, days: raw };
+}
+
+function runCleanup(projectPath: string, retentionDays: number) {
+  const invResult = cleanupInvocationLogs(projectPath, { retentionDays });
+  const textResult = cleanupTextLogs(projectPath, { retentionDays });
+  bustStorageCache(projectPath);
+  return {
+    ok: true as const,
+    deleted_files: invResult.deletedFiles + textResult.deletedFiles,
+    freed_bytes: invResult.freedBytes + textResult.freedBytes,
+    freed_human: formatBytes(invResult.freedBytes + textResult.freedBytes),
+  };
+}
+
 /**
  * POST /api/projects/clear-logs
  * Delete old invocation and text logs for a project
@@ -46,38 +66,21 @@ router.get('/projects/storage', async (req: Request, res: Response) => {
  */
 router.post('/projects/clear-logs', async (req: Request, res: Response) => {
   try {
-    const { path: rawPath, retention_days } = req.body as { path?: string; retention_days?: unknown };
+    const { path: rawPath, retention_days } = req.body;
 
-    // Validate retention_days: positive integer, max 365
-    if (retention_days !== undefined) {
-      if (typeof retention_days !== 'number' || !Number.isInteger(retention_days) || retention_days < 1 || retention_days > 365) {
-        res.status(400).json({ ok: false, error: 'retention_days must be a positive integer (1-365)' });
-        return;
-      }
+    const retention = parseRetentionDays(retention_days);
+    if (!retention.valid) {
+      res.status(400).json({ ok: false, error: retention.error });
+      return;
     }
-    const retentionDays = (retention_days as number | undefined) ?? 7;
 
-    // Security: resolve real path and verify it's a registered project
     const validation = await validateProjectPath(rawPath);
     if (!validation.valid) {
       res.status(validation.status).json({ ok: false, error: validation.error });
       return;
     }
 
-    const projectPath = validation.realPath;
-    const invResult = cleanupInvocationLogs(projectPath, { retentionDays });
-    const textResult = cleanupTextLogs(projectPath, { retentionDays });
-    const totalDeleted = invResult.deletedFiles + textResult.deletedFiles;
-    const totalFreed = invResult.freedBytes + textResult.freedBytes;
-
-    bustStorageCache(projectPath);
-
-    res.json({
-      ok: true,
-      deleted_files: totalDeleted,
-      freed_bytes: totalFreed,
-      freed_human: formatBytes(totalFreed),
-    });
+    res.json(runCleanup(validation.realPath, retention.days));
   } catch (error) {
     console.error('Error clearing project logs:', error);
     res.status(500).json({
