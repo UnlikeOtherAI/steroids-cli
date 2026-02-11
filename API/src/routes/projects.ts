@@ -20,6 +20,12 @@ import {
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 import { isValidProjectPath, validatePathRequest } from '../utils/validation.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
+import {
+  validateProjectPath,
+  getCachedStorageBreakdown,
+  getCachedListStorage,
+  bustStorageCache,
+} from '../utils/storage-cache.js';
 
 const router = Router();
 
@@ -80,6 +86,9 @@ interface ProjectResponse {
     current_task_id: string | null;
     heartbeat_at: string | null;
   } | null;
+  storage_bytes: number | null;
+  storage_human: string | null;
+  storage_warning: 'orange' | 'red' | null;
 }
 
 /**
@@ -109,6 +118,9 @@ router.get('/projects', (req: Request, res: Response) => {
         // Get live stats from project-local database
         const liveStats = getProjectLiveStats(project.path);
 
+        // Lightweight storage info (non-blocking, 5-min cache)
+        const storageInfo = getCachedListStorage(project.path);
+
         const response: ProjectResponse = {
           path: project.path,
           name: project.name,
@@ -126,6 +138,9 @@ router.get('/projects', (req: Request, res: Response) => {
                 heartbeat_at: runner.heartbeat_at,
               }
             : null,
+          storage_bytes: storageInfo?.storage_bytes ?? null,
+          storage_human: storageInfo?.storage_human ?? null,
+          storage_warning: storageInfo?.storage_warning ?? null,
         };
 
         return response;
@@ -390,6 +405,8 @@ router.get('/projects/status', (req: Request, res: Response) => {
         heartbeat_at: string | null;
       } | undefined;
 
+      const storageInfo = getCachedListStorage(project.path);
+
       const response: ProjectResponse = {
         path: project.path,
         name: project.name,
@@ -406,6 +423,9 @@ router.get('/projects/status', (req: Request, res: Response) => {
               heartbeat_at: runner.heartbeat_at,
             }
           : null,
+        storage_bytes: storageInfo?.storage_bytes ?? null,
+        storage_human: storageInfo?.storage_human ?? null,
+        storage_warning: storageInfo?.storage_warning ?? null,
       };
 
       res.json({
@@ -420,6 +440,30 @@ router.get('/projects/status', (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get project status',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/projects/storage
+ * Get storage breakdown for a project's .steroids/ directory
+ * Query: path (required) — absolute path to the project
+ */
+router.get('/projects/storage', async (req: Request, res: Response) => {
+  try {
+    const result = await validateProjectPath(req.query.path as string);
+    if (!result.valid) {
+      res.status(result.status).json({ success: false, error: result.error });
+      return;
+    }
+    const breakdown = await getCachedStorageBreakdown(result.realPath);
+    res.json(breakdown);
+  } catch (error) {
+    console.error('Error getting project storage:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get storage breakdown',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
