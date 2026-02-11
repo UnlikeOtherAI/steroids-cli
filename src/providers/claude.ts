@@ -143,25 +143,38 @@ export class ClaudeProvider extends BaseAIProvider {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      // Activity-based timeout: only kill when process goes silent
-      let lastActivity = Date.now();
-      const activityCheck = setInterval(() => {
-        if (Date.now() - lastActivity > timeout) {
+      // Activity-based timeout: resettable timer that only kills when silent
+      const MAX_BUFFER = 2_000_000; // Cap stdout/stderr at ~2MB
+      let activityTimer: ReturnType<typeof setTimeout>;
+
+      const resetActivityTimer = () => {
+        clearTimeout(activityTimer);
+        activityTimer = setTimeout(() => {
           timedOut = true;
           child.kill('SIGTERM');
+          // Force kill after 5s if process hasn't exited
           setTimeout(() => {
-            if (!child.killed) {
+            if (child.exitCode === null) {
               child.kill('SIGKILL');
             }
+            // Hard-resolve after another 5s if still stuck
+            setTimeout(() => {
+              if (child.exitCode === null) {
+                resolve({
+                  success: false, exitCode: 1, stdout, stderr,
+                  duration: Date.now() - startTime, timedOut: true,
+                });
+              }
+            }, 5000);
           }, 5000);
-          clearInterval(activityCheck);
-        }
-      }, 60_000);
+        }, timeout);
+      };
+      resetActivityTimer();
 
       child.stdout?.on('data', (data: Buffer) => {
         const text = data.toString();
-        stdout += text;
-        lastActivity = Date.now();
+        if (stdout.length < MAX_BUFFER) stdout += text;
+        resetActivityTimer();
         onActivity?.({ type: 'output', stream: 'stdout', msg: text });
         if (streamOutput) {
           process.stdout.write(text);
@@ -170,8 +183,8 @@ export class ClaudeProvider extends BaseAIProvider {
 
       child.stderr?.on('data', (data: Buffer) => {
         const text = data.toString();
-        stderr += text;
-        lastActivity = Date.now();
+        if (stderr.length < MAX_BUFFER) stderr += text;
+        resetActivityTimer();
         onActivity?.({ type: 'output', stream: 'stderr', msg: text });
         if (streamOutput) {
           process.stderr.write(text);
@@ -179,7 +192,7 @@ export class ClaudeProvider extends BaseAIProvider {
       });
 
       child.on('close', (code) => {
-        clearInterval(activityCheck);
+        clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
 
         resolve({
@@ -193,7 +206,7 @@ export class ClaudeProvider extends BaseAIProvider {
       });
 
       child.on('error', (error) => {
-        clearInterval(activityCheck);
+        clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
 
         resolve({

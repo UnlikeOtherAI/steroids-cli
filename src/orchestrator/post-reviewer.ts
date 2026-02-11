@@ -72,6 +72,8 @@ ${stderrSection}
 - Output contains "APPROVE" / "LGTM" / "looks good" → \`approve\`
 - Exit 0 + positive language + no rejection phrases → \`approve\`
 - Stderr warnings/info do NOT override an explicit approval in stdout
+- Non-zero exit code WITH explicit "APPROVE" in output → still \`approve\` (CLI wrapper errors don't invalidate the review)
+- Non-zero exit code WITHOUT any explicit decision → \`unclear\`
 
 ### 2. Clear Rejection
 - Output contains "REJECT" / "needs work" / "issues found" → \`reject\`
