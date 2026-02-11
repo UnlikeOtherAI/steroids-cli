@@ -33,6 +33,7 @@ import { OrchestrationFallbackHandler } from '../orchestrator/fallback-handler.j
 import type { CoderContext, ReviewerContext } from '../orchestrator/types.js';
 import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
+import type { InvokeResult } from '../providers/interface.js';
 
 export { type CoordinatorResult };
 
@@ -50,11 +51,11 @@ export interface CreditExhaustionResult {
 
 /**
  * Check a coder/reviewer result for credit exhaustion using the provider's classifier.
- * Checks both stderr and stdout (some providers return JSON errors in stdout).
+ * Uses provider.classifyResult() which checks both stderr and stdout.
  * Returns a CreditExhaustionResult if credits are exhausted, null otherwise.
  */
 function checkCreditExhaustion(
-  result: { success: boolean; exitCode: number; stdout: string; stderr: string; duration: number; timedOut: boolean },
+  result: InvokeResult,
   role: 'coder' | 'reviewer',
   projectPath: string
 ): CreditExhaustionResult | null {
@@ -71,26 +72,14 @@ function checkCreditExhaustion(
   const provider = registry.tryGet(providerName);
   if (!provider) return null;
 
-  // Check stderr first, then stdout (some providers put JSON errors in stdout)
-  const stderrClass = provider.classifyError(result.exitCode, result.stderr);
-  if (stderrClass?.type === 'credit_exhaustion') {
+  const classification = provider.classifyResult(result);
+  if (classification?.type === 'credit_exhaustion') {
     return {
       action: 'pause_credit_exhaustion',
       provider: providerName,
       model: modelName,
       role,
-      message: stderrClass.message,
-    };
-  }
-
-  const stdoutClass = provider.classifyError(result.exitCode, result.stdout);
-  if (stdoutClass?.type === 'credit_exhaustion') {
-    return {
-      action: 'pause_credit_exhaustion',
-      provider: providerName,
-      model: modelName,
-      role,
-      message: stdoutClass.message,
+      message: classification.message,
     };
   }
 

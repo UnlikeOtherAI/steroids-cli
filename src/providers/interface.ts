@@ -146,6 +146,13 @@ export interface IAIProvider {
   classifyError(exitCode: number, stderr: string): ProviderError | null;
 
   /**
+   * Classify a full invocation result, checking both stderr and stdout
+   * @param result The full invocation result
+   * @returns Classified error or null if successful
+   */
+  classifyResult(result: InvokeResult): ProviderError | null;
+
+  /**
    * Get the CLI path for this provider
    * @returns Path to CLI executable or undefined if using default
    */
