@@ -98,14 +98,14 @@ export async function handleCreditExhaustion(
   // Poll for config change
   while (true) {
     if (shouldStop?.()) {
-      resolveCreditIncident(projectDb, incidentId, 'none');
+      resolveCreditIncident(projectDb, incidentId, 'dismissed');
       return { resumed: false };
     }
 
     // Wait, but check shouldStop more frequently than the full interval
     const waited = await interruptibleSleep(POLL_INTERVAL_MS, shouldStop);
     if (!waited) {
-      resolveCreditIncident(projectDb, incidentId, 'none');
+      resolveCreditIncident(projectDb, incidentId, 'dismissed');
       return { resumed: false };
     }
 

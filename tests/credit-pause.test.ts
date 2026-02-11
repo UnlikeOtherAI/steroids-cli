@@ -267,7 +267,7 @@ describe('Credit Pause Handler', () => {
       expect(result.resumed).toBe(false);
       // Should resolve the incident via the query function
       expect(mockResolveCreditIncident).toHaveBeenCalledWith(
-        db, 'test-incident-id', 'none',
+        db, 'test-incident-id', 'dismissed',
       );
     });
   });

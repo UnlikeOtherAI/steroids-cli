@@ -1094,6 +1094,15 @@ export function recordCreditIncident(
   return id;
 }
 
+/** Base SELECT for credit incident queries. */
+const CREDIT_INCIDENT_SELECT = `SELECT id,
+  json_extract(details, '$.provider') as provider,
+  json_extract(details, '$.model') as model,
+  json_extract(details, '$.role') as role,
+  created_at
+FROM incidents
+WHERE failure_mode = 'credit_exhaustion' AND resolved_at IS NULL`;
+
 /**
  * Query unresolved credit_exhaustion incidents.
  * Optionally filter by project path (requires globalDb with runners table).
@@ -1103,39 +1112,19 @@ export function getActiveCreditIncidents(
   projectPath?: string,
   globalDb?: Database.Database
 ): CreditIncident[] {
-  if (projectPath && globalDb) {
-    const runnerIds = globalDb.prepare(
-      `SELECT id FROM runners WHERE project_path = ?`
-    ).all(projectPath) as Array<{ id: string }>;
-
-    if (runnerIds.length === 0) return [];
-
-    const placeholders = runnerIds.map(() => '?').join(',');
-    return db.prepare(
-      `SELECT id,
-              json_extract(details, '$.provider') as provider,
-              json_extract(details, '$.model') as model,
-              json_extract(details, '$.role') as role,
-              created_at
-       FROM incidents
-       WHERE failure_mode = 'credit_exhaustion'
-         AND resolved_at IS NULL
-         AND runner_id IN (${placeholders})
-       ORDER BY created_at DESC`
-    ).all(...runnerIds.map(r => r.id)) as CreditIncident[];
+  if (!projectPath || !globalDb) {
+    return db.prepare(`${CREDIT_INCIDENT_SELECT} ORDER BY created_at DESC`).all() as CreditIncident[];
   }
 
+  const runnerIds = globalDb.prepare(
+    `SELECT id FROM runners WHERE project_path = ?`
+  ).all(projectPath) as Array<{ id: string }>;
+  if (runnerIds.length === 0) return [];
+
+  const placeholders = runnerIds.map(() => '?').join(',');
   return db.prepare(
-    `SELECT id,
-            json_extract(details, '$.provider') as provider,
-            json_extract(details, '$.model') as model,
-            json_extract(details, '$.role') as role,
-            created_at
-     FROM incidents
-     WHERE failure_mode = 'credit_exhaustion'
-       AND resolved_at IS NULL
-     ORDER BY created_at DESC`
-  ).all() as CreditIncident[];
+    `${CREDIT_INCIDENT_SELECT} AND runner_id IN (${placeholders}) ORDER BY created_at DESC`
+  ).all(...runnerIds.map(r => r.id)) as CreditIncident[];
 }
 
 /**
@@ -1144,7 +1133,7 @@ export function getActiveCreditIncidents(
 export function resolveCreditIncident(
   db: Database.Database,
   incidentId: string,
-  resolution: CreditIncidentResolution | string
+  resolution: CreditIncidentResolution
 ): void {
   db.prepare(
     `UPDATE incidents SET resolved_at = datetime('now'), resolution = ? WHERE id = ?`
