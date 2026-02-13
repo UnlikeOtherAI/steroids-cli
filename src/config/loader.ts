@@ -91,6 +91,8 @@ export interface SteroidsConfig {
   projects?: {
     scanPaths?: string[];
     excludePatterns?: string[];
+    allowedPaths?: string[];
+    blockedPaths?: string[];
   };
   backup?: {
     enabled?: boolean;
@@ -199,6 +201,8 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
   projects: {
     scanPaths: ['~/Projects'],
     excludePatterns: ['node_modules', '.git'],
+    allowedPaths: [],
+    blockedPaths: [],
   },
   backup: {
     enabled: true,

@@ -16,6 +16,7 @@ import {
   disableProject,
   pruneProjects,
   getRegisteredProject,
+  isPathAllowed,
 } from '../runners/projects.js';
 import { generateHelp } from '../cli/help.js';
 
@@ -215,6 +216,17 @@ async function addProject(
       }
     }
     return;
+  }
+
+  // Check whitelist/blacklist
+  const pathCheck = isPathAllowed(projectPath);
+  if (!pathCheck.allowed) {
+    out.error('PATH_NOT_ALLOWED', pathCheck.reason ?? 'Path not allowed by project registration rules');
+    out.log('');
+    out.log('Configure allowed/blocked paths in global config:');
+    out.log(`  ${colors.dim('steroids config set projects.allowedPaths \'["~/Projects"]\' --global')}`);
+    out.log(`  ${colors.dim('steroids config set projects.blockedPaths \'["/tmp"]\' --global')}`);
+    process.exit(1);
   }
 
   // Register the project

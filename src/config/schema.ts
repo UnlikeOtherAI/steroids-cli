@@ -333,6 +333,16 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _type: 'array',
       _default: ['node_modules', '.git'],
     },
+    allowedPaths: {
+      _description: 'Whitelist: only allow project registration from these directories (prefix match). Empty = allow all.',
+      _type: 'array',
+      _default: [],
+    },
+    blockedPaths: {
+      _description: 'Blacklist: block project registration from these directories (prefix match). Empty = block none.',
+      _type: 'array',
+      _default: [],
+    },
   },
   backup: {
     _description: 'Backup configuration',

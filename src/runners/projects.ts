@@ -5,7 +5,9 @@
 
 import { existsSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { openGlobalDatabase } from './global-db.js';
+import { loadConfigFile, getGlobalConfigPath } from '../config/loader.js';
 
 export interface RegisteredProject {
   path: string;
@@ -52,6 +54,49 @@ export function isTemporaryPath(path: string): boolean {
 }
 
 /**
+ * Expand ~ to the user's home directory
+ */
+function expandHome(p: string): string {
+  if (p.startsWith('~/') || p === '~') {
+    return join(homedir(), p.slice(1));
+  }
+  return p;
+}
+
+/**
+ * Check if a project path is allowed by whitelist/blacklist config.
+ * Reads from global config (~/.steroids/config.yaml).
+ *
+ * @param path - Normalized absolute path to check
+ * @returns Object with allowed boolean and optional reason
+ */
+export function isPathAllowed(path: string): { allowed: boolean; reason?: string } {
+  const globalConfig = loadConfigFile(getGlobalConfigPath());
+  const allowedPaths = (globalConfig.projects?.allowedPaths ?? []).filter(Boolean);
+  const blockedPaths = (globalConfig.projects?.blockedPaths ?? []).filter(Boolean);
+
+  // Whitelist check (if non-empty, path must match at least one entry)
+  if (allowedPaths.length > 0) {
+    const expanded = allowedPaths.map(p => expandHome(resolve(p)).replace(/\/+$/, ''));
+    const matches = expanded.some(prefix => path === prefix || path.startsWith(prefix + '/'));
+    if (!matches) {
+      return { allowed: false, reason: `Path not in allowed directories: ${allowedPaths.join(', ')}` };
+    }
+  }
+
+  // Blacklist check (if non-empty, path must NOT match any entry)
+  if (blockedPaths.length > 0) {
+    const expanded = blockedPaths.map(p => expandHome(resolve(p)).replace(/\/+$/, ''));
+    const blocked = expanded.find(prefix => path === prefix || path.startsWith(prefix + '/'));
+    if (blocked) {
+      return { allowed: false, reason: `Path is in blocked directory: ${blocked}` };
+    }
+  }
+
+  return { allowed: true };
+}
+
+/**
  * Register a project in the global registry
  * Idempotent - updates last_seen_at if project already exists
  *
@@ -63,6 +108,12 @@ export function registerProject(path: string, name?: string): void {
 
   // Block temporary/ephemeral paths from polluting the global registry
   if (isTemporaryPath(normalizedPath)) {
+    return;
+  }
+
+  // Check whitelist/blacklist
+  const { allowed } = isPathAllowed(normalizedPath);
+  if (!allowed) {
     return;
   }
 

@@ -692,6 +692,34 @@ Examples:
   steroids projects prune                        # Remove stale projects
 ```
 
+### Registration Path Filtering
+
+Control where projects can be registered using whitelist and blacklist paths in global config:
+
+```yaml
+# ~/.steroids/config.yaml
+projects:
+  allowedPaths:       # Whitelist (prefix match). Empty = allow all.
+    - ~/Projects
+    - ~/Work
+  blockedPaths:       # Blacklist (prefix match). Empty = block none.
+    - /tmp
+    - /var/tmp
+```
+
+- **Whitelist** (`allowedPaths`): If non-empty, only projects under these directories can be registered. Empty means allow all.
+- **Blacklist** (`blockedPaths`): Projects under these directories are always blocked. Empty means block none.
+- Whitelist is checked first. Both support `~` expansion and prefix matching.
+- Enforced on `steroids init`, `steroids projects add`, and any code calling `registerProject()`.
+
+```bash
+# Set via CLI
+steroids config set projects.allowedPaths '["~/Projects","~/Work"]' --global
+steroids config set projects.blockedPaths '["/tmp","/var/tmp"]' --global
+```
+
+Or edit in the web dashboard under Settings > Projects.
+
 ### Global Project Registry
 
 The global project registry is stored in `~/.steroids/steroids.db` and tracks all steroids projects across your system. This enables:

@@ -190,6 +190,10 @@ steroids runners stop --all             # stop all
 steroids runners status                 # current state
 steroids runners logs <pid>             # view daemon output
 
+NOTE: Stopping a runner is temporary — the wakeup cron will respawn it.
+To permanently stop a runner, DISABLE the project first:
+  steroids projects disable             # then steroids runners stop --all
+
 ### Projects
 steroids projects list                  # all registered projects
 
@@ -242,7 +246,7 @@ SPECIFICATIONS = Markdown files describing what to build
   - Create a specs/ directory with markdown files
 
 INITIALIZING A PROJECT:
-  1. steroids init
+  1. steroids init -y                     # non-interactive, accept defaults
   2. Create specs/ with your specifications
   3. steroids sections add "Phase 1: Feature Name"
   4. steroids tasks add "Task title" --section <id> --source specs/spec.md
