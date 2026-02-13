@@ -11,6 +11,7 @@ import { listRunners } from '../runners/daemon.js';
 import { openDatabase } from '../database/connection.js';
 import { listTasks } from '../database/queries.js';
 import { generateHelp } from '../cli/help.js';
+import { createOutput } from '../cli/output.js';
 
 const LLM_INSTRUCTIONS = `# STEROIDS LLM QUICK REFERENCE
 
@@ -19,6 +20,29 @@ Steroids=automated task orchestration system.
 It manages tasks and invokes LLM agents (coders/reviewers) to execute them.
 The system spawns separate LLM processes for coding and reviewing.
 Deterministic daemon — never makes decisions, just follows the state machine.
+
+## TASK SIZING (CRITICAL)
+
+Tasks should be PR-sized chunks of work — not individual classes or functions,
+but whole testable pieces of functionality. Think "what would make a good pull request?"
+
+GOOD task sizing:
+- "Implement user authentication endpoint with tests"
+- "Add section dependency graph visualization"
+- "Build CSV export for task reports"
+
+BAD task sizing (too granular):
+- "Create UserService class"
+- "Add validateEmail helper function"
+- "Write test for login method"
+
+BAD task sizing (too large):
+- "Build the entire frontend"
+- "Implement all API endpoints"
+
+Each task should produce a reviewable, testable unit of work that can be
+merged independently. The reviewer needs enough context to verify correctness,
+and the coder needs enough scope to make meaningful progress.
 
 ## TASK STATE MACHINE
 
@@ -200,6 +224,30 @@ steroids tasks skip <id> --notes "spec says SKIP, needs Cloud SQL setup"
 # Use when: spec says SKIP/MANUAL, requires cloud console, account creation, etc.
 # --partial: use if you coded some parts but rest needs human action
 
+## PROJECT SETUP
+
+SECTIONS = Features or Functional Areas
+  - Each section represents ONE cohesive piece of functionality
+  - Sections should be independent enough to be worked on in isolation
+  - Sections have priorities and can depend on other sections
+
+TASKS = PR-Sized Implementation Units
+  - Each task produces a reviewable, testable unit of work
+  - Tasks must have a specification file explaining exactly what to build
+  - Tasks are ordered within sections — earlier tasks may set up later ones
+
+SPECIFICATIONS = Markdown files describing what to build
+  - Include: purpose, requirements, examples, acceptance criteria
+  - Reference existing code patterns the implementation should follow
+  - Create a specs/ directory with markdown files
+
+INITIALIZING A PROJECT:
+  1. steroids init
+  2. Create specs/ with your specifications
+  3. steroids sections add "Phase 1: Feature Name"
+  4. steroids tasks add "Task title" --section <id> --source specs/spec.md
+  5. steroids loop
+
 ## IMPORTANT NOTES
 - Task spec is in source file (see tasks audit output)
 - Max 15 rejections before task fails; coordinator intervenes at [2, 5, 9]
@@ -207,26 +255,33 @@ steroids tasks skip <id> --notes "spec says SKIP, needs Cloud SQL setup"
 - Each project isolated: own database, own runner
 - Section dependencies block entire sections, not individual tasks
 - Build+test verification happens automatically after coder submits
+- Always run build AND tests before submitting for review
+- Never modify code outside the task scope
+- If stuck, create a dispute rather than guessing
 `;
 
 const HELP = generateHelp({
   command: 'llm',
-  description: 'Compact instructions for LLM agents',
-  details: 'Quick reference guide for AI agents working with Steroids. Shows key commands, task flow, and current context.',
+  description: 'Quick reference for LLM agents (alias: steroids about)',
+  details: 'Complete reference guide for AI agents working with Steroids. Shows key commands, task flow, project setup, and current context.',
   usage: [
     'steroids llm',
     'steroids llm --context',
+    'steroids llm --json',
+    'steroids about            # alias for steroids llm',
   ],
   options: [
     { long: 'context', description: 'Include current project context (projects, runners, tasks)' },
+    { short: 'j', long: 'json', description: 'Output structured JSON for LLM parsing' },
   ],
   examples: [
     { command: 'steroids llm', description: 'Show LLM quick reference' },
     { command: 'steroids llm --context', description: 'Show reference with current context' },
+    { command: 'steroids about --json', description: 'Structured JSON output' },
   ],
   related: [
-    { command: 'steroids about', description: 'Explain what Steroids is' },
     { command: 'steroids tasks', description: 'Manage tasks' },
+    { command: 'steroids sections', description: 'Manage sections' },
   ],
   showGlobalOptions: false,
   showEnvVars: false,
@@ -234,9 +289,57 @@ const HELP = generateHelp({
 });
 
 export async function llmCommand(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'llm', flags });
+
   // Check for help
   if (flags.help || args.includes('-h') || args.includes('--help')) {
     console.log(HELP);
+    return;
+  }
+
+  // JSON output mode
+  if (flags.json) {
+    out.success({
+      name: 'Steroids',
+      description: 'AI-powered task orchestration with coder/reviewer loop',
+      version: process.env.npm_package_version ?? '0.0.0',
+      concept: {
+        roles: [
+          { name: 'coder', purpose: 'Implements tasks by writing code, running builds and tests' },
+          { name: 'reviewer', purpose: 'Reviews completed work, approves or rejects with feedback' },
+        ],
+        workflow: [
+          'Human creates tasks with specifications',
+          'Runner picks up pending tasks',
+          'Coder implements following specification',
+          'Reviewer evaluates implementation',
+          'Approved: task complete, next starts',
+          'Rejected: returns to coder with notes',
+          'After 15 rejections: dispute raised',
+        ],
+        lifecycle: ['pending', 'in_progress', 'review', 'completed'],
+      },
+      taskSizing: 'PR-sized chunks — whole testable pieces of functionality, not individual classes',
+      projectSetup: {
+        sections: 'Features or functional areas — each represents ONE cohesive piece of functionality',
+        tasks: 'PR-sized implementation units — reviewable, testable units of work',
+        specifications: 'Markdown files in specs/ with purpose, requirements, examples, acceptance criteria',
+      },
+      commands: [
+        { command: 'steroids tasks list', description: 'List pending tasks' },
+        { command: 'steroids tasks list --status all', description: 'Show all tasks' },
+        { command: 'steroids sections list', description: 'Show task sections' },
+        { command: 'steroids tasks approve <id>', description: 'Approve as reviewer' },
+        { command: 'steroids tasks reject <id> --notes "..."', description: 'Reject with feedback' },
+      ],
+      rules: [
+        'Always run build AND tests before submitting for review',
+        'Read the task specification thoroughly before implementing',
+        'Make small, focused commits',
+        'Never modify code outside the task scope',
+        'If stuck, create a dispute rather than guessing',
+      ],
+    });
     return;
   }
 

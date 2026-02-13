@@ -62,8 +62,8 @@ USAGE:
   steroids <command> [options]
 
 COMMANDS:
-  about             Explain what Steroids is (for LLMs discovering this tool)
-  llm               Compact instructions for LLM agents (call when context lost)
+  llm               Quick reference for LLM agents (project setup, commands, task flow)
+  about             Alias for llm
 
   init              Initialize steroids in current directory
   sections          Manage task sections

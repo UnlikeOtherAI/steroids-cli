@@ -5,30 +5,34 @@
 
 ---
 
-## `steroids about`
+## `steroids llm`
 
-**Start here if you're an LLM discovering this tool.**
+**Start here if you're an LLM discovering this tool.** `steroids about` is an alias for this command.
 
-Explains what Steroids is and how it works in detail suitable for AI agents.
+Complete reference for AI agents: task sizing, project setup, commands, and current context.
 
 ```
-Usage: steroids about [options]
+Usage: steroids llm [options]
+       steroids about [options]    # alias
 
 Options:
+  --context     Include current project context (projects, runners, tasks)
   -j, --json    Output as structured JSON for LLM parsing
   -h, --help    Show help
 
 Examples:
-  steroids about              # Human-readable explanation
-  steroids about --json       # Structured JSON for parsing
+  steroids llm                  # Show full reference
+  steroids llm --context        # Include live project context
+  steroids about --json         # Structured JSON for parsing
 ```
 
-The about command covers:
+The llm command covers:
 - What Steroids is (AI task orchestration)
-- The coder/reviewer loop concept
-- Task lifecycle (pending → in_progress → review → completed)
-- Key commands for working with tasks
-- Important rules for implementation
+- Task sizing guidance (PR-sized chunks, not individual classes)
+- The coder/reviewer loop and task state machine
+- Project setup (sections, tasks, specifications)
+- All key commands organized by category
+- Current context (active tasks, runners) with `--context`
 
 ---
 

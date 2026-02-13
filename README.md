@@ -246,9 +246,9 @@ That's it. Open your browser at:
 | Command | Description |
 |---------|-------------|
 | `steroids init` | Initialize Steroids in current directory |
-| `steroids about` | Explain what Steroids is (for LLMs discovering the tool) |
-| `steroids llm` | Compact instructions for LLM agents (call when context lost) |
+| `steroids llm` | Quick reference for LLM agents (project setup, commands, task flow) |
 | `steroids llm --context` | Include current project context (active tasks, runners) |
+| `steroids about` | Alias for `steroids llm` |
 | `steroids loop` | Run the coder/reviewer loop interactively |
 | `steroids loop --once` | Run one iteration only |
 
