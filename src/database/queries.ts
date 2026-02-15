@@ -579,6 +579,55 @@ export function resetRejectionCount(
   return oldCount;
 }
 
+/**
+ * Update editable task fields (title, source, file anchor, section)
+ * Only updates fields that are explicitly provided (not undefined)
+ */
+export interface TaskFieldUpdates {
+  title?: string;
+  sourceFile?: string;
+  sectionId?: string;
+  filePath?: string | null;
+  fileLine?: number | null;
+  fileCommitSha?: string | null;
+  fileContentHash?: string | null;
+}
+
+export function updateTaskFields(
+  db: Database.Database,
+  taskId: string,
+  fields: TaskFieldUpdates,
+  actor: string,
+  notes?: string
+): void {
+  const task = getTask(db, taskId);
+  if (!task) throw new Error(`Task not found: ${taskId}`);
+
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  if (fields.title !== undefined) { sets.push('title = ?'); params.push(fields.title); }
+  if (fields.sourceFile !== undefined) { sets.push('source_file = ?'); params.push(fields.sourceFile); }
+  if (fields.sectionId !== undefined) { sets.push('section_id = ?'); params.push(fields.sectionId); }
+  if (fields.filePath !== undefined) { sets.push('file_path = ?'); params.push(fields.filePath); }
+  if (fields.fileLine !== undefined) { sets.push('file_line = ?'); params.push(fields.fileLine); }
+  if (fields.fileCommitSha !== undefined) { sets.push('file_commit_sha = ?'); params.push(fields.fileCommitSha); }
+  if (fields.fileContentHash !== undefined) { sets.push('file_content_hash = ?'); params.push(fields.fileContentHash); }
+
+  if (sets.length === 0) return;
+
+  sets.push("updated_at = datetime('now')");
+  params.push(taskId);
+
+  db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+
+  const changes = Object.entries(fields)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(', ');
+  addAuditEntry(db, taskId, task.status, task.status, actor, notes ?? `Fields updated: ${changes}`);
+}
+
 export function approveTask(
   db: Database.Database,
   taskId: string,

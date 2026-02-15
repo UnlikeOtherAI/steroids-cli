@@ -167,6 +167,10 @@ This gives the coder/reviewer maximum context and traceability.
 ### Manage Tasks
 steroids tasks update <id> --status <s> --actor model --model <m>
   statuses: pending, in_progress, review, completed, skipped, partial
+steroids tasks update <id> --source <file>              # fix/change spec file
+steroids tasks update <id> --title "New title"          # rename task
+steroids tasks update <id> --section <id>               # move to different section
+steroids tasks update <id> --file <path> --line <n>     # change file anchor
 steroids tasks approve <id> --model <m> [--notes "msg"]     # mark completed
 steroids tasks reject <id> --model <m> --notes "feedback"   # back to pending
 steroids tasks skip <id> --notes "reason"                   # external setup, skip it

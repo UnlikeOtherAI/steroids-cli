@@ -27,6 +27,7 @@ import {
   getRecentTaskInvocations,
   getInvocationCount,
   getOrCreateFeedbackSection,
+  updateTaskFields,
   STATUS_MARKERS,
   type Task,
   type TaskStatus,
@@ -82,8 +83,9 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { long: 'actor', description: 'Actor making the change', values: '<name>' },
     { long: 'model', description: 'Model identifier (for LLM actors)', values: '<model>' },
     { long: 'notes', description: 'Review notes/comments', values: '<text>' },
-    { long: 'source', description: 'Specification file (add subcommand)', values: '<file>' },
-    { long: 'file', description: 'Anchor task to a committed file (add subcommand)', values: '<path>' },
+    { long: 'title', description: 'Change task title (update subcommand)', values: '<text>' },
+    { long: 'source', description: 'Specification file (add/update subcommand)', values: '<file>' },
+    { long: 'file', description: 'Anchor task to a file (add/update subcommand)', values: '<path>' },
     { long: 'line', description: 'Line number in anchored file (requires --file)', values: '<number>' },
     { long: 'feedback', description: 'Add to "Needs User Input" section (skipped, for human review)' },
     { long: 'partial', description: 'Mark as partial when skipping' },
@@ -98,7 +100,9 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { command: 'steroids tasks add "Implement login" --section abc123 --source docs/spec.md', description: 'Add new task' },
     { command: 'steroids tasks add "Fix bug" --section abc123 --source spec.md --file src/utils.ts --line 42', description: 'Add task anchored to a file' },
     { command: 'steroids tasks add "Review execSync usage" --feedback', description: 'Add feedback task (skipped section)' },
-    { command: 'steroids tasks update "Implement login" --status review', description: 'Update task status' },
+    { command: 'steroids tasks update abc123 --status review', description: 'Update task status' },
+    { command: 'steroids tasks update abc123 --source docs/correct-spec.md', description: 'Fix task source file' },
+    { command: 'steroids tasks update abc123 --title "Better name" --section def456', description: 'Change title and section' },
     { command: 'steroids tasks approve abc123 --model claude-sonnet-4', description: 'Approve a task' },
     { command: 'steroids tasks approve abc123 --no-hooks', description: 'Approve without triggering hooks' },
     { command: 'steroids tasks reject abc123 --model codex --notes "Missing tests"', description: 'Reject a task' },
@@ -816,6 +820,11 @@ async function updateTask(args: string[], flags: GlobalFlags): Promise<void> {
     options: {
       help: { type: 'boolean', short: 'h', default: false },
       status: { type: 'string' },
+      title: { type: 'string' },
+      source: { type: 'string' },
+      section: { type: 'string' },
+      file: { type: 'string' },
+      line: { type: 'string' },
       actor: { type: 'string', default: 'human:cli' },
       model: { type: 'string' },
       notes: { type: 'string' },
@@ -826,60 +835,107 @@ async function updateTask(args: string[], flags: GlobalFlags): Promise<void> {
 
   if (values.help || flags.help || positionals.length === 0) {
     out.log(`
-steroids tasks update <title|id> - Update task status
+steroids tasks update <id> - Update task status or fields
 
 USAGE:
-  steroids tasks update <title|id> [options]
+  steroids tasks update <id> [options]
 
 OPTIONS:
   --status <status>     New status: pending | in_progress | review | completed
+  --title <text>        Change the task title
+  --source <file>       Change the specification file
+  --section <id>        Move task to a different section
+  --file <path>         Change the anchored file (or set one)
+  --line <number>       Change the line number (requires --file on task)
   --reset-rejections    Reset rejection count to 0 (keeps audit history)
   --actor <actor>       Actor making the change (default: human:cli)
   --model <model>       Model identifier (for LLM actors)
-  --notes <text>        Notes for the reviewer (useful when submitting for review)
+  --notes <text>        Notes for the change
   -h, --help            Show help
 
 EXAMPLES:
   steroids tasks update abc123 --status review
+  steroids tasks update abc123 --source docs/correct-spec.md
+  steroids tasks update abc123 --title "Better task title" --source new-spec.md
+  steroids tasks update abc123 --section def456
+  steroids tasks update abc123 --file src/new-target.ts --line 10
   steroids tasks update abc123 --status pending --reset-rejections
-  steroids tasks update abc123 --status review --notes "Found existing implementation at commit xyz"
 `);
     return;
   }
 
-  if (!values.status && !values['reset-rejections']) {
-    if (flags.json) {
-      out.error(ErrorCode.INVALID_ARGUMENTS, '--status or --reset-rejections required');
-    } else {
-      console.error('Error: --status or --reset-rejections required');
-    }
+  const hasFieldUpdate = values.title || values.source || values.section || values.file || values.line;
+
+  if (!values.status && !values['reset-rejections'] && !hasFieldUpdate) {
+    out.error(ErrorCode.INVALID_ARGUMENTS, 'At least one option required (--status, --source, --title, --section, --file, --reset-rejections)');
     process.exit(1);
+  }
+
+  // Validate --line requires --file (either in this update or already on the task)
+  if (values.line) {
+    const lineNum = parseInt(values.line, 10);
+    if (isNaN(lineNum) || lineNum < 1) {
+      out.error(ErrorCode.INVALID_ARGUMENTS, '--line must be a positive integer', { provided: values.line });
+      process.exit(2);
+    }
   }
 
   const identifier = positionals.join(' ');
 
   const { db, close } = openDatabase();
   try {
-    // Try to find task by ID or title
     let task = getTask(db, identifier);
-    if (!task) {
-      task = getTaskByTitle(db, identifier);
-    }
+    if (!task) task = getTaskByTitle(db, identifier);
 
     if (!task) {
-      if (flags.json) {
-        out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
-      } else {
-        console.error(`Task not found: ${identifier}`);
-      }
+      out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
       process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
-    const actor = values.model
-      ? `model:${values.model}`
-      : values.actor ?? 'human:cli';
-
+    const actor = values.model ? `model:${values.model}` : values.actor ?? 'human:cli';
     let oldRejectionCount: number | undefined;
+    const changes: string[] = [];
+
+    // Update editable fields if any provided
+    if (hasFieldUpdate) {
+      const fields: Parameters<typeof updateTaskFields>[2] = {};
+
+      if (values.title) fields.title = values.title;
+      if (values.source) fields.sourceFile = values.source;
+      if (values.section) {
+        const section = getSection(db, values.section);
+        if (!section) {
+          out.error(ErrorCode.SECTION_NOT_FOUND, `Section not found: ${values.section}`);
+          process.exit(1);
+        }
+        fields.sectionId = section.id;
+        changes.push(`Section → ${section.name}`);
+      }
+      if (values.file) {
+        const fullPath = resolve(process.cwd(), values.file);
+        const normalizedPath = relative(process.cwd(), fullPath);
+        if (!existsSync(fullPath)) {
+          out.error(ErrorCode.INVALID_ARGUMENTS, `File not found: ${normalizedPath}`);
+          process.exit(2);
+        }
+        fields.filePath = normalizedPath;
+        fields.fileCommitSha = getFileLastCommit(normalizedPath) ?? null;
+        fields.fileContentHash = getFileContentHash(normalizedPath) ?? null;
+        changes.push(`File → ${normalizedPath}`);
+      }
+      if (values.line) {
+        if (!values.file && !task.file_path) {
+          out.error(ErrorCode.INVALID_ARGUMENTS, '--line requires --file (or task must already have a file anchor)');
+          process.exit(2);
+        }
+        fields.fileLine = parseInt(values.line, 10);
+        changes.push(`Line → ${values.line}`);
+      }
+      if (values.title) changes.push(`Title → ${values.title}`);
+      if (values.source) changes.push(`Source → ${values.source}`);
+
+      updateTaskFields(db, task.id, fields, actor, values.notes as string | undefined);
+    }
 
     // Reset rejections if requested
     if (values['reset-rejections']) {
@@ -894,7 +950,6 @@ EXAMPLES:
 
     const updated = getTask(db, task.id);
 
-    // Trigger task.updated hooks
     if (!shouldSkipHooks(flags) && updated) {
       await triggerHooksSafely(
         () => triggerTaskUpdated(updated, previousStatus, { verbose: flags.verbose }),
@@ -903,15 +958,12 @@ EXAMPLES:
     }
 
     if (flags.json) {
-      out.success({ task: updated, rejectionReset: oldRejectionCount !== undefined, oldRejectionCount });
+      out.success({ task: updated, rejectionReset: oldRejectionCount !== undefined, oldRejectionCount, changes });
     } else {
-      console.log(`Task updated: ${task.title}`);
-      if (values.status) {
-        console.log(`  Status: ${task.status} → ${values.status}`);
-      }
-      if (oldRejectionCount !== undefined) {
-        console.log(`  Rejections: ${oldRejectionCount} → 0 (reset)`);
-      }
+      console.log(`Task updated: ${updated?.title ?? task.title}`);
+      if (values.status) console.log(`  Status: ${task.status} → ${values.status}`);
+      if (oldRejectionCount !== undefined) console.log(`  Rejections: ${oldRejectionCount} → 0 (reset)`);
+      for (const c of changes) console.log(`  ${c}`);
     }
   } finally {
     close();

@@ -232,8 +232,14 @@ Examples:
   steroids tasks --section abc123                    # Tasks in section abc123
   steroids tasks --search "login"                    # Find tasks containing "login"
 
-  steroids tasks update "Fix login bug" --status completed
-  steroids tasks update "Fix login" --status in_progress  # Partial match works
+  steroids tasks update abc123 --status completed
+  steroids tasks update abc123 --status in_progress
+
+  # Fix task source file, title, section, or file anchor
+  steroids tasks update abc123 --source docs/correct-spec.md
+  steroids tasks update abc123 --title "Better task name"
+  steroids tasks update abc123 --section def456
+  steroids tasks update abc123 --file src/target.ts --line 42
 
   steroids tasks add "New feature" --section abc123 --source specs/frontend.md
   steroids tasks add "Bug fix" --section def456 --source specs/bugfix.md
