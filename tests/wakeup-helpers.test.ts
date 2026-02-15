@@ -116,9 +116,11 @@ const createMockDb = () => ({
 const mockGlobalDb = createMockDb();
 
 // Import module under test
-const { hasActiveRunnerForProject, checkWakeupNeeded } = await import(
-  '../src/runners/wakeup.js'
-);
+const {
+  hasActiveRunnerForProject,
+  hasActiveParallelSessionForProject,
+  checkWakeupNeeded,
+} = await import('../src/runners/wakeup.js');
 
 describe('hasActiveRunnerForProject()', () => {
   beforeEach(() => {
@@ -194,6 +196,43 @@ describe('hasActiveRunnerForProject()', () => {
     expect(mockPrepare).toHaveBeenCalledWith(
       expect.stringContaining('parallel_session_id IS NULL')
     );
+  });
+});
+
+describe('hasActiveParallelSessionForProject()', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    mockOpenGlobalDatabase.mockReturnValue({
+      db: mockGlobalDb,
+      close: jest.fn(),
+    });
+  });
+
+  it('should return true when project has an active parallel session', () => {
+    const mockGet = jest.fn().mockReturnValue({ 1: 1 });
+    const mockPrepare = jest.fn().mockReturnValue({ get: mockGet });
+    mockGlobalDb.prepare = mockPrepare;
+
+    const result = hasActiveParallelSessionForProject('/project1');
+
+    expect(result).toBe(true);
+    expect(mockPrepare).toHaveBeenCalledWith(
+      expect.stringContaining('SELECT 1 FROM parallel_sessions')
+    );
+    expect(mockPrepare).toHaveBeenCalledWith(
+      expect.stringContaining('status IN')
+    );
+  });
+
+  it('should return false when project has no active parallel session', () => {
+    const mockGet = jest.fn().mockReturnValue(undefined);
+    const mockPrepare = jest.fn().mockReturnValue({ get: mockGet });
+    mockGlobalDb.prepare = mockPrepare;
+
+    const result = hasActiveParallelSessionForProject('/project1');
+
+    expect(result).toBe(false);
   });
 });
 

@@ -83,6 +83,23 @@ export function hasActiveRunnerForProject(projectPath: string): boolean {
   }
 }
 
+export function hasActiveParallelSessionForProject(projectPath: string): boolean {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db
+      .prepare(
+        `SELECT 1 FROM parallel_sessions
+         WHERE project_path = ?
+           AND status IN ('running', 'merging')`
+      )
+      .get(projectPath) as { 1: number } | undefined;
+
+    return row !== undefined;
+  } finally {
+    close();
+  }
+}
+
 /**
  * Kill a process by PID
  */
@@ -258,8 +275,22 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
       continue;
     }
 
+    // Skip projects currently executing a parallel session before attempting recovery/startup.
+    // This prevents parallel runners from being interfered with by a cron-managed runner.
+    if (hasActiveParallelSessionForProject(project.path)) {
+      log(`Skipping ${project.path}: active parallel session in progress`);
+      results.push({
+        action: 'none',
+        reason: 'Parallel session already running',
+        projectPath: project.path,
+        deletedInvocationLogs,
+      });
+      continue;
+    }
+
     // Step 4a: Recover stuck tasks (best-effort) before deciding whether to (re)start a runner.
     // This is what unblocks orphaned/infinite-hang scenarios without manual intervention.
+
     let recoveredActions = 0;
     let skippedRecoveryDueToSafetyLimit = false;
     try {
