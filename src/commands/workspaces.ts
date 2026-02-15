@@ -25,7 +25,7 @@ const HELP = generateHelp({
     { name: 'clean', description: 'Clean workspace clones for the current project' },
   ],
   options: [
-    { long: 'project', description: 'Project directory to inspect (defaults to cwd)', values: '<path>' },
+    { long: 'project', short: 'p', description: 'Project directory to inspect (defaults to cwd)', values: '<path>' },
     { long: 'all', description: 'Include active/locked workspace clones when cleaning' },
   ],
   examples: [
@@ -78,7 +78,7 @@ interface OrphanWorkspace {
 }
 
 interface CleanResult {
-  removed: string[];
+  deleted: string[];
   skipped: string[];
   failures: string[];
 }
@@ -115,13 +115,26 @@ function parseSectionIds(raw: string | null): string[] {
   }
 }
 
-function getActiveSessionIds(db: Database.Database): Set<string> {
-  const rows = db
-    .prepare("SELECT parallel_session_id FROM runners WHERE status = 'running' AND parallel_session_id IS NOT NULL")
+function getActiveSessionIds(db: Database.Database, projectPath: string): Set<string> {
+  const active = new Set<string>();
+
+  const runningSessions = db
+    .prepare(
+      'SELECT id FROM parallel_sessions WHERE project_path = ? AND status = ?'
+    )
+    .all(projectPath, 'running') as Array<{ id: string }>;
+
+  for (const row of runningSessions) {
+    active.add(row.id);
+  }
+
+  const runningRunners = db
+    .prepare(
+      "SELECT parallel_session_id FROM runners WHERE status = 'running' AND parallel_session_id IS NOT NULL"
+    )
     .all() as Array<{ parallel_session_id: string | null }>;
 
-  const active = new Set<string>();
-  for (const row of rows) {
+  for (const row of runningRunners) {
     if (row.parallel_session_id) {
       active.add(row.parallel_session_id);
     }
@@ -144,7 +157,7 @@ function collectWorkspaceData(
 ): { records: WorkspaceRecord[]; orphans: OrphanWorkspace[]; workspaceRoot: string } {
   const workspaceRoot = normalizeWorkspaceRoot(projectPath);
   const projectWorkspaceRoot = resolve(workspaceRoot, getProjectHash(projectPath));
-  const activeSessionIds = getActiveSessionIds(db);
+  const activeSessionIds = getActiveSessionIds(db, projectPath);
 
   const rows = db
     .prepare(`
@@ -180,8 +193,8 @@ function collectWorkspaceData(
     const sessionId = row.session_id ?? 'unknown';
     const sessionStatus = row.session_status ?? 'unknown';
     const clonePath = resolve(row.clone_path ?? join(projectWorkspaceRoot, workstreamId));
-    const workstreamStatus = row.workstream_status ?? 'unknown';
-    const sessionActive = activeSessionIds.has(sessionId);
+    const workstreamStatus = row.workstream_status ?? sessionStatus;
+    const sessionActive = activeSessionIds.has(sessionId) || sessionStatus === 'running';
     const cleanable = !sessionActive && workstreamStatus !== 'running' && sessionStatus !== 'running';
 
     known.add(clonePath);
@@ -208,7 +221,7 @@ function collectWorkspaceData(
   const orphans: OrphanWorkspace[] = [];
   if (existsSync(projectWorkspaceRoot)) {
     for (const entry of readdirSync(projectWorkspaceRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) {
         continue;
       }
 
@@ -262,33 +275,31 @@ function toOrphanRowOutput(orphans: OrphanWorkspace[]): Array<Record<string, str
 function executeClean(
   records: WorkspaceRecord[],
   orphans: OrphanWorkspace[],
-  dryRun: boolean,
-  removeAll: boolean
+  removeAll: boolean,
+  dryRun: boolean
 ): CleanResult {
-  const targets = new Map<string, string>();
+  const targets = new Map<string, OrphanWorkspace | WorkspaceRecord>();
 
   for (const record of records) {
     if (!removeAll && !record.cleanable) {
       continue;
     }
-    targets.set(record.clonePath, `workstream:${record.workstreamId}`);
+    targets.set(record.clonePath, record);
   }
 
-  for (const orphan of orphans) {
-    targets.set(orphan.clonePath, `orphan:${orphan.workstreamId}`);
+  if (removeAll) {
+    for (const orphan of orphans) {
+      targets.set(orphan.clonePath, orphan);
+    }
   }
 
-  const removed: string[] = [];
+  const deleted: string[] = [];
   const skipped: string[] = [];
   const failures: string[] = [];
 
-  for (const [path, _reason] of targets.entries()) {
+  for (const path of [...targets.keys()].sort()) {
     if (!existsSync(path)) {
-      if (dryRun) {
-        skipped.push(path);
-      } else {
-        skipped.push(path);
-      }
+      skipped.push(path);
       continue;
     }
 
@@ -299,14 +310,14 @@ function executeClean(
 
     try {
       rmSync(path, { recursive: true, force: true });
-      removed.push(path);
+      deleted.push(path);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       failures.push(`${path}: ${message}`);
     }
   }
 
-  return { removed, skipped, failures };
+  return { deleted, skipped, failures };
 }
 
 async function listWorkspaces(args: string[], flags: GlobalFlags): Promise<void> {
@@ -316,7 +327,7 @@ async function listWorkspaces(args: string[], flags: GlobalFlags): Promise<void>
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      project: { type: 'string' },
+      project: { type: 'string', short: 'p' },
     },
     allowPositionals: false,
   });
@@ -353,7 +364,7 @@ async function listWorkspaces(args: string[], flags: GlobalFlags): Promise<void>
       out.success({
         project_path: projectPath,
         workspace_root: workspaceRoot,
-        workstreams: toWorkspaceRowOutput(records),
+        workspaces: toWorkspaceRowOutput(records),
         orphans: toOrphanRowOutput(orphans),
       });
       return;
@@ -398,7 +409,7 @@ async function cleanWorkspaces(args: string[], flags: GlobalFlags): Promise<void
     args,
     options: {
       help: { type: 'boolean', short: 'h', default: false },
-      project: { type: 'string' },
+      project: { type: 'string', short: 'p' },
       all: { type: 'boolean', default: false },
     },
     allowPositionals: false,
@@ -432,7 +443,7 @@ async function cleanWorkspaces(args: string[], flags: GlobalFlags): Promise<void
 
   try {
     const { records, orphans, workspaceRoot } = collectWorkspaceData(db, projectPath);
-    const result = executeClean(records, orphans, flags.dryRun, removeAll);
+    const result = executeClean(records, orphans, removeAll, flags.dryRun);
 
     if (result.failures.length > 0) {
       out.error(
@@ -453,7 +464,7 @@ async function cleanWorkspaces(args: string[], flags: GlobalFlags): Promise<void
         project_path: projectPath,
         workspace_root: workspaceRoot,
         dry_run: flags.dryRun,
-        removed: result.removed,
+        removed: result.deleted,
         skipped: result.skipped,
         failures: result.failures,
         remove_all: removeAll,
@@ -474,14 +485,14 @@ async function cleanWorkspaces(args: string[], flags: GlobalFlags): Promise<void
       return;
     }
 
-    if (result.removed.length === 0 && result.skipped.length === 0) {
+    if (result.deleted.length === 0 && result.skipped.length === 0) {
       out.log('No workspace clones were removed.');
       return;
     }
 
-    if (result.removed.length > 0) {
-      out.log(`Removed ${result.removed.length} workspace(s):`);
-      for (const path of result.removed) {
+    if (result.deleted.length > 0) {
+      out.log(`Removed ${result.deleted.length} workspace(s):`);
+      for (const path of result.deleted) {
         out.log(`  ${path}`);
       }
     }
