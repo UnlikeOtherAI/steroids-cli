@@ -43,20 +43,14 @@ function normalizePath(p: string): string {
  * Static blocked prefixes + dynamically resolved temp dirs.
  * On macOS /tmp → /private/tmp → /System/Volumes/Data/.internal/tmpVolume/tmp,
  * so we resolve the symlink chain once at startup to catch all variants.
+ * NOTE: Do NOT probe os.tmpdir() or /var/folders — triggers macOS TCC prompts.
  */
 const BLOCKED_PATH_PREFIXES: string[] = (() => {
   const statics = ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp'];
   const resolved = new Set(statics);
-  // Resolve each static path through symlinks to catch all aliases
   for (const p of statics) {
     try { resolved.add(realpathSync(p).replace(/\/+$/, '')); } catch { /* doesn't exist */ }
   }
-  // Also include os.tmpdir() and its realpath (e.g. /var/folders/.../T on macOS)
-  try {
-    const tmp = require('node:os').tmpdir().replace(/\/+$/, '');
-    resolved.add(tmp);
-    try { resolved.add(realpathSync(tmp).replace(/\/+$/, '')); } catch { /* ok */ }
-  } catch { /* ok */ }
   return [...resolved];
 })();
 
