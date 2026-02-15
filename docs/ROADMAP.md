@@ -9,16 +9,30 @@ Currently each task gets one reviewer. This feature enables multiple AI agents t
 ### Vision
 - Configure N reviewers per task (e.g., Claude + Gemini + Codex reviewing simultaneously)
 - Each reviewer produces an independent verdict (approve/reject with notes)
-- Configurable consensus strategy: unanimous, majority, any-approve
-- Combined feedback is merged and sent back to the coder on rejection
+- All reviews are collected and sent to the **orchestrator**
+- The orchestrator merges the reviews into a single coherent decision: approve or reject
+- On rejection, the orchestrator synthesizes all reviewer feedback into unified, non-contradictory notes for the coder
 - Catches blind spots that a single reviewer misses (different models have different strengths)
+
+### Flow
+```
+Task in review
+    ↓
+Reviewer A (Claude)  ──┐
+Reviewer B (Gemini)  ──┼──→  Orchestrator receives all reviews
+Reviewer C (Codex)   ──┘         ↓
+                          Merges into single verdict
+                              ↓
+                    Approve → completed
+                    Reject  → unified feedback → coder
+```
 
 ### Design Considerations
 - New config section: `ai.reviewers[]` — array of reviewer configs instead of single `ai.reviewer`
 - Parallel invocation: all reviewers run concurrently, wait for all to complete
-- Consensus resolution: if 2/3 approve but one rejects, what happens? Configurable policy.
+- Orchestrator merging: the orchestrator sees all reviews and produces one decision. It resolves contradictions (e.g., one approves, another rejects the same thing) and prioritizes actionable feedback.
 - Cost awareness: N reviewers = N invocations per review cycle. Need clear cost visibility.
-- Backward compatible: single reviewer config still works (array of one)
+- Backward compatible: single reviewer config still works (array of one, orchestrator pass-through)
 - Coordinator impact: coordinator guidance must address all reviewers' concerns, not just one
 
 ---
