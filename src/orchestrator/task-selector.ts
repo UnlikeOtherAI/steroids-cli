@@ -45,7 +45,7 @@ export interface TaskSelectionOptions {
   parallelSessionId?: string;
 }
 
-function normalizeSectionFilters(
+export function normalizeSectionFilters(
   sectionId?: string,
   sectionIds?: string[]
 ): string[] | undefined {
@@ -55,7 +55,10 @@ function normalizeSectionFilters(
   return sectionId ? [sectionId] : undefined;
 }
 
-function hasPendingOrInProgressWork(db: Database.Database, sectionId: string): boolean {
+export function hasPendingOrInProgressWork(
+  db: Database.Database,
+  sectionId: string
+): boolean {
   const row = db
     .prepare(
       `SELECT COUNT(*) as count FROM tasks
