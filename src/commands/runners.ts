@@ -1050,6 +1050,11 @@ OPTIONS:
       }
     }
   }
+
+  // Force exit — wakeup is a short-lived process spawned by launchd every 60s.
+  // Without this, lingering DB handles (better-sqlite3 native bindings) keep
+  // the Node.js event loop alive indefinitely, causing zombie process accumulation.
+  process.exit(0);
 }
 
 async function runCron(args: string[]): Promise<void> {
