@@ -33,6 +33,7 @@ import { statsCommand } from './commands/stats.js';
 import { hooksCommand } from './commands/hooks.js';
 import { aiCommand } from './commands/ai.js';
 import { webCommand } from './commands/web.js';
+import { mergeCommand } from './commands/merge.js';
 import { checkForNewVersion } from './cli/version-check.js';
 
 // Read version from package.json - search up from dist folder
@@ -86,6 +87,7 @@ COMMANDS:
   git               Git integration commands
   completion        Generate shell completions
   web               Launch the web dashboard (auto-clones on first run)
+  merge             Merge completed parallel workstreams
   locks             Manage task and section locks
 
 GLOBAL OPTIONS:
@@ -232,6 +234,9 @@ async function main(): Promise<void> {
         break;
       case 'web':
         await webCommand(commandArgs, flags);
+        break;
+      case 'merge':
+        await mergeCommand(commandArgs, flags);
         break;
       default:
         if (flags.json) {
