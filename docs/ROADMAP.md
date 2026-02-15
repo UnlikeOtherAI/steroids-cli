@@ -74,3 +74,59 @@ steroids runners merge                     # merge completed branches back
 - Section dependency graph must be accurate (garbage in, garbage out)
 - Git remote must be configured (branches need to be pushed)
 - Sufficient API credits for parallel invocations
+
+---
+
+## MiniMax Provider
+
+**Status:** Planned
+
+Add [MiniMax](https://www.minimax.io/) as a provider. MiniMax offers competitive coding models that can serve as coder, reviewer, or parallel reviewer.
+
+### Requirements
+- New provider implementation in `src/providers/minimax.ts`
+- Support for MiniMax API (API key auth, chat completions endpoint)
+- Register in provider registry alongside claude, gemini, codex
+- Add to `ai.*.provider` enum options in config schema
+- CLI detection: determine if MiniMax has a CLI tool or if it's API-only
+- If API-only: invoke via HTTP (like the OpenAI provider pattern) rather than spawning a CLI subprocess
+
+---
+
+## Ollama Provider (Local Models)
+
+**Status:** Planned
+
+Add [Ollama](https://ollama.com/) as a provider, enabling fully local/offline AI execution with no API costs.
+
+### Vision
+- Run coder and/or reviewer using local models via Ollama
+- Zero API cost — useful for development, testing, and cost-sensitive workflows
+- Mix and match: use a cloud model for coding and a local model for reviewing (or vice versa)
+- Support any model Ollama can run (llama, codellama, deepseek-coder, mistral, etc.)
+
+### Requirements
+- New provider implementation in `src/providers/ollama.ts`
+- Communicate via Ollama's local HTTP API (`http://localhost:11434/api/chat`)
+- Config: model name, Ollama host/port (default localhost:11434)
+- Register in provider registry
+- Add to `ai.*.provider` enum options in config schema
+- Health check: verify Ollama is running and the configured model is pulled
+- No CLI subprocess — Ollama runs as a background service, provider talks to its API
+
+### Config Example
+```yaml
+ai:
+  coder:
+    provider: ollama
+    model: deepseek-coder-v2:latest
+  reviewer:
+    provider: claude
+    model: claude-sonnet-4
+```
+
+### Considerations
+- Performance: local models are slower and less capable than cloud models. May need longer timeouts.
+- Context window: many local models have smaller context windows. Task specs + code may need truncation.
+- Quality tradeoff: best suited for reviewer role or simpler tasks. Cloud models likely still better for complex coding.
+- Ollama must be installed and running separately — Steroids doesn't manage it.
