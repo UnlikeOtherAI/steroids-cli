@@ -182,11 +182,12 @@ When a runner finishes all its sections:
 
 1. Push its branch: `git push origin steroids/ws-<id>`
 2. Update its workstream status to `completed` in the database
-3. Check: are ALL workstreams in this parallel session `completed` (or `failed`)?
-4. If yes → this runner transitions into the merge phase (acquires merge lock)
-5. If no → runner exits. Another runner will trigger merge when it finishes last.
+3. Re-check session progress: are **all** workstreams `completed` or `failed`?
+4. If yes, attempt to acquire the merge lock immediately; only the winner continues.
+5. If merge lock is acquired, the runner transitions to merge phase in the original project.
+6. If not acquired, or if session is not complete, runner exits. Another runner will merge when it is both complete and lock owner.
 
-The last runner to finish becomes the merge executor. Race condition is prevented by the merge lock — if two runners finish simultaneously and both try to merge, only one acquires the lock. The other sees the lock is held and exits.
+The last runner to finish that also acquires the lock becomes the merge executor. This keeps completion detection race-free: if two runners finish simultaneously and both check completion, only one can proceed after lock acquisition. The other sees the lock held and exits.
 
 `steroids merge` exists as a manual fallback if no runner triggers the merge (e.g., all runners crashed after pushing their branches).
 
