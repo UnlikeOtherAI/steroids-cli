@@ -39,18 +39,45 @@ function normalizePath(p: string): string {
   }
 }
 
-/** Paths that should never be registered globally (temp dirs, system dirs) */
-const BLOCKED_PATH_PREFIXES = ['/tmp/', '/tmp', '/var/tmp/', '/var/tmp'];
+/**
+ * Static blocked prefixes + dynamically resolved temp dirs.
+ * On macOS /tmp → /private/tmp → /System/Volumes/Data/.internal/tmpVolume/tmp,
+ * so we resolve the symlink chain once at startup to catch all variants.
+ */
+const BLOCKED_PATH_PREFIXES: string[] = (() => {
+  const statics = ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp'];
+  const resolved = new Set(statics);
+  // Resolve each static path through symlinks to catch all aliases
+  for (const p of statics) {
+    try { resolved.add(realpathSync(p).replace(/\/+$/, '')); } catch { /* doesn't exist */ }
+  }
+  // Also include os.tmpdir() and its realpath (e.g. /var/folders/.../T on macOS)
+  try {
+    const tmp = require('node:os').tmpdir().replace(/\/+$/, '');
+    resolved.add(tmp);
+    try { resolved.add(realpathSync(tmp).replace(/\/+$/, '')); } catch { /* ok */ }
+  } catch { /* ok */ }
+  return [...resolved];
+})();
+
+/** Check if a single path string matches any blocked prefix */
+function matchesBlockedPrefix(p: string): boolean {
+  return BLOCKED_PATH_PREFIXES.some(
+    (prefix) => p === prefix || p.startsWith(prefix + '/')
+  );
+}
 
 /**
  * Check if a path is in a temporary/ephemeral directory
- * Prevents test projects from polluting the global registry
+ * Checks BOTH the raw input AND the symlink-resolved path to handle
+ * macOS where /tmp → /private/tmp → deeper system paths
  */
 export function isTemporaryPath(path: string): boolean {
+  const raw = resolve(path).replace(/\/+$/, '');
+  if (matchesBlockedPrefix(raw)) return true;
   const normalized = normalizePath(path);
-  return BLOCKED_PATH_PREFIXES.some(
-    (prefix) => normalized === prefix.replace(/\/$/, '') || normalized.startsWith(prefix.endsWith('/') ? prefix : prefix + '/')
-  );
+  if (matchesBlockedPrefix(normalized)) return true;
+  return false;
 }
 
 /**

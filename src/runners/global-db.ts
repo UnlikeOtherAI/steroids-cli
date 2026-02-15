@@ -118,10 +118,13 @@ ALTER TABLE activity_log ADD COLUMN commit_sha TEXT;
 const GLOBAL_SCHEMA_VERSION = '7';
 
 /**
- * Get the path to the global steroids directory
+ * Get the path to the global steroids directory.
+ * Respects STEROIDS_HOME env var for test isolation (Jest's ESM VM context
+ * doesn't propagate process.env.HOME changes to CJS os.homedir()).
  */
 export function getGlobalSteroidsDir(): string {
-  return join(homedir(), STEROIDS_DIR);
+  const home = process.env.STEROIDS_HOME || homedir();
+  return join(home, STEROIDS_DIR);
 }
 
 /**

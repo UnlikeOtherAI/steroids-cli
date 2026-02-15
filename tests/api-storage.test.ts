@@ -60,6 +60,7 @@ describe('Storage API endpoints', () => {
     process.env.NODE_ENV = 'test';
     homeDir = tmpDir('steroids-home');
     process.env.HOME = homeDir;
+    process.env.STEROIDS_HOME = homeDir;
     projectPath = tmpDir('storage-proj');
     registerProject(projectPath);
     populateProject(projectPath);
@@ -70,6 +71,7 @@ describe('Storage API endpoints', () => {
 
   afterEach(async () => {
     process.env.HOME = originalHome;
+    delete process.env.STEROIDS_HOME;
     await new Promise<void>((r) => server.close(() => r()));
     await rm(projectPath, { recursive: true, force: true });
     await rm(homeDir, { recursive: true, force: true });

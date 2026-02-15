@@ -92,6 +92,7 @@ describe('API credit-alerts endpoints', () => {
     process.env.NODE_ENV = 'test';
     homeDir = createTempDir('steroids-home');
     process.env.HOME = homeDir;
+    process.env.STEROIDS_HOME = homeDir;
     projectPath = createTempDir('steroids-project');
     setupProjectDb(projectPath);
     setupGlobalDb(projectPath);
@@ -103,6 +104,7 @@ describe('API credit-alerts endpoints', () => {
   afterEach(async () => {
     process.env.HOME = originalHome;
     process.env.NODE_ENV = originalNodeEnv;
+    delete process.env.STEROIDS_HOME;
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(projectPath, { recursive: true, force: true });
     await rm(homeDir, { recursive: true, force: true });
