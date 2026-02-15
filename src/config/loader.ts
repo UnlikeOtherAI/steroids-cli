@@ -170,6 +170,7 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
     parallel: {
       enabled: false,
       maxClones: 3,
+      workspaceRoot: '',
       cleanupOnSuccess: true,
       cleanupOnFailure: false,
     },
