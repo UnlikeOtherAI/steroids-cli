@@ -17,7 +17,8 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { StatFs } from 'node:fs';
+
+type StatFs = ReturnType<typeof statfsSync>;
 
 export interface WorkspaceCloneOptions {
   projectPath: string;
@@ -220,10 +221,13 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
     throw new WorkspaceCloneError('Failed to create branch in clone', error);
   }
 
-  const steroidsSymlinkPath = createWorkspaceSymlink(
-    workspacePath,
-    projectPath
-  );
+  let steroidsSymlinkPath: string;
+  try {
+    steroidsSymlinkPath = createWorkspaceSymlink(workspacePath, projectPath);
+  } catch (error: unknown) {
+    rmSync(workspacePath, { recursive: true, force: true });
+    throw new WorkspaceCloneError('Failed to create .steroids symlink', error);
+  }
 
   return {
     projectPath,
