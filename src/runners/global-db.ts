@@ -115,7 +115,37 @@ const GLOBAL_SCHEMA_V7_SQL = `
 ALTER TABLE activity_log ADD COLUMN commit_sha TEXT;
 `;
 
-const GLOBAL_SCHEMA_VERSION = '7';
+/**
+ * Schema upgrade from version 7 to version 8: Add parallel session tracking
+ */
+const GLOBAL_SCHEMA_V8_SQL = `
+-- Parallel run sessions for independent workstreams
+CREATE TABLE IF NOT EXISTS parallel_sessions (
+    id TEXT PRIMARY KEY,
+    project_path TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running', 'merging', 'completed', 'failed')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+
+-- Workstreams within a parallel session
+CREATE TABLE IF NOT EXISTS workstreams (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES parallel_sessions(id),
+    branch_name TEXT NOT NULL,
+    section_ids TEXT NOT NULL,
+    clone_path TEXT,
+    status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
+    runner_id TEXT,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Associate runners with a parallel session
+ALTER TABLE runners ADD COLUMN parallel_session_id TEXT;
+`;
+
+const GLOBAL_SCHEMA_VERSION = '8';
 
 /**
  * Get the path to the global steroids directory.
@@ -178,6 +208,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
+    db.exec(GLOBAL_SCHEMA_V8_SQL);
     db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
       'version',
       GLOBAL_SCHEMA_VERSION
@@ -194,6 +225,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
+    db.exec(GLOBAL_SCHEMA_V8_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -205,6 +237,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
+    db.exec(GLOBAL_SCHEMA_V8_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -215,6 +248,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
+    db.exec(GLOBAL_SCHEMA_V8_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -224,6 +258,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V5_SQL);
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
+    db.exec(GLOBAL_SCHEMA_V8_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -232,6 +267,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     // Upgrade from version 5 to latest
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
+    db.exec(GLOBAL_SCHEMA_V8_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -239,6 +275,13 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   } else if (currentVersion === '6') {
     // Upgrade from version 6 to version 7
     db.exec(GLOBAL_SCHEMA_V7_SQL);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '7') {
+    // Upgrade from version 7 to version 8
+    db.exec(GLOBAL_SCHEMA_V8_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
