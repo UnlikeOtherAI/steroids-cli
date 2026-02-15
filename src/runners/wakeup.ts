@@ -72,7 +72,8 @@ export function hasActiveRunnerForProject(projectPath: string): boolean {
         `SELECT 1 FROM runners
          WHERE project_path = ?
          AND status != 'stopped'
-         AND heartbeat_at > datetime('now', '-5 minutes')`
+         AND heartbeat_at > datetime('now', '-5 minutes')
+         AND parallel_session_id IS NULL`
       )
       .get(projectPath) as { 1: number } | undefined;
 

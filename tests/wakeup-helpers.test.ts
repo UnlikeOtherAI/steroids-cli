@@ -182,6 +182,19 @@ describe('hasActiveRunnerForProject()', () => {
       expect.stringContaining("heartbeat_at > datetime('now', '-5 minutes')")
     );
   });
+
+  it('should ignore parallel runners when checking active runners', () => {
+    const mockGet = jest.fn().mockReturnValue(undefined);
+    const mockPrepare = jest.fn().mockReturnValue({ get: mockGet });
+    mockGlobalDb.prepare = mockPrepare;
+
+    const result = hasActiveRunnerForProject('/project1');
+
+    expect(result).toBe(false);
+    expect(mockPrepare).toHaveBeenCalledWith(
+      expect.stringContaining('parallel_session_id IS NULL')
+    );
+  });
 });
 
 describe('checkWakeupNeeded()', () => {
