@@ -80,6 +80,12 @@ function findSteroidsPath(): string {
 
 /**
  * Generate launchd plist content
+ *
+ * Uses Perl's alarm() to set a hard 45-second kill timer.  better-sqlite3 is
+ * synchronous — if macOS TCC blocks the open() syscall (e.g. when the project
+ * DB lives in a protected directory), the Node.js event loop freezes and no
+ * JavaScript-level timer can fire.  POSIX alarm() survives exec(), so the
+ * SIGALRM will terminate the Node process at the OS level.
  */
 function generateLaunchdPlist(): string {
   const steroidsPath = findSteroidsPath();
@@ -91,6 +97,9 @@ function generateLaunchdPlist(): string {
     <string>${LAUNCHD_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
+        <string>/usr/bin/perl</string>
+        <string>-e</string>
+        <string>alarm 45; exec @ARGV</string>
         <string>${steroidsPath}</string>
         <string>runners</string>
         <string>wakeup</string>
