@@ -13,6 +13,7 @@ export interface Project {
   registered_at: string;
   last_seen_at: string;
   last_activity_at: string | null;
+  last_task_added_at: string | null;
   storage_bytes?: number | null;
   storage_human?: string | null;
   storage_warning?: 'orange' | 'red' | null;

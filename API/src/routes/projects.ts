@@ -23,19 +23,21 @@ import { getCachedListStorage } from '../utils/storage-cache.js';
 
 const router = Router();
 
+interface ProjectLiveData {
+  stats: { pending: number; in_progress: number; review: number; completed: number };
+  last_task_added_at: string | null;
+}
+
 /**
- * Query live task stats from a project's local database
+ * Query live task stats and last task added from a project's local database
  */
-function getProjectLiveStats(projectPath: string): {
-  pending: number;
-  in_progress: number;
-  review: number;
-  completed: number;
-} {
+function getProjectLiveData(projectPath: string): ProjectLiveData {
+  const empty: ProjectLiveData = {
+    stats: { pending: 0, in_progress: 0, review: 0, completed: 0 },
+    last_task_added_at: null,
+  };
   const dbPath = join(projectPath, '.steroids', 'steroids.db');
-  if (!existsSync(dbPath)) {
-    return { pending: 0, in_progress: 0, review: 0, completed: 0 };
-  }
+  if (!existsSync(dbPath)) return empty;
 
   try {
     const projectDb = openSqliteForRead(dbPath);
@@ -46,17 +48,26 @@ function getProjectLiveStats(projectPath: string): {
             COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) as pending,
             COALESCE(SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END), 0) as in_progress,
             COALESCE(SUM(CASE WHEN status = 'review' THEN 1 ELSE 0 END), 0) as review,
-            COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed
+            COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed,
+            MAX(created_at) as last_task_added_at
           FROM tasks`
         )
-        .get() as { pending: number; in_progress: number; review: number; completed: number } | undefined;
+        .get() as { pending: number; in_progress: number; review: number; completed: number; last_task_added_at: string | null } | undefined;
 
-      return row || { pending: 0, in_progress: 0, review: 0, completed: 0 };
+      return {
+        stats: {
+          pending: row?.pending ?? 0,
+          in_progress: row?.in_progress ?? 0,
+          review: row?.review ?? 0,
+          completed: row?.completed ?? 0,
+        },
+        last_task_added_at: row?.last_task_added_at ?? null,
+      };
     } finally {
       projectDb.close();
     }
   } catch {
-    return { pending: 0, in_progress: 0, review: 0, completed: 0 };
+    return empty;
   }
 }
 
@@ -67,6 +78,7 @@ interface ProjectResponse {
   registered_at: string;
   last_seen_at: string;
   last_activity_at: string | null;  // Runner heartbeat or null if no active runner
+  last_task_added_at: string | null;  // Most recent task created_at
   stats?: {
     pending: number;
     in_progress: number;
@@ -109,8 +121,8 @@ router.get('/projects', (req: Request, res: Response) => {
           heartbeat_at: string | null;
         } | undefined;
 
-        // Get live stats from project-local database
-        const liveStats = getProjectLiveStats(project.path);
+        // Get live stats + last task added from project-local database
+        const liveData = getProjectLiveData(project.path);
 
         // Lightweight storage info (non-blocking, 5-min cache)
         const storageInfo = getCachedListStorage(project.path);
@@ -122,7 +134,8 @@ router.get('/projects', (req: Request, res: Response) => {
           registered_at: project.registered_at,
           last_seen_at: project.last_seen_at,
           last_activity_at: runner?.heartbeat_at || null,
-          stats: liveStats,
+          last_task_added_at: liveData.last_task_added_at,
+          stats: liveData.stats,
           runner: runner
             ? {
                 id: runner.id,
@@ -138,6 +151,13 @@ router.get('/projects', (req: Request, res: Response) => {
         };
 
         return response;
+      });
+
+      // Sort by most recently modified: last task added or project enabled, most recent first
+      projectsWithData.sort((a, b) => {
+        const aTime = a.last_task_added_at || a.last_seen_at || a.registered_at;
+        const bTime = b.last_task_added_at || b.last_seen_at || b.registered_at;
+        return new Date(bTime).getTime() - new Date(aTime).getTime();
       });
 
       res.json({
@@ -400,6 +420,7 @@ router.get('/projects/status', (req: Request, res: Response) => {
       } | undefined;
 
       const storageInfo = getCachedListStorage(project.path);
+      const liveData = getProjectLiveData(project.path);
 
       const response: ProjectResponse = {
         path: project.path,
@@ -408,6 +429,7 @@ router.get('/projects/status', (req: Request, res: Response) => {
         registered_at: project.registered_at,
         last_seen_at: project.last_seen_at,
         last_activity_at: runner?.heartbeat_at || null,
+        last_task_added_at: liveData.last_task_added_at,
         runner: runner
           ? {
               id: runner.id,
@@ -439,52 +461,25 @@ router.get('/projects/status', (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/projects/open
- * Open a project folder in Finder
- * Body: { path: string }
- */
+/** POST /api/projects/open - Open project folder in Finder */
 router.post('/projects/open', (req: Request, res: Response) => {
   try {
     const validation = validatePathRequest(req.body);
     if (!validation.valid) {
-      res.status(400).json({
-        success: false,
-        error: validation.error,
-      });
+      res.status(400).json({ success: false, error: validation.error });
       return;
     }
-
     const { path } = validation;
-
-    // Verify path exists
     if (!existsSync(path!)) {
-      res.status(404).json({
-        success: false,
-        error: 'Path does not exist',
-      });
+      res.status(404).json({ success: false, error: 'Path does not exist' });
       return;
     }
-
-    // Open in Finder (macOS)
-    try {
-      execSync(`open "${path}"`, { encoding: 'utf-8' });
-      res.json({
-        success: true,
-        message: 'Folder opened in Finder',
-      });
-    } catch (err) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to open folder',
-        message: err instanceof Error ? err.message : 'Unknown error',
-      });
-    }
+    execSync(`open "${path}"`, { encoding: 'utf-8' });
+    res.json({ success: true, message: 'Folder opened in Finder' });
   } catch (error) {
     console.error('Error opening project folder:', error);
     res.status(500).json({
-      success: false,
-      error: 'Failed to open project folder',
+      success: false, error: 'Failed to open project folder',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

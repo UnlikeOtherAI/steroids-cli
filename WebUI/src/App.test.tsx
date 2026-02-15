@@ -60,6 +60,7 @@ function ProjectSetter({ children }: { children: React.ReactNode }) {
       registered_at: '2025-01-01T00:00:00Z',
       last_seen_at: '2025-01-01T00:00:00Z',
       last_activity_at: null,
+      last_task_added_at: null,
     });
   }, [setSelectedProject]);
   return <>{children}</>;

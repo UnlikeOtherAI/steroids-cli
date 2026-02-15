@@ -81,11 +81,9 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
       )}
 
       <div className="text-xs text-gray-400">
-        Last activity: {project.last_activity_at
-          ? new Date(project.last_activity_at).toLocaleString()
-          : project.runner
-            ? 'No recent activity'
-            : 'No runner'
+        {project.last_task_added_at
+          ? `Last task added: ${new Date(project.last_task_added_at + 'Z').toLocaleString()}`
+          : 'No tasks yet'
         }
       </div>
       {project.storage_human && (

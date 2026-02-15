@@ -55,6 +55,7 @@ const fakeProject = {
   registered_at: '2025-01-01T00:00:00Z',
   last_seen_at: '2025-01-01T00:00:00Z',
   last_activity_at: '2025-01-15T10:30:00Z',
+  last_task_added_at: '2025-01-15T10:30:00Z',
 };
 
 const fakeStorage: StorageInfo = {

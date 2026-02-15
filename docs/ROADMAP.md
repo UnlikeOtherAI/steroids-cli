@@ -77,6 +77,45 @@ steroids runners merge                     # merge completed branches back
 
 ---
 
+## PR-Based Task Workflow
+
+**Status:** Planned
+
+Each task optionally creates a PR instead of committing directly to the main branch. A separate merge orchestrator handles bringing everything together.
+
+### Vision
+- Each task's coder works on a feature branch and opens a PR when done
+- Reviewer reviews the PR (not just the code — the actual diff against main)
+- On approval, a **merge orchestrator** is responsible for merging PRs into main
+- If a merge conflict occurs, the merge orchestrator spins up a coder + reviewer pair to resolve it
+- Clean git history: each task = one PR = one merge commit
+
+### Flow
+```
+Task picked up
+    ↓
+Coder creates branch: steroids/task-<id>
+Coder implements, commits, opens PR
+    ↓
+Reviewer reviews the PR
+    ↓
+Approved → Merge orchestrator merges PR
+    ↓
+Merge conflict? → Coder fixes conflicts → Reviewer re-reviews → Merge
+    ↓
+PR merged → task completed → next task
+```
+
+### Design Considerations
+- Config toggle: `git.prWorkflow: true` to enable (default: false for backward compat)
+- Merge orchestrator: separate from the task orchestrator, runs after task approval
+- Conflict resolution: the coder gets the conflict diff + both sides and resolves. Reviewer verifies the resolution doesn't break anything.
+- Branch cleanup: merged branches are deleted automatically
+- Parallel synergy: combines with Clone & Conquer — each parallel runner creates PRs, merge orchestrator handles the merge queue
+- GitHub/GitLab integration: use `gh pr create` / `glab mr create` based on provider
+
+---
+
 ## MiniMax Provider
 
 **Status:** Planned
