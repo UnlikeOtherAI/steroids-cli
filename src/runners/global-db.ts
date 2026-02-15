@@ -275,6 +275,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   } else if (currentVersion === '6') {
     // Upgrade from version 6 to version 7
     db.exec(GLOBAL_SCHEMA_V7_SQL);
+    db.exec(GLOBAL_SCHEMA_V8_SQL);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
