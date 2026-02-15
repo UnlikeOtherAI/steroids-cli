@@ -281,9 +281,9 @@ describe('workspacesCommand', () => {
       json: true,
     });
 
-    const payload = parseSuccessPayload<WorkspaceCleanResult>(consoleLogSpy);
+    const payload = parseSuccessPayload<WorkspaceCleanResult>(consoleLogSpy) as WorkspaceCleanResult;
     expect(payload.removed).toHaveLength(1);
-    expect(payload.removed[0]).toBe(path.join(workspaceRoot, getProjectHash(projectPath), 'ws-complete'));
+    expect((payload.removed as string[])[0]).toBe(path.join(workspaceRoot, getProjectHash(projectPath), 'ws-complete'));
     expect(payload.skipped).toHaveLength(0);
     expect(payload.failures).toHaveLength(0);
 
@@ -352,10 +352,10 @@ describe('workspacesCommand', () => {
       dryRun: true,
     });
 
-    const payload = parseSuccessPayload<WorkspaceCleanResult>(consoleLogSpy);
+    const payload = parseSuccessPayload<WorkspaceCleanResult>(consoleLogSpy) as WorkspaceCleanResult;
     expect(payload.removed).toHaveLength(0);
     expect(payload.skipped).toHaveLength(1);
-    expect(payload.skipped[0]).toBe(path.join(hashRoot, 'ws-complete'));
+    expect((payload.skipped as string[])[0]).toBe(path.join(hashRoot, 'ws-complete'));
     expect(existsSync(path.join(hashRoot, 'ws-complete'))).toBe(true);
   });
 
