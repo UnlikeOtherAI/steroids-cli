@@ -986,6 +986,12 @@ function formatBytes(bytes: number): string {
 }
 
 async function runWakeup(args: string[], flags: GlobalFlags): Promise<void> {
+  // Hard timeout: wakeup is a short-lived process spawned by launchd every 60s.
+  // If ANY operation hangs (TCC dialog blocking file access, locked DB, etc.),
+  // this ensures the process exits instead of becoming a zombie.
+  const WAKEUP_TIMEOUT_MS = 30_000;
+  setTimeout(() => process.exit(0), WAKEUP_TIMEOUT_MS).unref();
+
   const { values } = parseArgs({
     args,
     options: {
