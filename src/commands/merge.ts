@@ -13,7 +13,11 @@ import { generateHelp } from '../cli/help.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
 import { openDatabase } from '../database/connection.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
-import { runParallelMerge, type MergeResult } from '../parallel/merge.js';
+import {
+  runParallelMerge,
+  type MergeResult,
+  type MergeWorkstreamSpec,
+} from '../parallel/merge.js';
 
 const HELP = generateHelp({
   command: 'merge',
@@ -54,12 +58,6 @@ interface MergeSessionRow {
   id: string;
   status: string;
   created_at: string;
-}
-
-interface MergeWorkstreamSpec {
-  id: string;
-  branchName: string;
-  sectionIds: string[];
 }
 
 interface MergeSessionPlan {
@@ -136,7 +134,6 @@ function buildPlanForSession(
     .map((row) => ({
       id: row.id,
       branchName: row.branch_name,
-      sectionIds: parseSectionIds(row.section_ids),
     }));
 
   return {
