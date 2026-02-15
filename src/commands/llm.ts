@@ -252,6 +252,34 @@ INITIALIZING A PROJECT:
   4. steroids tasks add "Task title" --section <id> --source specs/spec.md
   5. steroids loop
 
+## DATABASE MIGRATIONS (IMPORTANT)
+
+Each project has its own SQLite database (.steroids/steroids.db). When Steroids is
+updated with schema changes, older project databases need migration.
+
+Migrations run AUTOMATICALLY on any command that opens the database. However, if a
+project hasn't been used for a while and the schema has drifted significantly,
+auto-migration may fail.
+
+### Before Adding Tasks to an Existing Project
+Always verify the database is healthy first:
+  steroids health                         # checks DB, runs auto-migration
+
+If you see "Database schema is out of date" errors:
+  STEROIDS_AUTO_MIGRATE=1 steroids health # force migration + health check
+
+### How Migrations Work
+- Migration files live in migrations/ (SQL with UP/DOWN sections)
+- Applied automatically when the database is opened
+- A backup is created before each migration (.steroids/backups/)
+- Safe to run multiple times (idempotent)
+- If migration fails: fix the issue, then re-run any steroids command
+
+### For LLM Agents
+ALWAYS run \`steroids health\` before adding the first task to a project you haven't
+touched recently. This ensures the schema is current and prevents cryptic SQL errors
+during task creation or runner execution.
+
 ## IMPORTANT NOTES
 - Task spec is in source file (see tasks audit output)
 - Max 15 rejections before task fails; coordinator intervenes at [2, 5, 9]
