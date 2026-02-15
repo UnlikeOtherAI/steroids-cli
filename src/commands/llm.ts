@@ -21,6 +21,11 @@ It manages tasks and invokes LLM agents (coders/reviewers) to execute them.
 The system spawns separate LLM processes for coding and reviewing.
 Deterministic daemon — never makes decisions, just follows the state machine.
 
+## DATABASE ACCESS RULES (CRITICAL)
+- Never touch '.steroids/steroids.db' directly — no raw SQL, no sqlite3.
+- Use 'steroids llm' first to understand how to inspect or manipulate the system.
+- Read/write operations must go through the steroids CLI only.
+
 ## TASK SIZING (CRITICAL)
 
 Tasks should be PR-sized chunks of work — not individual classes or functions,
