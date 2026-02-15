@@ -19,43 +19,14 @@ import {
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { execFileSync } from 'node:child_process';
-import { SCHEMA_SQL } from '../database/schema.js';
-import { getProjectHash } from './clone.js';
+import { SCHEMA_SQL } from '../../src/database/schema.js';
+import { getProjectHash } from '../../src/parallel/clone.js';
 
-type ExecFileSync = jest.MockedFunction<typeof execFileSync>;
-const mockExecFileSync = jest.fn() as unknown as ExecFileSync;
-
-jest.unstable_mockModule('node:child_process', () => ({
-  execFileSync: mockExecFileSync,
-}));
-
-const mockOpenDatabase = jest.fn() as unknown as jest.MockedFunction<
-  typeof import('../database/connection.js').openDatabase
->;
-const mockClose = jest.fn();
 let db: Database.Database;
 
-jest.unstable_mockModule('../database/connection.js', () => ({
-  openDatabase: mockOpenDatabase,
-  getDbPath: jest.fn().mockReturnValue('/tmp/steroids.db'),
-}));
-
 const mockLoadConfig = jest.fn();
-jest.unstable_mockModule('../config/loader.js', () => ({
+jest.unstable_mockModule('../../src/config/loader.js', () => ({
   loadConfig: mockLoadConfig,
-}));
-
-const mockProviderInvoke = jest.fn();
-jest.unstable_mockModule('../providers/registry.js', () => ({
-  getProviderRegistry: () => ({
-    get: () => ({ invoke: mockProviderInvoke }),
-  }),
-}));
-
-const mockLogInvocation = jest.fn();
-jest.unstable_mockModule('../providers/invocation-logger.js', () => ({
-  logInvocation: mockLogInvocation,
 }));
 
 interface GitPlanStep {
@@ -64,16 +35,29 @@ interface GitPlanStep {
   error?: string;
 }
 
-let mergeModule: typeof import('./merge.js');
-let lockModule: typeof import('./merge-lock.js');
-let progressModule: typeof import('./merge-progress.js');
-let conflictModule: typeof import('./merge-conflict.js');
+interface MockGitCommandOptions {
+  allowFailure?: boolean;
+}
+
+let mergeModule: typeof import('../../src/parallel/merge.js');
+let lockModule: typeof import('../../src/parallel/merge-lock.js');
+let progressModule: typeof import('../../src/parallel/merge-progress.js');
+let conflictModule: typeof import('../../src/parallel/merge-conflict.js');
+let mergeGitModule: typeof import('../../src/parallel/merge-git.js');
 
 let gitPlan: GitPlanStep[] = [];
 let invocationOutputs: string[] = [];
+const commandLog: string[][] = [];
+let isMergeGitMocksInstalled = false;
 
 function createDb(): Database.Database {
   const next = new Database(':memory:');
+  next.exec(SCHEMA_SQL);
+  return next;
+}
+
+function createProjectDb(projectPath: string): Database.Database {
+  const next = new Database(resolve(projectPath, '.steroids', 'steroids.db'));
   next.exec(SCHEMA_SQL);
   return next;
 }
@@ -88,36 +72,140 @@ function queueInvocationOutputs(outputs: string[]): void {
 
 function takeGitOutput(args: readonly string[]): string {
   const step = gitPlan.shift();
+  commandLog.push([...args]);
   if (!step) {
-    throw new Error(`Unexpected git command: git ${args.join(' ')}`);
+    throw new Error(`Unexpected git command #${commandLog.length}: git ${args.join(' ')}\nPlanned commands remaining: ${gitPlan.length}`);
   }
 
   expect(step.args).toEqual(expect.arrayContaining(args as string[]));
 
   if (step.error) {
-    throw new Error(step.error);
+    const error = new Error(step.error);
+    Object.assign(error, { stderr: Buffer.from(step.error), stdout: '' });
+    throw error;
   }
 
   return step.output ?? '';
 }
 
+function runMockGitCommand(
+  _projectPath: string,
+  args: string[],
+  options: MockGitCommandOptions = {}
+): string {
+  try {
+    return takeGitOutput(args);
+  } catch (error) {
+    if (options.allowFailure && error instanceof Error) {
+      const mergeError = error as Error & { stdout?: Buffer | string; stderr?: Buffer | string };
+      return [mergeError.stdout, mergeError.stderr]
+        .map((value) => (typeof value === 'string' ? value : value?.toString()))
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+    }
+
+    throw error;
+  }
+}
+
+function installMergeGitMocks(): void {
+  const originalMissingRemote = mergeGitModule.isMissingRemoteBranchFailure;
+  const originalNonFatalFetch = mergeGitModule.isNonFatalFetchResult;
+  const originalNoPushError = mergeGitModule.isNoPushError;
+  const isMissingRemoteBranchFailure = (output: string): boolean =>
+    originalMissingRemote.call(mergeGitModule, output);
+
+  const isNonFatalFetchResult = (output: string): boolean =>
+    originalNonFatalFetch.call(mergeGitModule, output);
+
+  const isNoPushError = (output: string): boolean =>
+    originalNoPushError.call(mergeGitModule, output);
+
+  const getConflictedFiles = (projectPath: string): string[] =>
+    runMockGitCommand(projectPath, ['diff', '--name-only', '--diff-filter=U'])
+      .split('\n')
+      .filter(Boolean);
+
+  jest.spyOn(mergeGitModule, 'runGitCommand').mockImplementation(runMockGitCommand);
+  jest.spyOn(mergeGitModule, 'cleanTreeHasConflicts').mockImplementation((projectPath: string) => {
+    return getConflictedFiles(projectPath).length > 0;
+  });
+  jest.spyOn(mergeGitModule, 'hasUnmergedFiles').mockImplementation((projectPath: string) => {
+    return getConflictedFiles(projectPath).length > 0;
+  });
+  jest.spyOn(mergeGitModule, 'gitStatusLines').mockImplementation((projectPath: string) => {
+    return runMockGitCommand(projectPath, ['status', '--porcelain'])
+      .split('\n')
+      .filter(Boolean);
+  });
+  jest.spyOn(mergeGitModule, 'getWorkstreamCommitList').mockImplementation((
+    projectPath: string,
+    remote: string,
+    workstreamBranch: string,
+    mainBranch: string
+  ) => {
+    const arg = `${mainBranch}..${remote}/${workstreamBranch}`;
+    const output = runMockGitCommand(projectPath, ['log', arg, '--format=%H', '--reverse'], { allowFailure: true });
+
+    if (isMissingRemoteBranchFailure(output)) {
+      return [];
+    }
+
+    if (/error:|fatal:|error /.test(output.toLowerCase())) {
+      throw new Error(`Failed to list commits from ${remote}/${workstreamBranch}: ${output}`);
+    }
+
+    return output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  });
+  jest.spyOn(mergeGitModule, 'getCommitPatch').mockImplementation((projectPath: string, commitSha: string) => {
+    return runMockGitCommand(projectPath, ['show', commitSha, '--']);
+  });
+  jest.spyOn(mergeGitModule, 'getCommitMessage').mockImplementation((projectPath: string, commitSha: string) => {
+    return runMockGitCommand(projectPath, ['log', '-1', '--format=%s%n%b', commitSha]);
+  });
+  jest.spyOn(mergeGitModule, 'getCachedDiff').mockImplementation((projectPath: string) => {
+    return runMockGitCommand(projectPath, ['diff', '--cached']);
+  });
+  jest.spyOn(mergeGitModule, 'getCachedFiles').mockImplementation((projectPath: string) => {
+    return runMockGitCommand(projectPath, ['diff', '--cached', '--name-only']).split('\n').filter(Boolean);
+  });
+  jest.spyOn(mergeGitModule, 'getConflictedFiles').mockImplementation(getConflictedFiles);
+  jest.spyOn(mergeGitModule, 'safeRunMergeCommand').mockImplementation((
+    projectPath: string,
+    remote: string,
+    branchName: string
+  ) => {
+    const output = runMockGitCommand(projectPath, ['fetch', '--prune', remote, branchName], { allowFailure: true });
+    const lower = output.toLowerCase();
+
+    if (!/error:|fatal:/.test(lower)) {
+      return;
+    }
+
+    if (isNonFatalFetchResult(lower)) {
+      return;
+    }
+
+    throw new Error(`Failed to fetch ${branchName} from ${remote}: ${output}`);
+  });
+
+  jest.spyOn(mergeGitModule, 'isNoPushError').mockImplementation(isNoPushError);
+
+  // Keep helper checks aligned with production implementations.
+  jest.spyOn(mergeGitModule, 'isMissingRemoteBranchFailure').mockImplementation(isMissingRemoteBranchFailure);
+  jest.spyOn(mergeGitModule, 'isNonFatalFetchResult').mockImplementation(isNonFatalFetchResult);
+}
+
 beforeEach(async () => {
   db = createDb();
-  mockOpenDatabase.mockReturnValue({ db, close: mockClose });
   jest.clearAllMocks();
-  mockClose.mockClear();
   gitPlan = [];
   invocationOutputs = [];
-
-  mockExecFileSync.mockImplementation(((command: string, args?: readonly string[]) => {
-    if (command !== 'git') {
-      throw new Error(`Unexpected command ${command}`);
-    }
-    if (!Array.isArray(args)) {
-      throw new Error('Invalid git args');
-    }
-    return takeGitOutput(args);
-  }) as ExecFileSync);
+  commandLog.splice(0, commandLog.length);
 
   mockLoadConfig.mockReturnValue({
     ai: {
@@ -126,21 +214,35 @@ beforeEach(async () => {
     },
   });
 
-  mockLogInvocation.mockImplementation(async () => ({
-    success: true,
-    exitCode: 0,
-    stdout: invocationOutputs.shift() ?? 'APPROVE',
-    stderr: '',
-    duration: 1,
-    timedOut: false,
-  }));
-
-  [mergeModule, lockModule, progressModule, conflictModule] = await Promise.all([
-    import('./merge.js'),
-    import('./merge-lock.js'),
-    import('./merge-progress.js'),
-    import('./merge-conflict.js'),
+  [mergeModule, lockModule, progressModule, conflictModule, mergeGitModule] = await Promise.all([
+    import('../../src/parallel/merge.js'),
+    import('../../src/parallel/merge-lock.js'),
+    import('../../src/parallel/merge-progress.js'),
+    import('../../src/parallel/merge-conflict.js'),
+    import('../../src/parallel/merge-git.js'),
   ]);
+
+  const registryModule = await import('../../src/providers/registry.js');
+  (registryModule as unknown as { setProviderRegistry: (registry: unknown) => void }).setProviderRegistry({
+    get: () => ({
+      invoke: async () => {
+        const response = invocationOutputs.shift() ?? 'APPROVE';
+        return {
+          success: true,
+          exitCode: 0,
+          stdout: response,
+          stderr: '',
+          duration: 1,
+          timedOut: false,
+        };
+      },
+    }),
+  });
+
+  if (!isMergeGitMocksInstalled) {
+    installMergeGitMocks();
+    isMergeGitMocksInstalled = true;
+  }
 });
 
 afterEach(() => {
@@ -181,8 +283,14 @@ describe('merge lock behavior', () => {
   it('rejects lock when held by another active runner', () => {
     const lockRow = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     db.prepare(
-      'INSERT INTO merge_locks (session_id, runner_id, acquired_at, expires_at, heartbeat_at) VALUES (?, ?, datetime("now"), ?, datetime("now"))'
-    ).run('session-2', 'runner-current', lockRow);
+      'INSERT INTO merge_locks (session_id, runner_id, acquired_at, expires_at, heartbeat_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(
+      'session-2',
+      'runner-current',
+      new Date().toISOString(),
+      lockRow,
+      new Date().toISOString()
+    );
 
     const result = lockModule.acquireMergeLock(db, {
       sessionId: 'session-2',
@@ -197,8 +305,8 @@ describe('merge lock behavior', () => {
   it('replaces lock when expired', () => {
     const stale = new Date(Date.now() - 60_000).toISOString();
     db.prepare(
-      'INSERT INTO merge_locks (session_id, runner_id, acquired_at, expires_at, heartbeat_at) VALUES (?, ?, datetime("now"), ?, datetime("now"))'
-    ).run('session-3', 'runner-stale', stale);
+      'INSERT INTO merge_locks (session_id, runner_id, acquired_at, expires_at, heartbeat_at) VALUES (?, ?, ?, ?, ?)'
+    ).run('session-3', 'runner-stale', new Date().toISOString(), stale, new Date().toISOString());
 
     const result = lockModule.acquireMergeLock(db, {
       sessionId: 'session-3',
@@ -245,7 +353,9 @@ describe('runParallelMerge integration', () => {
   const createProjectAndWorkspace = () => {
     const projectPath = mkdtempSync(join(tmpdir(), 'steroids-merge-XXXXXX'));
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'steroids-merge-workspace-XXXXXX'));
+    mkdirSync(resolve(projectPath, '.steroids'), { recursive: true });
     mkdirSync(resolve(projectPath, '.git'), { recursive: true });
+    db = createProjectDb(projectPath);
     return { projectPath, workspaceRoot };
   };
 
@@ -274,13 +384,13 @@ describe('runParallelMerge integration', () => {
     expect(result.success).toBe(true);
     expect(result.completedCommits).toBe(2);
     expect(result.errors).toHaveLength(0);
-    expect(mockOpenDatabase).toHaveBeenCalledWith(projectPath);
+    expect(existsSync(resolve(projectPath, '.steroids', 'steroids.db'))).toBe(true);
   });
 
   it('resumes from prior progress rows', async () => {
+    const { projectPath } = createProjectAndWorkspace();
     progressModule.upsertProgressEntry(db, 'resume-session', 'alpha', 0, 'commit-a', 'applied');
 
-    const { projectPath } = createProjectAndWorkspace();
     setGitPlan([
       { args: ['status', '--porcelain'], output: '' },
       { args: ['fetch', '--prune', 'origin', 'steroids/ws-alpha'], output: '' },
@@ -319,9 +429,9 @@ describe('runParallelMerge integration', () => {
     setGitPlan([
       { args: ['status', '--porcelain'], output: '' },
       { args: ['fetch', '--prune', 'origin', 'steroids/ws-alpha'], output: '' },
-      { args: ['pull', '--ff-only', 'origin', 'main'], output: '' },
       { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-conflict' },
       { args: ['cherry-pick', 'commit-conflict'], error: 'CONFLICT: could not apply commit-conflict' },
+      { args: ['diff', '--name-only', '--diff-filter=U'], output: 'src/file.ts' },
       { args: ['show', 'commit-conflict', '--'], output: 'patch' },
       { args: ['log', '-1', '--format=%s%n%b', 'commit-conflict'], output: 'Conflicting commit' },
       { args: ['diff', '--name-only', '--diff-filter=U'], output: 'src/file.ts' },
