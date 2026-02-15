@@ -20,6 +20,7 @@ export interface Runner {
   pid: number | null;
   project_path: string | null;
   section_id: string | null;
+  parallel_session_id: string | null;
   current_task_id: string | null;
   started_at: string | null;
   heartbeat_at: string;
@@ -28,25 +29,48 @@ export interface Runner {
 export interface DaemonOptions {
   projectPath?: string;
   sectionId?: string;  // Focus on this section only
+  sectionIds?: string[];
+  branchName?: string;
+  parallelSessionId?: string;
   onTaskStart?: (taskId: string) => void;
   onTaskComplete?: (taskId: string) => void;
   onShutdown?: () => void;
 }
+
+type RegisterRunnerOptions = {
+  sectionId?: string;
+  sectionIds?: string[];
+  parallelSessionId?: string;
+};
 
 /**
  * Register a new runner in the database
  */
 export function registerRunner(
   projectPath?: string,
-  sectionId?: string
+  options?: string | RegisterRunnerOptions
 ): { runnerId: string; close: () => void } {
+  const resolvedSectionId = typeof options === 'string'
+    ? options
+    : options?.sectionId ?? options?.sectionIds?.[0];
+
+  const parallelSessionId = typeof options === 'string'
+    ? null
+    : (options?.parallelSessionId ?? null);
+
   const { db, close } = openGlobalDatabase();
   const runnerId = uuidv4();
 
   db.prepare(
-    `INSERT INTO runners (id, status, pid, project_path, section_id, started_at, heartbeat_at)
-     VALUES (?, 'idle', ?, ?, ?, datetime('now'), datetime('now'))`
-  ).run(runnerId, process.pid, projectPath ?? null, sectionId ?? null);
+    `INSERT INTO runners (id, status, pid, project_path, section_id, parallel_session_id, started_at, heartbeat_at)
+     VALUES (?, 'idle', ?, ?, ?, ?, datetime('now'), datetime('now'))`
+  ).run(
+    runnerId,
+    process.pid,
+    projectPath ?? null,
+    resolvedSectionId ?? null,
+    parallelSessionId
+  );
 
   return { runnerId, close };
 }
@@ -194,7 +218,12 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
 
   // Register runner with effective project path and section ID
   // Note: Per-project isolation is enforced by hasActiveRunnerForProject() above
-  const { runnerId, close: closeDb } = registerRunner(effectiveProjectPath, options.sectionId);
+  const sectionIdForRegistration = options.sectionIds?.[0] ?? options.sectionId;
+  const { runnerId, close: closeDb } = registerRunner(effectiveProjectPath, {
+    sectionId: sectionIdForRegistration,
+    sectionIds: options.sectionIds,
+    parallelSessionId: options.parallelSessionId,
+  });
   const { db } = openGlobalDatabase();
 
   // Start heartbeat
@@ -244,6 +273,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
     await runOrchestratorLoop({
       projectPath: effectiveProjectPath,
       sectionId: options.sectionId,
+      sectionIds: options.sectionIds,
+      branchName: options.branchName,
+      parallelSessionId: options.parallelSessionId,
       runnerId,  // Pass runner ID for activity logging
       shouldStop: () => shutdownRequested,
       onIteration: (iteration) => {

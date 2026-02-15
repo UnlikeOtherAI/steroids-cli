@@ -39,7 +39,32 @@ export interface TaskSelectionOptions {
   noWait?: boolean;
   waitTimeoutMs?: number;
   pollIntervalMs?: number;
-  sectionId?: string;  // NEW: Focus on this section only
+  sectionId?: string;
+  sectionIds?: string[];
+  branchName?: string;
+  parallelSessionId?: string;
+}
+
+function normalizeSectionFilters(
+  sectionId?: string,
+  sectionIds?: string[]
+): string[] | undefined {
+  if (sectionIds && sectionIds.length > 0) {
+    return [...sectionIds];
+  }
+  return sectionId ? [sectionId] : undefined;
+}
+
+function hasPendingOrInProgressWork(db: Database.Database, sectionId: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) as count FROM tasks
+       WHERE section_id = ?
+       AND status IN ('pending', 'in_progress', 'review')`
+    )
+    .get(sectionId) as { count: number };
+
+  return row.count > 0;
 }
 
 /**
@@ -56,9 +81,38 @@ export interface TaskSelectionOptions {
  */
 export function selectNextTask(
   db: Database.Database,
-  sectionId?: string
+  sectionIdOrIds?: string | string[]
 ): SelectedTask | null {
-  const result = findNextTask(db, sectionId);
+  const sectionIds = normalizeSectionFilters(
+    typeof sectionIdOrIds === 'string' ? sectionIdOrIds : undefined,
+    Array.isArray(sectionIdOrIds) ? sectionIdOrIds : undefined
+  );
+
+  if (sectionIds) {
+    for (const sectionId of sectionIds) {
+      const result = findNextTask(db, sectionId);
+      if (result.task && result.action !== 'idle') {
+        const selectedTask: SelectedTask = {
+          task: result.task,
+          action: result.action as 'review' | 'resume' | 'start',
+        };
+
+        if (result.action === 'resume' && result.task.rejection_count > 0) {
+          selectedTask.rejectionNotes = getLastRejectionNotes(db, result.task.id) ?? undefined;
+        }
+
+        return selectedTask;
+      }
+
+      if (hasPendingOrInProgressWork(db, sectionId)) {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  const result = findNextTask(db);
 
   if (!result.task || result.action === 'idle') {
     return null;
@@ -158,9 +212,25 @@ export function markTaskInProgress(db: Database.Database, taskId: string): void 
 /**
  * Check if all tasks are completed
  */
-export function areAllTasksComplete(db: Database.Database, sectionId?: string): boolean {
-  const result = findNextTask(db, sectionId);
-  return result.action === 'idle';
+export function areAllTasksComplete(
+  db: Database.Database,
+  sectionIdOrIds?: string | string[]
+): boolean {
+  const sectionIds = normalizeSectionFilters(
+    typeof sectionIdOrIds === 'string' ? sectionIdOrIds : undefined,
+    Array.isArray(sectionIdOrIds) ? sectionIdOrIds : undefined
+  );
+  if (!sectionIds) {
+    const result = findNextTask(db);
+    return result.action === 'idle';
+  }
+
+  const result = selectNextTask(db, sectionIds);
+  if (result) {
+    return false;
+  }
+
+  return sectionIds.every((id) => !hasPendingOrInProgressWork(db, id));
 }
 
 /**
@@ -228,12 +298,18 @@ export function selectNextTaskWithLock(
     runnerId,
     timeoutMinutes = DEFAULT_TIMEOUT_MINUTES,
   } = options;
+  const sectionIds = normalizeSectionFilters(options.sectionId, options.sectionIds);
 
   // Get all currently locked task IDs
   const lockedTaskIds = new Set(listTaskLocks(db).map(lock => lock.task_id));
 
   // Find next available task that is not locked
-  const candidates = findNextTaskSkippingLocked(db, lockedTaskIds, runnerId, options.sectionId);
+  const candidates = findNextTaskSkippingLockedForSections(
+    db,
+    lockedTaskIds,
+    runnerId,
+    sectionIds
+  );
 
   if (!candidates) {
     return null;
@@ -279,7 +355,7 @@ function findNextTaskSkippingLocked(
   db: Database.Database,
   lockedTaskIds: Set<string>,
   runnerId: string,
-  sectionId?: string
+  sectionId: string | undefined
 ): SelectedTask | null {
   // Build WHERE clause for section filtering
   const sectionFilter = sectionId ? 'AND t.section_id = ?' : '';
@@ -339,6 +415,30 @@ function findNextTaskSkippingLocked(
   return null;
 }
 
+function findNextTaskSkippingLockedForSections(
+  db: Database.Database,
+  lockedTaskIds: Set<string>,
+  runnerId: string,
+  sectionIds?: string[]
+): SelectedTask | null {
+  if (!sectionIds) {
+    return findNextTaskSkippingLocked(db, lockedTaskIds, runnerId, undefined);
+  }
+
+  for (const sectionId of sectionIds) {
+    const candidates = findNextTaskSkippingLocked(db, lockedTaskIds, runnerId, sectionId);
+    if (candidates) {
+      return candidates;
+    }
+
+    if (hasPendingOrInProgressWork(db, sectionId)) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Check if a task is locked by the current runner
  */
@@ -361,6 +461,7 @@ export async function selectNextTaskWithWait(
     waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   } = options;
+  const sectionIds = normalizeSectionFilters(options.sectionId, options.sectionIds);
 
   // First try without waiting
   const result = selectNextTaskWithLock(db, options);
@@ -369,9 +470,16 @@ export async function selectNextTaskWithWait(
   }
 
   // Check if there are any tasks at all
-  const counts = getTaskCounts(db);
-  if (counts.pending === 0 && counts.in_progress === 0 && counts.review === 0) {
-    return null; // All tasks completed
+  if (sectionIds) {
+    const allSectionsIdle = sectionIds.every((sectionId) => !hasPendingOrInProgressWork(db, sectionId));
+    if (allSectionsIdle) {
+      return null; // Section-scoped work completed
+    }
+  } else {
+    const counts = getTaskCounts(db);
+    if (counts.pending === 0 && counts.in_progress === 0 && counts.review === 0) {
+      return null; // All tasks completed
+    }
   }
 
   // If noWait, return null immediately
@@ -391,11 +499,18 @@ export async function selectNextTaskWithWait(
     }
 
     // Check if all remaining tasks are locked
-    const currentCounts = getTaskCounts(db);
-    if (currentCounts.pending === 0 &&
+    if (sectionIds) {
+      const allSectionsIdle = sectionIds.every((sectionId) => !hasPendingOrInProgressWork(db, sectionId));
+      if (allSectionsIdle) {
+        return null; // Section-scoped work completed while waiting
+      }
+    } else {
+      const currentCounts = getTaskCounts(db);
+      if (currentCounts.pending === 0 &&
         currentCounts.in_progress === 0 &&
         currentCounts.review === 0) {
-      return null; // All tasks completed while waiting
+        return null; // All tasks completed while waiting
+      }
     }
   }
 

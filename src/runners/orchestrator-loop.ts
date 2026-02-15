@@ -21,15 +21,26 @@ import { getRegisteredProject } from './projects.js';
 import { execSync } from 'node:child_process';
 import { runCoderPhase, runReviewerPhase } from '../commands/loop-phases.js';
 import { handleCreditExhaustion, checkBatchCreditExhaustion } from './credit-pause.js';
+import { pushToRemote } from '../git/push.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function resolveSectionIds(sectionId?: string, sectionIds?: string[]): string[] | undefined {
+  if (sectionIds && sectionIds.length > 0) {
+    return sectionIds;
+  }
+  return sectionId ? [sectionId] : undefined;
+}
+
 export interface LoopOptions {
   projectPath: string;
   once?: boolean;
-  sectionId?: string;  // Focus on this section only
+  sectionId?: string;
+  sectionIds?: string[];
+  branchName?: string;
+  parallelSessionId?: string;
   runnerId?: string;   // For activity logging
   onIteration?: (iteration: number) => void;
   onTaskStart?: (taskId: string, action: string) => void;
@@ -43,7 +54,15 @@ export interface LoopOptions {
  * Processes tasks until all are complete or shouldStop returns true
  */
 export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
-  const { projectPath, once = false, shouldStop, sectionId } = options;
+  const {
+    projectPath,
+    once = false,
+    shouldStop,
+    sectionId,
+    sectionIds,
+    branchName = 'main',
+  } = options;
+  const activeSectionIds = resolveSectionIds(sectionId, sectionIds);
 
   const { db, close } = openDatabase(projectPath);
 
@@ -86,7 +105,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
 
       // Batch mode: process multiple pending tasks at once
       // Only active when not focusing on a specific section and batch mode is enabled
-      if (batchMode && !sectionId) {
+      if (batchMode && !activeSectionIds) {
         const batch = selectTaskBatch(db, maxBatchSize);
         if (batch && batch.tasks.length > 0) {
           console.log(`[BATCH MODE] Section "${batch.sectionName}" - ${batch.tasks.length} tasks`);
@@ -217,12 +236,12 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             });
 
             if (approvedTasks.length > 0) {
-              try {
+              const pushResult = pushToRemote(projectPath, 'origin', branchName);
+              if (pushResult.success) {
                 console.log('Pushing batch changes to git...');
-                execSync('git push', { cwd: projectPath, stdio: 'inherit' });
                 console.log(`Pushed ${approvedTasks.length} approved task(s)`);
-              } catch (error) {
-                console.warn('Failed to push:', error);
+              } else {
+                console.warn('Failed to push batch changes:', pushResult.error);
               }
             }
           }
@@ -243,7 +262,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       }
 
       // Select next task
-      const selected = selectNextTask(db, sectionId);
+      const selected = selectNextTask(db, activeSectionIds);
 
       if (!selected) {
         console.log('');
@@ -269,7 +288,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       } else if (action === 'resume') {
         phaseResult = await runCoderPhase(db, task, projectPath, 'resume', false);
       } else if (action === 'review') {
-        phaseResult = await runReviewerPhase(db, task, projectPath, false);
+        phaseResult = await runReviewerPhase(db, task, projectPath, false, undefined, branchName);
       }
 
       // Check for credit exhaustion from single-task phase
@@ -334,7 +353,9 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
     }
 
     // Final status
-    const finalCounts = getTaskCounts(db, sectionId);
+    const finalCounts = activeSectionIds && activeSectionIds.length === 1
+      ? getTaskCounts(db, activeSectionIds[0])
+      : getTaskCounts(db);
     console.log('\nFinal Status:');
     console.log(`  Completed: ${finalCounts.completed}`);
     console.log(`  Failed:    ${finalCounts.failed}`);

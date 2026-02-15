@@ -299,7 +299,8 @@ export async function runReviewerPhase(
   task: ReturnType<typeof getTask>,
   projectPath: string,
   jsonMode = false,
-  coordinatorResult?: CoordinatorResult
+  coordinatorResult?: CoordinatorResult,
+  branchName: string = 'main'
 ): Promise<CreditExhaustionResult | void> {
   if (!task) return;
 
@@ -401,7 +402,7 @@ export async function runReviewerPhase(
         console.log(`\n✓ Task APPROVED (confidence: ${decision.metadata.confidence})`);
         console.log('Pushing to git...');
       }
-      const pushResult = pushToRemote(projectPath);
+      const pushResult = pushToRemote(projectPath, 'origin', branchName);
       if (!jsonMode && pushResult.success) {
         console.log(`Pushed successfully (${pushResult.commitHash})`);
       } else if (!jsonMode) {
@@ -423,7 +424,7 @@ export async function runReviewerPhase(
         console.log(`\n! Task DISPUTED (confidence: ${decision.metadata.confidence})`);
         console.log('Pushing current work and moving to next task.');
       }
-      const disputePush = pushToRemote(projectPath);
+      const disputePush = pushToRemote(projectPath, 'origin', branchName);
       if (!jsonMode && disputePush.success) {
         console.log(`Pushed disputed work (${disputePush.commitHash})`);
       }
