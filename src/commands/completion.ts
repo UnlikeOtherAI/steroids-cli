@@ -64,6 +64,7 @@ const COMMANDS = {
   projects: ['list', 'add', 'remove', 'enable', 'disable', 'prune'],
   locks: ['list', 'show', 'release', 'cleanup'],
   completion: ['bash', 'zsh', 'fish', 'install'],
+  workspaces: ['list', 'clean'],
 };
 
 const GLOBAL_FLAGS = [
