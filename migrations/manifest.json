@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 10,
+  "latestDbVersion": 11,
   "migrations": [
     {
       "id": 1,
@@ -81,6 +81,14 @@
       "description": "Add started_at_ms, completed_at_ms, and status columns to task_invocations for lifecycle tracking",
       "checksum": "",
       "cliVersion": "0.7.0"
+    },
+    {
+      "id": 11,
+      "name": "011_add_merge_locks_and_progress",
+      "file": "011_add_merge_locks_and_progress.sql",
+      "description": "Add merge lock and merge progress tables for parallel merge workflow",
+      "checksum": "",
+      "cliVersion": "0.8.22"
     }
   ]
 }

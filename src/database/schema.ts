@@ -166,6 +166,35 @@ CREATE TABLE IF NOT EXISTS incidents (
 CREATE INDEX IF NOT EXISTS idx_incidents_task ON incidents(task_id);
 CREATE INDEX IF NOT EXISTS idx_incidents_detected ON incidents(detected_at);
 CREATE INDEX IF NOT EXISTS idx_incidents_unresolved ON incidents(resolved_at) WHERE resolved_at IS NULL;
+
+-- Merge locks (global lock during project merges)
+CREATE TABLE IF NOT EXISTS merge_locks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    runner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_merge_locks_expires ON merge_locks(expires_at);
+CREATE INDEX IF NOT EXISTS idx_merge_locks_heartbeat ON merge_locks(heartbeat_at);
+
+-- Merge progress tracking for crash recovery during cherry-pick
+CREATE TABLE IF NOT EXISTS merge_progress (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    workstream_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    commit_sha TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('applied', 'conflict', 'skipped')),
+    conflict_task_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    applied_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_merge_progress_session ON merge_progress(session_id, position);
+CREATE INDEX IF NOT EXISTS idx_merge_progress_status ON merge_progress(status, applied_at);
 `;
 
 export const INITIAL_SCHEMA_DATA = `
@@ -183,4 +212,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (7, '007_add_file_
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (8, '008_add_section_skipped', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (9, '009_add_incidents_and_failure_tracking', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (10, '010_add_lifecycle_timestamps', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (11, '011_add_merge_locks_and_progress', 'builtin');
 `;
