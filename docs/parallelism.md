@@ -137,11 +137,11 @@ For each workstream:
 
 1. Create workspace: `~/.steroids/workspaces/<project-hash>/ws-<id>/`
 2. Clone:
-   - **Same filesystem:** `git clone --local <project-path> <workspace-path>` (hardlinked objects)
+   - **Same filesystem:** `git clone --local <project-path> <workspace-path>` (hardlinked objects).
    - **Cross-filesystem:** `git clone <project-path> <workspace-path>` (full copy). Detected via `fs.statfs()` comparing `f_fsid`.
 3. `git checkout -b steroids/ws-<id>`
 4. Symlink `.steroids/`: since `.steroids/` is gitignored, the clone won't have it. Simply create the symlink: `ln -s <original>/.steroids <clone>/.steroids`. If it exists (non-gitignored edge case), remove it first. Resolve the original path via `realpath()` to avoid symlink chains.
-5. Verify symlink: confirm the database is readable
+5. Verify symlink: confirm the database is readable from clone (`.steroids/steroids.db`).
 
 ### 3. Execute
 
