@@ -1076,11 +1076,13 @@ function formatBytes(bytes: number): string {
 }
 
 async function runWakeup(args: string[], flags: GlobalFlags): Promise<void> {
-  // Hard timeout: wakeup is a short-lived process spawned by launchd every 60s.
-  // If ANY operation hangs (TCC dialog blocking file access, locked DB, etc.),
-  // this ensures the process exits instead of becoming a zombie.
+  // Hard timeout: wakeup is spawned by cron/launchd every 60s.
+  // If the wakeup function itself hangs (locked DB, TCC blocking file access),
+  // force-kill after 30s. SIGKILL is needed because process.exit() can also
+  // hang if native addon destructors (better-sqlite3) try to fsync blocked paths.
   const WAKEUP_TIMEOUT_MS = 30_000;
-  setTimeout(() => process.exit(0), WAKEUP_TIMEOUT_MS).unref();
+  const killTimer = setTimeout(() => process.kill(process.pid, 'SIGKILL'), WAKEUP_TIMEOUT_MS);
+  killTimer.unref();
 
   const { values } = parseArgs({
     args,
@@ -1147,9 +1149,11 @@ OPTIONS:
     }
   }
 
-  // Force exit — wakeup is a short-lived process spawned by launchd every 60s.
-  // Without this, lingering DB handles (better-sqlite3 native bindings) keep
-  // the Node.js event loop alive indefinitely, causing zombie process accumulation.
+  // Two-phase exit for wakeup (cron/launchd spawns this every 60s):
+  // 1. Try graceful exit first (exit code 0, clean shutdown)
+  // 2. If process.exit() hangs (e.g. better-sqlite3 destructors fsyncing WAL
+  //    files on TCC-protected paths), SIGKILL fires after 2s as a backstop.
+  setTimeout(() => process.kill(process.pid, 'SIGKILL'), 2000).unref();
   process.exit(0);
 }
 
