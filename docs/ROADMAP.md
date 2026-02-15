@@ -116,6 +116,71 @@ PR merged → task completed → next task
 
 ---
 
+## Provider Priority & Automatic Fallback
+
+**Status:** Planned
+
+Instead of configuring a single provider per role, configure a priority-ordered list. If the top provider runs out of credits (or is rate-limited), Steroids automatically falls back to the next one — no manual intervention, no stalled runners.
+
+### Vision
+- Each role (coder, reviewer, orchestrator) accepts a priority list of providers
+- On `credit_exhaustion` or rate-limit errors, the runner automatically tries the next provider in the list
+- Runners keep working instead of pausing and waiting for human intervention
+- Full visibility: logs show which provider was used and why fallback occurred
+
+### Config Example
+```yaml
+ai:
+  coder:
+    priority:
+      - provider: claude
+        model: claude-opus-4-6
+      - provider: codex
+        model: gpt-5.3-codex-spark
+      - provider: gemini
+        model: gemini-2.5-pro
+  reviewer:
+    priority:
+      - provider: claude
+        model: claude-opus-4-5-20251101
+      - provider: gemini
+        model: gemini-2.5-pro
+  orchestrator:
+    priority:
+      - provider: claude
+        model: claude-opus-4-6
+      - provider: codex
+        model: gpt-5.3-codex-spark
+```
+
+### Design Considerations
+- Backward compatible: existing single `provider`/`model` config still works (treated as a list of one)
+- Fallback triggers: credit exhaustion incidents, rate limit errors (429), provider outages (5xx)
+- Sticky sessions: once a task starts with a provider, prefer keeping that provider for the task's lifetime (avoid mid-task model switches that confuse context). Only fall back between tasks or on hard failure.
+- Cost tracking: log which provider handled each invocation so cost attribution stays accurate
+- Recovery: when the primary provider recovers (credits refilled), switch back automatically on the next task
+- Incident integration: fallback events create incidents visible in the WebUI and credit-alerts API
+- Per-role independence: coder can fall back to Gemini while reviewer stays on Claude — each role has its own priority list
+
+### Flow
+```
+Coder invocation
+    ↓
+Try provider #1 (Claude)
+    ↓
+Credit exhaustion / rate limit?
+    ├── No  → use Claude, continue
+    └── Yes → log incident, try provider #2 (Codex)
+                  ↓
+              Credit exhaustion?
+                  ├── No  → use Codex, continue
+                  └── Yes → try provider #3 (Gemini)
+                                ↓
+                            All exhausted? → pause runner, alert user
+```
+
+---
+
 ## MiniMax Provider
 
 **Status:** Planned
