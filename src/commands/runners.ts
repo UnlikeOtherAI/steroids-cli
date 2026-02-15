@@ -21,11 +21,23 @@ import { checkLockStatus, isProcessAlive } from '../runners/lock.js';
 import { wakeup, checkWakeupNeeded } from '../runners/wakeup.js';
 import { cronStatus, cronInstall, cronUninstall } from '../runners/cron.js';
 import { openDatabase } from '../database/connection.js';
-import { getSection, getSectionByName, listSections, getTask, listTasks, type Task } from '../database/queries.js';
+import {
+  getSection,
+  getSectionByName,
+  listSections,
+  getTask,
+  listTasks,
+  type Section,
+  type Task,
+} from '../database/queries.js';
+import { v4 as uuidv4 } from 'uuid';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { getRegisteredProjects } from '../runners/projects.js';
 import { generateHelp } from '../cli/help.js';
+import { createWorkspaceClone } from '../parallel/clone.js';
+import { openGlobalDatabase } from '../runners/global-db.js';
+import { partitionWorkstreams, CyclicDependencyError, type WorkstreamSection } from '../parallel/scheduler.js';
 
 const HELP = generateHelp({
   command: 'runners',
@@ -47,6 +59,9 @@ Runners can be started manually or managed automatically via cron.`,
     { long: 'detach', description: 'Run in background (daemonize) - start subcommand' },
     { long: 'project', description: 'Project path to work on', values: '<path>' },
     { long: 'section', description: 'Focus on specific section only', values: '<id|name>' },
+    { long: 'parallel', description: 'Run independent sections across multiple clones' },
+    { long: 'max', description: 'Limit number of concurrent workstreams', values: '<n>' },
+    { long: 'dry-run', description: 'Analyze plan and exit without cloning or spawning' },
     { long: 'id', description: 'Stop specific runner by ID - stop subcommand', values: '<id>' },
     { long: 'all', description: 'Stop all runners - stop subcommand' },
     { long: 'tree', description: 'Show tree view with projects/runners/tasks - list subcommand' },
@@ -57,6 +72,9 @@ Runners can be started manually or managed automatically via cron.`,
   examples: [
     { command: 'steroids runners start', description: 'Start in foreground' },
     { command: 'steroids runners start --detach', description: 'Start in background' },
+    { command: 'steroids runners start --parallel', description: 'Analyze and run independent workstreams in parallel clones' },
+    { command: 'steroids runners start --parallel --max 2', description: 'Run up to 2 workstreams concurrently' },
+    { command: 'steroids runners start --parallel --dry-run', description: 'Show planned parallel workstreams and exit' },
     { command: 'steroids runners start --section "Phase 2"', description: 'Focus on specific section' },
     { command: 'steroids runners stop', description: 'Stop runner for current project' },
     { command: 'steroids runners stop --all', description: 'Stop all runners' },
@@ -96,7 +114,7 @@ export async function runnersCommand(args: string[], flags: GlobalFlags): Promis
 
   switch (subcommand) {
     case 'start':
-      await runStart(subArgs);
+      await runStart(subArgs, flags);
       break;
     case 'stop':
       await runStop(subArgs);
@@ -123,7 +141,7 @@ export async function runnersCommand(args: string[], flags: GlobalFlags): Promis
   }
 }
 
-async function runStart(args: string[]): Promise<void> {
+async function runStart(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -132,6 +150,11 @@ async function runStart(args: string[]): Promise<void> {
       detach: { type: 'boolean', short: 'd', default: false },
       project: { type: 'string', short: 'p' },
       section: { type: 'string' },
+      parallel: { type: 'boolean', default: false },
+      max: { type: 'string' },
+      'section-ids': { type: 'string' },
+      branch: { type: 'string' },
+      'parallel-session-id': { type: 'string' },
     },
     allowPositionals: false,
   });
@@ -143,14 +166,31 @@ steroids runners start - Start runner daemon
 USAGE:
   steroids runners start [options]
 
-OPTIONS:
+  OPTIONS:
   --detach            Run in background
   --project <path>    Project path
   --section <id|name> Focus on a specific section only
+  --parallel          Analyze dependency graph and run independent workstreams in parallel clones
+  --max <n>           Limit number of parallel workstreams (overrides runners.parallel.maxClones)
   -j, --json          Output as JSON
   -h, --help          Show help
+  --dry-run           Print analysis plan and exit (global flag)
 `);
     return;
+  }
+
+  const sectionIdsOption = values['section-ids'] as string | undefined;
+  const parallelSessionId = values['parallel-session-id'] as string | undefined;
+  const asJson = values.json || flags.json;
+
+  if (values.parallel && values.section) {
+    const errorMsg = '--parallel cannot be combined with --section';
+    if (asJson) {
+      console.log(JSON.stringify({ success: false, error: errorMsg }));
+    } else {
+      console.error(errorMsg);
+    }
+    process.exit(1);
   }
 
   // Check if we can start
@@ -159,7 +199,7 @@ OPTIONS:
   const projectPath = path.resolve((values.project as string | undefined) ?? process.cwd());
   const check = canStartDaemon(projectPath);
   if (!check.canStart && !check.reason?.includes('zombie')) {
-    if (values.json) {
+    if (asJson) {
       console.log(
         JSON.stringify({
           success: false,
@@ -176,10 +216,41 @@ OPTIONS:
     process.exit(6);
   }
 
+  const runFromDetachedParent = values.detach && !values.parallel && !parallelSessionId && !sectionIdsOption;
+  const sectionIdsFromSpawn = typeof sectionIdsOption === 'string'
+    ? parseSectionIds(sectionIdsOption)
+    : [];
+
+  // Internal parallel runner invocation used by this command when spawning workspace runners.
+  if (
+    values.parallel
+    && sectionIdsOption !== undefined
+    && parallelSessionId
+    && values.branch
+  ) {
+    if (sectionIdsFromSpawn.length === 0) {
+      const errorMsg = 'Internal parallel runner received empty section ids';
+      if (asJson) {
+        console.log(JSON.stringify({ success: false, error: errorMsg }));
+      } else {
+        console.error(errorMsg);
+      }
+      process.exit(1);
+    }
+
+    await startDaemon({
+      projectPath,
+      sectionIds: sectionIdsFromSpawn,
+      branchName: values.branch as string,
+      parallelSessionId,
+    });
+    return;
+  }
+
   // Resolve section if --section flag is provided
   let focusedSectionId: string | undefined;
 
-  if (values.section) {
+  if (!values.parallel && values.section) {
     const sectionInput = values.section as string;
     const { db, close } = openDatabase(projectPath);
 
@@ -256,7 +327,7 @@ OPTIONS:
     }
   }
 
-  if (values.detach) {
+  if (runFromDetachedParent) {
     // Spawn detached process - always pass --project for proper tracking
     const spawnArgs = [process.argv[1], 'runners', 'start', '--project', projectPath];
 
@@ -265,61 +336,23 @@ OPTIONS:
       spawnArgs.push('--section', values.section as string);
     }
 
-    // Check config for daemon logging preference
-    const config = loadConfig(projectPath);
-    const daemonLogsEnabled = config.runners?.daemonLogs !== false;
+    const {
+      pid,
+      logFile: finalLogPath,
+    } = spawnDetachedRunner({
+      projectPath,
+      args: spawnArgs,
+    });
 
-    let logFile: string | undefined;
-    let logFd: number | undefined;
-
-    if (daemonLogsEnabled) {
-      // Create logs directory and log file for daemon output
-      const logsDir = path.join(os.homedir(), '.steroids', 'runners', 'logs');
-      fs.mkdirSync(logsDir, { recursive: true });
-
-      // Use timestamp for now, will rename after we have PID
-      const tempLogPath = path.join(logsDir, `daemon-${Date.now()}.log`);
-      logFd = fs.openSync(tempLogPath, 'a');
-      logFile = tempLogPath;
-    }
-
-    const child = spawn(
-      process.execPath,
-      spawnArgs,
-      {
-        detached: true,
-        stdio: daemonLogsEnabled && logFd !== undefined
-          ? ['ignore', logFd, logFd]
-          : 'ignore',
-      }
-    );
-    child.unref();
-
-    // Clean up file descriptor and rename log file
-    if (logFd !== undefined) {
-      fs.closeSync(logFd);
-    }
-
-    let finalLogPath: string | undefined;
-    if (logFile && child.pid) {
-      const logsDir = path.dirname(logFile);
-      finalLogPath = path.join(logsDir, `daemon-${child.pid}.log`);
-      try {
-        fs.renameSync(logFile, finalLogPath);
-      } catch {
-        finalLogPath = logFile; // Keep temp name if rename fails
-      }
-    }
-
-    if (values.json) {
+    if (asJson) {
       console.log(JSON.stringify({
         success: true,
-        pid: child.pid,
+        pid,
         detached: true,
         logFile: finalLogPath,
       }));
     } else {
-      console.log(`Runner started in background (PID: ${child.pid})`);
+      console.log(`Runner started in background (PID: ${pid})`);
       if (finalLogPath) {
         console.log(`  Log file: ${finalLogPath}`);
       }
@@ -327,8 +360,308 @@ OPTIONS:
     return;
   }
 
+  if (values.parallel) {
+    const maxFromCli = typeof values.max === 'string' ? values.max.trim() : undefined;
+    let maxClones: number | undefined;
+    if (maxFromCli !== undefined) {
+      const parsedMax = Number.parseInt(maxFromCli, 10);
+      if (!Number.isInteger(parsedMax) || parsedMax <= 0) {
+        if (asJson) {
+          console.log(JSON.stringify({ success: false, error: '--max must be a positive integer' }));
+        } else {
+          console.error('--max must be a positive integer');
+        }
+        process.exit(1);
+      }
+      maxClones = parsedMax;
+    }
+
+    let parallelPlan: ParallelWorkstreamPlan;
+    try {
+      parallelPlan = buildParallelRunPlan(projectPath, maxClones);
+    } catch (error: unknown) {
+      const message = error instanceof CyclicDependencyError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : 'Unable to create parallel plan';
+
+      if (asJson) {
+        console.log(JSON.stringify({ success: false, error: message }));
+      } else {
+        console.error(message);
+      }
+      process.exit(1);
+    }
+
+    if (flags.dryRun) {
+      if (asJson) {
+        console.log(JSON.stringify({ success: true, plan: parallelPlan }));
+      } else {
+        printParallelPlan(projectPath, parallelPlan);
+      }
+      return;
+    }
+
+    const sessionId = launchParallelSession(parallelPlan, projectPath);
+    if (asJson) {
+      console.log(JSON.stringify({ success: true, sessionId }));
+    } else {
+      console.log(`Started parallel session: ${sessionId}`);
+    }
+    return;
+  }
+
   // Start in foreground
   await startDaemon({ projectPath, sectionId: focusedSectionId });
+}
+
+function parseSectionIds(value: string): string[] {
+  return value
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+}
+
+interface ParallelWorkstreamPlan {
+  sessionId: string;
+  projectPath: string;
+  maxClones: number;
+  workstreams: Array<{
+    id: string;
+    branchName: string;
+    sectionIds: string[];
+    sectionNames: string[];
+  }>;
+}
+
+function printParallelPlan(projectPath: string, plan: ParallelWorkstreamPlan): void {
+  console.log(`Parallel plan for ${projectPath}`);
+  console.log(`Session: ${plan.sessionId}`);
+  console.log(`Workstreams: ${plan.workstreams.length}`);
+  console.log(`Max clones: ${plan.maxClones}`);
+  for (let i = 0; i < plan.workstreams.length; i += 1) {
+    const workstream = plan.workstreams[i];
+    console.log(`${i + 1}. ${workstream.id} (${workstream.branchName})`);
+    for (const sectionName of workstream.sectionNames) {
+      console.log(`   - ${sectionName}`);
+    }
+  }
+}
+
+function buildParallelRunPlan(projectPath: string, maxClonesOverride?: number): ParallelWorkstreamPlan {
+  const sessionId = uuidv4();
+  const shortSessionId = sessionId.slice(0, 8);
+  const config = loadConfig(projectPath);
+  if (config.runners?.parallel?.enabled !== true) {
+    throw new Error('Parallel mode is disabled. Set runners.parallel.enabled: true to use --parallel.');
+  }
+
+  const configuredMaxClones = getConfiguredMaxClones(projectPath);
+  const effectiveMaxClones = maxClonesOverride ?? configuredMaxClones;
+
+  const { db, close } = openDatabase(projectPath);
+
+  try {
+    const sections = listSections(db);
+    if (sections.length === 0) {
+      throw new Error('No sections found');
+    }
+
+    const dependencyRows = db
+      .prepare('SELECT section_id AS sectionId, depends_on_section_id AS dependsOnSectionId FROM section_dependencies')
+      .all();
+
+    const dependencies = dependencyRows as {
+      sectionId: string;
+      dependsOnSectionId: string;
+    }[];
+
+    const workstreamSections = sections.map((section: Section) => ({
+      id: section.id,
+      name: section.name,
+      position: section.position,
+    })) as WorkstreamSection[];
+
+    const workstreams = partitionWorkstreams(
+      workstreamSections,
+      dependencies.map((dep) => ({
+        sectionId: dep.sectionId,
+        dependsOnSectionId: dep.dependsOnSectionId,
+      }))
+    );
+
+    const pendingRows = db
+      .prepare(
+        `SELECT section_id as sectionId, COUNT(*) as count
+         FROM tasks
+         WHERE section_id IN (${sections.map(() => '?').join(',')})
+           AND status != 'completed'
+         GROUP BY section_id`
+      )
+      .all(...sections.map((section) => section.id)) as Array<{
+      sectionId: string;
+      count: number;
+    }>;
+    const pendingMap = new Map<string, number>(pendingRows.map((row) => [row.sectionId, row.count]));
+
+    const sectionNameById = new Map(sections.map((section) => [section.id, section.name]));
+    const activeWorkstreams = workstreams.workstreams
+      .map((sectionIds, index) => {
+        const sectionNames = sectionIds
+          .map((sectionId) => sectionNameById.get(sectionId) ?? sectionId);
+        const workstream: ParallelWorkstreamPlan['workstreams'][number] = {
+          id: `ws-${shortSessionId}-${index + 1}`,
+          branchName: `steroids/ws-${shortSessionId}-${index + 1}`,
+          sectionIds,
+          sectionNames,
+        };
+        return workstream;
+      })
+      .filter((workstream) =>
+        workstream.sectionIds.some((sectionId) => (pendingMap.get(sectionId) ?? 0) > 0)
+      );
+
+    const filteredWorkstreams = activeWorkstreams.slice(0, effectiveMaxClones);
+
+    if (filteredWorkstreams.length === 0) {
+      throw new Error('No pending workstreams');
+    }
+
+    return {
+      sessionId,
+      projectPath,
+      maxClones: effectiveMaxClones,
+      workstreams: filteredWorkstreams,
+    };
+  } finally {
+    close();
+  }
+}
+
+function getConfiguredMaxClones(projectPath: string): number {
+  const config = loadConfig(projectPath);
+  const configured = config.runners?.parallel?.maxClones;
+  return Number.isFinite(Number(configured)) && Number(configured) > 0
+    ? Number(configured)
+    : 3;
+}
+
+function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath: string): string {
+  const { db, close } = openGlobalDatabase();
+
+  const configuredWorkspaceRoot = loadConfig(projectPath).runners?.parallel?.workspaceRoot;
+
+  try {
+    db.prepare(
+      'INSERT INTO parallel_sessions (id, project_path, status) VALUES (?, ?, ?)'
+    ).run(plan.sessionId, projectPath, 'running');
+
+    const insertWorkstream = db.prepare(
+      `INSERT INTO workstreams (
+        id, session_id, branch_name, section_ids, status, clone_path
+      ) VALUES (?, ?, ?, ?, ?, ?)`
+    );
+
+    for (const workstream of plan.workstreams) {
+      let workspacePath: string | null = null;
+
+      try {
+        const workspaceClone = createWorkspaceClone({
+          projectPath,
+          workstreamId: workstream.id,
+          branchName: workstream.branchName,
+          workspaceRoot: configuredWorkspaceRoot,
+        });
+
+        workspacePath = workspaceClone.workspacePath;
+
+        insertWorkstream.run(
+          workstream.id,
+          plan.sessionId,
+          workstream.branchName,
+          JSON.stringify(workstream.sectionIds),
+          'running',
+          workspaceClone.workspacePath
+        );
+
+        const spawnResult = spawnDetachedRunner({
+          projectPath: workspaceClone.workspacePath,
+          args: [
+            process.argv[1],
+            'runners',
+            'start',
+            '--project', workspaceClone.workspacePath,
+            '--parallel',
+            '--section-ids', workstream.sectionIds.join(','),
+            '--branch', workstream.branchName,
+            '--parallel-session-id', plan.sessionId,
+          ],
+        });
+
+        if (!spawnResult.pid) {
+          throw new Error(`Failed to start clone runner for ${workstream.branchName}`);
+        }
+      } catch (error: unknown) {
+        if (workspacePath) {
+          fs.rmSync(workspacePath, { recursive: true, force: true });
+        }
+
+        throw error;
+      }
+    }
+  } finally {
+    close();
+  }
+
+  return plan.sessionId;
+}
+
+function spawnDetachedRunner(options: { projectPath: string; args: string[] }): { pid: number | null; logFile?: string } {
+  // Check config for daemon logging preference
+  const config = loadConfig(options.projectPath);
+  const daemonLogsEnabled = config.runners?.daemonLogs !== false;
+
+  let logFile: string | undefined;
+  let logFd: number | undefined;
+
+  if (daemonLogsEnabled) {
+    const logsDir = path.join(os.homedir(), '.steroids', 'runners', 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+
+    const tempLogPath = path.join(logsDir, `daemon-${Date.now()}.log`);
+    logFd = fs.openSync(tempLogPath, 'a');
+    logFile = tempLogPath;
+  }
+
+  const child = spawn(
+    process.execPath,
+    options.args,
+    {
+      detached: true,
+      stdio: daemonLogsEnabled && logFd !== undefined
+        ? ['ignore', logFd, logFd]
+        : 'ignore',
+    }
+  );
+  child.unref();
+
+  if (logFd !== undefined) {
+    fs.closeSync(logFd);
+  }
+
+  let finalLogPath: string | undefined;
+  if (logFile && child.pid) {
+    const logsDir = path.dirname(logFile);
+    finalLogPath = path.join(logsDir, `daemon-${child.pid}.log`);
+    try {
+      fs.renameSync(logFile, finalLogPath);
+    } catch {
+      finalLogPath = logFile;
+    }
+  }
+
+  return { pid: child.pid ?? null, logFile: finalLogPath };
 }
 
 async function runStop(args: string[]): Promise<void> {

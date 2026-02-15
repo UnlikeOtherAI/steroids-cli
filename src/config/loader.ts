@@ -48,6 +48,13 @@ export interface SteroidsConfig {
     maxConcurrent?: number;
     logRetention?: string;
     daemonLogs?: boolean;
+    parallel?: {
+      enabled?: boolean;
+      maxClones?: number;
+      workspaceRoot?: string;
+      cleanupOnSuccess?: boolean;
+      cleanupOnFailure?: boolean;
+    };
   };
   health?: {
     threshold?: number;
@@ -160,6 +167,12 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
     subprocessHangTimeout: '15m',
     maxConcurrent: 1,
     logRetention: '7d',
+    parallel: {
+      enabled: false,
+      maxClones: 3,
+      cleanupOnSuccess: true,
+      cleanupOnFailure: false,
+    },
   },
   health: {
     threshold: 80,

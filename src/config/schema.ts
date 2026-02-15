@@ -169,6 +169,35 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _type: 'boolean',
       _default: true,
     },
+    parallel: {
+      _description: 'Parallel execution settings',
+      _type: 'object',
+      enabled: {
+        _description: 'Enable runners with independent workstreams',
+        _type: 'boolean',
+        _default: false,
+      },
+      maxClones: {
+        _description: 'Maximum number of parallel workstreams (clone runners)',
+        _type: 'number',
+        _default: 3,
+      },
+      workspaceRoot: {
+        _description: 'Optional path for parallel workspaces root',
+        _type: 'string',
+        _default: '',
+      },
+      cleanupOnSuccess: {
+        _description: 'Delete workspace clones after successful merge',
+        _type: 'boolean',
+        _default: true,
+      },
+      cleanupOnFailure: {
+        _description: 'Preserve workspace clones after failures for debugging',
+        _type: 'boolean',
+        _default: false,
+      },
+    },
   },
   health: {
     _description: 'Health check configuration',
