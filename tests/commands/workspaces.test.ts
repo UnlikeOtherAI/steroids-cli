@@ -156,6 +156,10 @@ function parseErrorPayload(mock: ReturnType<typeof jest.spyOn>): { message: stri
   return payload.error;
 }
 
+function getLogLines(): string[] {
+  return consoleLogSpy.mock.calls.map((call: unknown[]) => String(call[0]));
+}
+
 beforeEach(async () => {
   jest.clearAllMocks();
   originalCwd = process.cwd();
@@ -402,5 +406,209 @@ describe('workspacesCommand', () => {
 
     const payload = parseErrorPayload(consoleLogSpy);
     expect(payload.message).toBe(`Not a steroids project: ${path.resolve(realpathSync(projectPath))}`);
+  });
+
+  it('formats workspace list output in text mode and reports orphaned workspaces', async () => {
+    const projectPath = makeProjectPath();
+    const hashRoot = path.join(workspaceRoot, getProjectHash(projectPath));
+    createWorkspaceLayout(projectPath, workspaceRoot, ['ws-active', 'ws-busy', 'ws-orphan']);
+
+    makeSession(globalDb, 'sess-active', projectPath, 'running', '2024-02-02T00:00:00Z');
+    makeWorkstream(globalDb, {
+      id: 'ws-active',
+      sessionId: 'sess-active',
+      branchName: 'steroids/ws-active',
+      sectionIds: ['alpha', 'beta'],
+      status: 'completed',
+      createdAt: '2024-02-02T00:00:00Z',
+    });
+
+    makeSession(globalDb, 'sess-busy', projectPath, 'completed', '2024-02-01T00:00:00Z');
+    makeWorkstream(globalDb, {
+      id: 'ws-busy',
+      sessionId: 'sess-busy',
+      branchName: 'steroids/ws-busy',
+      sectionIds: ['gamma'],
+      status: 'running',
+      createdAt: '2024-02-01T00:00:00Z',
+    });
+
+    await workspacesCommand(['list', '--project', projectPath], {
+      ...getDefaultFlags(),
+      json: false,
+    });
+
+    const logs = getLogLines();
+    expect(logs[0]).toBe(`Project: ${projectPath}`);
+    expect(logs[1]).toBe(`Workspace root: ${workspaceRoot}`);
+
+    const activeLine = logs.find((line) => line.includes('ws-active'));
+    const busyLine = logs.find((line) => line.includes('ws-busy'));
+    const orphanHeader = logs.find((line) => line.includes('Orphaned:'));
+    const orphanLine = logs.find((line) => line.includes('ws-orphan'));
+
+    expect(activeLine).toContain('session=sess-active');
+    expect(activeLine).toContain('status=completed');
+    expect(activeLine).toContain('branch=steroids/ws-active');
+    expect(activeLine).toContain('sections=alpha,beta');
+    expect(activeLine).toContain('[active]');
+    expect(activeLine).toContain('[busy]');
+
+    expect(busyLine).toContain('session=sess-busy');
+    expect(busyLine).toContain('status=running');
+    expect(busyLine).toContain('sections=gamma');
+    expect(busyLine).toContain('[busy]');
+    expect(busyLine).not.toContain('[active]');
+
+    expect(orphanHeader).toBe(`Orphaned: 1`);
+    expect(orphanLine).toBe(`  ws-orphan  path=${path.join(hashRoot, 'ws-orphan')}`);
+  });
+
+  it('prints a no-workspaces message when no text-mode workspaces exist', async () => {
+    const projectPath = makeProjectPath();
+
+    await workspacesCommand(['list', '--project', projectPath], {
+      ...getDefaultFlags(),
+      json: false,
+    });
+
+    expect(getLogLines()).toEqual([
+      `Project: ${projectPath}`,
+      `Workspace root: ${workspaceRoot}`,
+      'No workspace clones found.',
+    ]);
+  });
+
+  it('prints dry-run clean summary for text output', async () => {
+    const projectPath = makeProjectPath();
+    createWorkspaceLayout(projectPath, workspaceRoot, ['ws-clean', 'ws-busy']);
+
+    makeSession(globalDb, 'sess-clean', projectPath, 'completed', '2024-01-01T00:00:00Z');
+    makeWorkstream(globalDb, {
+      id: 'ws-clean',
+      sessionId: 'sess-clean',
+      branchName: 'steroids/ws-clean',
+      sectionIds: ['alpha'],
+      status: 'completed',
+      createdAt: '2024-01-01T00:00:00Z',
+    });
+
+    makeSession(globalDb, 'sess-busy', projectPath, 'running', '2024-01-02T00:00:00Z');
+    makeWorkstream(globalDb, {
+      id: 'ws-busy',
+      sessionId: 'sess-busy',
+      branchName: 'steroids/ws-busy',
+      sectionIds: ['beta'],
+      status: 'completed',
+      createdAt: '2024-01-02T00:00:00Z',
+    });
+
+    await workspacesCommand(['clean', '--project', projectPath], {
+      ...getDefaultFlags(),
+      dryRun: true,
+      json: false,
+    });
+
+    expect(getLogLines()).toEqual([
+      'Would remove 1 workspace(s):',
+      `  ${path.join(workspaceRoot, getProjectHash(projectPath), 'ws-clean')}`,
+    ]);
+
+    expect(existsSync(path.join(workspaceRoot, getProjectHash(projectPath), 'ws-clean'))).toBe(true);
+  });
+
+  it('prints no-workspaces would be removed when dry-run has nothing to remove', async () => {
+    const projectPath = makeProjectPath();
+    createWorkspaceLayout(projectPath, workspaceRoot, ['ws-busy']);
+
+    makeSession(globalDb, 'sess-busy', projectPath, 'running', '2024-01-01T00:00:00Z');
+    makeWorkstream(globalDb, {
+      id: 'ws-busy',
+      sessionId: 'sess-busy',
+      branchName: 'steroids/ws-busy',
+      sectionIds: ['alpha'],
+      status: 'completed',
+      createdAt: '2024-01-01T00:00:00Z',
+    });
+
+    await workspacesCommand(['clean', '--project', projectPath], {
+      ...getDefaultFlags(),
+      dryRun: true,
+      json: false,
+    });
+
+    expect(getLogLines()).toEqual(['No workspaces would be removed.']);
+  });
+
+  it('prints removed and skipped workspace summary for text-mode clean', async () => {
+    const projectPath = makeProjectPath();
+    const hashRoot = path.join(workspaceRoot, getProjectHash(projectPath));
+    createWorkspaceLayout(projectPath, workspaceRoot, ['ws-deleted']);
+    makeSession(globalDb, 'sess-cleaned', projectPath, 'completed', '2024-01-01T00:00:00Z');
+    makeWorkstream(globalDb, {
+      id: 'ws-deleted',
+      sessionId: 'sess-cleaned',
+      branchName: 'steroids/ws-deleted',
+      sectionIds: ['alpha'],
+      status: 'completed',
+      createdAt: '2024-01-01T00:00:00Z',
+    });
+
+    makeSession(globalDb, 'sess-missing', projectPath, 'completed', '2024-01-01T00:00:00Z');
+    makeWorkstream(globalDb, {
+      id: 'ws-missing',
+      sessionId: 'sess-missing',
+      branchName: 'steroids/ws-missing',
+      sectionIds: ['beta'],
+      status: 'completed',
+      createdAt: '2024-01-01T00:00:00Z',
+    });
+
+    const missingPath = path.join(hashRoot, 'ws-missing');
+    await workspacesCommand(['clean', '--project', projectPath], {
+      ...getDefaultFlags(),
+      json: false,
+    });
+
+    const logs = getLogLines();
+    expect(logs).toEqual([
+      'Removed 1 workspace(s):',
+      `  ${path.join(hashRoot, 'ws-deleted')}`,
+      'Skipped 1 workspace(s):',
+      `  ${missingPath}`,
+    ]);
+
+    expect(existsSync(path.join(hashRoot, 'ws-deleted'))).toBe(false);
+    expect(existsSync(missingPath)).toBe(false);
+  });
+
+  it('prints no removals when text-mode clean has no targets', async () => {
+    const projectPath = makeProjectPath();
+
+    await workspacesCommand(['clean', '--project', projectPath], {
+      ...getDefaultFlags(),
+      json: false,
+    });
+
+    expect(getLogLines()).toEqual(['No workspace clones were removed.']);
+  });
+
+  it('errors for unknown workspaces subcommand and exits with invalid-arguments code', async () => {
+    const projectPath = makeProjectPath();
+    process.chdir(projectPath);
+
+    try {
+      await workspacesCommand(['invalid'], {
+        ...getDefaultFlags(),
+        json: false,
+      });
+      throw new Error('Expected process.exit');
+    } catch (error) {
+      expect((error as Error).message).toBe('process.exit(2)');
+    }
+
+    expect(processExitSpy).toHaveBeenCalledWith(2);
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Unknown subcommand: invalid');
+    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('steroids workspaces'));
   });
 });
