@@ -64,6 +64,24 @@ function expandHome(p: string): string {
 }
 
 /**
+ * Normalize a path list: auto-split entries that look like multiple paths
+ * jammed into one string (e.g., "/path1 ~/path2" → ["/path1", "~/path2"]).
+ */
+function normalizePathList(paths: string[]): string[] {
+  const result: string[] = [];
+  for (const entry of paths) {
+    if (!entry) continue;
+    // Split on spaces followed by / or ~ (indicates two paths in one string)
+    const parts = entry.split(/\s+(?=[/~])/).map(p => p.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      console.warn(`Warning: auto-split path entry "${entry}" into ${parts.length} entries: ${parts.join(', ')}`);
+    }
+    result.push(...parts);
+  }
+  return result;
+}
+
+/**
  * Check if a project path is allowed by whitelist/blacklist config.
  * Reads from global config (~/.steroids/config.yaml).
  *
@@ -72,8 +90,8 @@ function expandHome(p: string): string {
  */
 export function isPathAllowed(path: string): { allowed: boolean; reason?: string } {
   const globalConfig = loadConfigFile(getGlobalConfigPath());
-  const allowedPaths = (globalConfig.projects?.allowedPaths ?? []).filter(Boolean);
-  const blockedPaths = (globalConfig.projects?.blockedPaths ?? []).filter(Boolean);
+  const allowedPaths = normalizePathList(globalConfig.projects?.allowedPaths ?? []);
+  const blockedPaths = normalizePathList(globalConfig.projects?.blockedPaths ?? []);
 
   // Whitelist check (if non-empty, path must match at least one entry)
   if (allowedPaths.length > 0) {
