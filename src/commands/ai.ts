@@ -36,7 +36,7 @@ const HELP = generateHelp({
   examples: [
     { command: 'steroids ai providers', description: 'List all detected providers' },
     { command: 'steroids ai models claude', description: 'List Claude models from CLI' },
-    { command: 'steroids ai models openai --api', description: 'Fetch OpenAI models from API' },
+    { command: 'steroids ai models mistral --api', description: 'Fetch Mistral models from API' },
     { command: 'steroids ai test coder', description: 'Test coder provider configuration' },
     { command: 'steroids ai setup', description: 'Interactive setup wizard' },
     { command: 'steroids ai setup reviewer', description: 'Configure reviewer role' },
@@ -168,7 +168,7 @@ USAGE:
   steroids ai models <provider> [options]
 
 ARGUMENTS:
-  <provider>          Provider name: claude | openai | gemini | codex
+  <provider>          Provider name: claude | openai | gemini | codex | mistral
 
 OPTIONS:
   --api               Fetch models from API (requires API key)
@@ -177,39 +177,40 @@ OPTIONS:
 
 EXAMPLES:
   steroids ai models claude              # List Claude models from CLI
-  steroids ai models openai --api        # Fetch OpenAI models from API
+  steroids ai models mistral --api       # Fetch Mistral models from API
 
 ENVIRONMENT VARIABLES:
   ANTHROPIC_API_KEY   Required for Claude API access
   OPENAI_API_KEY      Required for OpenAI API access
   GOOGLE_API_KEY      Required for Gemini API access
+  MISTRAL_API_KEY     Required for Mistral API access
 `);
     return;
   }
 
   const provider = positionals[0];
 
-  if (!['claude', 'openai', 'gemini', 'codex'].includes(provider)) {
+  if (!['claude', 'openai', 'gemini', 'codex', 'mistral'].includes(provider)) {
     out.error('INVALID_ARGUMENTS', `Invalid provider: ${provider}`);
-    out.log('Valid providers: claude, openai, gemini, codex');
+    out.log('Valid providers: claude, openai, gemini, codex, mistral');
     process.exit(2);
   }
 
   if (values.api) {
     // Fetch from API
-    if (!['claude', 'openai', 'gemini'].includes(provider)) {
+    if (!['claude', 'openai', 'gemini', 'mistral'].includes(provider)) {
       out.error('INVALID_ARGUMENTS', `Provider ${provider} does not support API model fetching`);
       process.exit(2);
     }
 
-    if (!hasApiKey(provider as 'claude' | 'openai' | 'gemini')) {
-      out.error('CONFIGURATION_ERROR', `${getApiKeyEnvVar(provider as 'claude' | 'openai' | 'gemini')} environment variable not set`);
+    if (!hasApiKey(provider as 'claude' | 'openai' | 'gemini' | 'mistral')) {
+      out.error('CONFIGURATION_ERROR', `${getApiKeyEnvVar(provider as 'claude' | 'openai' | 'gemini' | 'mistral')} environment variable not set`);
       process.exit(1);
     }
 
     out.verbose(`Fetching models from ${provider} API...`);
 
-    const result = await fetchModelsForProvider(provider as 'claude' | 'openai' | 'gemini');
+    const result = await fetchModelsForProvider(provider as 'claude' | 'openai' | 'gemini' | 'mistral');
 
     if (!result.success) {
       out.error('GENERAL_ERROR', `Failed to fetch models: ${result.error}`);
@@ -237,7 +238,7 @@ ENVIRONMENT VARIABLES:
     out.log(`Total: ${result.models.length} models`);
   } else {
     // Get from CLI provider registry
-    const models = getModelsForProvider(provider as 'claude' | 'openai' | 'gemini' | 'codex');
+    const models = getModelsForProvider(provider as 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral');
 
     if (models.length === 0) {
       out.error('NOT_FOUND', `No models found for provider: ${provider}`);
@@ -335,7 +336,7 @@ EXAMPLES:
   out.log('');
 
   // Check if provider CLI is available
-  const status = await checkProviderCLI(provider as 'claude' | 'openai' | 'gemini' | 'codex');
+  const status = await checkProviderCLI(provider as 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral');
 
   const results = {
     role,

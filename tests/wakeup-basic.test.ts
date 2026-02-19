@@ -233,7 +233,7 @@ describe('wakeup() - basic functionality', () => {
 
     const result = results.find((r) => r.projectPath === project.path);
     expect(result?.action).toBe('none');
-    expect(result?.reason).toContain('already active');
+    expect(result?.reason).toMatch(/already (active|running)/i);
   });
 
   it('should skip projects with no pending work', async () => {

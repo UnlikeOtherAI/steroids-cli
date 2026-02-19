@@ -23,6 +23,9 @@ export { CodexProvider, createCodexProvider } from './codex.js';
 // Gemini provider
 export { GeminiProvider, createGeminiProvider } from './gemini.js';
 
+// Mistral provider
+export { MistralProvider, createMistralProvider } from './mistral.js';
+
 // OpenAI provider
 export { OpenAIProvider, createOpenAIProvider } from './openai.js';
 
@@ -43,6 +46,7 @@ export {
   fetchClaudeModels,
   fetchOpenAIModels,
   fetchGeminiModels,
+  fetchMistralModels,
   fetchModelsForProvider,
   getApiKeyEnvVar,
   hasApiKey,

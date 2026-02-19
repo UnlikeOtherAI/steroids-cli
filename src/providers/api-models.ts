@@ -26,7 +26,7 @@ export interface ProviderModel {
  * Uses the provider registry to verify CLI availability
  */
 export async function checkProviderCLI(
-  provider: 'claude' | 'openai' | 'gemini' | 'codex'
+  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral'
 ): Promise<ProviderStatus> {
   const registry = getProviderRegistry();
   const providerInstance = registry.tryGet(provider);
@@ -55,7 +55,7 @@ export async function checkProviderCLI(
  * Does not require API keys - uses hardcoded model lists from provider implementations
  */
 export function getModelsForProvider(
-  provider: 'claude' | 'openai' | 'gemini' | 'codex'
+  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral'
 ): ProviderModel[] {
   const registry = getProviderRegistry();
   const providerInstance = registry.tryGet(provider);
@@ -77,7 +77,7 @@ export function getModelsForProvider(
  * Get the default model for a provider and role
  */
 export function getDefaultModel(
-  provider: 'claude' | 'openai' | 'gemini' | 'codex',
+  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral',
   role: 'orchestrator' | 'coder' | 'reviewer'
 ): string | undefined {
   const registry = getProviderRegistry();
@@ -340,10 +340,103 @@ function getGeminiModelScore(id: string): number {
 }
 
 /**
+ * Fetch models from Mistral API
+ * Uses MISTRAL_API_KEY environment variable
+ */
+export async function fetchMistralModels(): Promise<FetchModelsResult> {
+  const apiKey = process.env.MISTRAL_API_KEY;
+
+  if (!apiKey) {
+    return {
+      success: false,
+      models: [],
+      error: 'MISTRAL_API_KEY not set',
+    };
+  }
+
+  try {
+    const response = await fetch('https://api.mistral.ai/v1/models', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return {
+        success: false,
+        models: [],
+        error: `API error: ${response.status} - ${text}`,
+      };
+    }
+
+    const data = (await response.json()) as
+      | Array<{
+        id: string;
+        name?: string;
+        description?: string;
+        created?: number;
+        max_context_length?: number;
+      }>
+      | {
+        data?: Array<{
+          id: string;
+          name?: string;
+          description?: string;
+          created?: number;
+          max_context_length?: number;
+        }>;
+      };
+
+    const rawModels = Array.isArray(data) ? data : (data.data ?? []);
+
+    const models: APIModel[] = rawModels.map((m) => ({
+      id: m.id,
+      name: m.name ?? formatMistralModelName(m.id),
+      description: m.description,
+      created: m.created ? new Date(m.created * 1000) : undefined,
+      contextWindow: m.max_context_length,
+    }));
+
+    models.sort((a, b) => {
+      const aScore = getMistralModelScore(a.id);
+      const bScore = getMistralModelScore(b.id);
+      if (aScore !== bScore) return aScore - bScore;
+      return a.id.localeCompare(b.id);
+    });
+
+    return { success: true, models };
+  } catch (error) {
+    return {
+      success: false,
+      models: [],
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+function formatMistralModelName(id: string): string {
+  return id
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function getMistralModelScore(id: string): number {
+  if (id.includes('codestral')) return 0;
+  if (id.includes('mistral-large')) return 1;
+  if (id.includes('mistral-medium')) return 2;
+  if (id.includes('mistral-small')) return 3;
+  if (id.includes('ministral')) return 4;
+  return 5;
+}
+
+/**
  * Fetch models for a specific provider
  */
 export async function fetchModelsForProvider(
-  provider: 'claude' | 'openai' | 'gemini'
+  provider: 'claude' | 'openai' | 'gemini' | 'mistral'
 ): Promise<FetchModelsResult> {
   switch (provider) {
     case 'claude':
@@ -352,6 +445,8 @@ export async function fetchModelsForProvider(
       return fetchOpenAIModels();
     case 'gemini':
       return fetchGeminiModels();
+    case 'mistral':
+      return fetchMistralModels();
     default:
       return {
         success: false,
@@ -364,7 +459,7 @@ export async function fetchModelsForProvider(
 /**
  * Get the environment variable name for a provider's API key
  */
-export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini'): string {
+export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mistral'): string {
   switch (provider) {
     case 'claude':
       return 'ANTHROPIC_API_KEY';
@@ -372,13 +467,15 @@ export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini'): strin
       return 'OPENAI_API_KEY';
     case 'gemini':
       return 'GOOGLE_API_KEY';
+    case 'mistral':
+      return 'MISTRAL_API_KEY';
   }
 }
 
 /**
  * Check if API key is set for a provider
  */
-export function hasApiKey(provider: 'claude' | 'openai' | 'gemini'): boolean {
+export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral'): boolean {
   switch (provider) {
     case 'claude':
       return !!process.env.ANTHROPIC_API_KEY;
@@ -386,5 +483,7 @@ export function hasApiKey(provider: 'claude' | 'openai' | 'gemini'): boolean {
       return !!process.env.OPENAI_API_KEY;
     case 'gemini':
       return !!(process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY);
+    case 'mistral':
+      return !!process.env.MISTRAL_API_KEY;
   }
 }

@@ -35,6 +35,11 @@ trap cleanup EXIT
 echo "Creating test directory: $TEST_DIR"
 mkdir -p "$TEST_DIR/.steroids"
 
+if [ ! -f "$PROJECT_ROOT/dist/index.js" ] || [ ! -f "$PROJECT_ROOT/dist/migrations/index.js" ]; then
+    echo -e "${RED}FAILED: Build artifacts not found in dist/. Run 'npm run build' first.${NC}"
+    exit 1
+fi
+
 # Create a minimal database with only the base tables (simulating old database)
 echo "Creating minimal test database (simulating pre-migration state)..."
 sqlite3 "$TEST_DB" << 'EOF'
@@ -302,8 +307,10 @@ FRESH_DB="$FRESH_DIR/.steroids/steroids.db"
 FRESH_MIGRATIONS=$(sqlite3 "$FRESH_DB" "SELECT COUNT(*) FROM _migrations;")
 echo "  Fresh DB migrations recorded: $FRESH_MIGRATIONS"
 
-if [ "$FRESH_MIGRATIONS" -ne 10 ]; then
-    echo -e "${RED}FAILED: Fresh database should have 10 migrations recorded, got $FRESH_MIGRATIONS${NC}"
+EXPECTED_MIGRATIONS=$(node --no-warnings --input-type=module -e "import { readFileSync } from 'node:fs'; const manifest = JSON.parse(readFileSync('$PROJECT_ROOT/migrations/manifest.json', 'utf-8')); console.log(manifest.migrations.length);")
+
+if [ "$FRESH_MIGRATIONS" -ne "$EXPECTED_MIGRATIONS" ]; then
+    echo -e "${RED}FAILED: Fresh database should have $EXPECTED_MIGRATIONS migrations recorded, got $FRESH_MIGRATIONS${NC}"
     rm -rf "$FRESH_DIR"
     exit 1
 fi

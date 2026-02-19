@@ -599,7 +599,7 @@ ARGUMENTS:
   [role]              Role to configure: coder | reviewer | orchestrator
 
 OPTIONS:
-  -p, --provider      Provider (claude | openai | gemini) - skip interactive selection
+  -p, --provider      Provider (claude | openai | gemini | mistral) - skip interactive selection
   -m, --model         Model ID - skip interactive selection
   --global            Save to global config
   -h, --help          Show help
@@ -614,6 +614,7 @@ ENVIRONMENT VARIABLES:
   ANTHROPIC_API_KEY   Required for Claude models
   OPENAI_API_KEY      Required for OpenAI models
   GOOGLE_API_KEY      Required for Gemini models (or GEMINI_API_KEY)
+  MISTRAL_API_KEY     Required for Mistral models
 `);
     return;
   }
@@ -627,10 +628,10 @@ ENVIRONMENT VARIABLES:
   }
 
   if (values.provider) {
-    const provider = values.provider as 'claude' | 'openai' | 'gemini';
-    if (!['claude', 'openai', 'gemini'].includes(provider)) {
+    const provider = values.provider as 'claude' | 'openai' | 'gemini' | 'mistral';
+    if (!['claude', 'openai', 'gemini', 'mistral'].includes(provider)) {
       console.error(`Invalid provider: ${provider}`);
-      console.error('Valid providers: claude, openai, gemini');
+      console.error('Valid providers: claude, openai, gemini, mistral');
       process.exit(1);
     }
 
@@ -671,7 +672,7 @@ USAGE:
   steroids config models <provider> [options]
 
 ARGUMENTS:
-  <provider>          Provider to query: claude | openai | gemini
+  <provider>          Provider to query: claude | openai | gemini | mistral
 
 OPTIONS:
   -j, --json          Output as JSON
@@ -681,26 +682,28 @@ EXAMPLES:
   steroids config models claude           # List Claude models
   steroids config models openai --json    # List OpenAI models as JSON
   steroids config models gemini           # List Gemini models
+  steroids config models mistral          # List Mistral models
 
 ENVIRONMENT VARIABLES:
   ANTHROPIC_API_KEY   Required for Claude
   OPENAI_API_KEY      Required for OpenAI
   GOOGLE_API_KEY      Required for Gemini (or GEMINI_API_KEY)
+  MISTRAL_API_KEY     Required for Mistral
 `);
     return;
   }
 
   if (positionals.length === 0) {
     console.error('Provider is required');
-    console.error('Usage: steroids config models <claude|openai|gemini>');
+    console.error('Usage: steroids config models <claude|openai|gemini|mistral>');
     process.exit(2);
   }
 
-  const provider = positionals[0] as 'claude' | 'openai' | 'gemini';
+  const provider = positionals[0] as 'claude' | 'openai' | 'gemini' | 'mistral';
 
-  if (!['claude', 'openai', 'gemini'].includes(provider)) {
+  if (!['claude', 'openai', 'gemini', 'mistral'].includes(provider)) {
     console.error(`Invalid provider: ${provider}`);
-    console.error('Valid providers: claude, openai, gemini');
+    console.error('Valid providers: claude, openai, gemini, mistral');
     process.exit(2);
   }
 

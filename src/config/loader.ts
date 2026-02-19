@@ -14,17 +14,17 @@ const CONFIG_FILE = 'config.yaml';
 export interface SteroidsConfig {
   ai?: {
     orchestrator?: {
-      provider?: 'claude' | 'gemini' | 'openai';
+      provider?: 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral';
       model?: string;
       cli?: string;
     };
     coder?: {
-      provider?: 'claude' | 'gemini' | 'openai';
+      provider?: 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral';
       model?: string;
       cli?: string;
     };
     reviewer?: {
-      provider?: 'claude' | 'gemini' | 'openai';
+      provider?: 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral';
       model?: string;
       cli?: string;
     };

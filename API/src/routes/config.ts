@@ -297,6 +297,13 @@ const FALLBACK_MODELS: Record<string, APIModel[]> = {
     { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' },
     { id: 'gpt-5.1', name: 'GPT-5.1' },
   ],
+  mistral: [
+    { id: 'codestral-latest', name: 'Codestral (latest)' },
+    { id: 'mistral-large-latest', name: 'Mistral Large (latest)' },
+    { id: 'mistral-medium-latest', name: 'Mistral Medium (latest)' },
+    { id: 'mistral-small-latest', name: 'Mistral Small (latest)' },
+    { id: 'ministral-8b-latest', name: 'Ministral 8B (latest)' },
+  ],
 };
 
 // CLI config file paths
@@ -329,6 +336,13 @@ function getClaudeApiKey(): string | null {
 function getGeminiApiKey(): string | null {
   // Check environment variables (real API key)
   return process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || null;
+}
+
+/**
+ * Get Mistral API key
+ */
+function getMistralApiKey(): string | null {
+  return process.env.MISTRAL_API_KEY || null;
 }
 
 /**
@@ -465,6 +479,68 @@ async function fetchGeminiModels(): Promise<{ models: APIModel[]; source: string
 }
 
 /**
+ * Fetch Mistral models from Mistral API
+ */
+async function fetchMistralModels(): Promise<{ models: APIModel[]; source: string }> {
+  const apiKey = getMistralApiKey();
+  if (!apiKey) {
+    return { models: FALLBACK_MODELS.mistral, source: 'fallback' };
+  }
+
+  try {
+    const response = await fetch('https://api.mistral.ai/v1/models', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      return { models: FALLBACK_MODELS.mistral, source: 'fallback' };
+    }
+
+    const data = await response.json() as
+      | { data?: Array<{ id: string; name?: string; description?: string; max_context_length?: number }> }
+      | Array<{ id: string; name?: string; description?: string; max_context_length?: number }>;
+
+    const rawModels = Array.isArray(data) ? data : (data.data ?? []);
+    const models: APIModel[] = rawModels.map((m) => ({
+      id: m.id,
+      name: m.name || formatMistralModelName(m.id),
+      description: m.description,
+      contextWindow: m.max_context_length,
+    }));
+
+    models.sort((a, b) => {
+      const aScore = getMistralModelScore(a.id);
+      const bScore = getMistralModelScore(b.id);
+      if (aScore !== bScore) return aScore - bScore;
+      return a.id.localeCompare(b.id);
+    });
+
+    return { models, source: 'api' };
+  } catch {
+    return { models: FALLBACK_MODELS.mistral, source: 'fallback' };
+  }
+}
+
+function formatMistralModelName(id: string): string {
+  return id
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function getMistralModelScore(id: string): number {
+  if (id.includes('codestral')) return 0;
+  if (id.includes('mistral-large')) return 1;
+  if (id.includes('mistral-medium')) return 2;
+  if (id.includes('mistral-small')) return 3;
+  if (id.includes('ministral')) return 4;
+  return 5;
+}
+
+/**
  * Fetch Codex models - uses local cache or OpenAI API
  */
 async function fetchCodexModels(): Promise<{ models: APIModel[]; source: string }> {
@@ -527,6 +603,9 @@ router.get('/ai/models/:provider', async (req: Request, res: Response) => {
     case 'gemini':
       result = await fetchGeminiModels();
       break;
+    case 'mistral':
+      result = await fetchMistralModels();
+      break;
     case 'codex':
       result = await fetchCodexModels();
       break;
@@ -556,7 +635,7 @@ function isCliInstalled(command: string): boolean {
 
 // GET /api/ai/providers - Get list of available providers
 router.get('/ai/providers', (req: Request, res: Response) => {
-  // Only codex has a CLI tool to check for
+  // Codex and Mistral depend on local CLIs
   const providers = [
     {
       id: 'claude',
@@ -567,6 +646,11 @@ router.get('/ai/providers', (req: Request, res: Response) => {
       id: 'gemini',
       name: 'Gemini (Google)',
       installed: true, // Uses API
+    },
+    {
+      id: 'mistral',
+      name: 'Mistral AI',
+      installed: isCliInstalled('vibe'),
     },
     {
       id: 'codex',

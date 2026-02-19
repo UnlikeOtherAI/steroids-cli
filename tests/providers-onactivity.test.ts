@@ -130,5 +130,24 @@ describe('Providers emit onActivity events', () => {
     expect(activities.some((a) => a.type === 'tool' && String(a.cmd).includes('rg -n'))).toBe(true);
     expect(activities.some((a) => a.type === 'output')).toBe(true);
   });
-});
 
+  it('MistralProvider emits output activity', async () => {
+    mockSpawn.mockReturnValue(
+      createMockChildProcess({ stdoutChunks: ['mistral ok\n'], closeCode: 0 })
+    );
+
+    const { MistralProvider } = await import('../src/providers/mistral.js');
+    const provider = new MistralProvider();
+
+    const activities: any[] = [];
+    const result = await provider.invoke('prompt', {
+      model: 'codestral-latest',
+      streamOutput: false,
+      onActivity: (a) => activities.push(a),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.stdout).toContain('mistral ok');
+    expect(activities.some((a) => a.type === 'output')).toBe(true);
+  });
+});

@@ -7,6 +7,7 @@ import type { IAIProvider } from './interface.js';
 import { ClaudeProvider } from './claude.js';
 import { CodexProvider } from './codex.js';
 import { GeminiProvider } from './gemini.js';
+import { MistralProvider } from './mistral.js';
 import { OpenAIProvider } from './openai.js';
 
 /**
@@ -182,6 +183,7 @@ export function createDefaultRegistry(): ProviderRegistry {
   registry.register(new ClaudeProvider());
   registry.register(new CodexProvider());
   registry.register(new GeminiProvider());
+  registry.register(new MistralProvider());
   registry.register(new OpenAIProvider());
 
   return registry;

@@ -43,12 +43,57 @@ let mergeModule: typeof import('../../src/parallel/merge.js');
 let lockModule: typeof import('../../src/parallel/merge-lock.js');
 let progressModule: typeof import('../../src/parallel/merge-progress.js');
 let conflictModule: typeof import('../../src/parallel/merge-conflict.js');
-let mergeGitModule: typeof import('../../src/parallel/merge-git.js');
 
 let gitPlan: GitPlanStep[] = [];
 let invocationOutputs: string[] = [];
 const commandLog: string[][] = [];
-let isMergeGitMocksInstalled = false;
+
+const mockRunGitCommand = jest.fn<(
+  projectPath: string,
+  args: string[],
+  options?: MockGitCommandOptions
+) => string>();
+const mockCleanTreeHasConflicts = jest.fn<(projectPath: string) => boolean>();
+const mockHasUnmergedFiles = jest.fn<(projectPath: string) => boolean>();
+const mockGitStatusLines = jest.fn<(projectPath: string) => string[]>();
+const mockGetWorkstreamCommitList = jest.fn<(
+  projectPath: string,
+  remote: string,
+  workstreamBranch: string,
+  mainBranch: string
+) => string[]>();
+const mockGetCommitPatch = jest.fn<(projectPath: string, commitSha: string) => string>();
+const mockGetCommitMessage = jest.fn<(projectPath: string, commitSha: string) => string>();
+const mockGetCommitShortSha = jest.fn<(commitSha: string) => string>((commitSha: string) =>
+  commitSha.length > 7 ? commitSha.slice(0, 7) : commitSha
+);
+const mockGetConflictedFiles = jest.fn<(projectPath: string) => string[]>();
+const mockGetCachedDiff = jest.fn<(projectPath: string) => string>();
+const mockGetCachedFiles = jest.fn<(projectPath: string) => string[]>();
+const mockIsMissingRemoteBranchFailure = jest.fn<(output: string) => boolean>();
+const mockIsNonFatalFetchResult = jest.fn<(output: string) => boolean>();
+const mockSafeRunMergeCommand = jest.fn<(projectPath: string, remote: string, branchName: string) => void>();
+const mockIsNoPushError = jest.fn<(output: string) => boolean>();
+const mockHasCherryPickInProgress = jest.fn<(projectPath: string) => boolean>();
+
+jest.unstable_mockModule('../../src/parallel/merge-git.js', () => ({
+  runGitCommand: mockRunGitCommand,
+  cleanTreeHasConflicts: mockCleanTreeHasConflicts,
+  hasUnmergedFiles: mockHasUnmergedFiles,
+  gitStatusLines: mockGitStatusLines,
+  getWorkstreamCommitList: mockGetWorkstreamCommitList,
+  getCommitPatch: mockGetCommitPatch,
+  getCommitMessage: mockGetCommitMessage,
+  getCommitShortSha: mockGetCommitShortSha,
+  getConflictedFiles: mockGetConflictedFiles,
+  getCachedDiff: mockGetCachedDiff,
+  getCachedFiles: mockGetCachedFiles,
+  isMissingRemoteBranchFailure: mockIsMissingRemoteBranchFailure,
+  isNonFatalFetchResult: mockIsNonFatalFetchResult,
+  safeRunMergeCommand: mockSafeRunMergeCommand,
+  isNoPushError: mockIsNoPushError,
+  hasCherryPickInProgress: mockHasCherryPickInProgress,
+}));
 
 function createDb(): Database.Database {
   const next = new Database(':memory:');
@@ -109,37 +154,50 @@ function runMockGitCommand(
   }
 }
 
-function installMergeGitMocks(): void {
-  const originalMissingRemote = mergeGitModule.isMissingRemoteBranchFailure;
-  const originalNonFatalFetch = mergeGitModule.isNonFatalFetchResult;
-  const originalNoPushError = mergeGitModule.isNoPushError;
-  const isMissingRemoteBranchFailure = (output: string): boolean =>
-    originalMissingRemote.call(mergeGitModule, output);
+function configureMergeGitMocks(): void {
+  const isMissingRemoteBranchFailure = (output: string): boolean => {
+    const lower = output.toLowerCase();
+    return (
+      lower.includes('couldn\'t find remote ref') ||
+      (lower.includes('remote branch') && lower.includes('not found')) ||
+      lower.includes('unknown revision or path not in the working tree') ||
+      lower.includes('does not exist') ||
+      lower.includes('fatal: remote ref does not exist')
+    );
+  };
 
-  const isNonFatalFetchResult = (output: string): boolean =>
-    originalNonFatalFetch.call(mergeGitModule, output);
+  const isNonFatalFetchResult = (output: string): boolean => {
+    const lower = output.toLowerCase();
+    return (
+      lower.includes('couldn\'t find remote ref') ||
+      lower.includes('does not exist') ||
+      lower.includes('fatal: remote ref does not exist')
+    );
+  };
 
-  const isNoPushError = (output: string): boolean =>
-    originalNoPushError.call(mergeGitModule, output);
+  const isNoPushError = (output: string): boolean => {
+    const lower = output.toLowerCase();
+    return lower.includes('error:') || lower.includes('fatal:');
+  };
 
   const getConflictedFiles = (projectPath: string): string[] =>
     runMockGitCommand(projectPath, ['diff', '--name-only', '--diff-filter=U'])
       .split('\n')
       .filter(Boolean);
 
-  jest.spyOn(mergeGitModule, 'runGitCommand').mockImplementation(runMockGitCommand);
-  jest.spyOn(mergeGitModule, 'cleanTreeHasConflicts').mockImplementation((projectPath: string) => {
+  mockRunGitCommand.mockImplementation(runMockGitCommand);
+  mockCleanTreeHasConflicts.mockImplementation((projectPath: string) => {
     return getConflictedFiles(projectPath).length > 0;
   });
-  jest.spyOn(mergeGitModule, 'hasUnmergedFiles').mockImplementation((projectPath: string) => {
+  mockHasUnmergedFiles.mockImplementation((projectPath: string) => {
     return getConflictedFiles(projectPath).length > 0;
   });
-  jest.spyOn(mergeGitModule, 'gitStatusLines').mockImplementation((projectPath: string) => {
+  mockGitStatusLines.mockImplementation((projectPath: string) => {
     return runMockGitCommand(projectPath, ['status', '--porcelain'])
       .split('\n')
       .filter(Boolean);
   });
-  jest.spyOn(mergeGitModule, 'getWorkstreamCommitList').mockImplementation((
+  mockGetWorkstreamCommitList.mockImplementation((
     projectPath: string,
     remote: string,
     workstreamBranch: string,
@@ -161,20 +219,20 @@ function installMergeGitMocks(): void {
       .map((line) => line.trim())
       .filter(Boolean);
   });
-  jest.spyOn(mergeGitModule, 'getCommitPatch').mockImplementation((projectPath: string, commitSha: string) => {
+  mockGetCommitPatch.mockImplementation((projectPath: string, commitSha: string) => {
     return runMockGitCommand(projectPath, ['show', commitSha, '--']);
   });
-  jest.spyOn(mergeGitModule, 'getCommitMessage').mockImplementation((projectPath: string, commitSha: string) => {
+  mockGetCommitMessage.mockImplementation((projectPath: string, commitSha: string) => {
     return runMockGitCommand(projectPath, ['log', '-1', '--format=%s%n%b', commitSha]);
   });
-  jest.spyOn(mergeGitModule, 'getCachedDiff').mockImplementation((projectPath: string) => {
+  mockGetCachedDiff.mockImplementation((projectPath: string) => {
     return runMockGitCommand(projectPath, ['diff', '--cached']);
   });
-  jest.spyOn(mergeGitModule, 'getCachedFiles').mockImplementation((projectPath: string) => {
+  mockGetCachedFiles.mockImplementation((projectPath: string) => {
     return runMockGitCommand(projectPath, ['diff', '--cached', '--name-only']).split('\n').filter(Boolean);
   });
-  jest.spyOn(mergeGitModule, 'getConflictedFiles').mockImplementation(getConflictedFiles);
-  jest.spyOn(mergeGitModule, 'safeRunMergeCommand').mockImplementation((
+  mockGetConflictedFiles.mockImplementation(getConflictedFiles);
+  mockSafeRunMergeCommand.mockImplementation((
     projectPath: string,
     remote: string,
     branchName: string
@@ -193,12 +251,24 @@ function installMergeGitMocks(): void {
     throw new Error(`Failed to fetch ${branchName} from ${remote}: ${output}`);
   });
 
-  jest.spyOn(mergeGitModule, 'isNoPushError').mockImplementation(isNoPushError);
+  mockIsNoPushError.mockImplementation(isNoPushError);
 
   // Keep helper checks aligned with production implementations.
-  jest.spyOn(mergeGitModule, 'isMissingRemoteBranchFailure').mockImplementation(isMissingRemoteBranchFailure);
-  jest.spyOn(mergeGitModule, 'isNonFatalFetchResult').mockImplementation(isNonFatalFetchResult);
+  mockIsMissingRemoteBranchFailure.mockImplementation(isMissingRemoteBranchFailure);
+  mockIsNonFatalFetchResult.mockImplementation(isNonFatalFetchResult);
+  mockHasCherryPickInProgress.mockImplementation((projectPath: string) => {
+    return existsSync(resolve(projectPath, '.git', 'CHERRY_PICK_HEAD'));
+  });
 }
+
+[mergeModule, lockModule, progressModule, conflictModule] = await Promise.all([
+  import('../../src/parallel/merge.js'),
+  import('../../src/parallel/merge-lock.js'),
+  import('../../src/parallel/merge-progress.js'),
+  import('../../src/parallel/merge-conflict.js'),
+]);
+
+const registryModule = await import('../../src/providers/registry.js');
 
 beforeEach(async () => {
   db = createDb();
@@ -214,15 +284,6 @@ beforeEach(async () => {
     },
   });
 
-  [mergeModule, lockModule, progressModule, conflictModule, mergeGitModule] = await Promise.all([
-    import('../../src/parallel/merge.js'),
-    import('../../src/parallel/merge-lock.js'),
-    import('../../src/parallel/merge-progress.js'),
-    import('../../src/parallel/merge-conflict.js'),
-    import('../../src/parallel/merge-git.js'),
-  ]);
-
-  const registryModule = await import('../../src/providers/registry.js');
   (registryModule as unknown as { setProviderRegistry: (registry: unknown) => void }).setProviderRegistry({
     get: () => ({
       invoke: async () => {
@@ -239,10 +300,7 @@ beforeEach(async () => {
     }),
   });
 
-  if (!isMergeGitMocksInstalled) {
-    installMergeGitMocks();
-    isMergeGitMocksInstalled = true;
-  }
+  configureMergeGitMocks();
 });
 
 afterEach(() => {

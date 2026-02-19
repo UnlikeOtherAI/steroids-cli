@@ -19,7 +19,7 @@ import {
   type SteroidsConfig,
 } from './loader.js';
 
-type Provider = 'claude' | 'openai' | 'gemini';
+type Provider = 'claude' | 'openai' | 'gemini' | 'mistral';
 type Role = 'orchestrator' | 'coder' | 'reviewer';
 
 interface SetupState {
@@ -39,6 +39,7 @@ const PROVIDERS: { id: Provider; name: string; description: string }[] = [
   { id: 'claude', name: 'Anthropic Claude', description: 'Claude 3.5/4 models' },
   { id: 'openai', name: 'OpenAI', description: 'GPT-4, O1, O3 models' },
   { id: 'gemini', name: 'Google Gemini', description: 'Gemini Pro/Ultra/Flash' },
+  { id: 'mistral', name: 'Mistral AI', description: 'Mistral and Codestral models' },
 ];
 
 const ROLES: { id: Role; name: string; description: string }[] = [
