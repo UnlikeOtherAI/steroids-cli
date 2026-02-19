@@ -29,6 +29,23 @@ jest.unstable_mockModule('../../src/config/loader.js', () => ({
   loadConfig: mockLoadConfig,
 }));
 
+const mockCreateHash = jest.fn((algorithm: string) => {
+  let input = '';
+  const hash = {
+    update: (chunk: string) => {
+      input += chunk;
+      return hash;
+    },
+    digest: (_encoding: string) => `${algorithm}-${input}`,
+  };
+  return hash;
+});
+
+jest.unstable_mockModule('node:crypto', () => ({
+  createHash: mockCreateHash,
+  randomUUID: () => '00000000-0000-4000-8000-000000000000',
+}));
+
 interface GitPlanStep {
   args: string[];
   output?: string;
