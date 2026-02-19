@@ -406,7 +406,7 @@ export async function fetchMistralModels(): Promise<FetchModelsResult> {
       }
     }
 
-    const models = [...modelById.values()];
+    const models = dedupeMistralModels([...modelById.values()]);
 
     models.sort((a, b) => {
       const aScore = getMistralModelScore(a.id);
@@ -439,6 +439,40 @@ function getMistralModelScore(id: string): number {
   if (id.includes('mistral-small')) return 3;
   if (id.includes('ministral')) return 4;
   return 5;
+}
+
+function dedupeMistralModels(models: APIModel[]): APIModel[] {
+  const byName = new Map<string, APIModel>();
+
+  for (const model of models) {
+    const key = (model.name || model.id).trim().toLowerCase();
+    const existing = byName.get(key);
+
+    if (!existing || preferMistralModel(model, existing)) {
+      byName.set(key, model);
+    }
+  }
+
+  return [...byName.values()];
+}
+
+function preferMistralModel(candidate: APIModel, existing: APIModel): boolean {
+  const score = (model: APIModel): number => {
+    let value = 0;
+    if (model.id.includes('latest')) value += 10;
+    if (model.id.endsWith('-latest')) value += 5;
+    if (model.name?.toLowerCase().includes('latest')) value += 1;
+    return value;
+  };
+
+  const candidateScore = score(candidate);
+  const existingScore = score(existing);
+
+  if (candidateScore !== existingScore) {
+    return candidateScore > existingScore;
+  }
+
+  return candidate.id.localeCompare(existing.id) < 0;
 }
 
 /**
