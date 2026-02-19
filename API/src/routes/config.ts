@@ -504,12 +504,21 @@ async function fetchMistralModels(): Promise<{ models: APIModel[]; source: strin
       | Array<{ id: string; name?: string; description?: string; max_context_length?: number }>;
 
     const rawModels = Array.isArray(data) ? data : (data.data ?? []);
-    const models: APIModel[] = rawModels.map((m) => ({
-      id: m.id,
-      name: m.name || formatMistralModelName(m.id),
-      description: m.description,
-      contextWindow: m.max_context_length,
-    }));
+    const modelById = new Map<string, APIModel>();
+    for (const m of rawModels) {
+      const mapped: APIModel = {
+        id: m.id,
+        name: m.name || formatMistralModelName(m.id),
+        description: m.description,
+        contextWindow: m.max_context_length,
+      };
+
+      if (!modelById.has(mapped.id)) {
+        modelById.set(mapped.id, mapped);
+      }
+    }
+
+    const models = [...modelById.values()];
 
     models.sort((a, b) => {
       const aScore = getMistralModelScore(a.id);
