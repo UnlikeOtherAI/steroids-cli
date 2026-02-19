@@ -37,9 +37,9 @@ interface SetupState {
 
 const PROVIDERS: { id: Provider; name: string; description: string }[] = [
   { id: 'claude', name: 'Anthropic Claude', description: 'Claude 3.5/4 models' },
-  { id: 'openai', name: 'OpenAI', description: 'GPT-4, O1, O3 models' },
+  { id: 'openai', name: 'OpenAI (Codex)', description: 'Codex CLI via OpenAI models' },
   { id: 'gemini', name: 'Google Gemini', description: 'Gemini Pro/Ultra/Flash' },
-  { id: 'mistral', name: 'Mistral AI', description: 'Mistral and Codestral models' },
+  { id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral models' },
 ];
 
 const ROLES: { id: Role; name: string; description: string }[] = [
@@ -144,8 +144,10 @@ function render(state: SetupState): void {
       }
     }
   } else if (state.step === 'model') {
+    const selectedProviderName =
+      PROVIDERS.find((p) => p.id === state.provider)?.name ?? state.provider ?? '-';
     console.log(
-      '│' + `  Select a model from ${state.provider}:`.padEnd(width) + '│'
+      '│' + `  Select a model from ${selectedProviderName}:`.padEnd(width) + '│'
     );
     console.log('│' + ''.padEnd(width) + '│');
 

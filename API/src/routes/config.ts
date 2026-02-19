@@ -649,12 +649,12 @@ router.get('/ai/providers', (req: Request, res: Response) => {
     },
     {
       id: 'mistral',
-      name: 'Mistral AI',
+      name: 'Mistral',
       installed: isCliInstalled('vibe'),
     },
     {
       id: 'codex',
-      name: 'Codex',
+      name: 'OpenAI (Codex)',
       installed: isCliInstalled('codex'),
     },
   ];
@@ -666,3 +666,4 @@ router.get('/ai/providers', (req: Request, res: Response) => {
 });
 
 export default router;
+

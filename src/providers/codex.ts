@@ -53,7 +53,7 @@ const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec --dangerousl
  */
 export class CodexProvider extends BaseAIProvider {
   readonly name = 'codex';
-  readonly displayName = 'OpenAI Codex';
+  readonly displayName = 'OpenAI (Codex)';
 
   /**
    * Write prompt to a temporary file
