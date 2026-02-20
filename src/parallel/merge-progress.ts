@@ -81,3 +81,13 @@ export function getMergeProgressForWorkstream(
     .filter((row) => row.workstream_id === workstreamId)
     .sort((left, right) => left.position - right.position);
 }
+
+export function findMergeProgressBySourceCommit(
+  rows: MergeProgressRow[],
+  workstreamId: string,
+  sourceCommitSha: string
+): MergeProgressRow | undefined {
+  return rows.find(
+    (row) => row.workstream_id === workstreamId && row.commit_sha === sourceCommitSha
+  );
+}

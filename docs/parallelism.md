@@ -441,7 +441,7 @@ Checklist:
 : Files: `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`, `src/parallel/merge.ts`
 - `[x]` `CHUNK-07` Implement durable merge-progress mapping (`sealed_commit_sha` -> `applied_commit_sha`) with unique constraints.
 : Files: `src/parallel/merge-progress.ts`, `src/database/schema.ts`, `migrations/<new>.sql`
-- `[ ]` `CHUNK-08` Implement crash-safe merge resume using provenance mapping and reachability checks.
+- `[x]` `CHUNK-08` Implement crash-safe merge resume using provenance mapping and reachability checks.
 : Files: `src/parallel/merge.ts`, `src/parallel/merge-progress.ts`, `src/commands/merge.ts`
 - `[ ]` `CHUNK-09` Add post-merge validation gate and blocked-validation transition on failure.
 : Files: `src/parallel/merge.ts`, `src/commands/merge.ts`, `src/runners/global-db.ts`

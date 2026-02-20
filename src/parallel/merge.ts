@@ -112,6 +112,25 @@ function cleanupWorkspaceState(
   }
 }
 
+function isAppliedCommitIntegrated(projectPath: string, commitSha: string | null): boolean {
+  if (!commitSha) {
+    return false;
+  }
+
+  const output = runGitCommand(
+    projectPath,
+    ['branch', '--contains', commitSha, '--list', 'HEAD'],
+    { allowFailure: true }
+  );
+  const lower = output.toLowerCase();
+
+  if (lower.includes('fatal:') || lower.includes('error:')) {
+    return false;
+  }
+
+  return output.trim().length > 0;
+}
+
 function resolveGitSha(output: string): string | null {
   const trimmed = output.trim();
   if (!trimmed) return null;
@@ -190,8 +209,12 @@ async function processWorkstream(
     const prior = workstreamLookup.get(position);
 
     if (prior?.status === 'applied' && prior.commit_sha === commitSha) {
-      summary.applied += 1;
-      continue;
+      if (isAppliedCommitIntegrated(projectPath, prior.applied_commit_sha)) {
+        summary.applied += 1;
+        continue;
+      }
+
+      clearProgressEntry(db, sessionId, workstream.id, position);
     }
 
     if (prior?.status === 'skipped' && prior.commit_sha === commitSha) {

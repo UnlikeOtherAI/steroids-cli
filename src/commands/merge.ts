@@ -205,7 +205,8 @@ function resolveMergePlan(
     throw new Error(`No parallel sessions found for project: ${projectPath}`);
   }
 
-  const plan = buildPlanForSession(db, targetSession, false);
+  const includeRunning = targetSession.status === 'running' || targetSession.status === 'merging';
+  const plan = buildPlanForSession(db, targetSession, includeRunning);
 
   if (plan.sectionPlans.length === 0) {
     throw new Error(`No completed workstreams found for session: ${targetSession.id}`);
