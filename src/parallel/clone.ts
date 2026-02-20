@@ -226,15 +226,27 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
   mkdirSync(workspaceRoot, { recursive: true });
   mkdirSync(resolve(workspacePath, '..'), { recursive: true });
 
-  const usedLocalClone = isSameFileSystem(projectPath, workspaceRoot);
+  let usedLocalClone = isSameFileSystem(projectPath, workspaceRoot);
   const cloneArgs = ['clone', ...(usedLocalClone ? ['--local'] : []), projectPath, workspacePath];
 
   try {
     // hardcoded command, no user input
     execFileSync('git', cloneArgs, { cwd: process.cwd(), stdio: 'inherit' });
   } catch (error: unknown) {
-    rmSync(workspacePath, { recursive: true, force: true });
-    throw new WorkspaceCloneError('Git clone failed', error);
+    // If --local clone failed, retry without it (handles cross-device link on macOS APFS)
+    if (usedLocalClone) {
+      rmSync(workspacePath, { recursive: true, force: true });
+      usedLocalClone = false;
+      try {
+        execFileSync('git', ['clone', projectPath, workspacePath], { cwd: process.cwd(), stdio: 'inherit' });
+      } catch (retryError: unknown) {
+        rmSync(workspacePath, { recursive: true, force: true });
+        throw new WorkspaceCloneError('Git clone failed', retryError);
+      }
+    } else {
+      rmSync(workspacePath, { recursive: true, force: true });
+      throw new WorkspaceCloneError('Git clone failed', error);
+    }
   }
 
   try {
