@@ -1,7 +1,7 @@
 import { execSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { homedir } from 'node:os';
 import { v4 as uuidv4 } from 'uuid';
 import { openDatabase } from '../database/connection.js';
 import { createWorkspaceClone } from '../parallel/clone.js';
@@ -87,43 +87,6 @@ export function getConfiguredMaxClones(projectPath: string): number {
     : 3;
 }
 
-function toFinitePositive(value: number | undefined, fallback: number): number {
-  if (!Number.isFinite(value) || (value ?? 0) <= 0) {
-    return fallback;
-  }
-  return Number(value);
-}
-
-function resolveResourceCloneLimit(projectPath: string, config: ReturnType<typeof loadConfig>): number {
-  const minMemoryMbPerClone = toFinitePositive(
-    config.runners?.parallel?.minFreeMemoryMbPerClone,
-    1024
-  );
-  const minDiskMbPerClone = toFinitePositive(
-    config.runners?.parallel?.minFreeDiskMbPerClone,
-    512
-  );
-
-  const freeMemoryMb = Math.max(0, Math.floor(os.freemem() / (1024 * 1024)));
-  const memoryLimitedMax = Math.max(1, Math.floor(freeMemoryMb / minMemoryMbPerClone));
-
-  let diskLimitedMax = Number.MAX_SAFE_INTEGER;
-  try {
-    const stats = fs.statfsSync(projectPath) as {
-      bavail?: number | bigint;
-      bsize?: number | bigint;
-    };
-    const bavail = typeof stats.bavail === 'bigint' ? Number(stats.bavail) : (stats.bavail ?? 0);
-    const bsize = typeof stats.bsize === 'bigint' ? Number(stats.bsize) : (stats.bsize ?? 0);
-    const freeDiskMb = Math.max(0, Math.floor((bavail * bsize) / (1024 * 1024)));
-    diskLimitedMax = Math.max(1, Math.floor(freeDiskMb / minDiskMbPerClone));
-  } catch {
-    // If statfs isn't available for this path, treat disk as unconstrained.
-  }
-
-  return Math.max(1, Math.min(memoryLimitedMax, diskLimitedMax));
-}
-
 export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: number): ParallelWorkstreamPlan {
   const sessionId = uuidv4();
   const shortSessionId = sessionId.slice(0, 8);
@@ -142,19 +105,7 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
   }
 
   const configuredMaxClones = getConfiguredMaxClones(projectPath);
-  const requestedMaxClones = maxClonesOverride ?? configuredMaxClones;
-  const resourceMaxClones = resolveResourceCloneLimit(projectPath, config);
-  const autoDownshift = config.runners?.parallel?.autoDownshiftMaxClones !== false;
-  const effectiveMaxClones = autoDownshift
-    ? Math.min(requestedMaxClones, resourceMaxClones)
-    : requestedMaxClones;
-
-  if (!autoDownshift && requestedMaxClones > resourceMaxClones) {
-    throw new Error(
-      `Insufficient resources for maxClones=${requestedMaxClones}. ` +
-      `Resource preflight limit is ${resourceMaxClones}.`
-    );
-  }
+  const effectiveMaxClones = maxClonesOverride ?? configuredMaxClones;
   const { db, close } = openDatabase(projectPath);
 
   try {
@@ -340,7 +291,7 @@ export function spawnDetachedRunner(options: { projectPath: string; args: string
   let logFd: number | undefined;
 
   if (daemonLogsEnabled) {
-    const logsDir = path.join(os.homedir(), '.steroids', 'runners', 'logs');
+    const logsDir = path.join(homedir(), '.steroids', 'runners', 'logs');
     fs.mkdirSync(logsDir, { recursive: true });
 
     const tempLogPath = path.join(logsDir, `daemon-${Date.now()}.log`);

@@ -55,9 +55,6 @@ export interface SteroidsConfig {
       hydrationCommand?: string;
       validationCommand?: string;
       allowSharedMutableDependencies?: boolean;
-      autoDownshiftMaxClones?: boolean;
-      minFreeMemoryMbPerClone?: number;
-      minFreeDiskMbPerClone?: number;
       cleanupOnSuccess?: boolean;
       cleanupOnFailure?: boolean;
     };
@@ -183,9 +180,6 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       hydrationCommand: '',
       validationCommand: '',
       allowSharedMutableDependencies: false,
-      autoDownshiftMaxClones: true,
-      minFreeMemoryMbPerClone: 128,
-      minFreeDiskMbPerClone: 512,
       cleanupOnSuccess: true,
       cleanupOnFailure: false,
     },
