@@ -157,7 +157,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
     maxConcurrent: {
       _description: 'Maximum concurrent runners (global)',
       _type: 'number',
-      _default: 1,
+      _default: 5,
     },
     logRetention: {
       _description: 'How long to keep runner logs',
@@ -175,12 +175,12 @@ export const CONFIG_SCHEMA: SchemaObject = {
       enabled: {
         _description: 'Enable runners with independent workstreams',
         _type: 'boolean',
-        _default: false,
+        _default: true,
       },
       maxClones: {
         _description: 'Maximum number of parallel workstreams (clone runners)',
         _type: 'number',
-        _default: 3,
+        _default: 5,
       },
       workspaceRoot: {
         _description: 'Optional path for parallel workspaces root',
