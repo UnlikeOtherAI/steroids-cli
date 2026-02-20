@@ -166,6 +166,20 @@ function verifySteroidsSymlink(steroidsPath: string): void {
   accessSync(dbPath, constants.R_OK);
 }
 
+function enforceWorkspaceDependencyIsolation(workspacePath: string): void {
+  const nodeModulesPath = join(workspacePath, 'node_modules');
+  if (!existsSync(nodeModulesPath)) {
+    return;
+  }
+
+  const stats = lstatSync(nodeModulesPath);
+  if (stats.isSymbolicLink()) {
+    throw new WorkspaceCloneError(
+      `Forbidden shared mutable dependency directory: ${nodeModulesPath} is a symlink`
+    );
+  }
+}
+
 function createWorkspaceSymlink(
   clonePath: string,
   projectPath: string
@@ -242,6 +256,8 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
     rmSync(workspacePath, { recursive: true, force: true });
     throw new WorkspaceCloneError('Failed to create .steroids symlink', error);
   }
+
+  enforceWorkspaceDependencyIsolation(workspacePath);
 
   return {
     projectPath,

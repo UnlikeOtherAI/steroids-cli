@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -97,6 +97,13 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
     throw new Error('Parallel mode is disabled. Set runners.parallel.enabled: true to use --parallel.');
   }
 
+  if (config.runners?.parallel?.allowSharedMutableDependencies === true) {
+    throw new Error(
+      'Parallel mode forbids shared mutable dependency directories. ' +
+      'Set runners.parallel.allowSharedMutableDependencies to false.'
+    );
+  }
+
   const configuredMaxClones = getConfiguredMaxClones(projectPath);
   const effectiveMaxClones = maxClonesOverride ?? configuredMaxClones;
   const { db, close } = openDatabase(projectPath);
@@ -182,9 +189,19 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
 
 export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath: string): string {
   const { db, close } = openGlobalDatabase();
-  const configuredWorkspaceRoot = loadConfig(projectPath).runners?.parallel?.workspaceRoot;
+  const parallelConfig = loadConfig(projectPath).runners?.parallel;
+  const configuredWorkspaceRoot = parallelConfig?.workspaceRoot;
+  const hydrationCommand =
+    typeof parallelConfig?.hydrationCommand === 'string' ? parallelConfig.hydrationCommand.trim() : '';
+  const allowSharedMutableDependencies = parallelConfig?.allowSharedMutableDependencies === true;
 
   try {
+    if (allowSharedMutableDependencies) {
+      throw new Error(
+        'Parallel session launch blocked: shared mutable dependency directories are unsafe in full-access mode.'
+      );
+    }
+
     const activeSession = db
       .prepare(
         `SELECT id, status
@@ -225,6 +242,14 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
         });
 
         workspacePath = workspaceClone.workspacePath;
+
+        if (hydrationCommand.length > 0) {
+          execSync(hydrationCommand, {
+            cwd: workspaceClone.workspacePath,
+            stdio: 'inherit',
+            shell: true,
+          });
+        }
 
         insertWorkstream.run(
           workstream.id,

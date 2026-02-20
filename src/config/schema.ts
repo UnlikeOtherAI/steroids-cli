@@ -187,6 +187,16 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _type: 'string',
         _default: '',
       },
+      hydrationCommand: {
+        _description: 'Optional shell command to hydrate each workspace before runner start',
+        _type: 'string',
+        _default: '',
+      },
+      allowSharedMutableDependencies: {
+        _description: 'Allow shared mutable dependency directories across parallel workspaces (unsafe)',
+        _type: 'boolean',
+        _default: false,
+      },
       cleanupOnSuccess: {
         _description: 'Delete workspace clones after successful merge',
         _type: 'boolean',

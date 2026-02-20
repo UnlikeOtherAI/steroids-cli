@@ -449,7 +449,7 @@ Checklist:
 : Files: `src/commands/workspaces.ts`, `src/runners/wakeup.ts`, `src/runners/global-db.ts`
 - `[x]` `CHUNK-11` Implement deterministic reconciliation matrix and bounded recovery retries/backoff.
 : Files: `src/runners/wakeup.ts`, `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`
-- `[ ]` `CHUNK-12` Add hydration isolation guardrails (forbid shared mutable dependency directories).
+- `[x]` `CHUNK-12` Add hydration isolation guardrails (forbid shared mutable dependency directories).
 : Files: `src/parallel/clone.ts`, `src/commands/runners-parallel.ts`, `src/config/schema.ts`
 - `[ ]` `CHUNK-13` Add resource preflight + auto-downshift of `maxClones`.
 : Files: `src/commands/runners-parallel.ts`, `src/config/loader.ts`, `src/config/schema.ts`
