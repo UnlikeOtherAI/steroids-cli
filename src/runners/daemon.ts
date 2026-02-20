@@ -11,6 +11,8 @@ import { runOrchestratorLoop } from './orchestrator-loop.js';
 import { updateProjectStats, getRegisteredProject } from './projects.js';
 import { openDatabase } from '../database/connection.js';
 import { getTaskCountsByStatus } from '../database/queries.js';
+import { runParallelMerge, type MergeWorkstreamSpec } from '../parallel/merge.js';
+import { loadConfig } from '../config/loader.js';
 
 export type RunnerStatus = 'idle' | 'running' | 'stopping';
 
@@ -277,6 +279,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
   let shutdownRequested = false;
 
   // Run the orchestrator loop
+  let loopCompletedNormally = false;
   try {
     await runOrchestratorLoop({
       projectPath: effectiveProjectPath,
@@ -303,12 +306,115 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
         updateRunnerCurrentTask(runnerId, null);
       },
     });
+    loopCompletedNormally = true;
   } catch (error) {
     console.error('Loop error:', error);
   }
 
+  // Auto-merge if this is a parallel runner and loop completed normally
+  if (loopCompletedNormally && options.parallelSessionId) {
+    try {
+      await autoMergeOnCompletion(
+        options.parallelSessionId,
+        effectiveProjectPath,
+        runnerId
+      );
+    } catch (error) {
+      console.error('[AUTO-MERGE] Error:', error instanceof Error ? error.message : error);
+    }
+  }
+
   // Cleanup and exit
   shutdown('completed');
+}
+
+/**
+ * Auto-merge workstream branches when a parallel runner finishes all tasks.
+ * Only triggers merge if this is the last active workstream for the session.
+ */
+async function autoMergeOnCompletion(
+  parallelSessionId: string,
+  workspacePath: string,
+  runnerId: string
+): Promise<void> {
+  const { db, close } = openGlobalDatabase();
+  try {
+    // Mark our workstream as completed
+    const updated = db.prepare(
+      `UPDATE workstreams SET status = 'completed', completed_at = COALESCE(completed_at, datetime('now'))
+       WHERE session_id = ? AND clone_path = ? AND status = 'running'`
+    ).run(parallelSessionId, workspacePath);
+
+    if (updated.changes === 0) {
+      console.log('[AUTO-MERGE] No running workstream found for this runner, skipping');
+      return;
+    }
+
+    // Check if ALL workstreams for this session are now terminal
+    const remaining = db.prepare(
+      `SELECT COUNT(*) as count FROM workstreams
+       WHERE session_id = ? AND status = 'running'`
+    ).get(parallelSessionId) as { count: number };
+
+    if (remaining.count > 0) {
+      console.log(`[AUTO-MERGE] ${remaining.count} workstream(s) still running, skipping merge`);
+      return;
+    }
+
+    // Get original project path from session
+    const session = db.prepare(
+      `SELECT project_path, status FROM parallel_sessions WHERE id = ?`
+    ).get(parallelSessionId) as { project_path: string; status: string } | undefined;
+
+    if (!session) {
+      console.log('[AUTO-MERGE] Session not found, skipping');
+      return;
+    }
+
+    // Get completed workstreams
+    const workstreams = db.prepare(
+      `SELECT id, branch_name FROM workstreams
+       WHERE session_id = ? AND status = 'completed'
+       ORDER BY completion_order ASC NULLS LAST, created_at ASC`
+    ).all(parallelSessionId) as Array<{ id: string; branch_name: string }>;
+
+    if (workstreams.length === 0) {
+      console.log('[AUTO-MERGE] No completed workstreams, skipping');
+      return;
+    }
+
+    const specs: MergeWorkstreamSpec[] = workstreams.map(ws => ({
+      id: ws.id,
+      branchName: ws.branch_name,
+    }));
+
+    console.log(`\n[AUTO-MERGE] All workstreams done. Merging ${specs.length} workstream(s)...`);
+
+    const config = loadConfig(session.project_path);
+    const validationCommand = typeof config.runners?.parallel?.validationCommand === 'string'
+      ? config.runners.parallel.validationCommand : undefined;
+    const mainBranch = config.git?.branch ?? 'main';
+    const remote = config.git?.remote ?? 'origin';
+
+    const result = await runParallelMerge({
+      projectPath: session.project_path,
+      sessionId: parallelSessionId,
+      runnerId,
+      workstreams: specs,
+      remote,
+      mainBranch,
+      cleanupOnSuccess: config.runners?.parallel?.cleanupOnSuccess ?? true,
+      validationCommand,
+    });
+
+    if (result.success) {
+      console.log(`[AUTO-MERGE] Success: ${result.completedCommits} commits applied, ${result.conflicts} conflicts, ${result.skipped} skipped`);
+    } else {
+      console.error(`[AUTO-MERGE] Failed: ${result.errors.join('; ')}`);
+    }
+  } finally {
+    close();
+  }
 }
 
 /**
