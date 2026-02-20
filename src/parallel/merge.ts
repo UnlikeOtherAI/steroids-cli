@@ -21,6 +21,7 @@ import {
 import {
   MergeLockRecord,
   acquireMergeLock,
+  assertMergeLockEpoch,
   refreshMergeLock,
   releaseMergeLock,
 } from './merge-lock.js';
@@ -118,7 +119,7 @@ async function processWorkstream(
   mainBranch: string,
   remote: string,
   progressRows: MergeProgressRow[],
-  heartbeat: { sessionId: string; runnerId: string; timeoutMinutes: number }
+  heartbeat: { sessionId: string; runnerId: string; timeoutMinutes: number; lockEpoch: number }
 ): Promise<{ applied: number; skipped: number; conflicts: number }> {
   const summary = { applied: 0, skipped: 0, conflicts: 0 };
   const commits = getWorkstreamCommitList(projectPath, remote, workstream.branchName, mainBranch);
@@ -203,7 +204,13 @@ async function processWorkstream(
       summary.conflicts += 1;
     }
 
-    refreshMergeLock(db, heartbeat.sessionId, heartbeat.runnerId, heartbeat.timeoutMinutes);
+    refreshMergeLock(
+      db,
+      heartbeat.sessionId,
+      heartbeat.runnerId,
+      heartbeat.timeoutMinutes,
+      heartbeat.lockEpoch
+    );
   }
 
   return summary;
@@ -237,6 +244,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
   };
 
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let lockEpoch = 0;
 
   try {
     const lock = acquireMergeLock(db, {
@@ -249,6 +257,8 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       summary.errors.push(`Could not acquire merge lock (held by ${lock.lock?.runner_id ?? 'another process'})`);
       return summary;
     }
+    lockEpoch = lock.lock?.lock_epoch ?? 0;
+    assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
 
     const integrationWorkspace = createIntegrationWorkspace({
       projectPath,
@@ -265,15 +275,18 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
 
     heartbeatTimer = setInterval(() => {
       try {
-        refreshMergeLock(db, sessionId, runnerId, lockTimeoutMinutes);
+        refreshMergeLock(db, sessionId, runnerId, lockTimeoutMinutes, lockEpoch);
+        assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
       } catch {
         // If heartbeat fails, merge keeps running until lock-dependent operations fail.
       }
     }, heartbeatIntervalMs);
 
     ensureMergeWorkingTree(mergePath);
+    assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
 
     for (const stream of workstreams) {
+      assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
       safeRunMergeCommand(mergePath, remote, stream.branchName);
     }
 
@@ -309,7 +322,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
         mainBranch,
         remote,
         progressRows,
-        { sessionId, runnerId, timeoutMinutes: lockTimeoutMinutes }
+        { sessionId, runnerId, timeoutMinutes: lockTimeoutMinutes, lockEpoch }
       );
 
       summary.completedCommits += stats.applied;
@@ -317,6 +330,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       summary.conflicts += stats.conflicts;
     }
 
+    assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
     const pushResult = runGitCommand(mergePath, ['push', remote, mainBranch], { allowFailure: true });
     if (isNoPushError(pushResult)) {
       summary.errors.push('Push to main failed.');
@@ -325,6 +339,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
 
     for (const stream of workstreams) {
       try {
+        assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
         runGitCommand(mergePath, ['push', remote, '--delete', stream.branchName]);
       } catch {
         // Ignore branch delete failures; branch may already be deleted.
@@ -359,7 +374,9 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       rmSync(integrationWorkspacePath, { recursive: true, force: true });
     }
 
-    releaseMergeLock(db, sessionId, runnerId);
+    if (lockEpoch > 0) {
+      releaseMergeLock(db, sessionId, runnerId, lockEpoch);
+    }
     close();
   }
 }

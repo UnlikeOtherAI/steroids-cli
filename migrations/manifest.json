@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 11,
+  "latestDbVersion": 12,
   "migrations": [
     {
       "id": 1,
@@ -89,6 +89,14 @@
       "description": "Add merge lock and merge progress tables for parallel merge workflow",
       "checksum": "",
       "cliVersion": "0.8.22"
+    },
+    {
+      "id": 12,
+      "name": "012_add_merge_lock_epoch",
+      "file": "012_add_merge_lock_epoch.sql",
+      "description": "Add lock_epoch column for merge lock fencing semantics",
+      "checksum": "",
+      "cliVersion": "0.8.33"
     }
   ]
 }

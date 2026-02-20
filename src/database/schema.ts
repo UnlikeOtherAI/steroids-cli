@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS merge_locks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
     runner_id TEXT NOT NULL,
+    lock_epoch INTEGER NOT NULL DEFAULT 1,
     acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
     expires_at TEXT NOT NULL,
     heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -179,6 +180,7 @@ CREATE TABLE IF NOT EXISTS merge_locks (
 
 CREATE INDEX IF NOT EXISTS idx_merge_locks_expires ON merge_locks(expires_at);
 CREATE INDEX IF NOT EXISTS idx_merge_locks_heartbeat ON merge_locks(heartbeat_at);
+CREATE INDEX IF NOT EXISTS idx_merge_locks_epoch ON merge_locks(session_id, lock_epoch);
 
 -- Merge progress tracking for crash recovery during cherry-pick
 CREATE TABLE IF NOT EXISTS merge_progress (
@@ -213,4 +215,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (8, '008_add_secti
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (9, '009_add_incidents_and_failure_tracking', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (10, '010_add_lifecycle_timestamps', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (11, '011_add_merge_locks_and_progress', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (12, '012_add_merge_lock_epoch', 'builtin');
 `;
