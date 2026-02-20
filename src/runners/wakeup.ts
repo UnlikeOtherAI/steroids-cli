@@ -90,7 +90,7 @@ export function hasActiveParallelSessionForProject(projectPath: string): boolean
       .prepare(
         `SELECT 1 FROM parallel_sessions
          WHERE project_path = ?
-           AND status IN ('running', 'merging')`
+           AND status NOT IN ('completed', 'failed', 'aborted')`
       )
       .get(projectPath) as { 1: number } | undefined;
 
@@ -98,6 +98,19 @@ export function hasActiveParallelSessionForProject(projectPath: string): boolean
   } finally {
     close();
   }
+}
+
+function releaseExpiredWorkstreamLeases(db: ReturnType<typeof openGlobalDatabase>['db']): number {
+  const result = db.prepare(
+    `UPDATE workstreams
+     SET runner_id = NULL,
+         lease_expires_at = NULL
+     WHERE status = 'running'
+       AND lease_expires_at IS NOT NULL
+       AND lease_expires_at <= datetime('now')`
+  ).run();
+
+  return result.changes;
 }
 
 /**
@@ -125,6 +138,7 @@ function startRunner(projectPath: string): { pid: number } | null {
     const args = ['runners', 'start', '--detach', '--project', projectPath];
 
     const child = spawn('steroids', args, {
+      cwd: projectPath,
       detached: true,
       stdio: 'ignore',
     });
@@ -208,6 +222,15 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
       }
     } catch {
       // ignore global DB issues; wakeup will still attempt per-project checks
+    }
+
+    try {
+      const releasedLeases = releaseExpiredWorkstreamLeases(global.db);
+      if (releasedLeases > 0) {
+        log(`Released ${releasedLeases} expired workstream lease(s)`);
+      }
+    } catch {
+      // ignore lease cleanup issues in wakeup
     }
 
   // Step 2: Clean zombie lock if present

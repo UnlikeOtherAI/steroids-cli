@@ -38,6 +38,29 @@ export function parseSectionIds(value: string): string[] {
     .filter((id) => id.length > 0);
 }
 
+function claimWorkstreamLease(
+  db: ReturnType<typeof openGlobalDatabase>['db'],
+  workstreamId: string,
+  claimOwner: string,
+  expectedClaimGeneration: number
+): number {
+  const result = db.prepare(
+    `UPDATE workstreams
+     SET runner_id = ?,
+         claim_generation = claim_generation + 1,
+         lease_expires_at = datetime('now', '+120 seconds')
+     WHERE id = ?
+       AND status = 'running'
+       AND claim_generation = ?`
+  ).run(claimOwner, workstreamId, expectedClaimGeneration);
+
+  if (result.changes !== 1) {
+    throw new Error(`Failed to claim lease for workstream ${workstreamId}`);
+  }
+
+  return expectedClaimGeneration + 1;
+}
+
 export function printParallelPlan(_projectPath: string, plan: ParallelWorkstreamPlan): void {
   console.log(`Parallel plan for ${plan.projectPath}`);
   console.log(`Repo ID: ${plan.projectRepoId}`);
@@ -184,8 +207,8 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
 
     const insertWorkstream = db.prepare(
       `INSERT INTO workstreams (
-        id, session_id, branch_name, section_ids, status, clone_path
-      ) VALUES (?, ?, ?, ?, ?, ?)`
+        id, session_id, branch_name, section_ids, status, clone_path, claim_generation, lease_expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     for (const workstream of plan.workstreams) {
@@ -207,7 +230,16 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
           workstream.branchName,
           JSON.stringify(workstream.sectionIds),
           'running',
-          workspaceClone.workspacePath
+          workspaceClone.workspacePath,
+          0,
+          null
+        );
+
+        claimWorkstreamLease(
+          db,
+          workstream.id,
+          `launcher:${process.pid ?? 'unknown'}`,
+          0
         );
 
         const spawnResult = spawnDetachedRunner({

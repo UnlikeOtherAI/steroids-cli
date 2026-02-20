@@ -182,7 +182,15 @@ BEGIN
 END;
 `;
 
-const GLOBAL_SCHEMA_VERSION = '9';
+/**
+ * Schema upgrade from version 9 to version 10: add workstream lease fields.
+ */
+const GLOBAL_SCHEMA_V10_SQL = `
+CREATE INDEX IF NOT EXISTS idx_workstreams_session_status
+ON workstreams(session_id, status);
+`;
+
+const GLOBAL_SCHEMA_VERSION = '10';
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
   const columns = db
@@ -201,6 +209,22 @@ function applyGlobalSchemaV9(db: Database.Database): void {
     "UPDATE parallel_sessions SET project_repo_id = project_path WHERE project_repo_id IS NULL"
   );
   db.exec(GLOBAL_SCHEMA_V9_INDEX_AND_TRIGGERS_SQL);
+}
+
+function applyGlobalSchemaV10(db: Database.Database): void {
+  if (!hasColumn(db, 'workstreams', 'claim_generation')) {
+    db.exec('ALTER TABLE workstreams ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0');
+  }
+
+  if (!hasColumn(db, 'workstreams', 'lease_expires_at')) {
+    db.exec('ALTER TABLE workstreams ADD COLUMN lease_expires_at TEXT');
+  }
+
+  db.exec(
+    "UPDATE workstreams SET lease_expires_at = datetime('now', '+120 seconds') " +
+    "WHERE lease_expires_at IS NULL AND status = 'running'"
+  );
+  db.exec(GLOBAL_SCHEMA_V10_SQL);
 }
 
 /**
@@ -266,6 +290,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
+    applyGlobalSchemaV10(db);
     db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
       'version',
       GLOBAL_SCHEMA_VERSION
@@ -284,6 +309,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
+    applyGlobalSchemaV10(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -297,6 +323,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
+    applyGlobalSchemaV10(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -309,6 +336,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
+    applyGlobalSchemaV10(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -320,6 +348,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
+    applyGlobalSchemaV10(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -330,6 +359,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
+    applyGlobalSchemaV10(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -339,6 +369,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
+    applyGlobalSchemaV10(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -354,6 +385,14 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   } else if (currentVersion === '8') {
     // Upgrade from version 8 to version 9
     applyGlobalSchemaV9(db);
+    applyGlobalSchemaV10(db);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '9') {
+    // Upgrade from version 9 to version 10
+    applyGlobalSchemaV10(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
