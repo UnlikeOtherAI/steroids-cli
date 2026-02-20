@@ -3,7 +3,6 @@ import { parseArgs } from 'node:util';
 import { getRegisteredProjects } from '../runners/projects.js';
 import { listRunners, type Runner } from '../runners/daemon.js';
 import { openDatabase } from '../database/connection.js';
-import { openGlobalDatabase } from '../runners/global-db.js';
 import {
   getSection,
   getTask,
@@ -15,27 +14,9 @@ import { isProcessAlive } from '../runners/lock.js';
 import { basename } from 'node:path';
 import { existsSync } from 'node:fs';
 
-/**
- * Resolve the display project path for a runner.
- * For parallel runners, returns the original project path (not the clone workspace).
- */
+/** Get the resolved project path for display (original for parallel runners). */
 function resolveDisplayProject(runner: Runner): string {
-  if (!runner.parallel_session_id || !runner.project_path) {
-    return runner.project_path ?? '-';
-  }
-  try {
-    const { db, close } = openGlobalDatabase();
-    try {
-      const row = db
-        .prepare('SELECT project_path FROM parallel_sessions WHERE id = ?')
-        .get(runner.parallel_session_id) as { project_path: string } | undefined;
-      return row?.project_path ?? runner.project_path;
-    } finally {
-      close();
-    }
-  } catch {
-    return runner.project_path;
-  }
+  return runner.original_project_path ?? runner.project_path ?? '-';
 }
 
 export async function runList(args: string[], flags: GlobalFlags): Promise<void> {
@@ -72,29 +53,22 @@ OPTIONS:
   const runners = listRunners();
 
   if (flags.json) {
-    // For JSON output, enrich with section names and original project path
+    // For JSON output, enrich with section names
     const enrichedRunners = runners.map((runner) => {
-      const originalProjectPath = resolveDisplayProject(runner);
-      const enriched: Record<string, unknown> = {
-        ...runner,
-        original_project_path: originalProjectPath,
-      };
-
       if (!runner.section_id || !runner.project_path) {
-        return enriched;
+        return runner;
       }
       try {
         const { db, close } = openDatabase(runner.project_path);
         try {
           const section = getSection(db, runner.section_id);
-          enriched.section_name = section?.name;
+          return { ...runner, section_name: section?.name };
         } finally {
           close();
         }
       } catch {
-        // Section lookup failed, continue without it
+        return runner;
       }
-      return enriched;
     });
     console.log(JSON.stringify({ runners: enrichedRunners }, null, 2));
     return;

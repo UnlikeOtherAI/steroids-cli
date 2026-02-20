@@ -19,6 +19,8 @@ export interface Runner {
   status: RunnerStatus;
   pid: number | null;
   project_path: string | null;
+  /** Original project path for parallel runners (resolved from parallel_sessions table) */
+  original_project_path: string | null;
   section_id: string | null;
   parallel_session_id: string | null;
   current_task_id: string | null;
@@ -165,12 +167,18 @@ export function unregisterRunner(runnerId: string): void {
 }
 
 /**
- * Get all runners
+ * Get all runners.
+ * For parallel runners, resolves the original project path from parallel_sessions.
  */
 export function listRunners(): Runner[] {
   const { db, close } = openGlobalDatabase();
   try {
-    return db.prepare('SELECT * FROM runners').all() as Runner[];
+    return db.prepare(
+      `SELECT r.*,
+              COALESCE(ps.project_path, r.project_path) AS original_project_path
+       FROM runners r
+       LEFT JOIN parallel_sessions ps ON r.parallel_session_id = ps.id`
+    ).all() as Runner[];
   } finally {
     close();
   }
