@@ -222,14 +222,17 @@ function killProcess(pid: number): boolean {
 /**
  * Start a new runner daemon
  * Uses 'steroids runners start --detach' so the runner registers in the global DB
- * and updates heartbeat, allowing hasActiveRunnerForProject() to detect it
+ * and updates heartbeat, allowing hasActiveRunnerForProject() to detect it.
+ * When runners.parallel.enabled is true, launches a parallel session instead.
  */
-function startRunner(projectPath: string): { pid: number } | null {
+function startRunner(projectPath: string): { pid: number; parallel?: boolean } | null {
   try {
-    // Use runners start --detach so the daemon registers itself in the global DB
-    // This is critical: hasActiveRunnerForProject() checks the runners table,
-    // and only the daemon (not loop directly) writes to that table
-    const args = ['runners', 'start', '--detach', '--project', projectPath];
+    const config = loadConfig(projectPath);
+    const parallelEnabled = config.runners?.parallel?.enabled === true;
+
+    const args = parallelEnabled
+      ? ['runners', 'start', '--parallel', '--project', projectPath]
+      : ['runners', 'start', '--detach', '--project', projectPath];
 
     const child = spawn('steroids', args, {
       cwd: projectPath,
@@ -238,7 +241,7 @@ function startRunner(projectPath: string): { pid: number } | null {
     });
 
     child.unref();
-    return { pid: child.pid ?? 0 };
+    return { pid: child.pid ?? 0, parallel: parallelEnabled };
   } catch {
     return null;
   }
@@ -816,7 +819,9 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
     }
 
     // Start runner for this project
-    log(`Starting runner for: ${project.path}`);
+    const projectConfig = loadConfig(project.path);
+    const willParallel = projectConfig.runners?.parallel?.enabled === true;
+    log(`Starting ${willParallel ? 'parallel session' : 'runner'} for: ${project.path}`);
 
     if (dryRun) {
       results.push({
@@ -833,9 +838,10 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
 
     const startResult = startRunner(project.path);
     if (startResult) {
+      const mode = startResult.parallel ? 'parallel session' : 'runner';
       results.push({
         action: 'started',
-        reason: recoveredActions > 0 ? `Recovered ${recoveredActions} stuck item(s); started runner` : `Started runner`,
+        reason: recoveredActions > 0 ? `Recovered ${recoveredActions} stuck item(s); started ${mode}` : `Started ${mode}`,
         pid: startResult.pid,
         projectPath: project.path,
         recoveredActions,
