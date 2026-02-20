@@ -144,7 +144,7 @@ function reconcileParallelSessionRecovery(
       `SELECT id
        FROM parallel_sessions
        WHERE project_path = ?
-         AND status NOT IN ('completed', 'failed', 'aborted', 'blocked_validation')`
+         AND status NOT IN ('completed', 'failed', 'aborted', 'blocked_validation', 'blocked_recovery')`
     )
     .all(projectPath) as Array<{ id: string }>;
 
