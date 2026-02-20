@@ -197,6 +197,21 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _type: 'boolean',
         _default: false,
       },
+      autoDownshiftMaxClones: {
+        _description: 'Automatically lower maxClones when system resources are insufficient',
+        _type: 'boolean',
+        _default: true,
+      },
+      minFreeMemoryMbPerClone: {
+        _description: 'Minimum free memory (MB) required per parallel clone for resource preflight',
+        _type: 'number',
+        _default: 1024,
+      },
+      minFreeDiskMbPerClone: {
+        _description: 'Minimum free disk (MB) required per parallel clone for resource preflight',
+        _type: 'number',
+        _default: 512,
+      },
       cleanupOnSuccess: {
         _description: 'Delete workspace clones after successful merge',
         _type: 'boolean',

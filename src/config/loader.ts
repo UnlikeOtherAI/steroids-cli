@@ -52,6 +52,11 @@ export interface SteroidsConfig {
       enabled?: boolean;
       maxClones?: number;
       workspaceRoot?: string;
+      hydrationCommand?: string;
+      allowSharedMutableDependencies?: boolean;
+      autoDownshiftMaxClones?: boolean;
+      minFreeMemoryMbPerClone?: number;
+      minFreeDiskMbPerClone?: number;
       cleanupOnSuccess?: boolean;
       cleanupOnFailure?: boolean;
     };
@@ -171,6 +176,11 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       enabled: false,
       maxClones: 3,
       workspaceRoot: '',
+      hydrationCommand: '',
+      allowSharedMutableDependencies: false,
+      autoDownshiftMaxClones: true,
+      minFreeMemoryMbPerClone: 1024,
+      minFreeDiskMbPerClone: 512,
       cleanupOnSuccess: true,
       cleanupOnFailure: false,
     },

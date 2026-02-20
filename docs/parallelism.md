@@ -451,7 +451,7 @@ Checklist:
 : Files: `src/runners/wakeup.ts`, `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`
 - `[x]` `CHUNK-12` Add hydration isolation guardrails (forbid shared mutable dependency directories).
 : Files: `src/parallel/clone.ts`, `src/commands/runners-parallel.ts`, `src/config/schema.ts`
-- `[ ]` `CHUNK-13` Add resource preflight + auto-downshift of `maxClones`.
+- `[x]` `CHUNK-13` Add resource preflight + auto-downshift of `maxClones`.
 : Files: `src/commands/runners-parallel.ts`, `src/config/loader.ts`, `src/config/schema.ts`
 - `[ ]` `CHUNK-14` Add/update tests for provider cwd/worktree safety, locking, merge progress, and cleanup flow.
 : Files: `src/**/__tests__/*` (targeted new/updated test files only)
