@@ -346,7 +346,17 @@ export async function runConflictResolutionCycle(options: ConflictRunOptions): P
   refreshMergeConflictLease(sessionId, workstreamId, projectPath);
 
   if (currentConflictTask.status === 'completed') {
-    upsertProgressEntry(db, sessionId, workstreamId, position, commitSha, 'applied', conflictTaskId);
+    const appliedCommitSha = runGitCommand(projectPath, ['rev-parse', 'HEAD'], { allowFailure: true }).trim();
+    upsertProgressEntry(
+      db,
+      sessionId,
+      workstreamId,
+      position,
+      commitSha,
+      'applied',
+      conflictTaskId,
+      appliedCommitSha || null
+    );
     return 'continued';
   }
 
@@ -437,7 +447,17 @@ export async function runConflictResolutionCycle(options: ConflictRunOptions): P
       refreshMergeConflictLease(sessionId, workstreamId, projectPath);
       runGitCommand(projectPath, ['-c', 'core.editor=true', 'cherry-pick', '--continue']);
       approveTask(db, currentConflictTask.id, 'merge-conflict-reviewer', decision.notes);
-      upsertProgressEntry(db, sessionId, workstreamId, position, commitSha, 'applied', currentConflictTask.id);
+      const appliedCommitSha = runGitCommand(projectPath, ['rev-parse', 'HEAD'], { allowFailure: true }).trim();
+      upsertProgressEntry(
+        db,
+        sessionId,
+        workstreamId,
+        position,
+        commitSha,
+        'applied',
+        currentConflictTask.id,
+        appliedCommitSha || null
+      );
       return 'continued';
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

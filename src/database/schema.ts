@@ -189,6 +189,7 @@ CREATE TABLE IF NOT EXISTS merge_progress (
     workstream_id TEXT NOT NULL,
     position INTEGER NOT NULL,
     commit_sha TEXT NOT NULL,
+    applied_commit_sha TEXT,
     status TEXT NOT NULL CHECK (status IN ('applied', 'conflict', 'skipped')),
     conflict_task_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -197,6 +198,10 @@ CREATE TABLE IF NOT EXISTS merge_progress (
 
 CREATE INDEX IF NOT EXISTS idx_merge_progress_session ON merge_progress(session_id, position);
 CREATE INDEX IF NOT EXISTS idx_merge_progress_status ON merge_progress(status, applied_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_merge_progress_unique_position
+ON merge_progress(session_id, workstream_id, position);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_merge_progress_unique_commit
+ON merge_progress(session_id, workstream_id, commit_sha);
 `;
 
 export const INITIAL_SCHEMA_DATA = `
@@ -216,4 +221,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (9, '009_add_incid
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (10, '010_add_lifecycle_timestamps', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (11, '011_add_merge_locks_and_progress', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (12, '012_add_merge_lock_epoch', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (13, '013_add_merge_progress_applied_commit_sha', 'builtin');
 `;

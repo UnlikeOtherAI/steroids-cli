@@ -10,6 +10,7 @@ export interface MergeProgressRow {
   workstream_id: string;
   position: number;
   commit_sha: string;
+  applied_commit_sha: string | null;
   status: 'applied' | 'conflict' | 'skipped';
   conflict_task_id: string | null;
   created_at: string;
@@ -23,7 +24,7 @@ function getNowISOString(): string {
 export function listMergeProgress(db: Database.Database, sessionId: string): MergeProgressRow[] {
   return db
     .prepare(
-      `SELECT id, session_id, workstream_id, position, commit_sha, status, conflict_task_id, created_at, applied_at
+      `SELECT id, session_id, workstream_id, position, commit_sha, applied_commit_sha, status, conflict_task_id, created_at, applied_at
        FROM merge_progress
        WHERE session_id = ?
        ORDER BY workstream_id, position ASC`
@@ -49,16 +50,27 @@ export function upsertProgressEntry(
   position: number,
   commitSha: string,
   status: MergeProgressRow['status'],
-  conflictTaskId: string | null = null
+  conflictTaskId: string | null = null,
+  appliedCommitSha: string | null = null
 ): void {
   const payloadApplied = status === 'applied' ? getNowISOString() : null;
+  const payloadAppliedCommit = status === 'applied' ? appliedCommitSha : null;
 
   clearProgressEntry(db, sessionId, workstreamId, position);
   db.prepare(
     `INSERT INTO merge_progress
-      (session_id, workstream_id, position, commit_sha, status, conflict_task_id, applied_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(sessionId, workstreamId, position, commitSha, status, conflictTaskId, payloadApplied);
+      (session_id, workstream_id, position, commit_sha, applied_commit_sha, status, conflict_task_id, applied_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    sessionId,
+    workstreamId,
+    position,
+    commitSha,
+    payloadAppliedCommit,
+    status,
+    conflictTaskId,
+    payloadApplied
+  );
 }
 
 export function getMergeProgressForWorkstream(

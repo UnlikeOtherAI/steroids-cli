@@ -227,7 +227,17 @@ async function processWorkstream(
 
     try {
       runGitCommand(projectPath, ['cherry-pick', commitSha]);
-      upsertProgressEntry(db, sessionId, workstream.id, position, commitSha, 'applied');
+      const appliedCommitSha = runGitCommand(projectPath, ['rev-parse', 'HEAD']).trim();
+      upsertProgressEntry(
+        db,
+        sessionId,
+        workstream.id,
+        position,
+        commitSha,
+        'applied',
+        null,
+        appliedCommitSha
+      );
       summary.applied += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
