@@ -16,6 +16,8 @@ export interface GlobalDatabaseConnection {
   close: () => void;
 }
 
+export type ParallelSessionStatus = 'running' | 'merging' | 'completed' | 'failed';
+
 /**
  * Schema for global database (runners and locks)
  */
@@ -461,5 +463,26 @@ export function getGlobalSchemaVersion(db: Database.Database): string | null {
     return row?.value ?? null;
   } catch {
     return null;
+  }
+}
+
+export function updateParallelSessionStatus(
+  sessionId: string,
+  status: ParallelSessionStatus,
+  markCompletedAt = false
+): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare(
+      `UPDATE parallel_sessions
+       SET status = ?,
+           completed_at = CASE
+             WHEN ? = 1 THEN datetime('now')
+             ELSE completed_at
+           END
+       WHERE id = ?`
+    ).run(status, markCompletedAt ? 1 : 0, sessionId);
+  } finally {
+    close();
   }
 }

@@ -13,6 +13,7 @@ import { generateHelp } from '../cli/help.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
 import { openDatabase } from '../database/connection.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
+import { loadConfig } from '../config/loader.js';
 import {
   runParallelMerge,
   type MergeResult,
@@ -35,6 +36,7 @@ const HELP = generateHelp({
     { long: 'remote', description: 'Git remote to fetch from', values: '<name>', default: 'origin' },
     { long: 'main-branch', description: 'Target branch for cherry-picks', values: '<name>', default: 'main' },
     { long: 'integration-branch', description: 'Temporary integration branch name', values: '<name>' },
+    { long: 'validation-command', description: 'Shell command to validate merged state before push', values: '<cmd>' },
   ],
   examples: [
     { command: 'steroids merge', description: 'Merge latest parallel session in current project' },
@@ -240,6 +242,7 @@ export async function mergeCommand(args: string[], flags: GlobalFlags): Promise<
       remote: { type: 'string', default: 'origin' },
       'main-branch': { type: 'string', default: 'main' },
       'integration-branch': { type: 'string' },
+      'validation-command': { type: 'string' },
     },
     allowPositionals: false,
   });
@@ -280,6 +283,10 @@ export async function mergeCommand(args: string[], flags: GlobalFlags): Promise<
   const remote = values.remote as string;
   const mainBranch = values['main-branch'] as string;
   const integrationBranch = values['integration-branch'] as string | undefined;
+  const configuredValidationCommand = loadConfig(projectPath).runners?.parallel?.validationCommand;
+  const validationCommand =
+    (values['validation-command'] as string | undefined)
+    ?? (typeof configuredValidationCommand === 'string' ? configuredValidationCommand : undefined);
 
   try {
     const { close } = openDatabase(projectPath);
@@ -297,6 +304,7 @@ export async function mergeCommand(args: string[], flags: GlobalFlags): Promise<
       remote,
       mainBranch,
       integrationBranchName: integrationBranch,
+      validationCommand,
     });
 
   if (!result.success) {

@@ -443,7 +443,7 @@ Checklist:
 : Files: `src/parallel/merge-progress.ts`, `src/database/schema.ts`, `migrations/<new>.sql`
 - `[x]` `CHUNK-08` Implement crash-safe merge resume using provenance mapping and reachability checks.
 : Files: `src/parallel/merge.ts`, `src/parallel/merge-progress.ts`, `src/commands/merge.ts`
-- `[ ]` `CHUNK-09` Add post-merge validation gate and blocked-validation transition on failure.
+- `[x]` `CHUNK-09` Add post-merge validation gate and blocked-validation transition on failure.
 : Files: `src/parallel/merge.ts`, `src/commands/merge.ts`, `src/runners/global-db.ts`
 - `[ ]` `CHUNK-10` Implement cleanup-draining phase (lease revoke, runner termination verification, then deletion).
 : Files: `src/commands/workspaces.ts`, `src/runners/wakeup.ts`, `src/runners/global-db.ts`

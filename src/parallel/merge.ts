@@ -5,11 +5,12 @@
 
 import { resolve } from 'node:path';
 import { rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { getDefaultWorkspaceRoot } from './clone.js';
 import { getProjectHash } from './clone.js';
 import { createIntegrationWorkspace } from './clone.js';
 import { openDatabase } from '../database/connection.js';
-import { openGlobalDatabase } from '../runners/global-db.js';
+import { openGlobalDatabase, updateParallelSessionStatus } from '../runners/global-db.js';
 import {
   getCommitShortSha,
   getWorkstreamCommitList,
@@ -53,6 +54,7 @@ export interface MergeOptions {
   remoteWorkspaceRoot?: string;
   cleanupOnSuccess?: boolean;
   integrationBranchName?: string;
+  validationCommand?: string;
 }
 
 export interface MergeResult {
@@ -110,6 +112,18 @@ function cleanupWorkspaceState(
       rmSync(folder, { recursive: true, force: true });
     }
   }
+}
+
+function runValidationGate(mergePath: string, validationCommand?: string): void {
+  if (!validationCommand || validationCommand.trim().length === 0) {
+    return;
+  }
+
+  execSync(validationCommand, {
+    cwd: mergePath,
+    stdio: 'pipe',
+    encoding: 'utf-8',
+  });
 }
 
 function isAppliedCommitIntegrated(projectPath: string, commitSha: string | null): boolean {
@@ -314,6 +328,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
   const workspaceRoot = options.remoteWorkspaceRoot ?? getDefaultWorkspaceRoot();
   const cleanupOnSuccess = options.cleanupOnSuccess ?? true;
   const integrationBranchName = options.integrationBranchName ?? `steroids/integration-${sessionId.slice(0, 8)}`;
+  const validationCommand = options.validationCommand;
   let mergePath = projectPath;
   let integrationWorkspacePath: string | null = null;
 
@@ -330,6 +345,8 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
   let lockEpoch = 0;
 
   try {
+    updateParallelSessionStatus(sessionId, 'merging');
+
     const lock = acquireMergeLock(db, {
       sessionId,
       runnerId,
@@ -414,6 +431,8 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       summary.conflicts += stats.conflicts;
     }
 
+    runValidationGate(mergePath, validationCommand);
+
     assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
     const pushResult = runGitCommand(mergePath, ['push', remote, mainBranch], { allowFailure: true });
     if (isNoPushError(pushResult)) {
@@ -441,12 +460,14 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     }
 
     summary.success = true;
+    updateParallelSessionStatus(sessionId, 'completed', true);
     return summary;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!summary.errors.includes(message)) {
       summary.errors.push(message);
     }
+    updateParallelSessionStatus(sessionId, 'failed', true);
     return summary;
   } finally {
     if (heartbeatTimer) {
