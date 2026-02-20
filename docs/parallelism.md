@@ -1,498 +1,457 @@
-# Parallelism: Clone & Conquer
+# Parallelism: Worktree-Orchestrated Execution (Hardened)
 
-> Run independent sections in parallel using isolated git clones. Each clone is a regular runner on its own branch. Merge via cherry-pick. Conflicts become tasks.
-
----
-
-## Problem
-
-Steroids processes one task at a time, in one directory, on one branch. If a project has 5 independent sections with 4 tasks each, it takes 20 serial cycles. Independent sections sit idle while unrelated work finishes.
+> Run independent sections in parallel using Git worktrees. Each workstream gets a dedicated branch + worktree + runner lease. Merge and cleanup are fenced, resumable, and crash-safe.
 
 ---
 
-## Goal
+## 1. Problem Statement
 
-Run N independent sections simultaneously, each in its own clone, each on its own branch. When all clones finish, cherry-pick their commits onto `main` one by one. If a cherry-pick conflicts, the conflict becomes a task — the coder resolves it, the reviewer reviews the resolution. No human intervention, no special merge machinery.
-
----
-
-## Prerequisites
-
-- `.steroids/` **must be in `.gitignore`**. Clones replace this directory with a symlink. If git tracks it, the symlink would be committed, breaking the project for everyone.
-- Git remote must be configured (branches need to be pushed).
-- Sufficient API credits for parallel invocations.
+Steroids currently leaves throughput on the table when independent sections are processed serially. Parallel execution can reduce wall-clock time, but only if race conditions, crash recovery, merge correctness, and cleanup are deterministic.
 
 ---
 
-## Core Concepts
+## 2. Current Behavior (Codebase References)
 
-### Section Dependency Graph
+- Runner lifecycle: `src/commands/runners.ts`, `src/runners/daemon.ts`.
+- Wakeup/restart flow: `src/runners/wakeup.ts`.
+- Parallel scaffolding: `src/commands/runners-parallel.ts`, `src/commands/workspaces.ts`.
+- Loop orchestration: `src/commands/loop.ts`, `src/commands/loop-phases.ts`.
+- Parallel merge helpers: `src/parallel/merge.ts`, `src/parallel/merge-lock.ts`, `src/parallel/merge-progress.ts`.
 
-Sections declare dependencies. Two sections are **independent** if neither depends on the other, directly or transitively.
-
-**Convention:** `A ──depends-on──► B` means A requires B first. B runs before A.
-
-```
-Section A ──depends-on──► Section C
-Section B (no dependencies)
-Section D ──depends-on──► Section A
-```
-
-- **C** starts immediately (no prerequisites)
-- **A** waits for C
-- **D** waits for A
-- **B** is independent of everything
-
-Chain: **C → A → D** (sequential, one clone). B runs in its own clone, in parallel.
-
-#### Cycle Detection
-
-Before scheduling, validate with topological sort. Cycles are a hard stop:
-
-```
-Error: Cyclic dependency detected: Section A → Section C → Section A
-Fix the dependency declarations before running in parallel mode.
-```
-
-### Workstream Partitioning
-
-The scheduler groups sections into **workstreams**:
-
-1. Topological sort all sections
-2. Find **connected components** in the dependency graph (edges treated as undirected)
-3. Each connected component = one workstream
-4. Within a workstream, sections are ordered by topological sort
-
-```
-Input:  Sections [A, B, C, D, E]
-Deps:   A depends-on C, D depends-on A
-
-Workstreams:
-  Workstream 1: C → A → D  (one clone)
-  Workstream 2: B           (one clone)
-  Workstream 3: E           (one clone)
-```
-
-Each workstream gets one clone and one runner. Within a workstream, sections execute in dependency order. Across workstreams, execution is fully parallel.
-
-### Workspace Clones
-
-Each runner gets a full clone:
-
-```
-~/.steroids/workspaces/
-├── <project-hash>/
-│   ├── ws-abc123/                 # clone for Workstream 1
-│   │   ├── .git/
-│   │   ├── src/
-│   │   └── .steroids/            # symlink → original .steroids/ DIRECTORY
-│   └── ws-def456/                 # clone for Workstream 2
-│       ├── .git/
-│       ├── src/
-│       └── .steroids/
-```
-
-**Why full clones, not worktrees?** Git worktrees share `.git` internals — `HEAD.lock`, index locks, ref locks. Parallel operations deadlock. Full clones are completely independent. `git clone --local` hardlinks objects, so disk overhead is just the working tree.
-
-#### Database Sharing
-
-All clones share the original `.steroids/` **directory** via symlink. This is critical because SQLite WAL mode creates companion files (`-wal`, `-shm`) next to the database. Symlinking only the `.db` file would create separate WAL files per clone, breaking shared state.
-
-By symlinking the directory, all runners see the same tasks, locks, audit trail, and rejection history.
-
-### Branch Strategy
-
-Each clone works on a dedicated branch:
-
-```
-main:                    ──●──────────────────────────────●── (cherry-picks land here)
-                            \                             ↑
-steroids/ws-abc123:          ●──●──●──●──●──●──●         │ (cherry-pick each commit)
-                                                         │
-steroids/ws-def456:          ●──●──●──●──────────────────┘
-```
-
-Branch naming: `steroids/ws-<workstream-id>`
-
-Each branch forks from `main` at clone time. All task commits land on the branch sequentially. When the runner finishes, it pushes its branch to the remote.
+Current behavior is not fully hardened for worktree-parallel crash/recovery edge cases.
 
 ---
 
-## Lifecycle
+## 3. Desired Behavior
 
-### 1. Analyze
-
-When `steroids runners start --parallel` is invoked:
-
-1. Load all sections and their dependencies
-2. Validate: topological sort, abort on cycles
-3. Partition into workstreams (connected components)
-4. Skip workstreams with no pending tasks
-5. Respect `--max N` limit
-6. If `--dry-run`, print the plan and exit
-
-### 2. Clone
-
-For each workstream:
-
-1. Create workspace: `~/.steroids/workspaces/<project-hash>/ws-<id>/`
-2. Clone:
-   - **Same filesystem:** `git clone --local <project-path> <workspace-path>` (hardlinked objects).
-   - **Cross-filesystem:** `git clone <project-path> <workspace-path>` (full copy). Detected via `fs.statfs()` comparing `f_fsid`.
-3. `git checkout -b steroids/ws-<id>`
-4. Symlink `.steroids/`: since `.steroids/` is gitignored, the clone won't have it. Simply create the symlink: `ln -s <original>/.steroids <clone>/.steroids`. If it exists (non-gitignored edge case), remove it first. Resolve the original path via `realpath()` to avoid symlink chains.
-5. Verify symlink: confirm the database is readable from clone (`.steroids/steroids.db`).
-
-### 3. Execute
-
-Each clone spawns a **regular runner** — the same runner used in sequential mode. The only differences:
-
-- **Scoped to its workstream sections** (processes them in dependency order)
-- **Commits to its branch** (not `main`)
-- **Pushes its branch** to remote when all sections are done
-
-The runner inherits config, environment variables, API keys. It acquires task locks, runs the coder/reviewer loop, handles rejections and disputes — exactly like today.
-
-```
-Runner in ws-def456 (Section B):
-  ├── Select next pending task in Section B
-  ├── Acquire task lock (shared DB)
-  ├── Coder phase → commit to steroids/ws-def456
-  ├── Reviewer phase
-  ├── On approval: mark completed, next task
-  ├── On rejection: cycle as usual
-  └── All done → git push origin steroids/ws-def456
-```
-
-**Multi-section workstreams** (e.g., C→A→D): the runner receives the ordered list `[C, A, D]` and processes all tasks in C, then A, then D — all on the same branch.
-
-#### Runner Parameterization
-
-Existing `DaemonOptions` and `TaskSelectionOptions` need extensions:
-
-- `sectionIds: string[]` — ordered list of sections (replaces single `sectionId`)
-- `branchName: string` — push target (replaces hardcoded `main`)
-- `parallelSessionId: string` — links runner to its parallel session
-
-The task selector advances through `sectionIds` in order: process all tasks in `sectionIds[0]`, then `sectionIds[1]`, etc. Each section is fully completed before the next begins.
-
-#### Completion Detection
-
-When a runner finishes all its sections:
-
-1. Push its branch: `git push origin steroids/ws-<id>`
-2. Update its workstream status to `completed` in the database
-3. Re-check session progress: are **all** workstreams `completed` or `failed`?
-4. If yes, attempt to acquire the merge lock immediately; only the winner continues.
-5. If merge lock is acquired, the runner transitions to merge phase in the original project.
-6. If not acquired, or if session is not complete, runner exits. Another runner will merge when it is both complete and lock owner.
-
-The last runner to finish that also acquires the lock becomes the merge executor. This keeps completion detection race-free: if two runners finish simultaneously and both check completion, only one can proceed after lock acquisition. The other sees the lock held and exits.
-
-`steroids merge` exists as a manual fallback if no runner triggers the merge (e.g., all runners crashed after pushing their branches).
-
-### 4. Merge (Cherry-Pick)
-
-The merge runs in the **original project directory** (not in any clone). It is triggered either by the last runner to finish (automatic) or by `steroids merge` (manual fallback).
-
-**Merge ordering:** Workstreams are cherry-picked in the order they completed (first-finished, first-merged). This is deterministic and natural — earlier-finishing workstreams tend to be smaller with fewer potential conflicts.
-
-1. Acquire the **merge lock** (only one process cherry-picks at a time)
-2. **Verify clean working tree:** `git status --porcelain` must be empty. If dirty, check if a cherry-pick is in progress (`.git/CHERRY_PICK_HEAD` exists) and resume via crash recovery. If unrelated changes exist, abort: "Commit or stash changes before merging."
-3. Fetch workstream branches: `git fetch origin steroids/ws-<id>` for each completed workstream
-4. Ensure `main` is up to date: `git pull --ff-only`. If this fails (local commits exist), abort with guidance to `git pull --rebase` first. If remote is ahead, the pull succeeds normally.
-5. For each completed workstream branch, in completion order:
-   a. List commits: `git log main..origin/steroids/ws-<id> --format=%H --reverse`
-   b. If no commits → skip (workstream produced no work). Log and continue.
-   c. Cherry-pick each commit onto `main`: `git cherry-pick <sha>`
-   d. If cherry-pick succeeds → record in merge progress, continue
-   e. If cherry-pick conflicts → **resolve inline** (see below)
-6. After all commits from all branches are cherry-picked:
-   a. `git push origin main`
-   b. Enumerate and delete remote branches individually (tolerate already-deleted)
-   c. Clean up workspace clones
-
-**Note on "independent sections":** Independent sections have no *logical* dependency, but they may touch shared files (configs, schemas, lock files). Cherry-pick conflicts between independent sections are expected and handled — the conflict-as-task mechanism exists precisely for this.
-
-#### Why Cherry-Pick?
-
-- **Linear history** on `main` — no merge commits, no branch topology
-- **Granular conflict resolution** — per commit, not per branch. If commit 5 of 7 conflicts, commits 1-4 are already on `main`
-- **Partial adoption** — can cherry-pick some commits and defer others
-- **Each commit stands alone** — reviewable, revertible, bisectable
-
-#### Merge-Conflict Resolution (Inline)
-
-When a cherry-pick conflicts, the merge process resolves it inline — in the same process, in the original project directory. No abort, no separate runner.
-
-1. The cherry-pick leaves conflict markers (`<<<<<<<` / `=======` / `>>>>>>>`) in the working tree
-2. Capture context:
-   - Conflicted files: `git diff --name-only --diff-filter=U`
-   - Original commit's clean patch (intent): `git show <sha>` (NOT `git diff HEAD`, which includes conflict markers)
-   - Original commit message
-3. Create a merge-conflict task in the database:
-   - **Title:** `Merge conflict: cherry-pick <short-sha> from <branch>`
-   - **Section:** auto-created "merge-conflicts" section
-   - **Source:** conflicted file list, original patch, commit message
-4. Run the coder/reviewer loop **inline** (same process, same directory, on `main`):
-   - The coder receives the conflicted files with markers and the original commit's intent
-   - The coder edits files to resolve ALL conflict markers and runs `git add <resolved-files>`
-   - **The coder does NOT commit.** The cherry-pick remains in progress across retries.
-5. The reviewer reviews the **staged diff** (`git diff --cached`), not a commit
-6. On rejection → coder re-edits and re-stages. Loop back to step 5.
-7. On approval → the merge process runs `git -c core.editor=true cherry-pick --continue` to finalize the commit (the `-c core.editor=true` prevents an interactive editor in headless mode)
-8. Merge progress updated, continue with next cherry-pick
-
-**This differs from the normal coder/reviewer loop:** normally the coder commits and the reviewer reviews the commit. Here, the coder only stages. The commit is created by `cherry-pick --continue` after reviewer approval. This preserves the original commit's authorship and message.
-
-**This is the key simplification:** conflicts are not a special failure mode. They're tasks resolved by the same coder/reviewer loop that handles all other work.
-
-#### Merge Progress Tracking
-
-The merge process persists its progress in the `merge_progress` table (project DB):
-
-```
-session_id | workstream_id | position | commit_sha | status
------------+---------------+----------+------------+--------
-sess-001   | ws-abc123     | 0        | a1b2c3d    | applied
-sess-001   | ws-abc123     | 1        | d4e5f6g    | applied
-sess-001   | ws-def456     | 0        | h7i8j9k    | conflict  (task pending)
-```
-
-On crash and restart, `steroids merge` reads this table and resumes from the next position after the last applied commit. The `position` column makes recovery fully local — no need to re-derive ordering from remote refs. If a conflict task is pending and `.git/CHERRY_PICK_HEAD` exists, the coder/reviewer loop resumes for that conflict.
-
-#### Merge Lock
-
-Only one process can cherry-pick onto `main` at a time. The lock is acquired before cherry-picking starts and released after the push.
-
-Implementation: `merge_locks` table in the project database with expiry and heartbeat (same pattern as task locks). Long timeout (2 hours) with periodic heartbeat updates during conflict resolution. If the merge process crashes, the lock's heartbeat goes stale. `steroids merge` (or the wakeup cron) checks for stale locks (heartbeat older than `staleTimeout`), reclaims them, and resumes from `merge_progress`.
-
-### 5. Cleanup
-
-After successful cherry-pick + push:
-
-1. Push `main` to remote
-2. Delete remote branches (tolerate already-deleted errors): enumerate via `git for-each-ref`, delete each individually
-3. Delete workspace clones: `rm -rf ~/.steroids/workspaces/<project-hash>/ws-*`
-4. Prune stale remote-tracking refs: `git remote prune origin`
-5. Log summary: workstreams processed, wall-clock time, conflicts encountered
-
-Each step is idempotent. `steroids workspaces clean` retries any incomplete cleanup.
-
-**Clone preservation:** Until all commits are cherry-picked and pushed, workspace clones must not be deleted — they're the only location of completed work. Cleanup only runs after a successful push.
+1. Partition sections into independent workstreams.
+2. Create one branch + one worktree per workstream.
+3. Run one leased runner per workstream.
+4. Seal each completed workstream to immutable merge input.
+5. Merge in a dedicated integration worktree (not the user checkout).
+6. Resolve merge conflicts with existing coder/reviewer flow.
+7. Validate merged state before push.
+8. Cleanup branches/worktrees with quiesce+verification gates.
+9. Resume safely after crashes with deterministic reconciliation.
 
 ---
 
-## Configuration
+## 4. Design
 
-```yaml
-runners:
-  parallel:
-    enabled: false                    # opt-in
-    maxClones: 3                      # max simultaneous workstreams
-    workspaceRoot: ~/.steroids/workspaces
-    cleanupOnSuccess: true            # delete clones after successful merge + push
-    cleanupOnFailure: false           # keep failed clones for debugging
+### 4.1 Workstream Partitioning
 
-  # existing settings unchanged
-  maxConcurrent: 1                    # sequential mode only — ignored during parallel
-  heartbeatInterval: 30s
-  staleTimeout: 5m
-```
+1. Validate section dependency graph is acyclic.
+2. Build connected components (undirected dependency edges).
+3. Each component becomes one workstream.
+4. Topologically order sections inside each workstream.
 
-`--max N` on CLI overrides `parallel.maxClones`.
+### 4.2 Identity, Admission, and Naming
 
-**`maxConcurrent` vs `maxClones`:** `maxConcurrent` applies only to sequential mode (one runner per project). In parallel mode, `maxClones` controls the number of simultaneous workstreams. The per-project "one runner" constraint is lifted for runners that belong to a parallel session.
+Canonical repo identity:
 
-### Cost Controls
+- `project_repo_id = realpath(git rev-parse --show-toplevel)`
 
-Parallel runners multiply API costs linearly:
+Parallel session admission:
 
-- `maxClones` caps the multiplier
-- Existing credit exhaustion detection pauses individual runners
-- Default `maxClones: 3` keeps costs manageable
+- Exactly one active session per `project_repo_id`.
+- Enforce with unique-active-session constraint for all non-terminal statuses.
+- Terminal statuses are only:
+  - `completed`, `aborted`, `failed`
+- Blocked statuses remain active (must prevent new sessions):
+  - `blocked_conflict`, `blocked_recovery`, `blocked_validation`
+
+Naming:
+
+- Worktree directory: `~/.steroids/worktrees/<project-repo-hash>/ws-<session-hash>-<workstream-id>`
+- Workstream branch: `steroids/ws-<session-hash>-<workstream-id>`
+
+### 4.3 Workstream Ownership and Fencing
+
+Each workstream row includes:
+
+- `runner_id`
+- `claim_generation` (monotonic fence)
+- `lease_expires_at`
+
+Rules:
+
+1. Runner claim must be CAS-based.
+2. Lease renewal interval: 30s.
+3. Lease TTL: 120s.
+4. Every mutating action must verify current `claim_generation`:
+   - commit
+   - push
+   - seal operation
+   - workstream status transition
+5. If fence check fails, runner must stop immediately (read-only/exit).
+
+### 4.4 Process Launch and CWD Safety
+
+All spawned runner/provider processes must set explicit `cwd`:
+
+- Runner `cwd = worktree_path`
+- Provider subprocess `cwd = worktree_path`
+
+No inherited cwd is allowed in detached or wakeup paths.
+
+### 4.5 Shared Steroids State and DB Guardrails
+
+State coherence requirement:
+
+- Workstreams share Steroids task state (single source of truth) for locks/rejections/audit.
+
+DB guardrails:
+
+1. Preflight migration runs once before fan-out.
+2. Migration is serialized by schema gate lock.
+3. Write-heavy paths use retry with backoff+jitter.
+4. Parallelism is capped (`maxClones` default 3).
+5. If lock contention exceeds threshold, fail session fast to `blocked_recovery`.
+6. High-frequency logs should not saturate the shared DB write path (file-backed runner logs preferred; DB stores status transitions and summaries).
+
+### 4.6 Worktree Hydration
+
+Before launching each runner:
+
+1. Apply configured env hydration strategy:
+   - copy/symlink required env files
+2. Apply dependency hydration strategy:
+   - configured install command or supported shared-cache strategy
+   - shared mutable dependency directories across workstreams are forbidden
+3. Validate hydration success before claiming workstream `running`.
+
+### 4.7 Sealed Workstream Completion
+
+When a workstream finishes:
+
+1. Push branch.
+2. Seal immutable merge input:
+   - `sealed_base_sha`
+   - ordered `sealed_commit_shas[]`
+   - `sealed_head_sha`
+3. Mark `completed`.
+
+Post-seal rule:
+
+- Any further pushes/commits to the workstream branch are rejected.
+
+### 4.8 Merge Orchestrator (Dedicated Integration Worktree)
+
+Merge runs in `ws-integration` worktree, never in the user’s primary checkout.
+
+Integration branch rule:
+
+- Integration worktree uses a temporary branch:
+  - `steroids/integration-<session-hash>`
+- It is forked from merge target (for example `main`) and deleted during cleanup.
+
+Steps:
+
+1. Acquire merge lock using atomic CAS with fencing token:
+   - `merge_locks.lock_epoch`
+   - lock TTL: 600s
+   - heartbeat/renewal interval: 60s
+2. Verify lock epoch before every mutating step:
+   - cherry-pick/merge application
+   - conflict continuation commit
+   - push
+   - merge-progress write
+3. Fetch all sealed workstream branches.
+4. Update integration base (`pull --ff-only`).
+   - if ff-only fails, attempt rebase of integration branch onto target head
+   - if rebase drift exceeds `max_base_drift_commits` (default 50), set `blocked_recovery`
+   - rebase is allowed only before first commit reaches `merge_progress.state = applying/applied`
+   - if any commit application already started, ff-only failure must set `blocked_recovery` (no mid-merge rebase)
+5. Merge strategy is explicit: cherry-pick.
+   - apply exactly `sealed_commit_shas[]` in deterministic order
+   - record `applied_commit_sha` for each sealed source commit
+   - persist provenance mapping `sealed_commit_sha -> applied_commit_sha` (or equivalent durable metadata)
+6. On conflict:
+   - create conflict task
+   - run coder/reviewer inline
+   - persist conflict attempts and backoff
+7. After all applied, run integration validation gate.
+   - validation failure must hard-stop push and set `blocked_validation`
+8. Push integration branch (and main target as configured).
+
+Deterministic order:
+
+- `completion_order` only (monotonic integer assigned atomically at completion).
+- `completed_at` is diagnostic only.
+
+### 4.9 Merge Progress Durability
+
+Persist per-commit state machine:
+
+- `planned -> applying -> applied`
+- `conflict` / `skipped` / `failed` as explicit terminal markers
+- include `applied_commit_sha` for successful cherry-picks
+
+Crash recovery rule:
+
+1. On resume, for each sealed commit:
+   - check durable provenance mapping (`sealed_commit_sha -> applied_commit_sha`)
+   - verify `applied_commit_sha` reachability in integration history
+2. Reconcile state and continue without double-apply or silent skip.
+
+### 4.10 Conflict Resolution Limits
+
+Persist per-conflict fields:
+
+- `conflict_attempts`
+- `last_conflict_error`
+- `next_retry_at`
+
+Policy:
+
+- max conflict attempts default 5
+- exponential backoff between attempts
+- on cap: mark `blocked_conflict` and pause session for manual unblock
+
+### 4.11 Cleanup (Quiesce First, Then Delete)
+
+Cleanup is idempotent and resumable.
+
+Mandatory sequence:
+
+1. Enter `cleanup_draining`.
+2. Revoke leases for all workstreams.
+3. Terminate/confirm dead all runners (PID+identity check).
+4. Wait for lease expiry + runner-dead confirmation.
+5. Verify all `sealed_head_sha` are integrated.
+   - for cherry-pick mode, verify all sealed commits have `merge_progress.state = applied` and reachable `applied_commit_sha`
+6. Remove local worktrees.
+   - use `git worktree remove --force` after integration verification
+7. Remove local workstream branches.
+8. Delete remote workstream branches (non-blocking if permission/hook rejects).
+9. Prune worktree metadata.
+10. Mark workstreams `cleaned`, session `completed`.
+
+Failure policy:
+
+- Persist `cleanup_status`, `cleanup_error`, `cleanup_warnings`.
+- Resume from last successful cleanup step.
+- Remote branch deletion failure may produce warning but must not block session completion.
+
+### 4.12 Recovery and Reconciliation Matrix
+
+Reconcile tuple:
+
+- `{session_status, workstream_status, worktree_exists, branch_exists, runner_alive, lease_valid}`
+
+Requirements:
+
+1. Deterministic action mapping table is mandatory.
+2. Unknown tuple -> `alert_and_noop` (no destructive guessing).
+3. Persist `last_reconciled_at`, `last_reconcile_action`.
+4. Persist `recovery_attempts` per workstream/session.
+5. Use exponential backoff for repeated recovery attempts.
+6. On cap, mark `blocked_recovery`.
+
+Canonical reconciliation table (minimum required):
+
+| session | workstream | worktree | branch | runner | lease | action |
+|---|---|---|---|---|---|---|
+| running | running | yes | yes | yes | yes | noop (healthy) |
+| running | running | yes | yes | no | yes/no | revoke lease, mark interrupted, re-claim on wakeup |
+| running | running | yes | yes | yes | no | fence-stop runner, revoke lease, mark interrupted |
+| running | running | no | yes | no | any | mark `blocked_recovery` (worktree lost) |
+| running | running | yes | no | any | any | mark `blocked_recovery` (branch lost) |
+| running | completed | yes/no | yes | no | yes/no | eligible for merge |
+| running | completed | any | no | any | any | mark `blocked_recovery` (sealed branch lost) |
+| cleanup_draining | any | yes | any | yes | any | terminate runner, wait, retry cleanup |
+| cleanup_draining | any | yes | any | no | any | remove worktree, continue cleanup |
+| any | cleaned | no | no | no | no | noop (already clean) |
+| any unknown tuple | any | any | any | any | any | alert_and_noop |
+
+### 4.13 Session Limits and Cost Guardrails
+
+1. `max_duration_seconds` per session (default 4h).
+2. Optional API call budget per session.
+3. Resource preflight before fan-out:
+   - memory / disk / runner capacity checks
+4. Auto-downshift `maxClones` if resources are below safe thresholds.
 
 ---
 
-## CLI Interface
+## 5. Data Model
 
-```bash
-# Start parallel runners
-steroids runners start --parallel
+### Global DB
 
-# Limit parallelism
-steroids runners start --parallel --max 2
+- `parallel_sessions(...)`
+  - includes: `project_repo_id`, `status`, `cleanup_status`, `cleanup_error`, `cleanup_warnings`, `max_duration_seconds`, `created_at`, `completed_at`
+- `workstreams(...)`
+  - includes: `branch_name`, `worktree_path`, `runner_id`, `claim_generation`, `lease_expires_at`, `sealed_base_sha`, `sealed_head_sha`, `sealed_commit_shas`, `conflict_attempts`, `recovery_attempts`, `next_retry_at`, `last_error`, `cleaned_at`
+- `runners.parallel_session_id`
 
-# Dry run: show workstreams, then exit
-steroids runners start --parallel --dry-run
+### Project DB
 
-# See all runners including clones
-steroids runners list
-# ID        STATUS    PID    PROJECT              SECTION       BRANCH
-# a47dd5a7  running   61623  /path/to/project     Section C     steroids/ws-abc123
-# b945449a  running   28681  /path/to/project     Section B     steroids/ws-def456
-
-# Trigger merge (usually automatic, manual fallback)
-steroids merge
-
-# Check workspace status
-steroids workspaces list
-
-# Clean up workspaces
-steroids workspaces clean
-steroids workspaces clean --all
-
-# Stop all parallel runners
-steroids runners stop --all
-```
+- `merge_locks(...)`
+  - includes: `lock_epoch`, `runner_id`, `expires_at`, `heartbeat_at`
+- `merge_progress(...)`
+  - includes: `sealed_commit_sha`, `applied_commit_sha`, `state(planned|applying|applied|conflict|skipped|failed)`, `attempts`, `applied_at`
+  - invariant: `(session_id, workstream_id, sealed_commit_sha)` is unique
+  - invariant: `applied_commit_sha` is required when `state = applied`
 
 ---
 
-## Database Schema
+## 6. Implementation Order
 
-### Project DB (`.steroids/steroids.db`) — New Tables
+### Phase 1: Admission + Ownership Hardening
 
-| Table | Columns | Purpose |
-|-------|---------|---------|
-| `merge_locks` | `id`, `session_id`, `runner_id`, `acquired_at`, `expires_at`, `heartbeat_at` | Prevents concurrent merge operations |
-| `merge_progress` | `id` (auto), `session_id`, `workstream_id`, `position`, `commit_sha`, `status` (applied/conflict/skipped), `conflict_task_id`, `created_at`, `applied_at` | Tracks cherry-pick state for crash recovery |
+1. Add `project_repo_id` and active-session uniqueness.
+2. Add workstream CAS leases and fence checks.
+3. Add deterministic completion ordering.
 
-### Global DB (`~/.steroids/steroids.db`) — New Tables
+### Phase 2: Worktree Provisioning + Hydration
 
-| Table | Columns | Purpose |
-|-------|---------|---------|
-| `parallel_sessions` | `id`, `project_path`, `status` (running/merging/completed/failed), `created_at`, `completed_at` | Tracks parallel execution sessions |
-| `workstreams` | `id`, `session_id` (FK), `branch_name`, `section_ids` (JSON array), `clone_path`, `status` (running/completed/failed), `runner_id`, `completed_at` | Tracks each workstream within a session |
+1. Implement worktree create/list/remove/reconcile module.
+2. Implement env/dependency hydration strategy.
+3. Launch runners with strict worktree cwd.
 
-### Modified Tables
+### Phase 3: Sealed Merge + Validation
 
-**`runners`** (Global DB): add `parallel_session_id TEXT REFERENCES parallel_sessions(id)`. Clone runners use the **original project path** in `runners.project_path` (so project-level queries work). The clone's actual filesystem path is stored in `workstreams.clone_path`. The per-project "one runner" check skips runners with non-null `parallel_session_id`. The wakeup cron skips projects with an active parallel session.
+1. Add sealing fields and immutable commit-set capture.
+2. Implement integration-worktree merge.
+3. Implement merge lock epoch fencing.
+4. Implement post-merge validation gate.
 
----
+### Phase 4: Durable Recovery + Cleanup
 
-## Failure Modes
+1. Implement merge-progress state machine resume logic.
+2. Implement reconciliation matrix and bounded retries.
+3. Implement cleanup_draining and idempotent cleanup resume.
 
-### Clone Fails
+### Phase 5: Operational Guardrails
 
-- Same filesystem: `git clone --local` fails → log error, skip workstream
-- Cross-filesystem: automatic fallback to `git clone` without `--local`
-- Disk full: skip workstream, continue with remaining clones
-- Skipped workstreams' tasks remain pending for later sequential processing
-
-### Runner Crashes
-
-- Task locks expire after timeout (existing behavior)
-- Workspace clone persists
-- Partially completed tasks are visible in the shared database
-- The runner can be restarted in the same clone (branch and commits still exist)
-
-### Cherry-Pick Conflict
-
-Not a failure — it's a task. See **Merge-Conflict Tasks** above. The coder/reviewer loop resolves it automatically.
-
-### Credit Exhaustion
-
-- Affected runner pauses (existing behavior)
-- Other runners continue
-- Paused runners simply take longer to complete
-
-### Network Failure During Push
-
-- Push fails → retry. All work is local, nothing is lost.
-- `steroids merge --retry-push` to retry just the push.
+1. Session duration/API budget enforcement.
+2. Resource preflight + auto-downshift.
+3. Diagnostics and repair commands.
 
 ---
 
-## Shared State & SQLite Contention
+## 7. Edge Cases
 
-| Resource | Strategy | Contention |
-|----------|----------|------------|
-| Project DB (`.steroids/`) | Symlinked directory | Medium |
-| Global DB (`~/.steroids/`) | Direct access | Low |
-| Git objects | Hardlinked via `--local` | None |
-| Working tree / Config | Isolated per clone / Read-only | None |
-| API credits | Shared pool | High (N× burn rate) |
-
-WAL mode handles 3-5 runners well: ~10 heartbeat writes/minute, each <1ms, `busy_timeout = 5000ms`. Stagger heartbeats by `(spawnOrder * 5)` seconds. Beyond ~10 runners, SQLite becomes a bottleneck. Phase 1 caps at `maxClones: 3`.
-
----
-
-## Constraints
-
-### Phase 1 Scope
-
-- No PR creation — cherry-pick directly onto `main`
-- Local clones only — no cross-machine parallelism
-- No partial section parallelism — a section runs entirely in one clone
-- Dependency chains are sequential (one workstream, no chain-internal parallelism)
-
-### Throughput Expectations
-
-Not a guaranteed N× speedup. Only truly independent sections parallelize; cherry-pick + conflict resolution adds time; API rate limits may throttle. **Realistic:** 2-4× on projects with 3+ independent sections.
-
-### Disk Space
-
-Full clones with hardlinked objects: mostly working tree overhead. 500MB project × 5 clones ≈ 2.5GB. `cleanupOnSuccess: true` reclaims space after merge.
+| Scenario | Risk | Handling |
+|---|---|---|
+| Double session start for same repo | Branch/worktree collision | Unique active-session admission lock on `project_repo_id` |
+| Stale runner keeps mutating after lease loss | Branch corruption | `claim_generation` fencing on every git/db mutation |
+| Merge lock expires mid-merge | Dual merger writes | `lock_epoch` fencing check before each mutating step |
+| Commit-set drift after completion | Wrong commits merged | immutable `sealed_commit_shas[]` merge input |
+| Resume after crash double-applies commit | History corruption | durable per-commit merge state machine + ancestry check |
+| Cleanup removes while runner alive | data loss / flapping | mandatory `cleanup_draining` first |
+| Recovery loops forever | stuck project | bounded `recovery_attempts` + `blocked_recovery` |
+| Conflict loops forever | stalled merge | bounded `conflict_attempts` + `blocked_conflict` |
+| Merge breaks build without git conflicts | broken integration push | required post-merge validation gate |
+| User working tree has local edits | automation disrupts user | merge only in dedicated integration worktree |
 
 ---
 
-## Design Decisions
+## 8. Non-Goals
 
-### 1. Regular Runners, Not Parent/Child
-
-Each clone runs the same runner used in sequential mode. No special "parent" or "child" runner types. The only difference is scope (which sections) and branch (not `main`). This means zero new runner infrastructure — just parameterization.
-
-### 2. Cherry-Pick, Not Merge
-
-Cherry-pick gives linear history, per-commit conflict resolution, and partial adoption. Merge commits add noise and surface conflicts at branch granularity (harder to resolve). Cherry-pick is `git merge` at commit granularity — simpler and more precise.
-
-### 3. Conflicts Are Tasks, Not Failures
-
-The existing coder/reviewer loop already resolves code problems. A merge conflict is just another code problem. Creating a task for it means:
-- No human intervention needed
-- Same quality gates (reviewer reviews the resolution)
-- Same audit trail
-- Same rejection/retry loop if the resolution is bad
-
-### 4. Full Clones, Not Worktrees
-
-Worktrees share git internals (index locks, HEAD locks, ref locks). Parallel operations deadlock. Full clones are fully isolated. `git clone --local` hardlinks objects, so disk overhead is just the working tree — same as worktrees.
-
-### 5. Lightweight Progress, Not a State Machine
-
-The old design had 11 merge states, recovery commands (`--continue`, `--retry`, `--abort`), rollback logic, and metadata.json tracking. Cherry-pick + conflict-as-task eliminates most of this. What remains is a simple `merge_progress` table that tracks which commits have been applied — enough for crash recovery without the complexity of a full state machine. On restart, `steroids merge` reads the table and picks up where it left off.
+1. Cross-machine distributed execution.
+2. Fine-grained file-level concurrent editing inside one section.
+3. Unlimited automatic self-healing without escalation.
+4. Long-lived preservation of temporary workstream branches.
 
 ---
 
-## Implementation Checklist
+## 9. Cross-Provider Review (Strict Pass #2)
 
-### New Files
-- `src/parallel/scheduler.ts` — workstream partitioning (topological sort, connected components, cycle detection)
-- `src/parallel/clone.ts` — workspace clone creation, symlink setup, cross-filesystem detection
-- `src/parallel/merge.ts` — cherry-pick loop, conflict-as-task creation, merge progress tracking
-- `src/commands/merge.ts` — `steroids merge` CLI command
-- `src/commands/workspaces.ts` — `steroids workspaces list/clean` CLI commands
-- `src/prompts/merge-conflict.ts` — coder prompt variant for conflict resolution. Key constraints: coder must NOT commit (only `git add`), must NOT run `cherry-pick --continue`, must fully remove all conflict markers. Reviewer reviews staged diff, not a commit.
+### 9.1 Claude
 
-### Modified Files
-- `src/commands/runners.ts` — add `--parallel`, `--max`, `--dry-run` flags
-- `src/orchestrator/task-selector.ts` — accept `sectionIds: string[]` (ordered list). Multi-section advancement logic lives in the orchestrator loop wrapper, not in `findNextTask` itself (preserves existing single-section behavior)
-- `src/runners/global-db.ts` — add `parallel_sessions`, `workstreams` tables, `parallel_session_id` column on `runners`
-- `src/database/schema.ts` — add `merge_locks`, `merge_progress` tables
-- `src/git/push.ts` — parameterize branch name (already accepts `branch` param, needs wiring)
-- `src/commands/loop.ts` / `loop-phases.ts` — pass `branchName` and `sectionIds` through to orchestrator
-- `src/runners/wakeup.ts` — skip projects with active parallel sessions
-- `src/runners/daemon.ts` — update `hasActiveRunnerForProject()` to exclude runners with non-null `parallel_session_id`; update `canStartRunner()` to skip singleton check for parallel runners
+Key findings:
 
-### Migrations
-- Project DB: `merge_locks` table, `merge_progress` table
-- Global DB: `parallel_sessions` table, `workstreams` table, `runners.parallel_session_id` column
+- Merge in primary checkout is unsafe.
+- No post-merge validation gate.
+- Lease/reconciliation/timeout details needed to prevent hangs.
+
+Decision:
+
+- Adopted.
+- Strict pass #2 additions adopted:
+  - explicit cherry-pick strategy wording
+  - integration temporary branch in integration worktree
+  - merge lock ttl/renewal
+  - deterministic `completion_order` only
+  - concrete reconciliation table
+
+### 9.2 Gemini
+
+Key findings:
+
+- Dedicated integration worktree needed.
+- Hydration and process identity cleanup hardening needed.
+- Shared high-frequency logging into DB can create contention pressure.
+
+Decision:
+
+- Adopted integration-worktree merge and hydration requirements.
+- Adopted cleanup runner identity checks and stronger cleanup status persistence.
+- Adopted DB contention guardrails; detailed log-routing implementation deferred to implementation phase.
+- Strict pass #2 additions adopted:
+  - cherry-pick recovery must use `applied_commit_sha` mapping, not source-sha ancestry
+  - hydration now explicitly forbids shared mutable dependency directories
+
+### 9.3 Codex
+
+Key findings:
+
+- Missing fencing semantics for merge and runner leases.
+- Sealed head alone insufficient; sealed commit list required.
+- Merge progress needed explicit durable per-commit state machine.
+- Cleanup/recovery needed bounded retries and quiesce gate.
+
+Decision:
+
+- Adopted.
+- Strict pass #2 additions adopted:
+  - blocked states are active for session-admission lock purposes
+  - validation failure semantics now explicitly block push and set `blocked_validation`
 
 ---
 
-## Related Documentation
+## 10. PR-Sized Implementation Task Board
 
-- [RUNNERS.md](./cli/RUNNERS.md) — Current runner architecture
-- [GIT-WORKFLOW.md](./cli/GIT-WORKFLOW.md) — Current git operations
-- [LOCKING.md](./cli/LOCKING.md) — Task and section locking
-- [ROADMAP.md](./ROADMAP.md) — Feature roadmap
+Status legend:
+
+- `[ ]` not started
+- `[-]` started / in progress
+- `[x]` completed
+
+Execution rules:
+
+- Every task below is PR-sized (target: 1-3 files changed).
+- Commit after each chunk before starting the next chunk.
+- Commit message format: `feat(parallelism): <chunk-id> <short-summary>`.
+
+Checklist:
+
+- `[-]` `CHUNK-01` Add active-session admission guard by `project_repo_id` and non-terminal status gating.
+: Files: `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`, `migrations/<new>.sql`
+- `[ ]` `CHUNK-02` Add workstream lease fields and CAS claim logic (`claim_generation`, `lease_expires_at`).
+: Files: `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`, `src/runners/wakeup.ts`
+- `[ ]` `CHUNK-03` Enforce fencing checks on runner-side mutating actions (status, commit, push, seal).
+: Files: `src/runners/orchestrator-loop.ts`, `src/commands/loop-phases.ts`, `src/parallel/merge-conflict.ts`
+- `[ ]` `CHUNK-04` Add integration worktree bootstrap using temporary integration branch.
+: Files: `src/parallel/merge.ts`, `src/parallel/clone.ts`, `src/commands/merge.ts`
+- `[ ]` `CHUNK-05` Add merge lock epoch fencing + TTL/heartbeat renewal semantics.
+: Files: `src/parallel/merge-lock.ts`, `src/parallel/merge.ts`, `src/database/schema.ts`
+- `[ ]` `CHUNK-06` Persist sealed merge input (`sealed_base_sha`, `sealed_head_sha`, `sealed_commit_shas`) at workstream completion.
+: Files: `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`, `src/parallel/merge.ts`
+- `[ ]` `CHUNK-07` Implement durable merge-progress mapping (`sealed_commit_sha` -> `applied_commit_sha`) with unique constraints.
+: Files: `src/parallel/merge-progress.ts`, `src/database/schema.ts`, `migrations/<new>.sql`
+- `[ ]` `CHUNK-08` Implement crash-safe merge resume using provenance mapping and reachability checks.
+: Files: `src/parallel/merge.ts`, `src/parallel/merge-progress.ts`, `src/commands/merge.ts`
+- `[ ]` `CHUNK-09` Add post-merge validation gate and blocked-validation transition on failure.
+: Files: `src/parallel/merge.ts`, `src/commands/merge.ts`, `src/runners/global-db.ts`
+- `[ ]` `CHUNK-10` Implement cleanup-draining phase (lease revoke, runner termination verification, then deletion).
+: Files: `src/commands/workspaces.ts`, `src/runners/wakeup.ts`, `src/runners/global-db.ts`
+- `[ ]` `CHUNK-11` Implement deterministic reconciliation matrix and bounded recovery retries/backoff.
+: Files: `src/runners/wakeup.ts`, `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`
+- `[ ]` `CHUNK-12` Add hydration isolation guardrails (forbid shared mutable dependency directories).
+: Files: `src/parallel/clone.ts`, `src/commands/runners-parallel.ts`, `src/config/schema.ts`
+- `[ ]` `CHUNK-13` Add resource preflight + auto-downshift of `maxClones`.
+: Files: `src/commands/runners-parallel.ts`, `src/config/loader.ts`, `src/config/schema.ts`
+- `[ ]` `CHUNK-14` Add/update tests for provider cwd/worktree safety, locking, merge progress, and cleanup flow.
+: Files: `src/**/__tests__/*` (targeted new/updated test files only)
