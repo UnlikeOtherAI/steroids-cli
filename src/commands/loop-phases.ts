@@ -35,8 +35,58 @@ import type { CoderContext, ReviewerContext } from '../orchestrator/types.js';
 import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { InvokeResult } from '../providers/interface.js';
+import { openGlobalDatabase } from '../runners/global-db.js';
 
 export { type CoordinatorResult };
+
+interface LeaseFenceContext {
+  parallelSessionId?: string;
+  runnerId?: string;
+}
+
+function refreshParallelWorkstreamLease(projectPath: string, leaseFence?: LeaseFenceContext): void {
+  if (!leaseFence?.parallelSessionId) {
+    return;
+  }
+
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db
+      .prepare(
+        `SELECT id, claim_generation, runner_id
+         FROM workstreams
+         WHERE session_id = ?
+           AND clone_path = ?
+           AND status = 'running'
+         LIMIT 1`
+      )
+      .get(leaseFence.parallelSessionId, projectPath) as
+      | { id: string; claim_generation: number; runner_id: string | null }
+      | undefined;
+
+    if (!row) {
+      throw new Error('Parallel workstream row not found for lease refresh');
+    }
+
+    const owner = leaseFence.runnerId ?? row.runner_id ?? `runner:${process.pid ?? 'unknown'}`;
+    const updateResult = db
+      .prepare(
+        `UPDATE workstreams
+         SET runner_id = ?,
+             lease_expires_at = datetime('now', '+120 seconds')
+         WHERE id = ?
+           AND status = 'running'
+           AND claim_generation = ?`
+      )
+      .run(owner, row.id, row.claim_generation);
+
+    if (updateResult.changes !== 1) {
+      throw new Error('Parallel workstream lease fence check failed');
+    }
+  } finally {
+    close();
+  }
+}
 
 /**
  * Returned when a provider invocation is classified as credit exhaustion.
@@ -121,9 +171,11 @@ export async function runCoderPhase(
   action: 'start' | 'resume',
   jsonMode = false,
   coordinatorCache?: Map<string, CoordinatorResult>,
-  coordinatorThresholds?: number[]
+  coordinatorThresholds?: number[],
+  leaseFence?: LeaseFenceContext
 ): Promise<CreditExhaustionResult | void> {
   if (!task) return;
+  refreshParallelWorkstreamLease(projectPath, leaseFence);
 
   let coordinatorGuidance: string | undefined;
   const thresholds = coordinatorThresholds || [2, 5, 9];
@@ -307,6 +359,7 @@ export async function runCoderPhase(
       break;
 
     case 'stage_commit_submit':
+      refreshParallelWorkstreamLease(projectPath, leaseFence);
       // Stage all changes
       try {
         execSync('git add -A', { cwd: projectPath, stdio: 'pipe' });
@@ -352,9 +405,11 @@ export async function runReviewerPhase(
   projectPath: string,
   jsonMode = false,
   coordinatorResult?: CoordinatorResult,
-  branchName: string = 'main'
+  branchName: string = 'main',
+  leaseFence?: LeaseFenceContext
 ): Promise<CreditExhaustionResult | void> {
   if (!task) return;
+  refreshParallelWorkstreamLease(projectPath, leaseFence);
 
   // STEP 1: Invoke reviewer (no status commands in prompt anymore)
   if (!jsonMode) {
@@ -479,6 +534,7 @@ export async function runReviewerPhase(
         console.log(`\n✓ Task APPROVED (confidence: ${decision.metadata.confidence})`);
         console.log('Pushing to git...');
       }
+      refreshParallelWorkstreamLease(projectPath, leaseFence);
       const pushResult = pushToRemote(projectPath, 'origin', branchName);
       if (!jsonMode && pushResult.success) {
         console.log(`Pushed successfully (${pushResult.commitHash})`);
@@ -501,6 +557,7 @@ export async function runReviewerPhase(
         console.log(`\n! Task DISPUTED (confidence: ${decision.metadata.confidence})`);
         console.log('Pushing current work and moving to next task.');
       }
+      refreshParallelWorkstreamLease(projectPath, leaseFence);
       const disputePush = pushToRemote(projectPath, 'origin', branchName);
       if (!jsonMode && disputePush.success) {
         console.log(`Pushed disputed work (${disputePush.commitHash})`);

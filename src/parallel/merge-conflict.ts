@@ -28,6 +28,7 @@ import {
 } from './merge-git.js';
 import { ParallelMergeError } from './merge-errors.js';
 import { upsertProgressEntry } from './merge-progress.js';
+import { openGlobalDatabase } from '../runners/global-db.js';
 
 interface ParseReviewDecisionResult {
   decision: 'approve' | 'reject';
@@ -43,6 +44,53 @@ export interface ConflictRunOptions {
   position: number;
   commitSha: string;
   existingTaskId?: string;
+}
+
+function refreshMergeConflictLease(sessionId: string, workstreamId: string, projectPath: string): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db
+      .prepare(
+        `SELECT id, claim_generation, runner_id
+         FROM workstreams
+         WHERE session_id = ?
+           AND id = ?
+           AND clone_path = ?
+           AND status = 'running'
+         LIMIT 1`
+      )
+      .get(sessionId, workstreamId, projectPath) as
+      | { id: string; claim_generation: number; runner_id: string | null }
+      | undefined;
+
+    if (!row) {
+      throw new ParallelMergeError(
+        'Parallel workstream lease row not found during conflict resolution',
+        'LEASE_ROW_MISSING'
+      );
+    }
+
+    const owner = row.runner_id ?? `merge-conflict:${process.pid ?? 'unknown'}`;
+    const update = db
+      .prepare(
+        `UPDATE workstreams
+         SET runner_id = ?,
+             lease_expires_at = datetime('now', '+120 seconds')
+         WHERE id = ?
+           AND status = 'running'
+           AND claim_generation = ?`
+      )
+      .run(owner, row.id, row.claim_generation);
+
+    if (update.changes !== 1) {
+      throw new ParallelMergeError(
+        'Parallel workstream lease fence check failed during conflict resolution',
+        'LEASE_FENCE_FAILED'
+      );
+    }
+  } finally {
+    close();
+  }
 }
 
 export function parseReviewDecision(raw: string): ParseReviewDecisionResult {
@@ -295,6 +343,7 @@ export async function runConflictResolutionCycle(options: ConflictRunOptions): P
   if (!currentConflictTask) {
     throw new ParallelMergeError('Created merge-conflict task not found', 'TASK_MISSING');
   }
+  refreshMergeConflictLease(sessionId, workstreamId, projectPath);
 
   if (currentConflictTask.status === 'completed') {
     upsertProgressEntry(db, sessionId, workstreamId, position, commitSha, 'applied', conflictTaskId);
@@ -304,6 +353,7 @@ export async function runConflictResolutionCycle(options: ConflictRunOptions): P
   updateTaskStatus(db, currentConflictTask.id, 'in_progress', 'merge-conflict-orchestrator');
 
   while (true) {
+    refreshMergeConflictLease(sessionId, workstreamId, projectPath);
     const existingTask = getTask(db, currentConflictTask.id);
     const lastNotes = existingTask?.rejection_count
       ? `After ${existingTask.rejection_count} rejection(s).`
@@ -384,6 +434,7 @@ export async function runConflictResolutionCycle(options: ConflictRunOptions): P
     }
 
     try {
+      refreshMergeConflictLease(sessionId, workstreamId, projectPath);
       runGitCommand(projectPath, ['-c', 'core.editor=true', 'cherry-pick', '--continue']);
       approveTask(db, currentConflictTask.id, 'merge-conflict-reviewer', decision.notes);
       upsertProgressEntry(db, sessionId, workstreamId, position, commitSha, 'applied', currentConflictTask.id);
@@ -391,6 +442,7 @@ export async function runConflictResolutionCycle(options: ConflictRunOptions): P
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/nothing to commit|previous cherry-pick is empty/i.test(message)) {
+        refreshMergeConflictLease(sessionId, workstreamId, projectPath);
         runGitCommand(projectPath, ['cherry-pick', '--skip']);
         upsertProgressEntry(db, sessionId, workstreamId, position, commitSha, 'skipped', currentConflictTask.id);
         updateTaskStatus(

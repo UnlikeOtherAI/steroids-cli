@@ -22,6 +22,7 @@ import { execSync } from 'node:child_process';
 import { runCoderPhase, runReviewerPhase } from '../commands/loop-phases.js';
 import { handleCreditExhaustion, checkBatchCreditExhaustion } from './credit-pause.js';
 import { pushToRemote } from '../git/push.js';
+import { openGlobalDatabase } from './global-db.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -32,6 +33,54 @@ function resolveSectionIds(sectionId?: string, sectionIds?: string[]): string[] 
     return sectionIds;
   }
   return sectionId ? [sectionId] : undefined;
+}
+
+function refreshParallelWorkstreamLease(
+  parallelSessionId: string | undefined,
+  projectPath: string,
+  runnerId: string | undefined
+): void {
+  if (!parallelSessionId) {
+    return;
+  }
+
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db
+      .prepare(
+        `SELECT id, claim_generation, runner_id
+         FROM workstreams
+         WHERE session_id = ?
+           AND clone_path = ?
+           AND status = 'running'
+         LIMIT 1`
+      )
+      .get(parallelSessionId, projectPath) as
+      | { id: string; claim_generation: number; runner_id: string | null }
+      | undefined;
+
+    if (!row) {
+      throw new Error('Parallel workstream row not found for lease refresh');
+    }
+
+    const owner = runnerId ?? row.runner_id ?? `runner:${process.pid ?? 'unknown'}`;
+    const result = db
+      .prepare(
+        `UPDATE workstreams
+         SET runner_id = ?,
+             lease_expires_at = datetime('now', '+120 seconds')
+         WHERE id = ?
+           AND status = 'running'
+           AND claim_generation = ?`
+      )
+      .run(owner, row.id, row.claim_generation);
+
+    if (result.changes !== 1) {
+      throw new Error('Parallel workstream lease fence check failed');
+    }
+  } finally {
+    close();
+  }
 }
 
 export interface LoopOptions {
@@ -102,6 +151,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       iteration++;
       console.log(`\n─── Iteration ${iteration} ───\n`);
       options.onIteration?.(iteration);
+      refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId);
 
       // Batch mode: process multiple pending tasks at once
       // Only active when not focusing on a specific section and batch mode is enabled
@@ -111,6 +161,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           console.log(`[BATCH MODE] Section "${batch.sectionName}" - ${batch.tasks.length} tasks`);
 
           // Mark all tasks as in_progress
+          refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId);
           for (const task of batch.tasks) {
             markTaskInProgress(db, task.id);
             options.onTaskStart?.(task.id, 'batch');
@@ -236,6 +287,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             });
 
             if (approvedTasks.length > 0) {
+              refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId);
               const pushResult = pushToRemote(projectPath, 'origin', branchName);
               if (pushResult.success) {
                 console.log('Pushing batch changes to git...');
@@ -284,11 +336,46 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       let phaseResult;
       if (action === 'start') {
         markTaskInProgress(db, task.id);
-        phaseResult = await runCoderPhase(db, task, projectPath, 'start', false);
+        phaseResult = await runCoderPhase(
+          db,
+          task,
+          projectPath,
+          'start',
+          false,
+          undefined,
+          undefined,
+          {
+            parallelSessionId: options.parallelSessionId,
+            runnerId: options.runnerId,
+          }
+        );
       } else if (action === 'resume') {
-        phaseResult = await runCoderPhase(db, task, projectPath, 'resume', false);
+        phaseResult = await runCoderPhase(
+          db,
+          task,
+          projectPath,
+          'resume',
+          false,
+          undefined,
+          undefined,
+          {
+            parallelSessionId: options.parallelSessionId,
+            runnerId: options.runnerId,
+          }
+        );
       } else if (action === 'review') {
-        phaseResult = await runReviewerPhase(db, task, projectPath, false, undefined, branchName);
+        phaseResult = await runReviewerPhase(
+          db,
+          task,
+          projectPath,
+          false,
+          undefined,
+          branchName,
+          {
+            parallelSessionId: options.parallelSessionId,
+            runnerId: options.runnerId,
+          }
+        );
       }
 
       // Check for credit exhaustion from single-task phase
