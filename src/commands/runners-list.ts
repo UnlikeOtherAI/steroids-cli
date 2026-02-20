@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util';
 import { getRegisteredProjects } from '../runners/projects.js';
 import { listRunners, type Runner } from '../runners/daemon.js';
 import { openDatabase } from '../database/connection.js';
+import { openGlobalDatabase } from '../runners/global-db.js';
 import {
   getSection,
   getTask,
@@ -13,6 +14,29 @@ import {
 import { isProcessAlive } from '../runners/lock.js';
 import { basename } from 'node:path';
 import { existsSync } from 'node:fs';
+
+/**
+ * Resolve the display project path for a runner.
+ * For parallel runners, returns the original project path (not the clone workspace).
+ */
+function resolveDisplayProject(runner: Runner): string {
+  if (!runner.parallel_session_id || !runner.project_path) {
+    return runner.project_path ?? '-';
+  }
+  try {
+    const { db, close } = openGlobalDatabase();
+    try {
+      const row = db
+        .prepare('SELECT project_path FROM parallel_sessions WHERE id = ?')
+        .get(runner.parallel_session_id) as { project_path: string } | undefined;
+      return row?.project_path ?? runner.project_path;
+    } finally {
+      close();
+    }
+  } catch {
+    return runner.project_path;
+  }
+}
 
 export async function runList(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
@@ -48,22 +72,29 @@ OPTIONS:
   const runners = listRunners();
 
   if (flags.json) {
-    // For JSON output, enrich with section names if available
+    // For JSON output, enrich with section names and original project path
     const enrichedRunners = runners.map((runner) => {
+      const originalProjectPath = resolveDisplayProject(runner);
+      const enriched: Record<string, unknown> = {
+        ...runner,
+        original_project_path: originalProjectPath,
+      };
+
       if (!runner.section_id || !runner.project_path) {
-        return runner;
+        return enriched;
       }
       try {
         const { db, close } = openDatabase(runner.project_path);
         try {
           const section = getSection(db, runner.section_id);
-          return { ...runner, section_name: section?.name };
+          enriched.section_name = section?.name;
         } finally {
           close();
         }
       } catch {
-        return runner;
+        // Section lookup failed, continue without it
       }
+      return enriched;
     });
     console.log(JSON.stringify({ runners: enrichedRunners }, null, 2));
     return;
@@ -83,7 +114,15 @@ OPTIONS:
     const shortId = runner.id.substring(0, 8);
     const status = runner.status.padEnd(10);
     const pid = (runner.pid?.toString() ?? '-').padEnd(9);
-    const project = (runner.project_path ?? '-').substring(0, 30).padEnd(30);
+
+    const displayPath = resolveDisplayProject(runner);
+    let projectLabel = basename(displayPath);
+    if (runner.parallel_session_id && runner.project_path) {
+      const wsMatch = runner.project_path.match(/\/(ws-[a-f0-9]+-\d+)$/);
+      const wsTag = wsMatch ? wsMatch[1] : 'parallel';
+      projectLabel = `${projectLabel} (${wsTag})`;
+    }
+    const project = projectLabel.substring(0, 30).padEnd(30);
 
     // Fetch section name if available
     let sectionDisplay = '-';
@@ -110,8 +149,8 @@ OPTIONS:
     console.log(`${shortId}  ${status}  ${pid}  ${project}    ${section}    ${heartbeat}${alive}`);
   }
 
-  // Check if there are multiple projects
-  const uniqueProjects = new Set(runners.map(r => r.project_path).filter(Boolean));
+  // Check if there are multiple projects (resolve parallel clones to originals)
+  const uniqueProjects = new Set(runners.map(r => resolveDisplayProject(r)).filter(p => p !== '-'));
   if (uniqueProjects.size > 1) {
     const currentProject = process.cwd();
     console.log('');
@@ -150,10 +189,10 @@ async function runListTree(json: boolean): Promise<void> {
     });
   }
 
-  // Add runners to their projects
+  // Add runners to their projects (resolve parallel clones to originals)
   for (const runner of runners) {
-    const projectPath = runner.project_path;
-    if (!projectPath) continue;
+    const projectPath = resolveDisplayProject(runner);
+    if (!projectPath || projectPath === '-') continue;
 
     if (!projectMap.has(projectPath)) {
       projectMap.set(projectPath, {
