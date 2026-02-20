@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import { rmSync } from 'node:fs';
 import { getDefaultWorkspaceRoot } from './clone.js';
 import { getProjectHash } from './clone.js';
+import { createIntegrationWorkspace } from './clone.js';
 import { openDatabase } from '../database/connection.js';
 import {
   getCommitShortSha,
@@ -49,6 +50,7 @@ export interface MergeOptions {
   heartbeatIntervalMs?: number;
   remoteWorkspaceRoot?: string;
   cleanupOnSuccess?: boolean;
+  integrationBranchName?: string;
 }
 
 export interface MergeResult {
@@ -221,6 +223,9 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
   const workspaceRoot = options.remoteWorkspaceRoot ?? getDefaultWorkspaceRoot();
   const cleanupOnSuccess = options.cleanupOnSuccess ?? true;
+  const integrationBranchName = options.integrationBranchName ?? `steroids/integration-${sessionId.slice(0, 8)}`;
+  let mergePath = projectPath;
+  let integrationWorkspacePath: string | null = null;
 
   const { db, close } = openDatabase(projectPath);
   const summary: MergeResult = {
@@ -245,7 +250,18 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       return summary;
     }
 
-    const recoveringFromCherryPick = hasCherryPickInProgress(projectPath);
+    const integrationWorkspace = createIntegrationWorkspace({
+      projectPath,
+      sessionId,
+      baseBranch: mainBranch,
+      remote,
+      workspaceRoot,
+      integrationBranchName,
+    });
+    mergePath = integrationWorkspace.workspacePath;
+    integrationWorkspacePath = integrationWorkspace.workspacePath;
+
+    const recoveringFromCherryPick = hasCherryPickInProgress(mergePath);
 
     heartbeatTimer = setInterval(() => {
       try {
@@ -255,14 +271,14 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       }
     }, heartbeatIntervalMs);
 
-    ensureMergeWorkingTree(projectPath);
+    ensureMergeWorkingTree(mergePath);
 
     for (const stream of workstreams) {
-      safeRunMergeCommand(projectPath, remote, stream.branchName);
+      safeRunMergeCommand(mergePath, remote, stream.branchName);
     }
 
     if (!recoveringFromCherryPick) {
-      const pullOutput = runGitCommand(projectPath, ['pull', '--ff-only', remote, mainBranch], { allowFailure: true });
+      const pullOutput = runGitCommand(mergePath, ['pull', '--ff-only', remote, mainBranch], { allowFailure: true });
       const pullOutputLower = pullOutput.toLowerCase();
 
       if (pullOutputLower.includes('fatal:') || pullOutputLower.includes('error:') || pullOutputLower.includes('error ')) {
@@ -287,7 +303,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     for (const workstream of workstreams) {
       const stats = await processWorkstream(
         db,
-        projectPath,
+        mergePath,
         sessionId,
         workstream,
         mainBranch,
@@ -301,7 +317,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       summary.conflicts += stats.conflicts;
     }
 
-    const pushResult = runGitCommand(projectPath, ['push', remote, mainBranch], { allowFailure: true });
+    const pushResult = runGitCommand(mergePath, ['push', remote, mainBranch], { allowFailure: true });
     if (isNoPushError(pushResult)) {
       summary.errors.push('Push to main failed.');
       throw new ParallelMergeError(pushResult, 'PUSH_FAILED');
@@ -309,16 +325,21 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
 
     for (const stream of workstreams) {
       try {
-        runGitCommand(projectPath, ['push', remote, '--delete', stream.branchName]);
+        runGitCommand(mergePath, ['push', remote, '--delete', stream.branchName]);
       } catch {
         // Ignore branch delete failures; branch may already be deleted.
       }
     }
 
-    runGitCommand(projectPath, ['remote', 'prune', remote]);
+    runGitCommand(mergePath, ['remote', 'prune', remote]);
     cleanupWorkspaceState(projectPath, workspaceRoot, workstreams.map((stream) => stream.id), {
       cleanupOnSuccess,
     });
+
+    if (cleanupOnSuccess && integrationWorkspacePath) {
+      rmSync(integrationWorkspacePath, { recursive: true, force: true });
+      integrationWorkspacePath = null;
+    }
 
     summary.success = true;
     return summary;
@@ -332,6 +353,10 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
+    }
+
+    if (cleanupOnSuccess && integrationWorkspacePath) {
+      rmSync(integrationWorkspacePath, { recursive: true, force: true });
     }
 
     releaseMergeLock(db, sessionId, runnerId);

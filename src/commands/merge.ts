@@ -34,6 +34,7 @@ const HELP = generateHelp({
     { long: 'session-id', description: 'Alias for --session', values: '<id>' },
     { long: 'remote', description: 'Git remote to fetch from', values: '<name>', default: 'origin' },
     { long: 'main-branch', description: 'Target branch for cherry-picks', values: '<name>', default: 'main' },
+    { long: 'integration-branch', description: 'Temporary integration branch name', values: '<name>' },
   ],
   examples: [
     { command: 'steroids merge', description: 'Merge latest parallel session in current project' },
@@ -237,6 +238,7 @@ export async function mergeCommand(args: string[], flags: GlobalFlags): Promise<
       'session-id': { type: 'string' },
       remote: { type: 'string', default: 'origin' },
       'main-branch': { type: 'string', default: 'main' },
+      'integration-branch': { type: 'string' },
     },
     allowPositionals: false,
   });
@@ -276,6 +278,7 @@ export async function mergeCommand(args: string[], flags: GlobalFlags): Promise<
   let result: MergeResult;
   const remote = values.remote as string;
   const mainBranch = values['main-branch'] as string;
+  const integrationBranch = values['integration-branch'] as string | undefined;
 
   try {
     const { close } = openDatabase(projectPath);
@@ -285,14 +288,15 @@ export async function mergeCommand(args: string[], flags: GlobalFlags): Promise<
     process.exit(getExitCode(ErrorCode.NOT_INITIALIZED));
   }
 
-  result = await runParallelMerge({
-    projectPath,
-    sessionId: plan.sessionId,
-    runnerId: randomUUID(),
-    workstreams: plan.workstreams,
-    remote,
-    mainBranch,
-  });
+    result = await runParallelMerge({
+      projectPath,
+      sessionId: plan.sessionId,
+      runnerId: randomUUID(),
+      workstreams: plan.workstreams,
+      remote,
+      mainBranch,
+      integrationBranchName: integrationBranch,
+    });
 
   if (!result.success) {
     const isLockContention = result.errors.some((entry) => entry.includes('Could not acquire merge lock'));

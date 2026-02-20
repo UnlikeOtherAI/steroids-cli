@@ -433,7 +433,7 @@ Checklist:
 : Files: `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`, `src/runners/wakeup.ts`
 - `[x]` `CHUNK-03` Enforce fencing checks on runner-side mutating actions (status, commit, push, seal).
 : Files: `src/runners/orchestrator-loop.ts`, `src/commands/loop-phases.ts`, `src/parallel/merge-conflict.ts`
-- `[ ]` `CHUNK-04` Add integration worktree bootstrap using temporary integration branch.
+- `[x]` `CHUNK-04` Add integration worktree bootstrap using temporary integration branch.
 : Files: `src/parallel/merge.ts`, `src/parallel/clone.ts`, `src/commands/merge.ts`
 - `[ ]` `CHUNK-05` Add merge lock epoch fencing + TTL/heartbeat renewal semantics.
 : Files: `src/parallel/merge-lock.ts`, `src/parallel/merge.ts`, `src/database/schema.ts`
