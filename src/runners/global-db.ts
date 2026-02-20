@@ -4,6 +4,7 @@
  */
 
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -16,11 +17,35 @@ export interface GlobalDatabaseConnection {
   close: () => void;
 }
 
-export type ParallelSessionStatus = 'running' | 'merging' | 'completed' | 'failed';
+export type ParallelSessionStatus =
+  | 'running'
+  | 'merging'
+  | 'cleanup_pending'
+  | 'cleanup_draining'
+  | 'blocked_conflict'
+  | 'blocked_recovery'
+  | 'blocked_validation'
+  | 'completed'
+  | 'failed'
+  | 'aborted';
 
 export interface ParallelSessionRunner {
   id: string;
   pid: number | null;
+}
+
+export interface ValidationEscalationRecord {
+  id: string;
+  session_id: string;
+  project_path: string;
+  workspace_path: string;
+  validation_command: string;
+  error_message: string;
+  stdout_snippet: string | null;
+  stderr_snippet: string | null;
+  status: 'open' | 'resolved';
+  created_at: string;
+  resolved_at: string | null;
 }
 
 /**
@@ -130,7 +155,20 @@ const GLOBAL_SCHEMA_V8_SQL = `
 CREATE TABLE IF NOT EXISTS parallel_sessions (
     id TEXT PRIMARY KEY,
     project_path TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('running', 'merging', 'completed', 'failed')),
+    status TEXT NOT NULL CHECK (
+      status IN (
+        'running',
+        'merging',
+        'cleanup_pending',
+        'cleanup_draining',
+        'blocked_conflict',
+        'blocked_recovery',
+        'blocked_validation',
+        'completed',
+        'failed',
+        'aborted'
+      )
+    ),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     completed_at TEXT
 );
@@ -213,7 +251,39 @@ CREATE INDEX IF NOT EXISTS idx_workstreams_next_retry_at
 ON workstreams(next_retry_at);
 `;
 
-const GLOBAL_SCHEMA_VERSION = '12';
+/**
+ * Schema upgrade from version 13 to version 14: add conflict attempt tracking.
+ */
+const GLOBAL_SCHEMA_V14_SQL = `
+CREATE INDEX IF NOT EXISTS idx_workstreams_conflict_attempts
+ON workstreams(conflict_attempts);
+`;
+
+/**
+ * Schema upgrade from version 14 to version 15: add validation escalation tracking.
+ */
+const GLOBAL_SCHEMA_V15_SQL = `
+CREATE TABLE IF NOT EXISTS validation_escalations (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES parallel_sessions(id),
+    project_path TEXT NOT NULL,
+    workspace_path TEXT NOT NULL,
+    validation_command TEXT NOT NULL,
+    error_message TEXT NOT NULL,
+    stdout_snippet TEXT,
+    stderr_snippet TEXT,
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'resolved')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_validation_escalations_session
+ON validation_escalations(session_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_validation_escalations_project
+ON validation_escalations(project_path, status, created_at DESC);
+`;
+
+const GLOBAL_SCHEMA_VERSION = '15';
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
   const columns = db
@@ -288,6 +358,107 @@ function applyGlobalSchemaV12(db: Database.Database): void {
   }
 
   db.exec(GLOBAL_SCHEMA_V12_SQL);
+}
+
+function supportsBlockedParallelSessionStatuses(db: Database.Database): boolean {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'parallel_sessions'")
+    .get() as { sql?: string } | undefined;
+
+  const sql = row?.sql ?? '';
+  return (
+    sql.includes('blocked_conflict') &&
+    sql.includes('blocked_recovery') &&
+    sql.includes('blocked_validation') &&
+    sql.includes('aborted')
+  );
+}
+
+function applyGlobalSchemaV13(db: Database.Database): void {
+  if (supportsBlockedParallelSessionStatuses(db)) {
+    db.exec(GLOBAL_SCHEMA_V9_INDEX_AND_TRIGGERS_SQL);
+    return;
+  }
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec('DROP TABLE IF EXISTS parallel_sessions_new');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS parallel_sessions_new (
+            id TEXT PRIMARY KEY,
+            project_path TEXT NOT NULL,
+            project_repo_id TEXT,
+            status TEXT NOT NULL CHECK (
+              status IN (
+                'running',
+                'merging',
+                'cleanup_pending',
+                'cleanup_draining',
+                'blocked_conflict',
+                'blocked_recovery',
+                'blocked_validation',
+                'completed',
+                'failed',
+                'aborted'
+              )
+            ),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT
+        );
+      `);
+
+      db.exec(`
+        INSERT INTO parallel_sessions_new (id, project_path, project_repo_id, status, created_at, completed_at)
+        SELECT
+          id,
+          project_path,
+          project_repo_id,
+          CASE
+            WHEN status IN (
+              'running',
+              'merging',
+              'cleanup_pending',
+              'cleanup_draining',
+              'blocked_conflict',
+              'blocked_recovery',
+              'blocked_validation',
+              'completed',
+              'failed',
+              'aborted'
+            ) THEN status
+            ELSE 'running'
+          END,
+          created_at,
+          completed_at
+        FROM parallel_sessions;
+      `);
+
+      db.exec('DROP TABLE parallel_sessions');
+      db.exec('ALTER TABLE parallel_sessions_new RENAME TO parallel_sessions');
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+
+  db.exec(GLOBAL_SCHEMA_V9_INDEX_AND_TRIGGERS_SQL);
+}
+
+function applyGlobalSchemaV14(db: Database.Database): void {
+  if (!hasColumn(db, 'workstreams', 'conflict_attempts')) {
+    db.exec('ALTER TABLE workstreams ADD COLUMN conflict_attempts INTEGER NOT NULL DEFAULT 0');
+  }
+
+  db.exec(GLOBAL_SCHEMA_V14_SQL);
+}
+
+function applyGlobalSchemaV15(db: Database.Database): void {
+  db.exec(GLOBAL_SCHEMA_V15_SQL);
 }
 
 /**
@@ -495,6 +666,17 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     );
   }
   // Future upgrades would be handled here with additional conditions
+  applyGlobalSchemaV9(db);
+  applyGlobalSchemaV10(db);
+  applyGlobalSchemaV11(db);
+  applyGlobalSchemaV12(db);
+  applyGlobalSchemaV13(db);
+  applyGlobalSchemaV14(db);
+  applyGlobalSchemaV15(db);
+  db.prepare(
+    `INSERT INTO _global_schema (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run('version', GLOBAL_SCHEMA_VERSION);
 
   return {
     db,
@@ -567,6 +749,70 @@ export function removeParallelSessionRunner(runnerId: string): void {
   const { db, close } = openGlobalDatabase();
   try {
     db.prepare('DELETE FROM runners WHERE id = ?').run(runnerId);
+  } finally {
+    close();
+  }
+}
+
+export function recordValidationEscalation(input: {
+  sessionId: string;
+  projectPath: string;
+  workspacePath: string;
+  validationCommand: string;
+  errorMessage: string;
+  stdoutSnippet?: string | null;
+  stderrSnippet?: string | null;
+}): ValidationEscalationRecord {
+  const { db, close } = openGlobalDatabase();
+  const id = randomUUID();
+  try {
+    db.prepare(
+      `INSERT INTO validation_escalations (
+         id, session_id, project_path, workspace_path, validation_command,
+         error_message, stdout_snippet, stderr_snippet, status
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`
+    ).run(
+      id,
+      input.sessionId,
+      input.projectPath,
+      input.workspacePath,
+      input.validationCommand,
+      input.errorMessage,
+      input.stdoutSnippet ?? null,
+      input.stderrSnippet ?? null
+    );
+
+    const row = db
+      .prepare(
+        `SELECT id, session_id, project_path, workspace_path, validation_command,
+                error_message, stdout_snippet, stderr_snippet, status, created_at, resolved_at
+         FROM validation_escalations
+         WHERE id = ?`
+      )
+      .get(id) as ValidationEscalationRecord | undefined;
+
+    if (!row) {
+      throw new Error(`Failed to read validation escalation record for id ${id}`);
+    }
+
+    return row;
+  } finally {
+    close();
+  }
+}
+
+export function resolveValidationEscalationsForSession(sessionId: string): number {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const result = db.prepare(
+      `UPDATE validation_escalations
+       SET status = 'resolved',
+           resolved_at = datetime('now')
+       WHERE session_id = ?
+         AND status = 'open'`
+    ).run(sessionId);
+
+    return result.changes;
   } finally {
     close();
   }

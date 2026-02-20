@@ -53,6 +53,7 @@ export interface SteroidsConfig {
       maxClones?: number;
       workspaceRoot?: string;
       hydrationCommand?: string;
+      validationCommand?: string;
       allowSharedMutableDependencies?: boolean;
       autoDownshiftMaxClones?: boolean;
       minFreeMemoryMbPerClone?: number;
@@ -69,6 +70,9 @@ export interface SteroidsConfig {
       tests?: boolean;
       lint?: boolean;
     };
+    sanitiseEnabled?: boolean;
+    sanitiseIntervalMinutes?: number;
+    sanitiseInvocationTimeoutSec?: number;
     // Stuck task detection/recovery (seconds unless otherwise noted)
     orphanedTaskTimeout?: number;
     maxCoderDuration?: number;
@@ -177,6 +181,7 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       maxClones: 3,
       workspaceRoot: '',
       hydrationCommand: '',
+      validationCommand: '',
       allowSharedMutableDependencies: false,
       autoDownshiftMaxClones: true,
       minFreeMemoryMbPerClone: 1024,
@@ -193,6 +198,9 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       tests: true,
       lint: true,
     },
+    sanitiseEnabled: true,
+    sanitiseIntervalMinutes: 5,
+    sanitiseInvocationTimeoutSec: 1800,
     orphanedTaskTimeout: 600,
     maxCoderDuration: 1800,
     maxReviewerDuration: 900,

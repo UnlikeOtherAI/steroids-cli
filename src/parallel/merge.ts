@@ -10,7 +10,12 @@ import { getDefaultWorkspaceRoot } from './clone.js';
 import { getProjectHash } from './clone.js';
 import { createIntegrationWorkspace } from './clone.js';
 import { openDatabase } from '../database/connection.js';
-import { openGlobalDatabase, updateParallelSessionStatus } from '../runners/global-db.js';
+import {
+  openGlobalDatabase,
+  recordValidationEscalation,
+  resolveValidationEscalationsForSession,
+  updateParallelSessionStatus,
+} from '../runners/global-db.js';
 import {
   getCommitShortSha,
   getWorkstreamCommitList,
@@ -63,12 +68,16 @@ export interface MergeResult {
   conflicts: number;
   skipped: number;
   errors: string[];
+  validationEscalationId?: string;
+  validationWorkspacePath?: string;
 }
 
 const DEFAULT_REMOTE = 'origin';
 const DEFAULT_MAIN_BRANCH = 'main';
 const DEFAULT_LOCK_TIMEOUT_MINUTES = 120;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+const VALIDATION_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
+const VALIDATION_SNIPPET_LIMIT = 8_000;
 
 function getNowISOString(): string {
   return new Date().toISOString();
@@ -119,11 +128,57 @@ function runValidationGate(mergePath: string, validationCommand?: string): void 
     return;
   }
 
-  execSync(validationCommand, {
-    cwd: mergePath,
-    stdio: 'pipe',
-    encoding: 'utf-8',
-  });
+  try {
+    execSync(validationCommand, {
+      cwd: mergePath,
+      stdio: 'pipe',
+      encoding: 'utf-8',
+      maxBuffer: VALIDATION_MAX_BUFFER_BYTES,
+    });
+  } catch (error: unknown) {
+    const err = error as Error & { code?: string; stderr?: Buffer | string; stdout?: Buffer | string };
+    const stderr = typeof err.stderr === 'string' ? err.stderr : err.stderr?.toString() ?? '';
+    const stdout = typeof err.stdout === 'string' ? err.stdout : err.stdout?.toString() ?? '';
+    if (err.code === 'ENOBUFS') {
+      throw new ParallelMergeError(
+        'Validation gate output exceeded the maximum buffer size. Reduce output verbosity or split the command.',
+        'VALIDATION_FAILED',
+        {
+          details: {
+            command: validationCommand.trim(),
+            stderr: stderr ?? '',
+            stdout: stdout ?? '',
+          },
+        }
+      );
+    }
+
+    const message = [stderr, stdout, err.message].filter(Boolean).join('\n') || String(error);
+    throw new ParallelMergeError(
+      `Validation gate failed: ${message}`,
+      'VALIDATION_FAILED',
+      {
+        details: {
+          command: validationCommand.trim(),
+          stderr,
+          stdout,
+        },
+      }
+    );
+  }
+}
+
+function snippet(value: string | null | undefined, limit = VALIDATION_SNIPPET_LIMIT): string {
+  if (!value) {
+    return '';
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length <= limit) {
+    return trimmed;
+  }
+
+  return trimmed.slice(-limit);
 }
 
 function isAppliedCommitIntegrated(projectPath: string, commitSha: string | null): boolean {
@@ -153,7 +208,10 @@ function resolveGitSha(output: string): string | null {
 }
 
 function sealWorkstreamsForMerge(
+  mergeDb: ReturnType<typeof openDatabase>['db'],
   sessionId: string,
+  runnerId: string,
+  lockEpoch: number,
   mergePath: string,
   remote: string,
   mainBranch: string,
@@ -161,7 +219,18 @@ function sealWorkstreamsForMerge(
 ): void {
   const { db, close } = openGlobalDatabase();
   try {
+    const sealedEntries: Array<{
+      streamId: string;
+      sealedBaseSha: string;
+      sealedHeadSha: string;
+      commits: string[];
+      completionOrder: number;
+    }> = [];
+
+    assertMergeLockEpoch(mergeDb, sessionId, runnerId, lockEpoch);
+
     for (let index = 0; index < workstreams.length; index += 1) {
+      assertMergeLockEpoch(mergeDb, sessionId, runnerId, lockEpoch);
       const stream = workstreams[index];
       const commits = getWorkstreamCommitList(mergePath, remote, stream.branchName, mainBranch);
       const sealedHeadSha = resolveGitSha(
@@ -171,24 +240,54 @@ function sealWorkstreamsForMerge(
         runGitCommand(mergePath, ['merge-base', `${remote}/${mainBranch}`, `${remote}/${stream.branchName}`], { allowFailure: true })
       );
 
-      db.prepare(
-        `UPDATE workstreams
-         SET sealed_base_sha = ?,
-             sealed_head_sha = ?,
-             sealed_commit_shas = ?,
-             completion_order = COALESCE(completion_order, ?),
-             completed_at = COALESCE(completed_at, datetime('now')),
-             status = 'completed'
-         WHERE session_id = ? AND id = ?`
-      ).run(
+      if (!sealedHeadSha || !sealedBaseSha) {
+        throw new ParallelMergeError(
+          `Could not resolve sealed merge SHAs for ${remote}/${stream.branchName}`,
+          'REMOTE_BRANCH_MISSING'
+        );
+      }
+
+      sealedEntries.push({
+        streamId: stream.id,
         sealedBaseSha,
         sealedHeadSha,
-        JSON.stringify(commits),
-        index + 1,
-        sessionId,
-        stream.id
-      );
+        commits,
+        completionOrder: index + 1,
+      });
     }
+
+    const applySealedUpdates = db.transaction(() => {
+      for (const entry of sealedEntries) {
+        const update = db.prepare(
+          `UPDATE workstreams
+           SET sealed_base_sha = ?,
+               sealed_head_sha = ?,
+               sealed_commit_shas = ?,
+               completion_order = COALESCE(completion_order, ?),
+               completed_at = COALESCE(completed_at, datetime('now')),
+               status = 'completed'
+           WHERE session_id = ?
+             AND id = ?
+             AND status IN ('running', 'completed')`
+        ).run(
+          entry.sealedBaseSha,
+          entry.sealedHeadSha,
+          JSON.stringify(entry.commits),
+          entry.completionOrder,
+          sessionId,
+          entry.streamId
+        );
+
+        if (update.changes !== 1) {
+          throw new ParallelMergeError(
+            `Workstream lease check failed while sealing ${entry.streamId}`,
+            'LEASE_FENCE_FAILED'
+          );
+        }
+      }
+    });
+
+    applySealedUpdates();
   } finally {
     close();
   }
@@ -238,16 +337,21 @@ async function processWorkstream(
 
     if (prior?.status === 'conflict' && prior.commit_sha === commitSha) {
       if (hasCherryPickInProgress(projectPath)) {
-        const outcome = await runConflictResolutionCycle({
-          db,
-          projectPath,
-          sessionId,
-          workstreamId: workstream.id,
-          branchName: workstream.branchName,
-          position,
-          commitSha,
-          existingTaskId: prior.conflict_task_id ?? undefined,
-        });
+      const outcome = await runConflictResolutionCycle({
+        db,
+        projectPath,
+        sessionId,
+        workstreamId: workstream.id,
+        runnerId: heartbeat.runnerId,
+        mergeLockHeartbeat: {
+          lockEpoch: heartbeat.lockEpoch,
+          timeoutMinutes: heartbeat.timeoutMinutes,
+        },
+        branchName: workstream.branchName,
+        position,
+        commitSha,
+        existingTaskId: prior.conflict_task_id ?? undefined,
+      });
 
         if (outcome === 'skipped') summary.skipped += 1;
         else summary.applied += 1;
@@ -287,6 +391,11 @@ async function processWorkstream(
         projectPath,
         sessionId,
         workstreamId: workstream.id,
+        runnerId: heartbeat.runnerId,
+        mergeLockHeartbeat: {
+          lockEpoch: heartbeat.lockEpoch,
+          timeoutMinutes: heartbeat.timeoutMinutes,
+        },
         branchName: workstream.branchName,
         position,
         commitSha,
@@ -345,8 +454,6 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
   let lockEpoch = 0;
 
   try {
-    updateParallelSessionStatus(sessionId, 'merging');
-
     const lock = acquireMergeLock(db, {
       sessionId,
       runnerId,
@@ -359,6 +466,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     }
     lockEpoch = lock.lock?.lock_epoch ?? 0;
     assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
+    updateParallelSessionStatus(sessionId, 'merging');
 
     const integrationWorkspace = createIntegrationWorkspace({
       projectPath,
@@ -389,7 +497,16 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
       safeRunMergeCommand(mergePath, remote, stream.branchName);
     }
-    sealWorkstreamsForMerge(sessionId, mergePath, remote, mainBranch, workstreams);
+    sealWorkstreamsForMerge(
+      db,
+      sessionId,
+      runnerId,
+      lockEpoch,
+      mergePath,
+      remote,
+      mainBranch,
+      workstreams
+    );
 
     if (!recoveringFromCherryPick) {
       const pullOutput = runGitCommand(mergePath, ['pull', '--ff-only', remote, mainBranch], { allowFailure: true });
@@ -440,6 +557,8 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       throw new ParallelMergeError(pushResult, 'PUSH_FAILED');
     }
 
+    updateParallelSessionStatus(sessionId, 'cleanup_draining');
+
     for (const stream of workstreams) {
       try {
         assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
@@ -450,16 +569,25 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     }
 
     runGitCommand(mergePath, ['remote', 'prune', remote]);
-    cleanupWorkspaceState(projectPath, workspaceRoot, workstreams.map((stream) => stream.id), {
-      cleanupOnSuccess,
-    });
+    if (cleanupOnSuccess) {
+      cleanupWorkspaceState(projectPath, workspaceRoot, workstreams.map((stream) => stream.id), {
+        cleanupOnSuccess,
+      });
 
-    if (cleanupOnSuccess && integrationWorkspacePath) {
-      rmSync(integrationWorkspacePath, { recursive: true, force: true });
-      integrationWorkspacePath = null;
+      if (integrationWorkspacePath) {
+        rmSync(integrationWorkspacePath, { recursive: true, force: true });
+        integrationWorkspacePath = null;
+      }
+    } else {
+      updateParallelSessionStatus(sessionId, 'cleanup_pending');
     }
 
     summary.success = true;
+    try {
+      resolveValidationEscalationsForSession(sessionId);
+    } catch {
+      // best-effort resolution marker; merge completion should not fail because of escalation bookkeeping.
+    }
     updateParallelSessionStatus(sessionId, 'completed', true);
     return summary;
   } catch (error) {
@@ -467,7 +595,38 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     if (!summary.errors.includes(message)) {
       summary.errors.push(message);
     }
-    updateParallelSessionStatus(sessionId, 'failed', true);
+    if (error instanceof ParallelMergeError && error.code === 'VALIDATION_FAILED') {
+      const commandFromError = typeof error.details?.command === 'string' ? error.details.command : null;
+      const stderrFromError = typeof error.details?.stderr === 'string' ? error.details.stderr : null;
+      const stdoutFromError = typeof error.details?.stdout === 'string' ? error.details.stdout : null;
+      try {
+        const escalation = recordValidationEscalation({
+          sessionId,
+          projectPath,
+          workspacePath: integrationWorkspacePath ?? mergePath,
+          validationCommand: commandFromError ?? (validationCommand?.trim() || '(not configured)'),
+          errorMessage: message,
+          stdoutSnippet: snippet(stdoutFromError),
+          stderrSnippet: snippet(stderrFromError || message),
+        });
+        summary.validationEscalationId = escalation.id;
+        summary.validationWorkspacePath = escalation.workspace_path;
+        summary.errors.push(
+          `Validation blocked for session ${sessionId}. Escalation ${escalation.id} created. Workspace preserved at ${escalation.workspace_path}.`
+        );
+      } catch (escalationError) {
+        const escalationMessage =
+          escalationError instanceof Error ? escalationError.message : String(escalationError);
+        summary.errors.push(
+          `Validation escalation persistence failed for session ${sessionId}: ${escalationMessage}. Workspace preserved at ${integrationWorkspacePath ?? mergePath}.`
+        );
+      }
+      updateParallelSessionStatus(sessionId, 'blocked_validation', false);
+    } else if (error instanceof ParallelMergeError && error.code === 'CONFLICT_ATTEMPT_LIMIT') {
+      updateParallelSessionStatus(sessionId, 'blocked_conflict', false);
+    } else {
+      updateParallelSessionStatus(sessionId, 'failed', true);
+    }
     return summary;
   } finally {
     if (heartbeatTimer) {
@@ -475,7 +634,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       heartbeatTimer = null;
     }
 
-    if (cleanupOnSuccess && integrationWorkspacePath) {
+    if (cleanupOnSuccess && integrationWorkspacePath && summary.success) {
       rmSync(integrationWorkspacePath, { recursive: true, force: true });
     }
 

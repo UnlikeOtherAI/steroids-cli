@@ -88,6 +88,12 @@ interface CleanResult {
   failures: string[];
 }
 
+const TERMINAL_PARALLEL_SESSION_STATUSES = new Set(['completed', 'failed', 'aborted']);
+
+function isActiveParallelSessionStatus(status: string): boolean {
+  return !TERMINAL_PARALLEL_SESSION_STATUSES.has(status);
+}
+
 function terminateRunnerPid(pid: number): boolean {
   try {
     process.kill(pid, 'SIGTERM');
@@ -150,9 +156,12 @@ function getActiveSessionIds(db: Database.Database, projectPath: string): Set<st
 
   const runningSessions = db
     .prepare(
-      'SELECT id FROM parallel_sessions WHERE project_path = ? AND status = ?'
+      `SELECT id
+       FROM parallel_sessions
+       WHERE project_path = ?
+         AND status NOT IN ('completed', 'failed', 'aborted')`
     )
-    .all(projectPath, 'running') as Array<{ id: string }>;
+    .all(projectPath) as Array<{ id: string }>;
 
   for (const row of runningSessions) {
     active.add(row.id);
@@ -224,8 +233,11 @@ function collectWorkspaceData(
     const sessionStatus = row.session_status ?? 'unknown';
     const clonePath = resolve(row.clone_path ?? join(projectWorkspaceRoot, workstreamId));
     const workstreamStatus = row.workstream_status ?? sessionStatus;
-    const sessionActive = activeSessionIds.has(sessionId) || sessionStatus === 'running';
-    const cleanable = !sessionActive && workstreamStatus !== 'running' && sessionStatus !== 'running';
+    const sessionActive = activeSessionIds.has(sessionId) || isActiveParallelSessionStatus(sessionStatus);
+    const cleanable =
+      !sessionActive &&
+      workstreamStatus !== 'running' &&
+      !isActiveParallelSessionStatus(sessionStatus);
 
     known.add(clonePath);
 

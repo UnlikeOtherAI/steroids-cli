@@ -339,6 +339,23 @@ This ensures the `steroids` command is available globally with your latest chang
 
 The Makefile does steps 2: `make build`
 
+### macOS Privacy Prompt Prevention (CRITICAL)
+
+If you see macOS prompts like **"`node` would like to access data from other apps"**, treat that as a bug in execution context.
+
+**What we must NOT do:**
+- Do NOT run coder/reviewer/orchestrator provider invocations from home (`/Users/...`) or other broad directories.
+- Do NOT use `process.cwd()` for provider invocation working directory when a project path is available.
+- Do NOT spawn detached runners without explicitly setting spawn `cwd` to the target project path.
+- Do NOT run broad scans (`find`, `rg`, `ls -R`) outside the active project root.
+- Do NOT access protected macOS folders (Mail, Messages, Photos, Contacts, Calendars, Safari data, etc.) from automation code.
+- Do NOT add code paths that read from `~/Library` (except explicit Steroids-owned paths like `~/.steroids`).
+
+**Required practice:**
+- Always set provider invocation `cwd` to the active project path.
+- Keep all automated reads/writes scoped to project files and Steroids-managed files only.
+- If any command unexpectedly targets outside the project, stop and fix the call site before continuing.
+
 ### Testing in Temp Directories (CRITICAL)
 
 **When testing `steroids init` in temp directories, ALWAYS use `--no-register`.**

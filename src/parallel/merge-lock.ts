@@ -56,36 +56,46 @@ export function acquireMergeLock(
   db: Database.Database,
   options: MergeLockOptions
 ): { acquired: boolean; lock?: MergeLockRecord } {
-  const lock = getLatestMergeLock(db, options.sessionId);
+  const acquireTx = db.transaction((): { acquired: boolean; lock?: MergeLockRecord } => {
+    const lock = getLatestMergeLock(db, options.sessionId);
 
-  if (lock && !isLockExpired(lock)) {
-    if (lock.runner_id === options.runnerId) {
-      const refreshed = refreshMergeLock(db, lock.session_id, options.runnerId, options.timeoutMinutes);
-      return { acquired: true, lock: refreshed };
+    if (lock && !isLockExpired(lock)) {
+      if (lock.runner_id === options.runnerId) {
+        const refreshed = refreshMergeLock(
+          db,
+          lock.session_id,
+          options.runnerId,
+          options.timeoutMinutes,
+          lock.lock_epoch
+        );
+        return { acquired: true, lock: refreshed };
+      }
+
+      return { acquired: false, lock };
     }
 
-    return { acquired: false, lock };
-  }
+    const lockEpoch = getNextLockEpoch(db, options.sessionId);
+    db.prepare('DELETE FROM merge_locks WHERE session_id = ?').run(options.sessionId);
 
-  db.prepare('DELETE FROM merge_locks WHERE session_id = ?').run(options.sessionId);
-  const lockEpoch = getNextLockEpoch(db, options.sessionId);
+    const inserted = db.prepare(
+      'INSERT INTO merge_locks (session_id, runner_id, lock_epoch, acquired_at, expires_at, heartbeat_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(
+      options.sessionId,
+      options.runnerId,
+      lockEpoch,
+      getNowISOString(),
+      utcExpiresAt(options.timeoutMinutes),
+      getNowISOString()
+    );
 
-  const inserted = db.prepare(
-    'INSERT INTO merge_locks (session_id, runner_id, lock_epoch, acquired_at, expires_at, heartbeat_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(
-    options.sessionId,
-    options.runnerId,
-    lockEpoch,
-    getNowISOString(),
-    utcExpiresAt(options.timeoutMinutes),
-    getNowISOString()
-  );
+    if (inserted.changes !== 1) {
+      return { acquired: false };
+    }
 
-  if (inserted.changes !== 1) {
-    return { acquired: false };
-  }
+    return { acquired: true, lock: getLatestMergeLock(db, options.sessionId) ?? undefined };
+  });
 
-  return { acquired: true, lock: getLatestMergeLock(db, options.sessionId) ?? undefined };
+  return acquireTx();
 }
 
 export function refreshMergeLock(

@@ -89,7 +89,10 @@ export function getWorkstreamCommitList(
   }
 
   if (isMissingRemoteBranchFailure(output)) {
-    return [];
+    throw new ParallelMergeError(
+      `Remote branch is missing: ${remote}/${workstreamBranch}`,
+      'REMOTE_BRANCH_MISSING'
+    );
   }
 
   return output
@@ -150,6 +153,13 @@ export function safeRunMergeCommand(projectPath: string, remote: string, branchN
 
   if (!/error:|fatal:/.test(lower)) {
     return;
+  }
+
+  if (isMissingRemoteBranchFailure(lower)) {
+    throw new ParallelMergeError(
+      `Remote branch is missing: ${remote}/${branchName}. Refusing to continue merge.`,
+      'REMOTE_BRANCH_MISSING'
+    );
   }
 
   if (isNonFatalFetchResult(lower)) {

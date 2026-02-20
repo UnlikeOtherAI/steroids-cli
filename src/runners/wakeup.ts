@@ -13,6 +13,7 @@ import { openDatabase } from '../database/connection.js';
 import { loadConfig } from '../config/loader.js';
 import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
 import { cleanupInvocationLogs } from '../cleanup/invocation-logs.js';
+import { readFileSync } from 'node:fs';
 
 export interface WakeupOptions {
   quiet?: boolean;
@@ -30,7 +31,27 @@ export interface WakeupResult {
   recoveredActions?: number;
   skippedRecoveryDueToSafetyLimit?: boolean;
   deletedInvocationLogs?: number;
+  sanitisedActions?: number;
 }
+
+interface SanitiseSettings {
+  enabled: boolean;
+  intervalMinutes: number;
+  staleInvocationTimeoutSec: number;
+}
+
+interface SanitiseSummary {
+  ran: boolean;
+  reason: string;
+  recoveredApprovals: number;
+  recoveredRejects: number;
+  closedStaleInvocations: number;
+  releasedTaskLocks: number;
+  releasedSectionLocks: number;
+}
+
+const DEFAULT_SANITISE_INTERVAL_MINUTES = 5;
+const DEFAULT_SANITISE_INVOCATION_TIMEOUT_SEC = 1800;
 
 /**
  * Check if a project has pending work
@@ -90,7 +111,8 @@ export function hasActiveParallelSessionForProject(projectPath: string): boolean
       .prepare(
         `SELECT 1 FROM parallel_sessions
          WHERE project_path = ?
-           AND status NOT IN ('completed', 'failed', 'aborted')`
+           AND status NOT IN ('completed', 'failed', 'aborted')
+         LIMIT 1`
       )
       .get(projectPath) as { 1: number } | undefined;
 
@@ -122,7 +144,7 @@ function reconcileParallelSessionRecovery(
       `SELECT id
        FROM parallel_sessions
        WHERE project_path = ?
-         AND status NOT IN ('completed', 'failed', 'aborted')`
+         AND status NOT IN ('completed', 'failed', 'aborted', 'blocked_validation')`
     )
     .all(projectPath) as Array<{ id: string }>;
 
@@ -130,6 +152,7 @@ function reconcileParallelSessionRecovery(
   let blockedWorkstreams = 0;
 
   for (const session of sessions) {
+    let blockedInSession = 0;
     const candidates = db
       .prepare(
         `SELECT id, recovery_attempts
@@ -155,6 +178,7 @@ function reconcileParallelSessionRecovery(
            WHERE id = ?`
         ).run(nextAttempts, candidate.id);
         blockedWorkstreams += 1;
+        blockedInSession += 1;
         continue;
       }
 
@@ -170,11 +194,11 @@ function reconcileParallelSessionRecovery(
       scheduledRetries += 1;
     }
 
-    if (blockedWorkstreams > 0) {
+    if (blockedInSession > 0) {
       db.prepare(
         `UPDATE parallel_sessions
-         SET status = 'failed',
-             completed_at = datetime('now')
+         SET status = 'blocked_recovery',
+             completed_at = NULL
          WHERE id = ?`
       ).run(session.id);
     }
@@ -218,6 +242,332 @@ function startRunner(projectPath: string): { pid: number } | null {
   } catch {
     return null;
   }
+}
+
+function getSanitiseSettings(projectPath: string): SanitiseSettings {
+  const config = loadConfig(projectPath);
+  const health = config.health ?? {};
+
+  const enabled = health.sanitiseEnabled ?? true;
+  const intervalMinutes = Math.max(
+    1,
+    Number(health.sanitiseIntervalMinutes ?? DEFAULT_SANITISE_INTERVAL_MINUTES)
+  );
+  const staleInvocationTimeoutSec = Math.max(
+    60,
+    Number(health.sanitiseInvocationTimeoutSec ?? DEFAULT_SANITISE_INVOCATION_TIMEOUT_SEC)
+  );
+
+  return { enabled, intervalMinutes, staleInvocationTimeoutSec };
+}
+
+function getSanitiseSchemaKey(projectPath: string): string {
+  return `wakeup_sanitise_last_run::${projectPath}`;
+}
+
+function shouldRunPeriodicSanitise(
+  db: ReturnType<typeof openGlobalDatabase>['db'],
+  projectPath: string,
+  intervalMinutes: number
+): boolean {
+  const key = getSanitiseSchemaKey(projectPath);
+  const row = db
+    .prepare('SELECT value FROM _global_schema WHERE key = ?')
+    .get(key) as { value: string } | undefined;
+
+  if (!row?.value) {
+    return true;
+  }
+
+  const due = db.prepare(
+    `SELECT CASE
+       WHEN datetime(?) <= datetime('now', ?)
+       THEN 1 ELSE 0
+     END AS due`
+  ).get(row.value, `-${intervalMinutes} minutes`) as { due: number } | undefined;
+
+  return (due?.due ?? 0) === 1;
+}
+
+function markPeriodicSanitiseRun(
+  db: ReturnType<typeof openGlobalDatabase>['db'],
+  projectPath: string
+): void {
+  db.prepare(
+    `INSERT INTO _global_schema (key, value) VALUES (?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(getSanitiseSchemaKey(projectPath));
+}
+
+function parseReviewerDecisionFromLog(
+  projectPath: string,
+  invocationId: number
+): 'approve' | 'reject' | null {
+  const logPath = join(projectPath, '.steroids', 'invocations', `${invocationId}.log`);
+  if (!existsSync(logPath)) {
+    return null;
+  }
+
+  try {
+    const raw = readFileSync(logPath, 'utf-8');
+    if (raw.includes('DECISION: APPROVE')) {
+      return 'approve';
+    }
+    if (raw.includes('DECISION: REJECT')) {
+      return 'reject';
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function sanitiseProjectState(
+  globalDb: ReturnType<typeof openGlobalDatabase>['db'],
+  projectDb: ReturnType<typeof openDatabase>['db'],
+  projectPath: string,
+  dryRun: boolean,
+  staleInvocationTimeoutSec: number
+): SanitiseSummary {
+  const summary: SanitiseSummary = {
+    ran: true,
+    reason: 'ok',
+    recoveredApprovals: 0,
+    recoveredRejects: 0,
+    closedStaleInvocations: 0,
+    releasedTaskLocks: 0,
+    releasedSectionLocks: 0,
+  };
+
+  const staleCutoffMs = Date.now() - staleInvocationTimeoutSec * 1000;
+  const activeRunnerTaskRows = globalDb
+    .prepare(
+      `SELECT current_task_id, parallel_session_id
+       FROM runners
+       WHERE project_path = ?
+         AND status = 'running'
+         AND heartbeat_at > datetime('now', '-5 minutes')
+         AND (current_task_id IS NOT NULL OR parallel_session_id IS NOT NULL)`
+    )
+    .all(projectPath) as Array<{ current_task_id: string | null; parallel_session_id: string | null }>;
+  const activeTaskIds = new Set(
+    activeRunnerTaskRows
+      .map((row) => row.current_task_id)
+      .filter((taskId): taskId is string => typeof taskId === 'string' && taskId.length > 0)
+  );
+  const hasActiveParallelRunner = activeRunnerTaskRows.some(
+    (row) => typeof row.parallel_session_id === 'string' && row.parallel_session_id.length > 0
+  );
+  let hasActiveMergeLock = false;
+  try {
+    const mergeLockRows = projectDb
+      .prepare('SELECT expires_at FROM merge_locks')
+      .all() as Array<{ expires_at: string }>;
+    const nowMs = Date.now();
+    hasActiveMergeLock = mergeLockRows.some((row) => {
+      const expiresAtMs = Date.parse(row.expires_at);
+      return Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
+    });
+  } catch {
+    hasActiveMergeLock = false;
+  }
+
+  const hasActiveParallelContext = hasActiveParallelRunner || hasActiveMergeLock;
+
+  const staleInvocations = projectDb
+    .prepare(
+      `SELECT i.id, i.task_id, i.role, i.started_at_ms, t.status AS task_status
+       FROM task_invocations i
+       LEFT JOIN tasks t ON t.id = i.task_id
+       WHERE i.status = 'running'
+         AND i.started_at_ms IS NOT NULL
+         AND i.started_at_ms <= ?
+       ORDER BY i.started_at_ms ASC`
+    )
+    .all(staleCutoffMs) as Array<{
+    id: number;
+    task_id: string;
+    role: string;
+    started_at_ms: number;
+    task_status: string | null;
+  }>;
+
+  for (const row of staleInvocations) {
+    if (activeTaskIds.has(row.task_id) || hasActiveParallelContext) {
+      continue;
+    }
+
+    const completedAtMs = Date.now();
+    const durationMs = Math.max(0, completedAtMs - row.started_at_ms);
+    const reviewerDecision =
+      row.role === 'reviewer'
+        ? parseReviewerDecisionFromLog(projectPath, row.id)
+        : null;
+
+    if (!dryRun) {
+      if (reviewerDecision === 'approve' && row.task_status === 'review') {
+        projectDb
+          .prepare(
+            `UPDATE task_invocations
+             SET status = 'completed',
+                 success = 1,
+                 timed_out = 0,
+                 exit_code = 0,
+                 completed_at_ms = ?,
+                 duration_ms = ?,
+                 error = COALESCE(error, 'Recovered by periodic sanitise (review approve token found).')
+             WHERE id = ? AND status = 'running'`
+          )
+          .run(completedAtMs, durationMs, row.id);
+
+        projectDb
+          .prepare(
+            `UPDATE tasks
+             SET status = 'completed',
+                 updated_at = datetime('now')
+             WHERE id = ? AND status = 'review'`
+          )
+          .run(row.task_id);
+
+        projectDb
+          .prepare(
+            `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
+             SELECT ?, 'review', 'completed', 'orchestrator', 'orchestrator',
+                    'Recovered by periodic sanitise from reviewer decision log (DECISION: APPROVE).',
+                    datetime('now')
+             WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND status = 'completed')`
+          )
+          .run(row.task_id, row.task_id);
+      } else if (reviewerDecision === 'reject' && row.task_status === 'review') {
+        projectDb
+          .prepare(
+            `UPDATE task_invocations
+             SET status = 'completed',
+                 success = 1,
+                 timed_out = 0,
+                 exit_code = 0,
+                 completed_at_ms = ?,
+                 duration_ms = ?,
+                 error = COALESCE(error, 'Recovered by periodic sanitise (review reject token found).')
+             WHERE id = ? AND status = 'running'`
+          )
+          .run(completedAtMs, durationMs, row.id);
+
+        projectDb
+          .prepare(
+            `UPDATE tasks
+             SET status = 'in_progress',
+                 rejection_count = COALESCE(rejection_count, 0) + 1,
+                 updated_at = datetime('now')
+             WHERE id = ? AND status = 'review'`
+          )
+          .run(row.task_id);
+
+        projectDb
+          .prepare(
+            `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
+             SELECT ?, 'review', 'in_progress', 'orchestrator', 'orchestrator',
+                    'Recovered by periodic sanitise from reviewer decision log (DECISION: REJECT).',
+                    datetime('now')
+             WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND status = 'in_progress')`
+          )
+          .run(row.task_id, row.task_id);
+      } else {
+        projectDb
+          .prepare(
+            `UPDATE task_invocations
+             SET status = 'failed',
+                 success = 0,
+                 timed_out = 1,
+                 exit_code = 1,
+                 completed_at_ms = ?,
+                 duration_ms = ?,
+                 error = COALESCE(error, 'Periodic sanitise closed stale running invocation.')
+             WHERE id = ? AND status = 'running'`
+          )
+          .run(completedAtMs, durationMs, row.id);
+      }
+    }
+
+    if (reviewerDecision === 'approve' && row.task_status === 'review') {
+      summary.recoveredApprovals += 1;
+    } else if (reviewerDecision === 'reject' && row.task_status === 'review') {
+      summary.recoveredRejects += 1;
+    } else {
+      summary.closedStaleInvocations += 1;
+    }
+  }
+
+  if (!dryRun) {
+    const releasedTaskLocks = projectDb
+      .prepare(`DELETE FROM task_locks WHERE expires_at <= datetime('now')`)
+      .run();
+    summary.releasedTaskLocks = releasedTaskLocks.changes;
+
+    const releasedSectionLocks = projectDb
+      .prepare(`DELETE FROM section_locks WHERE expires_at <= datetime('now')`)
+      .run();
+    summary.releasedSectionLocks = releasedSectionLocks.changes;
+  }
+
+  return summary;
+}
+
+function runPeriodicSanitiseForProject(
+  globalDb: ReturnType<typeof openGlobalDatabase>['db'],
+  projectDb: ReturnType<typeof openDatabase>['db'],
+  projectPath: string,
+  dryRun: boolean
+): SanitiseSummary {
+  const settings = getSanitiseSettings(projectPath);
+  if (!settings.enabled) {
+    return {
+      ran: false,
+      reason: 'disabled',
+      recoveredApprovals: 0,
+      recoveredRejects: 0,
+      closedStaleInvocations: 0,
+      releasedTaskLocks: 0,
+      releasedSectionLocks: 0,
+    };
+  }
+
+  if (!shouldRunPeriodicSanitise(globalDb, projectPath, settings.intervalMinutes)) {
+    return {
+      ran: false,
+      reason: 'interval_not_due',
+      recoveredApprovals: 0,
+      recoveredRejects: 0,
+      closedStaleInvocations: 0,
+      releasedTaskLocks: 0,
+      releasedSectionLocks: 0,
+    };
+  }
+
+  const summary = sanitiseProjectState(
+    globalDb,
+    projectDb,
+    projectPath,
+    dryRun,
+    settings.staleInvocationTimeoutSec
+  );
+
+  if (!dryRun) {
+    markPeriodicSanitiseRun(globalDb, projectPath);
+  }
+
+  return summary;
+}
+
+function sanitisedActionCount(summary: SanitiseSummary): number {
+  return (
+    summary.recoveredApprovals +
+    summary.recoveredRejects +
+    summary.closedStaleInvocations +
+    summary.releasedTaskLocks +
+    summary.releasedSectionLocks
+  );
 }
 
 /**
@@ -360,16 +710,65 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
       // Ignore cleanup errors; wakeup must remain robust.
     }
 
-    // Skip if project already has an active runner
-    // Check for pending work
+    let recoveredActions = 0;
+    let skippedRecoveryDueToSafetyLimit = false;
+    let sanitisedActions = 0;
+
+    try {
+      const { db: projectDb, close: closeProjectDb } = openDatabase(project.path);
+      try {
+        const sanitiseSummary = runPeriodicSanitiseForProject(
+          global.db,
+          projectDb,
+          project.path,
+          dryRun
+        );
+        sanitisedActions = sanitisedActionCount(sanitiseSummary);
+        if (sanitisedActions > 0 && !quiet) {
+          log(`Sanitised ${sanitisedActions} stale item(s) in ${project.path}`);
+        }
+
+        // Step 4a: Recover stuck tasks (best-effort) before deciding whether to (re)start a runner.
+        // This is what unblocks orphaned/infinite-hang scenarios without manual intervention.
+        const config = loadConfig(project.path);
+        const recovery = await recoverStuckTasks({
+          projectPath: project.path,
+          projectDb,
+          globalDb: global.db,
+          config,
+          dryRun,
+        });
+        recoveredActions = recovery.actions.length;
+        skippedRecoveryDueToSafetyLimit = recovery.skippedDueToSafetyLimit;
+        if (recoveredActions > 0 && !quiet) {
+          log(`Recovered ${recoveredActions} stuck item(s) in ${project.path}`);
+        }
+        if (skippedRecoveryDueToSafetyLimit && !quiet) {
+          log(`Skipping auto-recovery in ${project.path}: safety limit hit (maxIncidentsPerHour)`);
+        }
+      } finally {
+        closeProjectDb();
+      }
+    } catch {
+      // If sanitise/recovery can't run (DB missing/corrupt), we still proceed with runner checks.
+    }
+
+    // Check for pending work after sanitise/recovery
     const hasWork = await projectHasPendingWork(project.path);
     if (!hasWork) {
-      log(`Skipping ${project.path}: no pending tasks`);
+      const noWorkReason =
+        sanitisedActions > 0
+          ? `No pending tasks after sanitise (${sanitisedActions} action(s))`
+          : 'No pending tasks';
+      log(`Skipping ${project.path}: ${noWorkReason.toLowerCase()}`);
       results.push({
         action: 'none',
-        reason: 'No pending tasks',
+        reason: noWorkReason,
         projectPath: project.path,
+        recoveredActions,
+        skippedRecoveryDueToSafetyLimit,
         deletedInvocationLogs,
+        sanitisedActions,
       });
       continue;
     }
@@ -398,37 +797,6 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
       continue;
     }
 
-    // Step 4a: Recover stuck tasks (best-effort) before deciding whether to (re)start a runner.
-    // This is what unblocks orphaned/infinite-hang scenarios without manual intervention.
-
-    let recoveredActions = 0;
-    let skippedRecoveryDueToSafetyLimit = false;
-    try {
-      const { db: projectDb, close: closeProjectDb } = openDatabase(project.path);
-      try {
-        const config = loadConfig(project.path);
-        const recovery = await recoverStuckTasks({
-          projectPath: project.path,
-          projectDb,
-          globalDb: global.db,
-          config,
-          dryRun,
-        });
-        recoveredActions = recovery.actions.length;
-        skippedRecoveryDueToSafetyLimit = recovery.skippedDueToSafetyLimit;
-        if (recoveredActions > 0 && !quiet) {
-          log(`Recovered ${recoveredActions} stuck item(s) in ${project.path}`);
-        }
-        if (skippedRecoveryDueToSafetyLimit && !quiet) {
-          log(`Skipping auto-recovery in ${project.path}: safety limit hit (maxIncidentsPerHour)`);
-        }
-      } finally {
-        closeProjectDb();
-      }
-    } catch {
-      // If recovery can't run (DB missing/corrupt), we still proceed with runner checks.
-    }
-
     // Skip if project already has an active runner (after recovery, which may have killed/removed it).
     if (hasActiveRunnerForProject(project.path)) {
       log(`Skipping ${project.path}: runner already active`);
@@ -442,6 +810,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         recoveredActions,
         skippedRecoveryDueToSafetyLimit,
         deletedInvocationLogs,
+        sanitisedActions,
       });
       continue;
     }
@@ -457,6 +826,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         recoveredActions,
         skippedRecoveryDueToSafetyLimit,
         deletedInvocationLogs,
+        sanitisedActions,
       });
       continue;
     }
@@ -471,6 +841,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         recoveredActions,
         skippedRecoveryDueToSafetyLimit,
         deletedInvocationLogs,
+        sanitisedActions,
       });
     } else {
       results.push({
@@ -480,6 +851,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         recoveredActions,
         skippedRecoveryDueToSafetyLimit,
         deletedInvocationLogs,
+        sanitisedActions,
       });
     }
   }

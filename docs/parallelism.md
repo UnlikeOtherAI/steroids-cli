@@ -455,3 +455,7 @@ Checklist:
 : Files: `src/commands/runners-parallel.ts`, `src/config/loader.ts`, `src/config/schema.ts`
 - `[x]` `CHUNK-14` Add/update tests for provider cwd/worktree safety, locking, merge progress, and cleanup flow.
 : Files: `src/**/__tests__/*` (targeted new/updated test files only)
+- `[x]` `CHUNK-15` Fix review-pass gaps: bounded conflict retries with `blocked_conflict`, explicit cleanup status transitions, and active-status workspace cleaning rules.
+: Files: `src/parallel/merge-conflict.ts`, `src/parallel/merge.ts`, `src/commands/workspaces.ts`
+- `[x]` `CHUNK-16` Resolve review-discovered compile blockers in parallel config and lock refresh typing.
+: Files: `src/config/loader.ts`, `src/config/schema.ts`, `src/commands/runners-parallel.ts`, `src/parallel/merge-lock.ts`

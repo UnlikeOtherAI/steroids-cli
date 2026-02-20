@@ -296,7 +296,6 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
           execSync(hydrationCommand, {
             cwd: workspaceClone.workspacePath,
             stdio: 'inherit',
-            shell: true,
           });
         }
 

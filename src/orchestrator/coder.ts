@@ -94,7 +94,7 @@ async function invokeProvider(
       provider.invoke(promptContent, {
         model: modelName,
         timeout: timeoutMs,
-        cwd: process.cwd(),
+        cwd: projectPath ?? process.cwd(),
         promptFile,
         role: 'coder',
         streamOutput: true,

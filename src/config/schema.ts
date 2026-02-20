@@ -192,6 +192,11 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _type: 'string',
         _default: '',
       },
+      validationCommand: {
+        _description: 'Optional shell command to validate integration workspace before push',
+        _type: 'string',
+        _default: '',
+      },
       allowSharedMutableDependencies: {
         _description: 'Allow shared mutable dependency directories across parallel workspaces (unsafe)',
         _type: 'boolean',
@@ -255,6 +260,21 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _type: 'boolean',
         _default: true,
       },
+    },
+    sanitiseEnabled: {
+      _description: 'Enable periodic project sanitise pass during wakeup',
+      _type: 'boolean',
+      _default: true,
+    },
+    sanitiseIntervalMinutes: {
+      _description: 'Minutes between periodic sanitise passes per project',
+      _type: 'number',
+      _default: 5,
+    },
+    sanitiseInvocationTimeoutSec: {
+      _description: 'Seconds before a running invocation is considered stale for sanitise checks',
+      _type: 'number',
+      _default: 1800,
     },
     orphanedTaskTimeout: {
       _description: 'Seconds before an in_progress task without an active runner is considered orphaned',
