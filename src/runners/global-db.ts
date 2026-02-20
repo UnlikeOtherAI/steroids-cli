@@ -190,7 +190,15 @@ CREATE INDEX IF NOT EXISTS idx_workstreams_session_status
 ON workstreams(session_id, status);
 `;
 
-const GLOBAL_SCHEMA_VERSION = '10';
+/**
+ * Schema upgrade from version 10 to version 11: add sealed merge input fields.
+ */
+const GLOBAL_SCHEMA_V11_SQL = `
+CREATE INDEX IF NOT EXISTS idx_workstreams_completion_order
+ON workstreams(session_id, completion_order);
+`;
+
+const GLOBAL_SCHEMA_VERSION = '11';
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
   const columns = db
@@ -225,6 +233,26 @@ function applyGlobalSchemaV10(db: Database.Database): void {
     "WHERE lease_expires_at IS NULL AND status = 'running'"
   );
   db.exec(GLOBAL_SCHEMA_V10_SQL);
+}
+
+function applyGlobalSchemaV11(db: Database.Database): void {
+  if (!hasColumn(db, 'workstreams', 'sealed_base_sha')) {
+    db.exec('ALTER TABLE workstreams ADD COLUMN sealed_base_sha TEXT');
+  }
+
+  if (!hasColumn(db, 'workstreams', 'sealed_head_sha')) {
+    db.exec('ALTER TABLE workstreams ADD COLUMN sealed_head_sha TEXT');
+  }
+
+  if (!hasColumn(db, 'workstreams', 'sealed_commit_shas')) {
+    db.exec('ALTER TABLE workstreams ADD COLUMN sealed_commit_shas TEXT');
+  }
+
+  if (!hasColumn(db, 'workstreams', 'completion_order')) {
+    db.exec('ALTER TABLE workstreams ADD COLUMN completion_order INTEGER');
+  }
+
+  db.exec(GLOBAL_SCHEMA_V11_SQL);
 }
 
 /**
@@ -291,6 +319,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
     applyGlobalSchemaV10(db);
+    applyGlobalSchemaV11(db);
     db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
       'version',
       GLOBAL_SCHEMA_VERSION
@@ -310,6 +339,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
     applyGlobalSchemaV10(db);
+    applyGlobalSchemaV11(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -324,6 +354,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
     applyGlobalSchemaV10(db);
+    applyGlobalSchemaV11(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -337,6 +368,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
     applyGlobalSchemaV10(db);
+    applyGlobalSchemaV11(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -349,6 +381,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
     applyGlobalSchemaV10(db);
+    applyGlobalSchemaV11(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -360,6 +393,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
     applyGlobalSchemaV10(db);
+    applyGlobalSchemaV11(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -370,6 +404,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
     applyGlobalSchemaV10(db);
+    applyGlobalSchemaV11(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -386,6 +421,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     // Upgrade from version 8 to version 9
     applyGlobalSchemaV9(db);
     applyGlobalSchemaV10(db);
+    applyGlobalSchemaV11(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -393,6 +429,14 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   } else if (currentVersion === '9') {
     // Upgrade from version 9 to version 10
     applyGlobalSchemaV10(db);
+    applyGlobalSchemaV11(db);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '10') {
+    // Upgrade from version 10 to version 11
+    applyGlobalSchemaV11(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'

@@ -207,8 +207,9 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
 
     const insertWorkstream = db.prepare(
       `INSERT INTO workstreams (
-        id, session_id, branch_name, section_ids, status, clone_path, claim_generation, lease_expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        id, session_id, branch_name, section_ids, status, clone_path, claim_generation, lease_expires_at,
+        sealed_base_sha, sealed_head_sha, sealed_commit_shas, completion_order
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     for (const workstream of plan.workstreams) {
@@ -232,6 +233,10 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
           'running',
           workspaceClone.workspacePath,
           0,
+          null,
+          null,
+          null,
+          null,
           null
         );
 

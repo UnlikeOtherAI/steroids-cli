@@ -437,7 +437,7 @@ Checklist:
 : Files: `src/parallel/merge.ts`, `src/parallel/clone.ts`, `src/commands/merge.ts`
 - `[x]` `CHUNK-05` Add merge lock epoch fencing + TTL/heartbeat renewal semantics.
 : Files: `src/parallel/merge-lock.ts`, `src/parallel/merge.ts`, `src/database/schema.ts`
-- `[ ]` `CHUNK-06` Persist sealed merge input (`sealed_base_sha`, `sealed_head_sha`, `sealed_commit_shas`) at workstream completion.
+- `[x]` `CHUNK-06` Persist sealed merge input (`sealed_base_sha`, `sealed_head_sha`, `sealed_commit_shas`) at workstream completion.
 : Files: `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`, `src/parallel/merge.ts`
 - `[ ]` `CHUNK-07` Implement durable merge-progress mapping (`sealed_commit_sha` -> `applied_commit_sha`) with unique constraints.
 : Files: `src/parallel/merge-progress.ts`, `src/database/schema.ts`, `migrations/<new>.sql`

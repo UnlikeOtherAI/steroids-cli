@@ -9,6 +9,7 @@ import { getDefaultWorkspaceRoot } from './clone.js';
 import { getProjectHash } from './clone.js';
 import { createIntegrationWorkspace } from './clone.js';
 import { openDatabase } from '../database/connection.js';
+import { openGlobalDatabase } from '../runners/global-db.js';
 import {
   getCommitShortSha,
   getWorkstreamCommitList,
@@ -108,6 +109,55 @@ function cleanupWorkspaceState(
     if (resolve(folder).startsWith(projectWorkspaceRoot)) {
       rmSync(folder, { recursive: true, force: true });
     }
+  }
+}
+
+function resolveGitSha(output: string): string | null {
+  const trimmed = output.trim();
+  if (!trimmed) return null;
+  if (/fatal:|error:/i.test(trimmed)) return null;
+  return trimmed.split('\n').at(-1)?.trim() ?? null;
+}
+
+function sealWorkstreamsForMerge(
+  sessionId: string,
+  mergePath: string,
+  remote: string,
+  mainBranch: string,
+  workstreams: MergeWorkstreamSpec[]
+): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    for (let index = 0; index < workstreams.length; index += 1) {
+      const stream = workstreams[index];
+      const commits = getWorkstreamCommitList(mergePath, remote, stream.branchName, mainBranch);
+      const sealedHeadSha = resolveGitSha(
+        runGitCommand(mergePath, ['rev-parse', `${remote}/${stream.branchName}`], { allowFailure: true })
+      );
+      const sealedBaseSha = resolveGitSha(
+        runGitCommand(mergePath, ['merge-base', `${remote}/${mainBranch}`, `${remote}/${stream.branchName}`], { allowFailure: true })
+      );
+
+      db.prepare(
+        `UPDATE workstreams
+         SET sealed_base_sha = ?,
+             sealed_head_sha = ?,
+             sealed_commit_shas = ?,
+             completion_order = COALESCE(completion_order, ?),
+             completed_at = COALESCE(completed_at, datetime('now')),
+             status = 'completed'
+         WHERE session_id = ? AND id = ?`
+      ).run(
+        sealedBaseSha,
+        sealedHeadSha,
+        JSON.stringify(commits),
+        index + 1,
+        sessionId,
+        stream.id
+      );
+    }
+  } finally {
+    close();
   }
 }
 
@@ -289,6 +339,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
       safeRunMergeCommand(mergePath, remote, stream.branchName);
     }
+    sealWorkstreamsForMerge(sessionId, mergePath, remote, mainBranch, workstreams);
 
     if (!recoveringFromCherryPick) {
       const pullOutput = runGitCommand(mergePath, ['pull', '--ff-only', remote, mainBranch], { allowFailure: true });
