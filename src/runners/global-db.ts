@@ -145,7 +145,63 @@ CREATE TABLE IF NOT EXISTS workstreams (
 ALTER TABLE runners ADD COLUMN parallel_session_id TEXT;
 `;
 
-const GLOBAL_SCHEMA_VERSION = '8';
+/**
+ * Schema upgrade from version 8 to version 9: add project_repo_id and active-session guards.
+ */
+const GLOBAL_SCHEMA_V9_INDEX_AND_TRIGGERS_SQL = `
+CREATE INDEX IF NOT EXISTS idx_parallel_sessions_project_repo_id
+ON parallel_sessions(project_repo_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_parallel_sessions_active_insert
+BEFORE INSERT ON parallel_sessions
+WHEN NEW.project_repo_id IS NOT NULL
+  AND NEW.status NOT IN ('completed', 'failed', 'aborted')
+BEGIN
+  SELECT RAISE(ABORT, 'active parallel session already exists for project repo')
+  WHERE EXISTS (
+    SELECT 1
+    FROM parallel_sessions
+    WHERE project_repo_id = NEW.project_repo_id
+      AND status NOT IN ('completed', 'failed', 'aborted')
+  );
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_parallel_sessions_active_update
+BEFORE UPDATE OF project_repo_id, status ON parallel_sessions
+WHEN NEW.project_repo_id IS NOT NULL
+  AND NEW.status NOT IN ('completed', 'failed', 'aborted')
+BEGIN
+  SELECT RAISE(ABORT, 'active parallel session already exists for project repo')
+  WHERE EXISTS (
+    SELECT 1
+    FROM parallel_sessions
+    WHERE project_repo_id = NEW.project_repo_id
+      AND status NOT IN ('completed', 'failed', 'aborted')
+      AND id != NEW.id
+  );
+END;
+`;
+
+const GLOBAL_SCHEMA_VERSION = '9';
+
+function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
+  const columns = db
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all() as Array<{ name: string }>;
+
+  return columns.some((column) => column.name === columnName);
+}
+
+function applyGlobalSchemaV9(db: Database.Database): void {
+  if (!hasColumn(db, 'parallel_sessions', 'project_repo_id')) {
+    db.exec('ALTER TABLE parallel_sessions ADD COLUMN project_repo_id TEXT');
+  }
+
+  db.exec(
+    "UPDATE parallel_sessions SET project_repo_id = project_path WHERE project_repo_id IS NULL"
+  );
+  db.exec(GLOBAL_SCHEMA_V9_INDEX_AND_TRIGGERS_SQL);
+}
 
 /**
  * Get the path to the global steroids directory.
@@ -209,6 +265,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
+    applyGlobalSchemaV9(db);
     db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
       'version',
       GLOBAL_SCHEMA_VERSION
@@ -226,6 +283,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
+    applyGlobalSchemaV9(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -238,6 +296,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
+    applyGlobalSchemaV9(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -249,6 +308,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
+    applyGlobalSchemaV9(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -259,6 +319,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
+    applyGlobalSchemaV9(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -268,6 +329,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V6_SQL);
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
+    applyGlobalSchemaV9(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -276,6 +338,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     // Upgrade from version 6 to version 7
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
+    applyGlobalSchemaV9(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -283,6 +346,14 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   } else if (currentVersion === '7') {
     // Upgrade from version 7 to version 8
     db.exec(GLOBAL_SCHEMA_V8_SQL);
+    applyGlobalSchemaV9(db);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '8') {
+    // Upgrade from version 8 to version 9
+    applyGlobalSchemaV9(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'

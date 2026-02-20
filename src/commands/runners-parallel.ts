@@ -13,6 +13,7 @@ import { listSections } from '../database/queries.js';
 export interface ParallelWorkstreamPlan {
   sessionId: string;
   projectPath: string;
+  projectRepoId: string;
   maxClones: number;
   workstreams: Array<{
     id: string;
@@ -20,6 +21,14 @@ export interface ParallelWorkstreamPlan {
     sectionIds: string[];
     sectionNames: string[];
   }>;
+}
+
+function getProjectRepoId(projectPath: string): string {
+  try {
+    return fs.realpathSync(projectPath);
+  } catch {
+    return path.resolve(projectPath);
+  }
 }
 
 export function parseSectionIds(value: string): string[] {
@@ -31,6 +40,7 @@ export function parseSectionIds(value: string): string[] {
 
 export function printParallelPlan(_projectPath: string, plan: ParallelWorkstreamPlan): void {
   console.log(`Parallel plan for ${plan.projectPath}`);
+  console.log(`Repo ID: ${plan.projectRepoId}`);
   console.log(`Session: ${plan.sessionId}`);
   console.log(`Workstreams: ${plan.workstreams.length}`);
   console.log(`Max clones: ${plan.maxClones}`);
@@ -57,6 +67,7 @@ export function getConfiguredMaxClones(projectPath: string): number {
 export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: number): ParallelWorkstreamPlan {
   const sessionId = uuidv4();
   const shortSessionId = sessionId.slice(0, 8);
+  const projectRepoId = getProjectRepoId(projectPath);
   const config = loadConfig(projectPath);
 
   if (config.runners?.parallel?.enabled !== true) {
@@ -137,6 +148,7 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
     return {
       sessionId,
       projectPath,
+      projectRepoId,
       maxClones: effectiveMaxClones,
       workstreams: filteredWorkstreams,
     };
@@ -150,9 +162,25 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
   const configuredWorkspaceRoot = loadConfig(projectPath).runners?.parallel?.workspaceRoot;
 
   try {
+    const activeSession = db
+      .prepare(
+        `SELECT id, status
+         FROM parallel_sessions
+         WHERE project_repo_id = ?
+           AND status NOT IN ('completed', 'failed', 'aborted')
+         LIMIT 1`
+      )
+      .get(plan.projectRepoId) as { id: string; status: string } | undefined;
+
+    if (activeSession) {
+      throw new Error(
+        `Active parallel session already exists for this repository: ${activeSession.id} (${activeSession.status})`
+      );
+    }
+
     db.prepare(
-      'INSERT INTO parallel_sessions (id, project_path, status) VALUES (?, ?, ?)'
-    ).run(plan.sessionId, projectPath, 'running');
+      'INSERT INTO parallel_sessions (id, project_path, project_repo_id, status) VALUES (?, ?, ?, ?)'
+    ).run(plan.sessionId, projectPath, plan.projectRepoId, 'running');
 
     const insertWorkstream = db.prepare(
       `INSERT INTO workstreams (
@@ -234,6 +262,7 @@ export function spawnDetachedRunner(options: { projectPath: string; args: string
     process.execPath,
     options.args,
     {
+      cwd: options.projectPath,
       detached: true,
       stdio: daemonLogsEnabled && logFd !== undefined
         ? ['ignore', logFd, logFd]
