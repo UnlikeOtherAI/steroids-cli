@@ -93,16 +93,16 @@ export interface FetchModelsResult {
 
 /**
  * Fetch models from Anthropic API
- * Uses ANTHROPIC_API_KEY environment variable
+ * Uses STEROIDS_ANTHROPIC_API_KEY environment variable
  */
 export async function fetchClaudeModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.STEROIDS_ANTHROPIC_API_KEY;
 
   if (!apiKey) {
     return {
       success: false,
       models: [],
-      error: 'ANTHROPIC_API_KEY not set',
+      error: 'STEROIDS_ANTHROPIC_API_KEY not set',
     };
   }
 
@@ -159,16 +159,16 @@ export async function fetchClaudeModels(): Promise<FetchModelsResult> {
 
 /**
  * Fetch models from OpenAI API
- * Uses OPENAI_API_KEY environment variable
+ * Uses STEROIDS_OPENAI_API_KEY environment variable
  */
 export async function fetchOpenAIModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.STEROIDS_OPENAI_API_KEY;
 
   if (!apiKey) {
     return {
       success: false,
       models: [],
-      error: 'OPENAI_API_KEY not set',
+      error: 'STEROIDS_OPENAI_API_KEY not set',
     };
   }
 
@@ -253,16 +253,16 @@ function getOpenAIModelScore(id: string): number {
 
 /**
  * Fetch models from Google AI (Gemini) API
- * Uses GOOGLE_API_KEY or GEMINI_API_KEY environment variable
+ * Uses STEROIDS_GOOGLE_API_KEY or STEROIDS_GEMINI_API_KEY environment variable
  */
 export async function fetchGeminiModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
+  const apiKey = process.env.STEROIDS_GOOGLE_API_KEY ?? process.env.STEROIDS_GEMINI_API_KEY;
 
   if (!apiKey) {
     return {
       success: false,
       models: [],
-      error: 'GOOGLE_API_KEY or GEMINI_API_KEY not set',
+      error: 'STEROIDS_GOOGLE_API_KEY or STEROIDS_GEMINI_API_KEY not set',
     };
   }
 
@@ -341,16 +341,16 @@ function getGeminiModelScore(id: string): number {
 
 /**
  * Fetch models from Mistral API
- * Uses MISTRAL_API_KEY environment variable
+ * Uses STEROIDS_MISTRAL_API_KEY environment variable
  */
 export async function fetchMistralModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.MISTRAL_API_KEY;
+  const apiKey = process.env.STEROIDS_MISTRAL_API_KEY;
 
   if (!apiKey) {
     return {
       success: false,
       models: [],
-      error: 'MISTRAL_API_KEY not set',
+      error: 'STEROIDS_MISTRAL_API_KEY not set',
     };
   }
 
@@ -505,13 +505,13 @@ export async function fetchModelsForProvider(
 export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mistral'): string {
   switch (provider) {
     case 'claude':
-      return 'ANTHROPIC_API_KEY';
+      return 'STEROIDS_ANTHROPIC_API_KEY';
     case 'openai':
-      return 'OPENAI_API_KEY';
+      return 'STEROIDS_OPENAI_API_KEY';
     case 'gemini':
-      return 'GOOGLE_API_KEY';
+      return 'STEROIDS_GOOGLE_API_KEY';
     case 'mistral':
-      return 'MISTRAL_API_KEY';
+      return 'STEROIDS_MISTRAL_API_KEY';
   }
 }
 
@@ -521,12 +521,12 @@ export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mist
 export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral'): boolean {
   switch (provider) {
     case 'claude':
-      return !!process.env.ANTHROPIC_API_KEY;
+      return !!process.env.STEROIDS_ANTHROPIC_API_KEY;
     case 'openai':
-      return !!process.env.OPENAI_API_KEY;
+      return !!process.env.STEROIDS_OPENAI_API_KEY;
     case 'gemini':
-      return !!(process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY);
+      return !!(process.env.STEROIDS_GOOGLE_API_KEY ?? process.env.STEROIDS_GEMINI_API_KEY);
     case 'mistral':
-      return !!process.env.MISTRAL_API_KEY;
+      return !!process.env.STEROIDS_MISTRAL_API_KEY;
   }
 }

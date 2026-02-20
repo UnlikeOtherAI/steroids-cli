@@ -69,8 +69,11 @@ function normalizeForComparison(text: string): string {
  * Detect repeated patterns in rejection history
  * Uses normalized fuzzy matching to catch similar (not just identical) issues
  */
-export function detectRejectionPatterns(rejectionHistory: RejectionEntry[]): string {
-  if (rejectionHistory.length < 3) return '';
+export function detectRejectionPatterns(
+  rejectionHistory: RejectionEntry[],
+  repeatThreshold: number = 3
+): string {
+  if (rejectionHistory.length < repeatThreshold) return '';
 
   // Extract titles and normalize for comparison
   const entries = rejectionHistory.map(r => ({
@@ -90,7 +93,7 @@ export function detectRejectionPatterns(rejectionHistory: RejectionEntry[]): str
   }
 
   // Also check for keyword-level overlap between non-identical entries
-  // If 3+ rejections share significant keywords, flag it
+  // If N+ rejections share significant keywords, flag it
   const allNotes = rejectionHistory.map(r => r.notes || '');
   const keywordCounts = new Map<string, number>();
   for (const note of allNotes) {
@@ -105,11 +108,11 @@ export function detectRejectionPatterns(rejectionHistory: RejectionEntry[]): str
     }
   }
   const hotKeywords = [...keywordCounts.entries()]
-    .filter(([, count]) => count >= 3)
+    .filter(([, count]) => count >= repeatThreshold)
     .filter(([word]) => !['task', 'file', 'code', 'this', 'that', 'should', 'must', 'need'].includes(word))
     .map(([word]) => word);
 
-  const repeated = [...groups.values()].filter(g => g.count >= 3);
+  const repeated = [...groups.values()].filter(g => g.count >= repeatThreshold);
   if (repeated.length === 0 && hotKeywords.length === 0) return '';
 
   const lines: string[] = [];
@@ -209,7 +212,10 @@ ${r.notes || '(no detailed notes)'}
   });
 
   // Detect patterns
-  const patternWarning = detectRejectionPatterns(rejectionHistory);
+  const patternWarning = detectRejectionPatterns(
+    rejectionHistory,
+    coordinatorGuidance ? 2 : 3
+  );
 
   // Coordinator guidance section (injected after 2nd rejection)
   const coordinatorSection = coordinatorGuidance ? `
@@ -221,7 +227,10 @@ A coordinator has reviewed the rejection history and provides this guidance:
 
 ${coordinatorGuidance}
 
-**Follow the coordinator's guidance above. It takes priority over conflicting reviewer feedback.**
+**Use the coordinator guidance as additional context, not as an override of reviewer correctness checks.**
+
+If coordinator guidance says a reviewer demand is likely out of scope, you may skip that demand.
+If the reviewer rejects again for the same disputed demand, DISPUTE instead of repeating the same fix cycle.
 
 ` : '';
 

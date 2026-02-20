@@ -34,7 +34,7 @@ export interface ReviewerResult {
   stderr: string;
   duration: number;
   timedOut: boolean;
-  decision?: 'approve' | 'reject' | 'dispute';
+  decision?: 'approve' | 'reject' | 'dispute' | 'skip';
   notes?: string;
 }
 
@@ -60,28 +60,35 @@ function writePromptToTempFile(prompt: string): string {
 /**
  * Parse reviewer output for decision
  */
-function parseReviewerDecision(output: string): { decision?: 'approve' | 'reject' | 'dispute'; notes?: string } {
-  const upperOutput = output.toUpperCase();
+function parseReviewerDecision(output: string): { decision?: 'approve' | 'reject' | 'dispute' | 'skip'; notes?: string } {
+  const tokenMap: Record<string, 'approve' | 'reject' | 'dispute' | 'skip'> = {
+    APPROVE: 'approve',
+    REJECT: 'reject',
+    DISPUTE: 'dispute',
+    SKIP: 'skip',
+  };
 
-  // Look for explicit decision markers
-  if (upperOutput.includes('DECISION: APPROVE') || upperOutput.includes('**APPROVE**') || /\bAPPROVE\b/.test(upperOutput)) {
-    // Extract notes if present
-    const notesMatch = output.match(/(?:notes?|feedback|comments?):\s*["']?([^"'\n]+)/i);
-    return { decision: 'approve', notes: notesMatch?.[1]?.trim() };
+  const explicitToken = output.match(
+    /^\s*(?:\*\*)?DECISION(?:\*\*)?\s*(?::|-)\s*(APPROVE|REJECT|DISPUTE|SKIP)\b/im
+  )?.[1]?.toUpperCase();
+
+  const firstNonEmptyLine = output.split('\n').find(line => line.trim().length > 0)?.trim();
+  const firstLineToken = firstNonEmptyLine?.match(/^(APPROVE|REJECT|DISPUTE|SKIP)\b/i)?.[1]?.toUpperCase();
+
+  const resolvedToken = explicitToken || firstLineToken;
+  if (!resolvedToken || !tokenMap[resolvedToken]) {
+    return {};
   }
 
-  if (upperOutput.includes('DECISION: REJECT') || upperOutput.includes('**REJECT**') || /\bREJECT\b/.test(upperOutput)) {
-    // Extract rejection notes
-    const notesMatch = output.match(/(?:notes?|reason|feedback|issues?):\s*["']?([^"'\n]+)/i);
-    return { decision: 'reject', notes: notesMatch?.[1]?.trim() || 'See reviewer output for details' };
+  const decision = tokenMap[resolvedToken];
+  const notesMatch = output.match(/(?:notes?|reason|feedback|issues?|comments?):\s*["']?([^"'\n]+)/i);
+  const extractedNotes = notesMatch?.[1]?.trim();
+
+  if (decision === 'reject') {
+    return { decision, notes: extractedNotes || 'See reviewer output for details' };
   }
 
-  if (upperOutput.includes('DECISION: DISPUTE') || upperOutput.includes('**DISPUTE**') || /\bDISPUTE\b/.test(upperOutput)) {
-    const notesMatch = output.match(/(?:reason|notes?):\s*["']?([^"'\n]+)/i);
-    return { decision: 'dispute', notes: notesMatch?.[1]?.trim() };
-  }
-
-  return {};
+  return { decision, notes: extractedNotes };
 }
 
 /**

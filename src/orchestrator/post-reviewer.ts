@@ -68,30 +68,25 @@ ${stderrSection}
 
 ## Decision Rules
 
-### 1. Clear Approval (HIGHEST PRIORITY)
-- Output contains "APPROVE" / "LGTM" / "looks good" → \`approve\`
-- Exit 0 + positive language + no rejection phrases → \`approve\`
-- Stderr warnings/info do NOT override an explicit approval in stdout
-- Non-zero exit code WITH explicit "APPROVE" in output → still \`approve\` (CLI wrapper errors don't invalidate the review)
-- Non-zero exit code WITHOUT any explicit decision → \`unclear\`
+### 1. Explicit Decision Token (HIGHEST PRIORITY)
+- Parse decision from an explicit token in stdout only:
+  - \`DECISION: APPROVE\` → \`approve\`
+  - \`DECISION: REJECT\` → \`reject\`
+  - \`DECISION: DISPUTE\` → \`dispute\`
+  - \`DECISION: SKIP\` → \`skip\`
+- Also accept formatting variants with the same explicit token:
+  - \`DECISION - APPROVE\`
+  - \`**DECISION:** APPROVE\`
+- Accept a bare first-line token only if it is exactly one of:
+  - \`APPROVE\`, \`REJECT\`, \`DISPUTE\`, \`SKIP\`
+- Do NOT infer approval/rejection from sentiment or keywords like "looks good".
+- Stderr warnings/info do NOT override an explicit token in stdout.
+- Non-zero exit code WITH explicit token → honor token.
 
-### 2. Clear Rejection
-- Output contains "REJECT" / "needs work" / "issues found" → \`reject\`
-- Output lists specific problems/feedback → \`reject\`
-
-### 3. Dispute
-- Output contains "DISPUTE" / "fundamental disagreement" → \`dispute\`
-- Rejection count >= 10 AND same issue repeated → \`dispute\`
-- Output mentions "out of scope" / "architectural disagreement" → \`dispute\`
-
-### 4. Skip
-- Output contains "SKIP" / "external setup required" → \`skip\`
-- Output says "nothing to review" / "no code changes needed" → \`skip\`
-
-### 5. Unclear
-- Exit 0 but no clear decision words → \`unclear\`
+### 2. Unclear
+- No explicit decision token found in stdout → \`unclear\`
 - Timeout → \`unclear\`
-- **IMPORTANT:** Stderr output alone does NOT make a decision unclear. AI CLI tools routinely write progress, warnings, and debug info to stderr. If stdout contains a clear APPROVE/REJECT/DISPUTE signal, honor it regardless of stderr content.
+- **IMPORTANT:** Stderr output alone does NOT make a decision unclear.
 
 ### 6. Rejection Threshold
 - Rejection count = 15 → automatically \`dispute\` (prevent infinite loops)

@@ -20,7 +20,6 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SCHEMA_SQL } from '../../src/database/schema.js';
-import { getProjectHash } from '../../src/parallel/clone.js';
 
 let db: Database.Database;
 
@@ -60,6 +59,7 @@ let mergeModule: typeof import('../../src/parallel/merge.js');
 let lockModule: typeof import('../../src/parallel/merge-lock.js');
 let progressModule: typeof import('../../src/parallel/merge-progress.js');
 let conflictModule: typeof import('../../src/parallel/merge-conflict.js');
+let getProjectHash: (projectPath: string) => string;
 
 let gitPlan: GitPlanStep[] = [];
 let invocationOutputs: string[] = [];
@@ -278,12 +278,19 @@ function configureMergeGitMocks(): void {
   });
 }
 
-[mergeModule, lockModule, progressModule, conflictModule] = await Promise.all([
+const [mergeMod, lockMod, progressMod, conflictMod, cloneMod] = await Promise.all([
   import('../../src/parallel/merge.js'),
   import('../../src/parallel/merge-lock.js'),
   import('../../src/parallel/merge-progress.js'),
   import('../../src/parallel/merge-conflict.js'),
+  import('../../src/parallel/clone.js'),
 ]);
+
+mergeModule = mergeMod;
+lockModule = lockMod;
+progressModule = progressMod;
+conflictModule = conflictMod;
+getProjectHash = cloneMod.getProjectHash;
 
 const registryModule = await import('../../src/providers/registry.js');
 

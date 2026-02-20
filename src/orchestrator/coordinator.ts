@@ -105,8 +105,8 @@ A task has been rejected ${rejectionHistory.length} times. You MUST provide a de
 **Your job is to MAKE A DECISION, not to escalate.** There is no human to escalate to.
 
 **IMPORTANT: Your guidance will be sent to BOTH the coder AND the reviewer.**
-- The coder will follow your guidance when implementing fixes
-- The reviewer will see your decision and must respect it (especially override_reviewer decisions)
+- The coder will use your guidance when implementing fixes
+- The reviewer will see your guidance as CONTEXT only and still perform a full independent review
 
 ---
 
@@ -186,8 +186,10 @@ GUIDANCE:
 - If there's a design disagreement, PICK the approach that matches the project's architecture and tell the coder to follow it
 - If the same feedback appeared 3+ times unchanged, the coder needs a fundamentally different approach - describe it
 - Always ask: "Will this be usable for the end user?" - if the current approach works for users, don't block on technicalities
+- Never tell the reviewer to auto-approve based on a fixed checklist (e.g., "these are the only items required for approval")
+- Never claim reviewer guidance is binding over security, correctness, or specification requirements
 - Keep guidance under 500 words
-- Focus on UNBLOCKING - the goal is to get this task approved on the next attempt
+- Focus on UNBLOCKING while preserving review quality and safety
 `;
 }
 

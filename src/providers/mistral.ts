@@ -152,8 +152,7 @@ export class MistralProvider extends BaseAIProvider {
 
       // Vibe chooses models by alias. We inject a one-model runtime list so any
       // requested model ID can be selected deterministically.
-      const env = {
-        ...process.env,
+      const env = this.getSanitizedCliEnv({
         VIBE_ACTIVE_MODEL: model,
         VIBE_MODELS: JSON.stringify([
           {
@@ -164,7 +163,7 @@ export class MistralProvider extends BaseAIProvider {
             output_price: 0.0,
           },
         ]),
-      };
+      });
 
       // Default path uses argument-based invocation (no shell interpolation),
       // which avoids command injection through prompt content.
@@ -313,7 +312,7 @@ export class MistralProvider extends BaseAIProvider {
         /mistral_api_key/i.test(stderr)) {
       return {
         type: 'auth_error',
-        message: 'MISTRAL_API_KEY is missing or invalid',
+        message: 'STEROIDS_MISTRAL_API_KEY is missing or invalid',
         retryable: false,
       };
     }

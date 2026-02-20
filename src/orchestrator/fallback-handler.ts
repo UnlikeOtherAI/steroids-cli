@@ -7,6 +7,78 @@ import { CoderOrchestrationResult, ReviewerOrchestrationResult } from './types.j
 import { validateCoderResult, validateReviewerResult } from './schemas.js';
 
 export class OrchestrationFallbackHandler {
+  private static readonly UNQUOTED_KEY_REGEX = /([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g;
+  private static readonly SINGLE_QUOTED_STRING_REGEX = /'((?:\\.|[^'\\])*)'/g;
+
+  private normalizeJsonCandidate(raw: string): string {
+    let normalized = raw.trim();
+
+    // Strip markdown fences if present
+    const fencedMatch = normalized.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (fencedMatch?.[1]) {
+      normalized = fencedMatch[1].trim();
+    }
+
+    // Normalize smart quotes
+    normalized = normalized
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'");
+
+    // Quote unquoted object keys: { action: "retry" } -> { "action": "retry" }
+    normalized = normalized.replace(OrchestrationFallbackHandler.UNQUOTED_KEY_REGEX, '$1"$2"$3');
+
+    // Convert single-quoted strings to JSON-safe double-quoted strings
+    normalized = normalized.replace(
+      OrchestrationFallbackHandler.SINGLE_QUOTED_STRING_REGEX,
+      (_match, inner: string) => `"${inner.replace(/"/g, '\\"')}"`
+    );
+
+    // Remove trailing commas
+    normalized = normalized.replace(/,\s*([}\]])/g, '$1');
+
+    // Normalize python-ish literals that occasionally leak
+    normalized = normalized
+      .replace(/\bTrue\b/g, 'true')
+      .replace(/\bFalse\b/g, 'false')
+      .replace(/\bNone\b/g, 'null');
+
+    return normalized;
+  }
+
+  private tryRepairAndParse<T>(
+    rawOutput: string,
+    validator: (value: unknown) => boolean,
+    successLog: string
+  ): T | null {
+    const candidates: string[] = [rawOutput];
+
+    const jsonBlock = rawOutput.match(/```json\s*([\s\S]*?)\s*```/i);
+    if (jsonBlock?.[1]) {
+      candidates.push(jsonBlock[1]);
+    }
+
+    const start = rawOutput.indexOf('{');
+    const end = rawOutput.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      candidates.push(rawOutput.substring(start, end + 1));
+    }
+
+    for (const candidate of candidates) {
+      const normalized = this.normalizeJsonCandidate(candidate);
+      try {
+        const parsed = JSON.parse(normalized);
+        if (validator(parsed)) {
+          console.log(successLog);
+          return parsed as T;
+        }
+      } catch {
+        // Continue to next candidate
+      }
+    }
+
+    return null;
+  }
+
   /**
    * Parse coder orchestrator output with multi-layer fallback
    */
@@ -57,8 +129,18 @@ export class OrchestrationFallbackHandler {
       }
     }
 
-    // Layer 4: Keyword fallback
-    console.warn('[Orchestrator] ⚠ Layer 4: Using keyword fallback (all parsing failed)');
+    // Layer 4: Repair malformed JSON and validate
+    const repaired = this.tryRepairAndParse<CoderOrchestrationResult>(
+      rawOutput,
+      validateCoderResult,
+      '[Orchestrator] ✓ Layer 4: JSON repair succeeded'
+    );
+    if (repaired) {
+      return repaired;
+    }
+
+    // Layer 5: Keyword fallback
+    console.warn('[Orchestrator] ⚠ Layer 5: Using keyword fallback (all parsing+repair failed)');
     return this.keywordFallbackCoder(rawOutput);
   }
 
@@ -112,9 +194,47 @@ export class OrchestrationFallbackHandler {
       }
     }
 
-    // Layer 4: Keyword fallback
-    console.warn('[Orchestrator] ⚠ Layer 4: Using keyword fallback (all parsing failed)');
+    // Layer 4: Repair malformed JSON and validate
+    const repaired = this.tryRepairAndParse<ReviewerOrchestrationResult>(
+      rawOutput,
+      validateReviewerResult,
+      '[Orchestrator] ✓ Layer 4: JSON repair succeeded'
+    );
+    if (repaired) {
+      return repaired;
+    }
+
+    // Layer 5: Explicit decision fallback
+    console.warn('[Orchestrator] ⚠ Layer 5: Using explicit decision fallback (all parsing+repair failed)');
     return this.keywordFallbackReviewer(rawOutput);
+  }
+
+  private extractExplicitReviewerDecision(
+    output: string
+  ): 'approve' | 'reject' | 'dispute' | 'skip' | null {
+    const map: Record<string, 'approve' | 'reject' | 'dispute' | 'skip'> = {
+      APPROVE: 'approve',
+      REJECT: 'reject',
+      DISPUTE: 'dispute',
+      SKIP: 'skip',
+    };
+
+    const explicitMatch = output.match(
+      /^\s*(?:\*\*)?DECISION(?:\*\*)?\s*(?::|-)\s*(APPROVE|REJECT|DISPUTE|SKIP)\b/im
+    );
+    if (explicitMatch?.[1]) {
+      return map[explicitMatch[1].toUpperCase()] ?? null;
+    }
+
+    const firstNonEmptyLine = output.split('\n').find(line => line.trim().length > 0)?.trim();
+    if (firstNonEmptyLine && /^(APPROVE|REJECT|DISPUTE|SKIP)\b/i.test(firstNonEmptyLine)) {
+      const token = firstNonEmptyLine.match(/^(APPROVE|REJECT|DISPUTE|SKIP)\b/i)?.[1];
+      if (token) {
+        return map[token.toUpperCase()] ?? null;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -203,17 +323,15 @@ export class OrchestrationFallbackHandler {
   }
 
   /**
-   * Keyword-based fallback for reviewer orchestrator
+   * Explicit-token fallback for reviewer orchestrator
    */
   private keywordFallbackReviewer(output: string): ReviewerOrchestrationResult {
-    const lower = output.toLowerCase();
-
-    // Check for approval
-    if (/(lgtm|approve|looks good|approved)/.test(lower) && !/reject|issues|needs work/.test(lower)) {
+    const decision = this.extractExplicitReviewerDecision(output);
+    if (decision === 'approve') {
       return {
         decision: 'approve',
-        reasoning: 'FALLBACK: Detected approval keywords',
-        notes: 'Approved based on keyword detection',
+        reasoning: 'FALLBACK: Explicit DECISION token APPROVE',
+        notes: 'Approved based on explicit reviewer decision token',
         next_status: 'completed',
         metadata: {
           rejection_count: 0,
@@ -223,13 +341,11 @@ export class OrchestrationFallbackHandler {
         }
       };
     }
-
-    // Check for rejection
-    if (/reject|issues|needs work|fix|problem/.test(lower)) {
+    if (decision === 'reject') {
       return {
         decision: 'reject',
-        reasoning: 'FALLBACK: Detected rejection keywords',
-        notes: 'Rejected - see full reviewer output for details',
+        reasoning: 'FALLBACK: Explicit DECISION token REJECT',
+        notes: 'Rejected - see reviewer output for details',
         next_status: 'in_progress',
         metadata: {
           rejection_count: 0,
@@ -239,12 +355,10 @@ export class OrchestrationFallbackHandler {
         }
       };
     }
-
-    // Check for dispute
-    if (/dispute|disagree|out of scope/.test(lower)) {
+    if (decision === 'dispute') {
       return {
         decision: 'dispute',
-        reasoning: 'FALLBACK: Detected dispute keywords',
+        reasoning: 'FALLBACK: Explicit DECISION token DISPUTE',
         notes: 'Dispute detected - human decision needed',
         next_status: 'disputed',
         metadata: {
@@ -255,12 +369,10 @@ export class OrchestrationFallbackHandler {
         }
       };
     }
-
-    // Check for skip
-    if (/skip|no changes|nothing to review/.test(lower)) {
+    if (decision === 'skip') {
       return {
         decision: 'skip',
-        reasoning: 'FALLBACK: Detected skip keywords',
+        reasoning: 'FALLBACK: Explicit DECISION token SKIP',
         notes: 'Task skipped',
         next_status: 'skipped',
         metadata: {
@@ -275,8 +387,8 @@ export class OrchestrationFallbackHandler {
     // Safe default: unclear
     return {
       decision: 'unclear',
-      reasoning: 'FALLBACK: Orchestrator failed, retrying review',
-      notes: 'Review unclear, retrying',
+      reasoning: 'FALLBACK: Missing explicit reviewer decision token',
+      notes: 'Review unclear, retrying with explicit decision requirement',
       next_status: 'review',
       metadata: {
         rejection_count: 0,

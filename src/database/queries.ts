@@ -538,9 +538,24 @@ export function updateTaskStatus(
 
   const oldStatus = task.status;
 
-  db.prepare(
-    `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`
-  ).run(newStatus, taskId);
+  // When manually restarting a task from failed -> pending,
+  // decrement failure_count by 1 to reflect one recovered failure.
+  if (oldStatus === 'failed' && newStatus === 'pending') {
+    db.prepare(
+      `UPDATE tasks
+       SET status = ?,
+           failure_count = CASE
+             WHEN COALESCE(failure_count, 0) > 0 THEN failure_count - 1
+             ELSE 0
+           END,
+           updated_at = datetime('now')
+       WHERE id = ?`
+    ).run(newStatus, taskId);
+  } else {
+    db.prepare(
+      `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`
+    ).run(newStatus, taskId);
+  }
 
   addAuditEntry(db, taskId, oldStatus, newStatus, actor, notes, commitSha);
 }

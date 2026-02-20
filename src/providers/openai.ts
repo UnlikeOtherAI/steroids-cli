@@ -151,6 +151,7 @@ export class OpenAIProvider extends BaseAIProvider {
       const child = spawn(command, {
         shell: true,
         cwd,
+        env: this.getSanitizedCliEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 

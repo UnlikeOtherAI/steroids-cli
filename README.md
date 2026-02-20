@@ -528,9 +528,9 @@ Same schema — acts as default, overridden by project config.
 ### Environment Variables
 
 ```bash
-ANTHROPIC_API_KEY=...        # For Claude models
-OPENAI_API_KEY=...           # For Codex (OpenAI's development CLI)
-GOOGLE_API_KEY=...           # For Gemini models
+STEROIDS_ANTHROPIC_API_KEY=...        # For Claude models
+STEROIDS_OPENAI_API_KEY=...           # For Codex (OpenAI's development CLI)
+STEROIDS_GOOGLE_API_KEY=...           # For Gemini models
 
 STEROIDS_JSON=1              # Output as JSON
 STEROIDS_QUIET=1             # Minimal output

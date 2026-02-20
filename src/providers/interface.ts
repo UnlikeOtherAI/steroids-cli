@@ -375,4 +375,14 @@ export abstract class BaseAIProvider implements IAIProvider {
       .replace('{prompt_file}', promptFile)
       .replace('{model}', model);
   }
+
+  /**
+   * Build child process env for provider CLI invocation.
+   */
+  protected getSanitizedCliEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      ...overrides,
+    };
+  }
 }

@@ -83,7 +83,7 @@ ${lines.join('\n')}
  */
 /**
  * Format coordinator guidance for the reviewer
- * Makes coordinator decisions visible and enforceable by the reviewer
+ * Makes coordinator decisions visible as advisory context for the reviewer
  */
 function formatCoordinatorGuidance(guidance?: string, decision?: string): string {
   if (!guidance) return '';
@@ -109,11 +109,14 @@ A coordinator has reviewed the rejection history for this task and made the foll
 
 ${guidance}
 
-**You MUST consider this when making your decision:**
-- If the coordinator decided **override_reviewer**: do NOT re-raise the issues the coordinator flagged as out of scope or unachievable. Those demands have been ruled invalid.
-- If the coordinator decided **narrow_scope**: evaluate the coder's work against the NARROWED scope described above, not the original full scope.
-- If the coordinator decided **guide_coder**: the coder was given specific direction - check whether they followed it.
-- You may still reject for NEW issues not addressed by the coordinator, but do not contradict the coordinator's ruling.
+**Use this as advisory context, not an approval gate:**
+- If the coordinator decided **override_reviewer**: treat it as a scope hint, but still verify correctness, security, and spec compliance in the actual diff.
+- If the coordinator decided **narrow_scope**: prioritize the narrowed scope for disputed points, but still review for any blocking defects.
+- If the coordinator decided **guide_coder**: check whether the coder followed the guidance, then continue full independent review.
+- You may reject for any blocking issue, including new or previously missed issues.
+- Never auto-approve because coordinator guidance was followed.
+- If coordinator guidance conflicts with clear spec/security/correctness requirements, follow those requirements and explain the conflict.
+- If you disagree with coordinator scope advice, explicitly state why in your rejection notes so the next coordinator pass can converge.
 
 `;
 }
@@ -256,49 +259,73 @@ ${getTestCoverageInstructions(config, modifiedFiles)}
 
 ## Your Decision
 
-You MUST output ONE of these decision statements clearly:
+Your first non-empty line MUST be an explicit decision token in this exact format:
+- \`DECISION: APPROVE\`
+- \`DECISION: REJECT\`
+- \`DECISION: DISPUTE\`
+- \`DECISION: SKIP\`
+
+After the decision token, include the matching details below.
 
 ### APPROVE (implementation is correct)
 If the code correctly implements the specification:
-**Output:** "APPROVE - Implementation meets all requirements"
+**Output:**
+\`\`\`
+DECISION: APPROVE
+APPROVE - Implementation meets all requirements
+\`\`\`
 
 ### APPROVE WITH NOTE (minor issues, not blocking)
 If you have minor concerns but the implementation is acceptable:
-**Output:** "APPROVE - <your feedback here>"
+**Output:**
+\`\`\`
+DECISION: APPROVE
+APPROVE - <your feedback here>
+\`\`\`
 
 ### SKIP (external setup required)
 If the coder requested a SKIP and it's legitimate:
 1. **Verify** the spec section says SKIP, MANUAL, or requires external action
 2. **Verify** the skip notes explain WHAT human action is needed
 3. If valid:
-**Output:** "SKIP - Verified: spec says SKIP. Human must [action]. Approved to unblock pipeline."
+**Output:**
+\`\`\`
+DECISION: SKIP
+SKIP - Verified: spec says SKIP. Human must [action]. Approved to unblock pipeline.
+\`\`\`
 
 ### REJECT (needs changes)
 If there are issues that must be fixed:
-**Output:** "REJECT" followed by specific feedback
+**Output:** \`DECISION: REJECT\` followed by specific feedback
 
 **CRITICAL: Format rejection feedback with checkboxes for EACH actionable item:**
 
 \`\`\`
-- [ ] Fix type error in src/foo.ts:42 - change \`string\` to \`number\`
-- [ ] Add missing null check in src/bar.ts:15 before accessing \`.data\`
-- [ ] Add unit test for the new \`processItem()\` function
-- [ ] Remove unused import on line 3
+- [ ] [NEW] Fix type error in src/foo.ts:42 - change \`string\` to \`number\`
+- [ ] [UNRESOLVED] src/bar.ts:15 still dereferences \`.data\` without null check (same issue from prior review; verified in current diff)
+- [ ] [NEW] Add unit test for the new \`processItem()\` function
+- [ ] [NEW] Remove unused import on line 3
 \`\`\`
 
 **Why checkboxes?** The coder will use these to verify they've addressed EVERY issue before resubmitting. Each checkbox = one specific action.
 
 **Rules for rejection notes:**
 1. One checkbox per actionable item (not paragraphs of prose)
-2. Include file:line references where applicable
-3. Be specific about WHAT to change, not just WHAT is wrong
-4. Group related items logically
+2. Start each checkbox with \`[NEW]\` or \`[UNRESOLVED]\`
+3. For each \`[UNRESOLVED]\` item, include evidence of what remains broken now (file:line or concrete behavior)
+4. Include file:line references where applicable
+5. Be specific about WHAT to change, not just WHAT is wrong
+6. Group related items logically
 
 This will be rejection #${task.rejection_count + 1}.
 
 ### DISPUTE (fundamental disagreement)
 Only if there's a genuine specification or architecture conflict:
-**Output:** "DISPUTE - <explanation>"
+**Output:**
+\`\`\`
+DECISION: DISPUTE
+DISPUTE - <explanation>
+\`\`\`
 
 Use sparingly. Most issues should be resolved via reject/fix cycle.
 
@@ -311,7 +338,7 @@ Use sparingly. Most issues should be resolved via reject/fix cycle.
 1. **NEVER modify code yourself** - only review it
 2. **Be specific in rejection notes** - vague feedback wastes cycles
 3. **Approve if it works** - don't reject for style preferences
-4. **You MUST clearly state your decision** (APPROVE/REJECT/DISPUTE/SKIP)
+4. **You MUST include an explicit decision token** (\`DECISION: APPROVE|REJECT|DISPUTE|SKIP\`)
 5. **Verify coder's claims** - if coder says work exists in a commit, CHECK IT before rejecting
 6. **Empty diff ≠ no work** - work may exist in earlier commits the coder referenced
 7. **SKIP requests are valid** - if spec says SKIP/manual, approve the skip to unblock the pipeline
@@ -336,7 +363,7 @@ Simply include these as notes in your decision output. They will be logged for h
 
 ## Review Now
 
-Examine the diff above, then clearly state your decision (APPROVE/REJECT/DISPUTE/SKIP) with any notes.
+Examine the diff above, then output your explicit decision token first, followed by any notes.
 The orchestrator will parse your decision and update task status accordingly.
 `;
 }

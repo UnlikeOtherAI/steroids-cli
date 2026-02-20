@@ -19,20 +19,20 @@ import {
  */
 const GEMINI_MODELS: ModelInfo[] = [
   {
-    id: 'gemini-pro',
-    name: 'Gemini Pro',
-    recommendedFor: ['coder'],
+    id: 'gemini-2.5-pro',
+    name: 'Gemini 2.5 Pro',
+    recommendedFor: ['orchestrator', 'coder', 'reviewer'],
     supportsStreaming: true,
   },
   {
-    id: 'gemini-ultra',
-    name: 'Gemini Ultra',
-    recommendedFor: ['orchestrator', 'reviewer'],
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    recommendedFor: [],
     supportsStreaming: true,
   },
   {
-    id: 'gemini-flash',
-    name: 'Gemini Flash',
+    id: 'gemini-2.0-flash',
+    name: 'Gemini 2.0 Flash',
     recommendedFor: [],
     supportsStreaming: true,
   },
@@ -42,9 +42,9 @@ const GEMINI_MODELS: ModelInfo[] = [
  * Default models per role
  */
 const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string> = {
-  orchestrator: 'gemini-ultra',
-  coder: 'gemini-pro',
-  reviewer: 'gemini-ultra',
+  orchestrator: 'gemini-2.5-pro',
+  coder: 'gemini-2.5-pro',
+  reviewer: 'gemini-2.5-pro',
 };
 
 /**
@@ -166,14 +166,15 @@ export class GeminiProvider extends BaseAIProvider {
       let timedOut = false;
       let stdoutLineBuffer = '';
       const isStreamJson = this.getInvocationTemplate().includes('stream-json');
-
       // Build command from invocation template
       const command = this.buildCommand(promptFile, model);
+
 
       // Spawn using shell to handle the command template
       const child = spawn(command, {
         shell: true,
         cwd,
+        env: this.getSanitizedCliEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 

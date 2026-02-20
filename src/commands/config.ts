@@ -611,10 +611,10 @@ EXAMPLES:
   steroids config ai reviewer --global            # Configure reviewer in global config
 
 ENVIRONMENT VARIABLES:
-  ANTHROPIC_API_KEY   Required for Claude models
-  OPENAI_API_KEY      Required for OpenAI models
-  GOOGLE_API_KEY      Required for Gemini models (or GEMINI_API_KEY)
-  MISTRAL_API_KEY     Required for Mistral models
+  STEROIDS_ANTHROPIC_API_KEY   Required for Claude models
+  STEROIDS_OPENAI_API_KEY      Required for OpenAI models
+  STEROIDS_GOOGLE_API_KEY      Required for Gemini models (or STEROIDS_GEMINI_API_KEY)
+  STEROIDS_MISTRAL_API_KEY     Required for Mistral models
 `);
     return;
   }
@@ -685,10 +685,10 @@ EXAMPLES:
   steroids config models mistral          # List Mistral models
 
 ENVIRONMENT VARIABLES:
-  ANTHROPIC_API_KEY   Required for Claude
-  OPENAI_API_KEY      Required for OpenAI
-  GOOGLE_API_KEY      Required for Gemini (or GEMINI_API_KEY)
-  MISTRAL_API_KEY     Required for Mistral
+  STEROIDS_ANTHROPIC_API_KEY   Required for Claude
+  STEROIDS_OPENAI_API_KEY      Required for OpenAI
+  STEROIDS_GOOGLE_API_KEY      Required for Gemini (or STEROIDS_GEMINI_API_KEY)
+  STEROIDS_MISTRAL_API_KEY     Required for Mistral
 `);
     return;
   }

@@ -10,6 +10,7 @@ import {
   approveTask,
   rejectTask,
   getTaskRejections,
+  getTaskAudit,
   getLatestSubmissionNotes,
   listTasks,
   addAuditEntry,
@@ -84,6 +85,33 @@ function checkCreditExhaustion(
   }
 
   return null;
+}
+
+const MAX_ORCHESTRATOR_PARSE_RETRIES = 3;
+const CODER_PARSE_FALLBACK_MARKER = '[retry] FALLBACK: Orchestrator failed, defaulting to retry';
+const REVIEWER_PARSE_FALLBACK_MARKER = '[unclear] FALLBACK: Orchestrator failed, retrying review';
+
+function countConsecutiveOrchestratorFallbackEntries(
+  db: ReturnType<typeof openDatabase>['db'],
+  taskId: string,
+  marker: string
+): number {
+  const audit = getTaskAudit(db, taskId);
+  let count = 0;
+
+  for (let i = audit.length - 1; i >= 0; i--) {
+    const entry = audit[i];
+    if (entry.actor !== 'orchestrator') break;
+
+    if ((entry.notes ?? '').includes(marker)) {
+      count += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return count;
 }
 
 export async function runCoderPhase(
@@ -237,7 +265,31 @@ export async function runCoderPhase(
 
   // STEP 5: Parse orchestrator output with fallback
   const handler = new OrchestrationFallbackHandler();
-  const decision = handler.parseCoderOutput(orchestratorOutput);
+  let decision = handler.parseCoderOutput(orchestratorOutput);
+
+  if (decision.action === 'retry' && decision.reasoning.startsWith('FALLBACK: Orchestrator failed')) {
+    const consecutiveParseFallbackRetries =
+      countConsecutiveOrchestratorFallbackEntries(db, task.id, CODER_PARSE_FALLBACK_MARKER) + 1;
+
+    if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
+      decision = {
+        ...decision,
+        action: 'error',
+        reasoning: `Orchestrator parse failed ${consecutiveParseFallbackRetries} times; escalating to failed to stop retry loop`,
+        next_status: 'failed',
+        metadata: {
+          ...decision.metadata,
+          confidence: 'low',
+          exit_clean: false,
+        },
+      };
+    } else {
+      decision = {
+        ...decision,
+        reasoning: `${decision.reasoning} (parse_retry ${consecutiveParseFallbackRetries}/${MAX_ORCHESTRATOR_PARSE_RETRIES})`,
+      };
+    }
+  }
 
   // STEP 6: Log orchestrator decision for audit trail
   addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
@@ -384,7 +436,32 @@ export async function runReviewerPhase(
 
   // STEP 5: Parse orchestrator output with fallback
   const handler = new OrchestrationFallbackHandler();
-  const decision = handler.parseReviewerOutput(orchestratorOutput);
+  let decision = handler.parseReviewerOutput(orchestratorOutput);
+
+  if (decision.decision === 'unclear' && decision.reasoning.startsWith('FALLBACK: Orchestrator failed')) {
+    const consecutiveParseFallbackRetries =
+      countConsecutiveOrchestratorFallbackEntries(db, task.id, REVIEWER_PARSE_FALLBACK_MARKER) + 1;
+
+    if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
+      decision = {
+        ...decision,
+        decision: 'dispute',
+        reasoning: `Orchestrator parse failed ${consecutiveParseFallbackRetries} times; escalating to dispute`,
+        notes: 'Escalated to disputed to prevent endless unclear-review retries',
+        next_status: 'disputed',
+        metadata: {
+          ...decision.metadata,
+          confidence: 'low',
+          push_to_remote: false,
+        },
+      };
+    } else {
+      decision = {
+        ...decision,
+        reasoning: `${decision.reasoning} (parse_retry ${consecutiveParseFallbackRetries}/${MAX_ORCHESTRATOR_PARSE_RETRIES})`,
+      };
+    }
+  }
 
   // STEP 6: Log orchestrator decision for audit trail
   addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
