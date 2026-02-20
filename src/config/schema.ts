@@ -210,7 +210,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       minFreeMemoryMbPerClone: {
         _description: 'Minimum free memory (MB) required per parallel clone for resource preflight',
         _type: 'number',
-        _default: 1024,
+        _default: 128,
       },
       minFreeDiskMbPerClone: {
         _description: 'Minimum free disk (MB) required per parallel clone for resource preflight',

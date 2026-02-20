@@ -7,7 +7,7 @@ import { openDatabase } from '../database/connection.js';
 import { createWorkspaceClone } from '../parallel/clone.js';
 import { loadConfig } from '../config/loader.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
-import { partitionWorkstreams, CyclicDependencyError, type WorkstreamSection } from '../parallel/scheduler.js';
+import { CyclicDependencyError, type WorkstreamSection } from '../parallel/scheduler.js';
 import { listSections } from '../database/queries.js';
 
 export interface ParallelWorkstreamPlan {
@@ -163,33 +163,13 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
       throw new Error('No sections found');
     }
 
-    const dependencyRows = db
-      .prepare('SELECT section_id AS sectionId, depends_on_section_id AS dependsOnSectionId FROM section_dependencies')
-      .all() as {
-        sectionId: string;
-        dependsOnSectionId: string;
-      }[];
-
-    const workstreamSections = sections.map((section) => ({
-      id: section.id,
-      name: section.name,
-      position: section.position,
-    }) as WorkstreamSection);
-
-    const workstreams = partitionWorkstreams(
-      workstreamSections,
-      dependencyRows.map((dep) => ({
-        sectionId: dep.sectionId,
-        dependsOnSectionId: dep.dependsOnSectionId,
-      }))
-    );
-
+    // Count pending tasks per section
     const pendingRows = db
       .prepare(
         `SELECT section_id as sectionId, COUNT(*) as count
          FROM tasks
          WHERE section_id IN (${sections.map(() => '?').join(',')})
-           AND status != 'completed'
+           AND status NOT IN ('completed', 'skipped', 'failed')
          GROUP BY section_id`
       )
       .all(...sections.map((section) => section.id)) as Array<{
@@ -198,25 +178,20 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
     }>;
 
     const pendingMap = new Map<string, number>(pendingRows.map((row) => [row.sectionId, row.count]));
-    const sectionNameById = new Map(sections.map((section) => [section.id, section.name]));
 
-    const activeWorkstreams = workstreams.workstreams
-      .map((sectionIds, index) => {
-        const sectionNames = sectionIds
-          .map((sectionId) => sectionNameById.get(sectionId) ?? sectionId);
+    // Each section with pending work gets its own workstream.
+    // The task selector inside each runner already respects section dependencies
+    // at runtime, so we don't need to group connected components together.
+    const sectionsWithWork = sections
+      .filter((s) => (pendingMap.get(s.id) ?? 0) > 0)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
 
-        const workstream: ParallelWorkstreamPlan['workstreams'][number] = {
-          id: `ws-${shortSessionId}-${index + 1}`,
-          branchName: `steroids/ws-${shortSessionId}-${index + 1}`,
-          sectionIds,
-          sectionNames,
-        };
-
-        return workstream;
-      })
-      .filter((workstream) =>
-        workstream.sectionIds.some((sectionId) => (pendingMap.get(sectionId) ?? 0) > 0)
-      );
+    const activeWorkstreams = sectionsWithWork.map((section, index) => ({
+      id: `ws-${shortSessionId}-${index + 1}`,
+      branchName: `steroids/ws-${shortSessionId}-${index + 1}`,
+      sectionIds: [section.id],
+      sectionNames: [section.name],
+    }));
 
     const filteredWorkstreams = activeWorkstreams.slice(0, effectiveMaxClones);
 

@@ -184,7 +184,7 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       validationCommand: '',
       allowSharedMutableDependencies: false,
       autoDownshiftMaxClones: true,
-      minFreeMemoryMbPerClone: 1024,
+      minFreeMemoryMbPerClone: 128,
       minFreeDiskMbPerClone: 512,
       cleanupOnSuccess: true,
       cleanupOnFailure: false,
