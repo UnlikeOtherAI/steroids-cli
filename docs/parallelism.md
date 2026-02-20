@@ -447,7 +447,7 @@ Checklist:
 : Files: `src/parallel/merge.ts`, `src/commands/merge.ts`, `src/runners/global-db.ts`
 - `[x]` `CHUNK-10` Implement cleanup-draining phase (lease revoke, runner termination verification, then deletion).
 : Files: `src/commands/workspaces.ts`, `src/runners/wakeup.ts`, `src/runners/global-db.ts`
-- `[ ]` `CHUNK-11` Implement deterministic reconciliation matrix and bounded recovery retries/backoff.
+- `[x]` `CHUNK-11` Implement deterministic reconciliation matrix and bounded recovery retries/backoff.
 : Files: `src/runners/wakeup.ts`, `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`
 - `[ ]` `CHUNK-12` Add hydration isolation guardrails (forbid shared mutable dependency directories).
 : Files: `src/parallel/clone.ts`, `src/commands/runners-parallel.ts`, `src/config/schema.ts`

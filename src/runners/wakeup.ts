@@ -113,6 +113,76 @@ function releaseExpiredWorkstreamLeases(db: ReturnType<typeof openGlobalDatabase
   return result.changes;
 }
 
+function reconcileParallelSessionRecovery(
+  db: ReturnType<typeof openGlobalDatabase>['db'],
+  projectPath: string
+): { scheduledRetries: number; blockedWorkstreams: number } {
+  const sessions = db
+    .prepare(
+      `SELECT id
+       FROM parallel_sessions
+       WHERE project_path = ?
+         AND status NOT IN ('completed', 'failed', 'aborted')`
+    )
+    .all(projectPath) as Array<{ id: string }>;
+
+  let scheduledRetries = 0;
+  let blockedWorkstreams = 0;
+
+  for (const session of sessions) {
+    const candidates = db
+      .prepare(
+        `SELECT id, recovery_attempts
+         FROM workstreams
+         WHERE session_id = ?
+           AND status = 'running'
+           AND (lease_expires_at IS NULL OR lease_expires_at <= datetime('now'))
+           AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))`
+      )
+      .all(session.id) as Array<{ id: string; recovery_attempts: number }>;
+
+    for (const candidate of candidates) {
+      const nextAttempts = (candidate.recovery_attempts ?? 0) + 1;
+
+      if (nextAttempts >= 5) {
+        db.prepare(
+          `UPDATE workstreams
+           SET status = 'failed',
+               recovery_attempts = ?,
+               next_retry_at = NULL,
+               last_reconcile_action = 'blocked_recovery',
+               last_reconciled_at = datetime('now')
+           WHERE id = ?`
+        ).run(nextAttempts, candidate.id);
+        blockedWorkstreams += 1;
+        continue;
+      }
+
+      const backoffMinutes = Math.min(2 ** nextAttempts, 30);
+      db.prepare(
+        `UPDATE workstreams
+         SET recovery_attempts = ?,
+             next_retry_at = datetime('now', ?),
+             last_reconcile_action = 'retry_scheduled',
+             last_reconciled_at = datetime('now')
+         WHERE id = ?`
+      ).run(nextAttempts, `+${backoffMinutes} minutes`, candidate.id);
+      scheduledRetries += 1;
+    }
+
+    if (blockedWorkstreams > 0) {
+      db.prepare(
+        `UPDATE parallel_sessions
+         SET status = 'failed',
+             completed_at = datetime('now')
+         WHERE id = ?`
+      ).run(session.id);
+    }
+  }
+
+  return { scheduledRetries, blockedWorkstreams };
+}
+
 /**
  * Kill a process by PID
  */
@@ -307,10 +377,21 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
     // Skip projects currently executing a parallel session before attempting recovery/startup.
     // This prevents parallel runners from being interfered with by a cron-managed runner.
     if (hasActiveParallelSessionForProject(project.path)) {
-      log(`Skipping ${project.path}: active parallel session in progress`);
+      let retrySummary = '';
+      if (!dryRun) {
+        const recovery = reconcileParallelSessionRecovery(global.db, project.path);
+        if (recovery.scheduledRetries > 0) {
+          retrySummary += `, scheduled ${recovery.scheduledRetries} recovery retry(s)`;
+        }
+        if (recovery.blockedWorkstreams > 0) {
+          retrySummary += `, blocked ${recovery.blockedWorkstreams} workstream(s)`;
+        }
+      }
+
+      log(`Skipping ${project.path}: active parallel session in progress${retrySummary}`);
       results.push({
         action: 'none',
-        reason: 'Parallel session already running',
+        reason: `Parallel session already running${retrySummary}`,
         projectPath: project.path,
         deletedInvocationLogs,
       });
