@@ -10,7 +10,12 @@ import type Database from 'better-sqlite3';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
-import { openGlobalDatabase } from '../runners/global-db.js';
+import {
+  openGlobalDatabase,
+  listParallelSessionRunners,
+  removeParallelSessionRunner,
+  revokeWorkstreamLeasesForSession,
+} from '../runners/global-db.js';
 import { loadConfig } from '../config/loader.js';
 import { getDefaultWorkspaceRoot, getProjectHash } from '../parallel/clone.js';
 
@@ -81,6 +86,31 @@ interface CleanResult {
   deleted: string[];
   skipped: string[];
   failures: string[];
+}
+
+function terminateRunnerPid(pid: number): boolean {
+  try {
+    process.kill(pid, 'SIGTERM');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function drainParallelSessionsForCleanup(records: WorkspaceRecord[]): void {
+  const sessionIds = [...new Set(records.map((record) => record.sessionId))];
+
+  for (const sessionId of sessionIds) {
+    revokeWorkstreamLeasesForSession(sessionId);
+
+    const runners = listParallelSessionRunners(sessionId);
+    for (const runner of runners) {
+      if (runner.pid) {
+        terminateRunnerPid(runner.pid);
+      }
+      removeParallelSessionRunner(runner.id);
+    }
+  }
 }
 
 function resolveProjectPath(projectArg?: string): string {
@@ -443,6 +473,11 @@ async function cleanWorkspaces(args: string[], flags: GlobalFlags): Promise<void
 
   try {
     const { records, orphans, workspaceRoot } = collectWorkspaceData(db, projectPath);
+
+    if (removeAll && !flags.dryRun) {
+      drainParallelSessionsForCleanup(records);
+    }
+
     const result = executeClean(records, orphans, removeAll, flags.dryRun);
 
     if (result.failures.length > 0) {

@@ -18,6 +18,11 @@ export interface GlobalDatabaseConnection {
 
 export type ParallelSessionStatus = 'running' | 'merging' | 'completed' | 'failed';
 
+export interface ParallelSessionRunner {
+  id: string;
+  pid: number | null;
+}
+
 /**
  * Schema for global database (runners and locks)
  */
@@ -482,6 +487,41 @@ export function updateParallelSessionStatus(
            END
        WHERE id = ?`
     ).run(status, markCompletedAt ? 1 : 0, sessionId);
+  } finally {
+    close();
+  }
+}
+
+export function revokeWorkstreamLeasesForSession(sessionId: string): number {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const result = db.prepare(
+      `UPDATE workstreams
+       SET runner_id = NULL,
+           lease_expires_at = datetime('now')
+       WHERE session_id = ?`
+    ).run(sessionId);
+    return result.changes;
+  } finally {
+    close();
+  }
+}
+
+export function listParallelSessionRunners(sessionId: string): ParallelSessionRunner[] {
+  const { db, close } = openGlobalDatabase();
+  try {
+    return db
+      .prepare('SELECT id, pid FROM runners WHERE parallel_session_id = ?')
+      .all(sessionId) as ParallelSessionRunner[];
+  } finally {
+    close();
+  }
+}
+
+export function removeParallelSessionRunner(runnerId: string): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare('DELETE FROM runners WHERE id = ?').run(runnerId);
   } finally {
     close();
   }

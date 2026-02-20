@@ -211,6 +211,12 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
             if (runner.pid) {
               killProcess(runner.pid);
             }
+            global.db.prepare(
+              `UPDATE workstreams
+               SET runner_id = NULL,
+                   lease_expires_at = datetime('now')
+               WHERE runner_id = ?`
+            ).run(runner.id);
             global.db.prepare('DELETE FROM runners WHERE id = ?').run(runner.id);
           }
         }

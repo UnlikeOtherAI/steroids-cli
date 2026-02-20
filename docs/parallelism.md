@@ -445,7 +445,7 @@ Checklist:
 : Files: `src/parallel/merge.ts`, `src/parallel/merge-progress.ts`, `src/commands/merge.ts`
 - `[x]` `CHUNK-09` Add post-merge validation gate and blocked-validation transition on failure.
 : Files: `src/parallel/merge.ts`, `src/commands/merge.ts`, `src/runners/global-db.ts`
-- `[ ]` `CHUNK-10` Implement cleanup-draining phase (lease revoke, runner termination verification, then deletion).
+- `[x]` `CHUNK-10` Implement cleanup-draining phase (lease revoke, runner termination verification, then deletion).
 : Files: `src/commands/workspaces.ts`, `src/runners/wakeup.ts`, `src/runners/global-db.ts`
 - `[ ]` `CHUNK-11` Implement deterministic reconciliation matrix and bounded recovery retries/backoff.
 : Files: `src/runners/wakeup.ts`, `src/runners/global-db.ts`, `src/commands/runners-parallel.ts`
