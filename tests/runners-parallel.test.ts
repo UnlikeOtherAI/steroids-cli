@@ -210,6 +210,7 @@ describe('launchParallelSession', () => {
       CREATE TABLE parallel_sessions (
         id TEXT PRIMARY KEY,
         project_path TEXT NOT NULL,
+        project_repo_id TEXT,
         status TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         completed_at TEXT
@@ -223,6 +224,16 @@ describe('launchParallelSession', () => {
         clone_path TEXT,
         status TEXT NOT NULL,
         runner_id TEXT,
+        claim_generation INTEGER NOT NULL DEFAULT 0,
+        lease_expires_at TEXT,
+        sealed_base_sha TEXT,
+        sealed_head_sha TEXT,
+        sealed_commit_shas TEXT,
+        completion_order INTEGER,
+        recovery_attempts INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_reconcile_action TEXT,
+        last_reconciled_at TEXT,
         completed_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
@@ -239,6 +250,7 @@ describe('launchParallelSession', () => {
     const plan: Parameters<typeof testModule.launchParallelSession>[0] = {
       sessionId: 'session-1',
       projectPath: '/tmp/project',
+      projectRepoId: '/tmp/project',
       maxClones: 3,
       workstreams: [
         {
@@ -254,11 +266,12 @@ describe('launchParallelSession', () => {
 
     expect(sessionId).toBe('session-1');
     const session = globalDb
-      .prepare('SELECT id, project_path, status FROM parallel_sessions WHERE id = ?')
+      .prepare('SELECT id, project_path, project_repo_id, status FROM parallel_sessions WHERE id = ?')
       .get('session-1') as { id: string; project_path: string; status: string };
     expect(session).toMatchObject({
       id: 'session-1',
       project_path: '/tmp/project',
+      project_repo_id: '/tmp/project',
       status: 'running',
     });
 
@@ -294,6 +307,7 @@ describe('launchParallelSession', () => {
       '--parallel-session-id',
       'session-1',
     ], {
+      cwd: workspacePath,
       detached: true,
       stdio: 'ignore',
     });
@@ -311,6 +325,73 @@ describe('launchParallelSession', () => {
       .prepare('SELECT id FROM workstreams WHERE id = ?')
       .get('ws-abc')
     ).toMatchObject({ id: 'ws-abc' });
+
+    globalDb.close();
+  });
+
+  it('fails when an active parallel session already exists for the same repo id', () => {
+    const globalDb = new Database(':memory:');
+    globalDb.exec(`
+      CREATE TABLE parallel_sessions (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        project_repo_id TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT
+      );
+
+      CREATE TABLE workstreams (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        branch_name TEXT NOT NULL,
+        section_ids TEXT NOT NULL,
+        clone_path TEXT,
+        status TEXT NOT NULL,
+        runner_id TEXT,
+        claim_generation INTEGER NOT NULL DEFAULT 0,
+        lease_expires_at TEXT,
+        sealed_base_sha TEXT,
+        sealed_head_sha TEXT,
+        sealed_commit_shas TEXT,
+        completion_order INTEGER,
+        recovery_attempts INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_reconcile_action TEXT,
+        last_reconciled_at TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    globalDb
+      .prepare(
+        'INSERT INTO parallel_sessions (id, project_path, project_repo_id, status) VALUES (?, ?, ?, ?)'
+      )
+      .run('session-existing', '/tmp/project', '/tmp/project', 'running');
+
+    mockOpenGlobalDatabase.mockReturnValue({
+      db: globalDb,
+      close: jest.fn(),
+    });
+
+    const plan: Parameters<typeof testModule.launchParallelSession>[0] = {
+      sessionId: 'session-new',
+      projectPath: '/tmp/project',
+      projectRepoId: '/tmp/project',
+      maxClones: 1,
+      workstreams: [
+        {
+          id: 'ws-1',
+          branchName: 'steroids/ws-1',
+          sectionIds: ['sec-1'],
+          sectionNames: ['Section 1'],
+        },
+      ],
+    };
+
+    expect(() => testModule.launchParallelSession(plan, '/tmp/project')).toThrow(
+      'Active parallel session already exists for this repository'
+    );
 
     globalDb.close();
   });
