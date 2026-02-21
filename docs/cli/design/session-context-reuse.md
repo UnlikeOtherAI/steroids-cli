@@ -598,13 +598,22 @@ export interface InvokeResult {
 
 #### 5. Database: Store Session ID Per Invocation
 
-Add `session_id` column to `task_invocations` table:
+Add columns to `task_invocations` table. Per the repo's migration system, this requires a numbered SQL file + `migrations/manifest.json` update:
 
 ```sql
--- Migration: add_session_id_to_invocations
+-- migrations/NNN_add_session_context.sql
+-- UP
 ALTER TABLE task_invocations ADD COLUMN session_id TEXT;
+ALTER TABLE task_invocations ADD COLUMN resumed_from_session_id TEXT;
+ALTER TABLE task_invocations ADD COLUMN invocation_mode TEXT DEFAULT 'fresh'; -- 'fresh' | 'resume'
+ALTER TABLE task_invocations ADD COLUMN token_usage_json TEXT; -- JSON blob of TokenUsage
 CREATE INDEX idx_invocations_session ON task_invocations(session_id);
+
+-- DOWN
+-- SQLite cannot DROP COLUMN; recreate table without new columns
 ```
+
+**Note:** `invocation_mode` and `resumed_from_session_id` track the session chain lineage. `token_usage_json` stores the provider-specific token data for cost analysis.
 
 #### 6. Orchestrator Logic: When to Resume vs. Fresh
 
@@ -612,23 +621,27 @@ The coder/reviewer orchestrators decide whether to resume or start fresh:
 
 ```
 shouldResume(task, role):
-  1. Find the last invocation for this task + role
+  1. Find last successful invocation for (task_id, role, provider, model) ordered by id DESC
   2. If no previous invocation → fresh session
   3. If previous invocation has a session_id:
-     a. Check if session is still valid (not too old, same provider)
-     b. Check if the task context changed substantially
+     a. Check provider + model + role all match current config
+     b. Check session age < TTL (default 30 min)
+     c. Check task context hasn't changed substantially
         (e.g., new coordinator guidance = probably fresh)
-     c. If valid → resume with delta prompt
-     d. If invalid → fresh session
+     d. Check previous invocation was successful (not error/timeout)
+     e. If all valid → resume with delta prompt
+     f. If any invalid → fresh session
   4. If provider doesn't support resume → always fresh
 ```
 
 **When to always start fresh:**
 - First invocation for a task
-- Provider changed since last invocation
+- Provider or model changed since last invocation
+- Task was manually restarted (rejection count reset)
 - Coordinator issued a major scope change
-- Session is older than a configurable TTL (e.g., 1 hour)
+- Session is older than a configurable TTL (e.g., 30 minutes)
 - Previous session ended in error/timeout
+- Reviewer signals "context reset" (coder is lost, start over)
 
 **When to resume:**
 - Same provider, same task, previous session succeeded
