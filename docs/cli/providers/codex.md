@@ -19,7 +19,7 @@
 
 **Default Steroids template:**
 ```
-cat {prompt_file} | {cli} exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -
+cat {prompt_file} | {cli} exec --model {model} --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -
 ```
 
 **Key flags:**
@@ -32,17 +32,26 @@ cat {prompt_file} | {cli} exec --dangerously-bypass-approvals-and-sandbox --skip
 
 **Prompt delivery:** Piped via stdin (`cat file | codex exec ... -`). Tested working with 38KB prompts.
 
-**Important:** Codex does not have a `--model` flag in `exec` mode. Model selection is handled by Codex's own configuration.
+**Model selection:** Use `--model <model>` or `-m <model>` flag. Default: `gpt-5.3-codex`.
 
 ## Models
 
 | ID | Full Name | Recommended For |
 |----|-----------|-----------------|
-| `codex` | Codex (default) | reviewer |
+| `gpt-5.3-codex` | GPT-5.3 Codex (default) | coder, reviewer |
+| `gpt-4.1` | GPT-4.1 | reviewer |
+| `o3` | O3 | orchestrator |
 
 **Steroids defaults:** orchestrator=undefined, coder=undefined, reviewer=`codex`
 
-Codex model selection is opaque — the CLI chooses the model internally. No `--model` flag for `exec` mode.
+**Model flag (verified 2026-02-21):** Codex DOES support `--model` / `-m` in exec mode:
+```bash
+cat prompt.txt | codex exec --model gpt-4.1 --skip-git-repo-check -
+```
+- Default (no flag): `gpt-5.3-codex`
+- `OPENAI_MODEL` env var does NOT work — completely ignored
+- Also accepts `-c model="gpt-4.1"` config override syntax
+- Model availability may depend on account type (API key vs ChatGPT account)
 
 ## Output Format
 
@@ -53,7 +62,7 @@ Codex model selection is opaque — the CLI chooses the model internally. No `--
 {"type":"thread.started","thread_id":"<uuid>"}
 {"type":"turn.started",...}
 {"type":"message.delta","content":"..."}
-{"type":"turn.completed","usage":{"input_tokens":6528,"output_tokens":342,"cached_tokens":6528}}
+{"type":"turn.completed","usage":{"input_tokens":6528,"output_tokens":342,"cached_input_tokens":6528}}
 {"type":"thread.completed",...}
 ```
 
@@ -70,12 +79,12 @@ From `turn.completed` events:
   "usage": {
     "input_tokens": 17024,
     "output_tokens": 156,
-    "cached_tokens": 17024
+    "cached_input_tokens": 17024
   }
 }
 ```
 
-**Cached tokens observed:** 6,528 on first call, 17,024 on resume — Codex has built-in prompt caching.
+**Cached input tokens observed:** 6,528 on first call, 17,024 on resume — Codex has built-in prompt caching.
 
 ## Session Management
 
@@ -91,7 +100,7 @@ From `turn.completed` events:
 ## Known Issues & Quirks
 
 1. **Empty output on first attempt** — Occasionally produces 0 bytes stdout/stderr on first invocation. Retrying typically works. Possibly a cold-start issue.
-2. **No `--model` flag in exec mode** — Model is selected by Codex internally, not by Steroids.
+2. **Model availability varies by account** — `--model gpt-4.1` works but may fail with "model not supported" on ChatGPT accounts (vs API accounts). The flag is parsed correctly regardless.
 3. **`--json` changes behavior** — Adding `--json` for session ID extraction may subtly change output format. Current template uses text mode.
 4. **Tool execution markers** — In text mode, Codex emits `exec\n<command>` patterns for tool calls. Steroids parses these for activity monitoring.
 5. **stdin must be closed** — Like other CLIs, Codex hangs if stdin stays open after piping.
@@ -117,4 +126,5 @@ From `turn.completed` events:
 - [ ] Switch to `--json` output for session ID and token extraction
 - [ ] Add `resume <thread_id>` support via invocation template
 - [ ] Investigate empty output issue — may need retry logic
-- [ ] Add model selection once Codex supports `--model` in exec mode
+- [x] ~~Add model selection~~ — `--model` flag confirmed working (2026-02-21). Template updated.
+- [ ] Update `src/providers/codex.ts` to include `--model {model}` in default template

@@ -68,7 +68,7 @@ All four provider CLIs support resuming previous sessions:
 | **Claude** | `claude -c` | `claude -r <id>` | `claude -p --resume <id> "msg"` | `~/.claude/sessions/` |
 | **Codex** | `codex resume --last` | `codex resume <id>` | `codex exec resume <id> "msg"` | `~/.codex/sessions/YYYY/MM/DD/` |
 | **Gemini** | `gemini --resume` | `gemini --resume <uuid>` | `gemini --prompt "msg" --resume <uuid>` | `~/.gemini/tmp/<hash>/chats/` |
-| **Vibe** | `vibe -c` | `vibe --resume <id>` | `vibe -p --resume <id> "msg"` | `~/.vibe/logs/session/` (metadata); `~/.vibe/sessions/` (JSONL history) |
+| **Vibe** | `vibe -c` | `vibe --resume <id>` | `vibe -p --resume <id> "msg"` | `~/.vibe/logs/session/` (metadata + stats) |
 
 **Key detail:** When resumed, Claude, Codex, and Gemini replay the full conversation history internally — the AI model sees all previous messages, tool calls, and results. No re-scanning needed for context the agent already explored. **Exception: Vibe only loads the last 20 messages** on resume (`HISTORY_RESUME_TAIL_MESSAGES`), so earlier context may be lost in long sessions.
 
@@ -90,9 +90,8 @@ All four provider CLIs support resuming previous sessions:
 **Vibe (Mistral) specifics:**
 - CLI binary is `vibe` (package is `mistral-vibe`)
 - `--continue` / `-c` resumes most recent session; `--resume SESSION_ID` resumes by ID (supports partial matching)
-- Sessions stored as JSONL in `~/.vibe/sessions/` (configurable via `VIBE_HOME` env var)
-- Prints session ID (first 8 chars) on exit — usable with `--resume`
-- Output formats: `--output text|json|streaming` (session ID is NOT in any stdout format — must use filesystem)
+- Session metadata stored in `~/.vibe/logs/session/` (configurable via `VIBE_HOME` env var)
+- Output formats: `--output text|json|streaming` (session ID is NOT in any stdout format — must use filesystem scan of `meta.json`)
 - Session windowing: only loads last 20 messages on resume (`HISTORY_RESUME_TAIL_MESSAGES`), loads more on demand
 - **No `--list-sessions` flag** — [known gap (issue #249)](https://github.com/mistralai/mistral-vibe/issues/249). Must use `--continue` or remember the session ID from exit output
 - Has `--max-price DOLLARS` for cost ceiling and `--max-turns N` for turn limits — useful for automation safety
@@ -813,7 +812,7 @@ Sometimes the coder gets fundamentally lost — wrong approach, wrong files, mis
 
 1. Implement session ID extraction for Codex (JSONL parsing)
 2. Implement session ID extraction for Gemini
-3. Implement session ID extraction for Vibe (exit output or filesystem scan)
+3. Implement session ID extraction for Vibe (filesystem scan of `~/.vibe/logs/session/*/meta.json`)
 4. Add resume templates for all three providers
 5. Validate non-interactive resume works for each
 6. **Vibe-specific:** Test session windowing (20-message limit) — verify delta prompts work within the windowed context
@@ -912,7 +911,7 @@ echo "prompt" | vibe                                       # ❌ Error (no stdin
 
 ## Cross-Provider Review (2026-02-21)
 
-This design document was reviewed by Claude (Opus 4.6), Codex (OpenAI), and Gemini (auto-gemini-3). Vibe review was attempted but blocked by the integration gaps above.
+This design document was reviewed by Claude (Opus 4.6), Codex (OpenAI), and Gemini (auto-gemini-3). Vibe review was initially blocked by integration gaps (now resolved — see below). A second round of review (2026-02-21) included Vibe, Codex, and Gemini reviewing the complete documentation set including per-provider reference docs.
 
 ### Findings Accepted
 

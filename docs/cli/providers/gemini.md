@@ -8,7 +8,7 @@
 | Field | Value |
 |-------|-------|
 | Binary | `gemini` (fallback: `gcloud`) |
-| Package | `npm install -g @anthropic-ai/gemini-cli` or via Google Cloud SDK |
+| Package | `npm install -g @google/gemini-cli` or via Google Cloud SDK |
 | Auth | `gemini login` or Google Cloud credentials |
 | Provider name | `gemini` |
 | Source file | `src/providers/gemini.ts` |
@@ -52,6 +52,11 @@ The current Steroids template uses `-p` (short form) which avoids this issue.
 | `gemini-2.0-flash` | Gemini 2.0 Flash | legacy |
 
 **Steroids defaults:** orchestrator=`gemini-2.5-pro`, coder=`gemini-2.5-pro`, reviewer=`gemini-2.5-pro`
+
+**Model flag (verified 2026-02-21):** Both `-m` and `--model` work identically.
+- Use **short aliases only**: `gemini-2.5-pro`, `gemini-2.5-flash`
+- **Versioned IDs fail**: `gemini-2.5-pro-preview-05-06` returns HTTP 404 `ModelNotFoundError`
+- No env var for model selection — CLI flag only
 
 **Note:** Gemini CLI may report a different internal model name (e.g., `auto-gemini-3`) in stream-json output than what was requested.
 
