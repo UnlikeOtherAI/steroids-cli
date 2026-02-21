@@ -329,8 +329,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
 }
 
 /**
- * Auto-merge workstream branches when a parallel runner finishes all tasks.
- * Only triggers merge if this is the last active workstream for the session.
+ * Auto-merge THIS runner's workstream branch immediately on completion.
+ * Does not wait for other workstreams — each runner merges its own work
+ * so commits reach main even if other runners crash or stall.
  */
 async function autoMergeOnCompletion(
   parallelSessionId: string,
@@ -339,56 +340,34 @@ async function autoMergeOnCompletion(
 ): Promise<void> {
   const { db, close } = openGlobalDatabase();
   try {
-    // Mark our workstream as completed
-    const updated = db.prepare(
-      `UPDATE workstreams SET status = 'completed', completed_at = COALESCE(completed_at, datetime('now'))
+    // Find our workstream
+    const ours = db.prepare(
+      `SELECT id, branch_name FROM workstreams
        WHERE session_id = ? AND clone_path = ? AND status = 'running'`
-    ).run(parallelSessionId, workspacePath);
+    ).get(parallelSessionId, workspacePath) as { id: string; branch_name: string } | undefined;
 
-    if (updated.changes === 0) {
+    if (!ours) {
       console.log('[AUTO-MERGE] No running workstream found for this runner, skipping');
       return;
     }
 
-    // Check if ALL workstreams for this session are now terminal
-    const remaining = db.prepare(
-      `SELECT COUNT(*) as count FROM workstreams
-       WHERE session_id = ? AND status = 'running'`
-    ).get(parallelSessionId) as { count: number };
-
-    if (remaining.count > 0) {
-      console.log(`[AUTO-MERGE] ${remaining.count} workstream(s) still running, skipping merge`);
-      return;
-    }
+    // Mark our workstream as completed
+    db.prepare(
+      `UPDATE workstreams SET status = 'completed', completed_at = COALESCE(completed_at, datetime('now'))
+       WHERE id = ? AND session_id = ?`
+    ).run(ours.id, parallelSessionId);
 
     // Get original project path from session
     const session = db.prepare(
-      `SELECT project_path, status FROM parallel_sessions WHERE id = ?`
-    ).get(parallelSessionId) as { project_path: string; status: string } | undefined;
+      `SELECT project_path FROM parallel_sessions WHERE id = ?`
+    ).get(parallelSessionId) as { project_path: string } | undefined;
 
     if (!session) {
       console.log('[AUTO-MERGE] Session not found, skipping');
       return;
     }
 
-    // Get completed workstreams
-    const workstreams = db.prepare(
-      `SELECT id, branch_name FROM workstreams
-       WHERE session_id = ? AND status = 'completed'
-       ORDER BY completion_order ASC NULLS LAST, created_at ASC`
-    ).all(parallelSessionId) as Array<{ id: string; branch_name: string }>;
-
-    if (workstreams.length === 0) {
-      console.log('[AUTO-MERGE] No completed workstreams, skipping');
-      return;
-    }
-
-    const specs: MergeWorkstreamSpec[] = workstreams.map(ws => ({
-      id: ws.id,
-      branchName: ws.branch_name,
-    }));
-
-    console.log(`\n[AUTO-MERGE] All workstreams done. Merging ${specs.length} workstream(s)...`);
+    console.log(`\n[AUTO-MERGE] Merging workstream ${ours.id} (${ours.branch_name})...`);
 
     const config = loadConfig(session.project_path);
     const validationCommand = typeof config.runners?.parallel?.validationCommand === 'string'
@@ -400,7 +379,7 @@ async function autoMergeOnCompletion(
       projectPath: session.project_path,
       sessionId: parallelSessionId,
       runnerId,
-      workstreams: specs,
+      workstreams: [{ id: ours.id, branchName: ours.branch_name }],
       remote,
       mainBranch,
       cleanupOnSuccess: config.runners?.parallel?.cleanupOnSuccess ?? true,
