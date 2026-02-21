@@ -14,6 +14,8 @@ import {
   getLatestSubmissionNotes,
   listTasks,
   addAuditEntry,
+  getFollowUpDepth,
+  createFollowUpTask,
 } from '../database/queries.js';
 import type { openDatabase } from '../database/connection.js';
 import { invokeCoder, type CoderResult } from '../orchestrator/coder.js';
@@ -100,21 +102,21 @@ function refreshParallelWorkstreamLease(projectPath: string, leaseFence?: LeaseF
 }
 
 /**
- * Returned when a provider invocation is classified as credit exhaustion.
- * The main loop should pause and wait for a config change instead of retrying.
+ * Returned when a provider invocation is classified as credit exhaustion or rate limit.
  */
 export interface CreditExhaustionResult {
-  action: 'pause_credit_exhaustion';
+  action: 'pause_credit_exhaustion' | 'rate_limit';
   provider: string;
   model: string;
   role: 'coder' | 'reviewer';
   message: string;
+  retryAfterMs?: number;
 }
 
 /**
- * Check a coder/reviewer result for credit exhaustion using the provider's classifier.
+ * Check a coder/reviewer result for credit exhaustion or rate limits using the provider's classifier.
  * Uses provider.classifyResult() which checks both stderr and stdout.
- * Returns a CreditExhaustionResult if credits are exhausted, null otherwise.
+ * Returns a CreditExhaustionResult if credits are exhausted or rate limited, null otherwise.
  */
 function checkCreditExhaustion(
   result: InvokeResult,
@@ -143,6 +145,17 @@ function checkCreditExhaustion(
       model: modelName,
       role,
       message: classification.message,
+    };
+  }
+
+  if (classification?.type === 'rate_limit') {
+    return {
+      action: 'rate_limit',
+      provider: providerName,
+      model: modelName,
+      role,
+      message: classification.message,
+      retryAfterMs: classification.retryAfterMs,
     };
   }
 
@@ -643,6 +656,36 @@ export async function runReviewerPhase(
     actorType: 'orchestrator',
     notes: `[${decision.decision}] ${decision.reasoning} (confidence: ${decision.metadata.confidence})`,
   });
+
+  // STEP 5.5: Create follow-up tasks if any
+  if (decision.follow_up_tasks && decision.follow_up_tasks.length > 0) {
+    const depth = getFollowUpDepth(db, task.id);
+    const maxDepth = config.followUpTasks?.maxDepth ?? 2;
+
+    if (depth < maxDepth) {
+      for (const followUp of decision.follow_up_tasks) {
+        try {
+          const followUpId = createFollowUpTask(db, {
+            title: followUp.title,
+            description: followUp.description,
+            sectionId: task.section_id,
+            referenceTaskId: task.id,
+            referenceCommit: commit_sha || undefined,
+            requiresPromotion: !(config.followUpTasks?.autoImplement ?? false),
+            depth: depth + 1,
+          });
+          
+          if (!jsonMode) {
+            console.log(`\n+ Created follow-up task: ${followUp.title} (${followUpId.substring(0, 8)})`);
+          }
+        } catch (error) {
+          console.warn(`Failed to create follow-up task "${followUp.title}":`, error);
+        }
+      }
+    } else if (!jsonMode) {
+      console.log(`\n! Follow-up depth limit reached (${depth}), skipping new follow-ups.`);
+    }
+  }
 
   // STEP 6: Execute the decision
   const commitSha = commit_sha || undefined;

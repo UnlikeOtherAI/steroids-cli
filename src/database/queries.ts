@@ -865,6 +865,7 @@ export function findNextTask(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'review' ${sectionFilter} ${skipFilter}
+         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -880,6 +881,7 @@ export function findNextTask(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'in_progress' ${sectionFilter} ${skipFilter}
+         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -895,6 +897,7 @@ export function findNextTask(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'pending' ${sectionFilter} ${skipFilter}
+         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -1147,6 +1150,103 @@ export function findResumableSession(
   }
 
   return row.session_id;
+}
+
+/**
+ * Get the chain depth of a follow-up task
+ */
+export function getFollowUpDepth(db: Database.Database, taskId: string): number {
+  let depth = 0;
+  let currentId: string | null = taskId;
+
+  while (currentId) {
+    const row = db.prepare('SELECT reference_task_id, is_follow_up FROM tasks WHERE id = ?').get(currentId) as { reference_task_id: string | null, is_follow_up: number } | undefined;
+    if (!row || !row.is_follow_up) break;
+    currentId = row.reference_task_id;
+    depth++;
+    if (depth > 10) break; // Safety limit
+  }
+
+  return depth;
+}
+
+/**
+ * Generate a deduplication key for a follow-up task
+ */
+export function generateDedupeKey(title: string, referenceTaskId: string): string {
+  const normalized = title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(word => word.length > 3)
+    .sort()
+    .join('-');
+
+  return `${referenceTaskId}:${normalized}`;
+}
+
+/**
+ * Create a follow-up task
+ */
+export function createFollowUpTask(
+  db: Database.Database,
+  params: {
+    title: string;
+    description: string;
+    sectionId: string | null;
+    referenceTaskId: string;
+    referenceCommit?: string;
+    requiresPromotion: boolean;
+    depth: number;
+  }
+): string {
+  const id = uuidv4();
+  const dedupeKey = generateDedupeKey(params.title, params.referenceTaskId);
+
+  try {
+    db.prepare(
+      `INSERT INTO tasks (
+        id, title, description, status, section_id,
+        reference_task_id, reference_commit, is_follow_up,
+        requires_promotion, follow_up_depth, dedupe_key
+      ) VALUES (?, ?, ?, 'pending', ?, ?, ?, 1, ?, ?, ?)`
+    ).run(
+      id,
+      params.title,
+      params.description,
+      params.sectionId,
+      params.referenceTaskId,
+      params.referenceCommit ?? null,
+      params.requiresPromotion ? 1 : 0,
+      params.depth,
+      dedupeKey
+    );
+
+    addAuditEntry(db, id, null, 'pending', 'system:reviewer', {
+      notes: `Follow-up task created from ${params.referenceTaskId}${params.requiresPromotion ? ' (requires promotion)' : ''}`,
+      actorType: 'orchestrator'
+    });
+
+    return id;
+  } catch (error: any) {
+    if (error.message?.includes('UNIQUE constraint')) {
+      // Find existing task
+      const existing = db.prepare('SELECT id FROM tasks WHERE dedupe_key = ?').get(dedupeKey) as { id: string };
+      return existing.id;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Promote a deferred follow-up task to active status
+ */
+export function promoteTask(db: Database.Database, taskId: string, actor: string): void {
+  db.prepare(
+    "UPDATE tasks SET requires_promotion = 0, updated_at = datetime('now') WHERE id = ?"
+  ).run(taskId);
+
+  addAuditEntry(db, taskId, 'pending', 'pending', actor, 'Task promoted (auto-implementation enabled)');
 }
 
 // ============ Credit Exhaustion Incidents ============

@@ -384,7 +384,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
         phaseResult = await runReviewerPhase(db, task, projectPath, flags.json, cachedCoord);
       }
 
-      // Handle credit exhaustion: pause and wait for config change
+      // Handle credit exhaustion or rate limits
       if (phaseResult?.action === 'pause_credit_exhaustion') {
         const pauseResult = await handleCreditExhaustion({
           provider: phaseResult.provider,
@@ -406,6 +406,18 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
           // 'stopped'
           break;
         }
+      } else if (phaseResult?.action === 'rate_limit') {
+        const delayMs = phaseResult.retryAfterMs ?? 60000;
+        const delayMin = (delayMs / 60000).toFixed(1);
+        
+        if (!flags.json) {
+          console.log(`\n[RATE LIMIT] ${phaseResult.message}`);
+          console.log(`  Provider: ${phaseResult.provider} (${phaseResult.model})`);
+          console.log(`  Waiting ${delayMin}m before retrying...`);
+        }
+        
+        await sleep(delayMs);
+        continue; // Retry the same task
       }
 
       // Check if we should continue

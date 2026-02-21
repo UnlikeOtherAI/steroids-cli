@@ -63,7 +63,8 @@ export function hasPendingOrInProgressWork(
     .prepare(
       `SELECT COUNT(*) as count FROM tasks
        WHERE section_id = ?
-       AND status IN ('pending', 'in_progress', 'review')`
+       AND status IN ('pending', 'in_progress', 'review')
+       AND (requires_promotion = 0 OR is_follow_up = 0)`
     )
     .get(sectionId) as { count: number };
 
@@ -370,6 +371,7 @@ function findNextTaskSkippingLocked(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'review' ${sectionFilter}
+         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -386,6 +388,7 @@ function findNextTaskSkippingLocked(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'in_progress' ${sectionFilter}
+         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -405,6 +408,7 @@ function findNextTaskSkippingLocked(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'pending' ${sectionFilter}
+         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];

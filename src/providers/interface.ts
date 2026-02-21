@@ -275,6 +275,14 @@ export abstract class BaseAIProvider implements IAIProvider {
           retryAfterMs: 60000,
         };
       }
+      if (/demand|compute|pressure|busy|wait/i.test(stderr)) {
+        return {
+          type: 'rate_limit',
+          message: 'High compute demand, waiting for capacity',
+          retryable: true,
+          retryAfterMs: 300000, // 5 minutes
+        };
+      }
       if (/billing|budget|hard limit/i.test(stderr)) {
         return {
           type: 'credit_exhaustion',
@@ -293,10 +301,12 @@ export abstract class BaseAIProvider implements IAIProvider {
       };
     }
 
-    if (stderrLower.includes('rate limit') || stderr.includes('429')) {
+    if (stderrLower.includes('rate limit') || stderr.includes('429') ||
+        stderrLower.includes('overloaded') || stderrLower.includes('capacity') ||
+        stderrLower.includes('busy')) {
       return {
         type: 'rate_limit',
-        message: 'Rate limit exceeded',
+        message: 'Provider is overloaded or rate limited',
         retryable: true,
         retryAfterMs: 60000,
       };

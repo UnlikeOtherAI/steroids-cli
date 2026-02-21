@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 14,
+  "latestDbVersion": 15,
   "migrations": [
     {
       "id": 1,
@@ -113,6 +113,14 @@
       "description": "Add session context and token usage to task_invocations",
       "checksum": "",
       "cliVersion": "0.8.34"
+    },
+    {
+      "id": 15,
+      "name": "015_add_follow_up_fields",
+      "file": "015_add_follow_up_fields.sql",
+      "description": "Add follow-up task fields to support non-blocking improvements",
+      "checksum": "",
+      "cliVersion": "0.8.45"
     }
   ]
 }

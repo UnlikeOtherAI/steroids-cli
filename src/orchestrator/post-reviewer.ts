@@ -100,6 +100,12 @@ ${stderrSection}
   "decision": "approve" | "reject" | "dispute" | "skip" | "unclear",
   "reasoning": "One sentence why (max 100 chars)",
   "notes": "Feedback for coder (required if reject)",
+  "follow_up_tasks": [
+    {
+      "title": "Short descriptive title (10-100 chars)",
+      "description": "Detailed context: WHAT, WHY, and HOW (100-4000 chars)"
+    }
+  ],
   "next_status": "completed" | "in_progress" | "disputed" | "skipped" | "review",
   "metadata": {
     "rejection_count": 0,
@@ -128,6 +134,8 @@ ${stderrSection}
 
 **notes:** Required if reject (specific feedback for coder)
 
+**follow_up_tasks:** Optional (0-3 items). Use ONLY for approvals where non-blocking improvements or technical debt were identified.
+
 **metadata.push_to_remote:**
 - \`true\` for approve, dispute, skip
 - \`false\` for reject, unclear
@@ -136,12 +144,18 @@ ${stderrSection}
 
 ## Examples
 
-### Example 1: Approval
+### Example 1: Approval with Follow-up
 \`\`\`json
 {
   "decision": "approve",
   "reasoning": "Explicit approval signal",
   "notes": "Implementation meets all requirements",
+  "follow_up_tasks": [
+    {
+      "title": "Add unit tests for edge cases in validation.ts",
+      "description": "WHAT: Add unit tests for null/undefined and malformed inputs in the new validation logic.\\n\\nWHY: The current implementation only covers happy paths. We need more coverage before this module is considered bulletproof.\\n\\nHOW: Use the existing pattern in tests/validation.test.ts. Focus on the new boundary conditions introduced in this task."
+    }
+  ],
   "next_status": "completed",
   "metadata": {
     "rejection_count": 0,
@@ -264,6 +278,7 @@ ${reviewers_formatted}
 6. If findings conflict on STYLE (not correctness), mark as [STYLE CONFLICT] and keep only the primary reviewer's preference (Reviewer 0 is primary).
 7. Order: file path -> line number.
 8. Use checkbox format for the final notes: - [ ] Finding text (Reviewer Name)
+9. **Follow-up Tasks:** If any reviewer suggested a follow-up task, consolidate and deduplicate them. Include them in the \`follow_up_tasks\` field.
 
 ---
 
@@ -274,6 +289,12 @@ ${reviewers_formatted}
   "decision": "reject",
   "reasoning": "Consolidated rejection notes from ${reviewer_results.length} reviewers",
   "notes": "## Merged Review Findings\\n\\n### File.ts\\n- [ ] Issue found (Reviewer name)\\n...",
+  "follow_up_tasks": [
+    {
+      "title": "Title",
+      "description": "WHAT/WHY/HOW"
+    }
+  ],
   "next_status": "in_progress",
   "metadata": {
     "rejection_count": ${task.rejection_count},

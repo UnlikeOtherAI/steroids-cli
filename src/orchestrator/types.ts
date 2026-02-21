@@ -16,16 +16,23 @@ export interface CoderOrchestrationResult {
   };
 }
 
+export interface FollowUpTask {
+  title: string;
+  description: string;
+}
+
 export interface ReviewerOrchestrationResult {
   decision: 'approve' | 'reject' | 'dispute' | 'skip' | 'unclear';
   reasoning: string;
   notes: string;
+  follow_up_tasks?: FollowUpTask[];
   next_status: 'completed' | 'in_progress' | 'disputed' | 'skipped' | 'review';
   metadata: {
     rejection_count: number;
     confidence: 'high' | 'medium' | 'low';
     push_to_remote: boolean;
     repeated_issue: boolean;
+    reviewer_count?: number;
   };
 }
 

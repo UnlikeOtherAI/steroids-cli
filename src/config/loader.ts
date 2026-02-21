@@ -144,6 +144,12 @@ export interface SteroidsConfig {
     batchMode?: boolean;
     maxBatchSize?: number;
   };
+  followUpTasks?: {
+    autoImplement?: boolean;
+    maxDepth?: number;
+    maxPerApproval?: number;
+    minDescriptionLength?: number;
+  };
   hooks?: unknown[]; // Array of hook configurations
 }
 
@@ -268,6 +274,12 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
   sections: {
     batchMode: false,
     maxBatchSize: 10,
+  },
+  followUpTasks: {
+    autoImplement: false,
+    maxDepth: 2,
+    maxPerApproval: 3,
+    minDescriptionLength: 100,
   },
 };
 

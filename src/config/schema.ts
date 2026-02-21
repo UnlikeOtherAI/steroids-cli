@@ -509,6 +509,30 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _default: 10,
     },
   },
+  followUpTasks: {
+    _description: 'Follow-up task generation settings',
+    _type: 'object',
+    autoImplement: {
+      _description: 'Automatically implement follow-up tasks without human promotion',
+      _type: 'boolean',
+      _default: false,
+    },
+    maxDepth: {
+      _description: 'Maximum chain depth for follow-up tasks',
+      _type: 'number',
+      _default: 2,
+    },
+    maxPerApproval: {
+      _description: 'Maximum number of follow-up tasks per reviewer approval',
+      _type: 'number',
+      _default: 3,
+    },
+    minDescriptionLength: {
+      _description: 'Minimum required length for follow-up task descriptions',
+      _type: 'number',
+      _default: 100,
+    },
+  },
   hooks: {
     _description: 'Event hooks for automation (scripts and webhooks)',
     _type: 'array',
