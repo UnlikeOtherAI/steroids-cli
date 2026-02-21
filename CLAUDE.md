@@ -23,6 +23,26 @@ Available providers:
 
 The "OpenAI" provider in the registry is redundant and references a non-existent CLI. Only use the Codex provider for OpenAI models.
 
+## Provider CLI Reference Docs (CRITICAL)
+
+**Maintain the per-provider CLI reference docs whenever you learn new provider behavior.**
+
+Each provider has a dedicated reference doc in `docs/cli/providers/`:
+
+- [`claude.md`](./docs/cli/providers/claude.md) — Claude Code CLI (Anthropic)
+- [`codex.md`](./docs/cli/providers/codex.md) — Codex CLI (OpenAI)
+- [`gemini.md`](./docs/cli/providers/gemini.md) — Gemini CLI (Google)
+- [`vibe.md`](./docs/cli/providers/vibe.md) — Vibe CLI (Mistral)
+
+**When to update these docs:**
+- After discovering a new CLI flag, quirk, or behavior
+- After debugging a provider integration issue
+- After testing session resume, output parsing, or error handling
+- When a provider CLI releases a new version with relevant changes
+- When adding or modifying a provider in `src/providers/`
+
+**Before invoking a provider or debugging an issue, check its reference doc first.** These docs contain hard-won operational knowledge — invocation templates, output format details, session management behavior, known issues, and error patterns.
+
 ## Agent Prompt Changes (CRITICAL)
 
 **Every time you modify a prompt for orchestrator, coder, or reviewer agents, you MUST validate it with multiple AI providers.**

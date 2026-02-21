@@ -16,6 +16,17 @@ Steroids uses **existing CLI tools** for AI providers rather than direct API int
 
 ---
 
+## Detailed Provider References
+
+For in-depth operational knowledge about each provider CLI — invocation details, output formats, session management, known issues, and integration notes — see the per-provider reference docs:
+
+- [Claude Code CLI Reference](./providers/claude.md) — Anthropic's Claude CLI
+- [Codex CLI Reference](./providers/codex.md) — OpenAI's Codex CLI
+- [Gemini CLI Reference](./providers/gemini.md) — Google's Gemini CLI
+- [Vibe CLI Reference](./providers/vibe.md) — Mistral's Vibe CLI
+
+---
+
 ## Supported Providers
 
 | Provider | CLI Tool | Detection Command |
@@ -23,6 +34,7 @@ Steroids uses **existing CLI tools** for AI providers rather than direct API int
 | Anthropic (Claude) | `claude` | `which claude` |
 | Google (Gemini) | `gemini` | `which gemini` |
 | Codex (OpenAI) | `codex` | `which codex` |
+| Mistral (Vibe) | `vibe` | `which vibe` |
 
 ### Future Providers
 
@@ -408,11 +420,14 @@ def classify_error(exit_code, stderr):
 
 ## Provider-Specific Notes
 
+> For detailed CLI references including invocation templates, output formats, session management, and known issues, see the [Detailed Provider References](#detailed-provider-references) section above.
+
 ### Anthropic (Claude)
 
 - Requires `claude` CLI installed
 - Authenticated via `claude login`
 - Supports streaming responses
+- See [Claude CLI Reference](./providers/claude.md) for full details
 
 ```bash
 # Install
@@ -429,6 +444,7 @@ claude --version
 
 - Requires `gemini` CLI installed
 - Authenticated via Google Cloud credentials
+- See [Gemini CLI Reference](./providers/gemini.md) for full details
 
 ```bash
 # Install
@@ -446,6 +462,7 @@ gemini --version
 - Requires `codex` CLI installed
 - This IS OpenAI's development tool CLI - there is no separate `openai` CLI
 - Authenticated via API key
+- See [Codex CLI Reference](./providers/codex.md) for full details
 
 ```bash
 # Install: See https://codex.com
@@ -455,6 +472,23 @@ export OPENAI_API_KEY=sk-...
 
 # Verify
 codex --version
+```
+
+### Mistral (Vibe)
+
+- Requires `vibe` CLI installed (via `uv` or `pip`)
+- Authenticated via `vibe --setup` or `MISTRAL_API_KEY` env var
+- See [Vibe CLI Reference](./providers/vibe.md) for full details
+
+```bash
+# Install
+uv tool install mistral-vibe
+
+# Authenticate
+vibe --setup
+
+# Verify
+vibe --version
 ```
 
 ---
@@ -664,3 +698,5 @@ steroids purge tasks --older-than 30d --keep-logs
 - [ORCHESTRATOR.md](./ORCHESTRATOR.md) - How the daemon uses providers
 - [PROMPTS.md](./PROMPTS.md) - Prompt templates for each role
 - [CONFIG-SCHEMA.md](./CONFIG-SCHEMA.md) - Full configuration reference
+- [Session Context Reuse](./design/session-context-reuse.md) - Design doc for session resume across providers
+- **Provider CLI References:** [Claude](./providers/claude.md) | [Codex](./providers/codex.md) | [Gemini](./providers/gemini.md) | [Vibe](./providers/vibe.md)
