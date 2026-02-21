@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -189,6 +189,9 @@ export class CodexProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
+    // Set up isolated HOME
+    const isolatedHome = this.setupIsolatedHome('.codex', ['auth.json', 'config.yaml', 'state.json']);
+
     return new Promise((resolve) => {
       const startTime = Date.now();
       let stdout = '';
@@ -209,7 +212,9 @@ export class CodexProvider extends BaseAIProvider {
       const child = spawn(command, {
         shell: true,
         cwd,
-        env: this.getSanitizedCliEnv(),
+        env: this.getSanitizedCliEnv({
+          HOME: isolatedHome,
+        }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -327,6 +332,13 @@ export class CodexProvider extends BaseAIProvider {
           }
         }
 
+        // Cleanup isolated home
+        try {
+          rmSync(isolatedHome, { recursive: true, force: true });
+        } catch {
+          // Ignore cleanup errors
+        }
+
         resolve({
           success: code === 0 && !timedOut,
           exitCode: code ?? 1,
@@ -342,6 +354,13 @@ export class CodexProvider extends BaseAIProvider {
       child.on('error', (error) => {
         clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
+
+        // Cleanup isolated home
+        try {
+          rmSync(isolatedHome, { recursive: true, force: true });
+        } catch {
+          // Ignore cleanup errors
+        }
 
         resolve({
           success: false,

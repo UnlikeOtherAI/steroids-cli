@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -190,6 +190,11 @@ export class GeminiProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
+    // Set up isolated HOME
+    const isolatedHome = this.setupIsolatedHome('.gemini', ['config.json']);
+    // Also isolate gcloud config if present in the same isolated home
+    this.setupIsolatedHome('.config/gcloud', ['active_config', 'credentials.db', 'configurations/config_default'], isolatedHome);
+
     return new Promise((resolve) => {
       const startTime = Date.now();
       let stdout = '';
@@ -209,7 +214,9 @@ export class GeminiProvider extends BaseAIProvider {
       const child = spawn(command, {
         shell: true,
         cwd,
-        env: this.getSanitizedCliEnv(),
+        env: this.getSanitizedCliEnv({
+          HOME: isolatedHome,
+        }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -294,6 +301,13 @@ export class GeminiProvider extends BaseAIProvider {
         clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
 
+        // Cleanup isolated home
+        try {
+          rmSync(isolatedHome, { recursive: true, force: true });
+        } catch {
+          // Ignore cleanup errors
+        }
+
         resolve({
           success: code === 0 && !timedOut,
           exitCode: code ?? 1,
@@ -309,6 +323,13 @@ export class GeminiProvider extends BaseAIProvider {
       child.on('error', (error) => {
         clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
+
+        // Cleanup isolated home
+        try {
+          rmSync(isolatedHome, { recursive: true, force: true });
+        } catch {
+          // Ignore cleanup errors
+        }
 
         resolve({
           success: false,

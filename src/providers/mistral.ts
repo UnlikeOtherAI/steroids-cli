@@ -152,8 +152,14 @@ export class MistralProvider extends BaseAIProvider {
   private extractSessionInfo(vibeHome?: string): { sessionId?: string; tokenUsage?: TokenUsage } {
     try {
       const home = vibeHome ?? join(homedir(), '.vibe');
+      // Vibe puts logs in logs/session/ under the home dir
       const sessionsDir = join(home, 'logs', 'session');
-      if (!existsSync(sessionsDir)) return {};
+      if (!existsSync(sessionsDir)) {
+        // Fallback for isolated home where logs/session might be at the root or under .vibe
+        const altDir = join(home, '.vibe', 'logs', 'session');
+        if (existsSync(altDir)) return this.extractSessionInfo(join(home, '.vibe'));
+        return {};
+      }
 
       // Find newest session directory (named session_YYYYMMDD_HHMMSS_shortid)
       const dirs = readdirSync(sessionsDir)
@@ -196,30 +202,8 @@ export class MistralProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
-    const uuid = randomUUID();
-    const isolatedHome = join(tmpdir(), `steroids-vibe-${uuid}`);
-
     // Set up isolated VIBE_HOME
-    try {
-      mkdirSync(isolatedHome, { recursive: true });
-      const realHome = join(homedir(), '.vibe');
-
-      // Copy/symlink auth and config from real home if available
-      // state.json (auth) and config.yaml (settings) are critical
-      ['state.json', 'config.yaml'].forEach((f) => {
-        const src = join(realHome, f);
-        if (existsSync(src)) {
-          try {
-            symlinkSync(src, join(isolatedHome, f));
-          } catch {
-            // Fallback to copy if symlink fails
-            writeFileSync(join(isolatedHome, f), readFileSync(src));
-          }
-        }
-      });
-    } catch (e) {
-      console.warn(`Failed to set up isolated Vibe home: ${e}`);
-    }
+    const isolatedHome = this.setupIsolatedHome('.vibe', ['state.json', 'config.yaml']);
 
     return new Promise((resolve) => {
       const startTime = Date.now();

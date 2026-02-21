@@ -1,3 +1,8 @@
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
 /**
  * AI Provider Interface
  * Defines the contract for AI providers (Claude, Gemini, OpenAI, etc.)
@@ -444,5 +449,64 @@ export abstract class BaseAIProvider implements IAIProvider {
     }
 
     return { ...env, ...overrides };
+  }
+
+  /**
+   * Set up an isolated temporary home directory for a provider CLI.
+   * Copies/symlinks essential auth files from the real home to the isolated one.
+   *
+   * @param providerDir The provider-specific config directory (e.g. '.claude', '.gemini')
+   * @param authFiles Array of critical auth/config filenames to preserve (e.g. ['config.json', 'state.json'])
+   * @param baseDir Optional pre-existing isolated home directory to use
+   * @returns Path to the isolated home directory
+   */
+  protected setupIsolatedHome(providerDir: string, authFiles: string[], baseDir?: string): string {
+    const uuid = randomUUID();
+    const isolatedHome = baseDir ?? join(tmpdir(), `steroids-${this.name}-${uuid}`);
+
+    try {
+      if (!baseDir) {
+        mkdirSync(isolatedHome, { recursive: true });
+      }
+
+      const realProviderPath = join(homedir(), providerDir);
+      const isolatedProviderPath = join(isolatedHome, providerDir);
+
+      if (existsSync(realProviderPath)) {
+        mkdirSync(isolatedProviderPath, { recursive: true });
+
+        for (const file of authFiles) {
+          const src = join(realProviderPath, file);
+          const dest = join(isolatedProviderPath, file);
+
+          if (existsSync(src)) {
+            try {
+              symlinkSync(src, dest);
+            } catch {
+              // Fallback to copy if symlink fails
+              writeFileSync(dest, readFileSync(src));
+            }
+          }
+        }
+      }
+
+      // Also symlink global git config so AI tools still work
+      ['.gitconfig', '.ssh'].forEach(file => {
+        const src = join(homedir(), file);
+        const dest = join(isolatedHome, file);
+        if (existsSync(src)) {
+          try {
+            symlinkSync(src, dest);
+          } catch {
+            // Ignore failure for optional system files
+          }
+        }
+      });
+
+    } catch (e) {
+      console.warn(`Failed to set up isolated ${this.name} home: ${e}`);
+    }
+
+    return isolatedHome;
   }
 }
