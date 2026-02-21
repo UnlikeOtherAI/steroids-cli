@@ -7,10 +7,11 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
-import { listTasks, getTaskRejections, getLatestSubmissionNotes } from '../database/queries.js';
+import { listTasks, getTaskRejections, getLatestSubmissionNotes, findResumableSession } from '../database/queries.js';
 import { openDatabase } from '../database/connection.js';
 import {
   generateReviewerPrompt,
+  generateResumingReviewerDeltaPrompt,
   generateBatchReviewerPrompt,
   type ReviewerPromptContext,
   type BatchReviewerPromptContext,
@@ -199,7 +200,8 @@ async function invokeProvider(
   timeoutMs: number = 600_000, // 10 minutes default for reviewer
   taskId?: string,
   projectPath?: string,
-  reviewerConfig?: ReviewerConfig
+  reviewerConfig?: ReviewerConfig,
+  resumeSessionId?: string
 ): Promise<ReviewerResult> {
   // Load configuration to get reviewer provider settings if not provided
   // Project config overrides global config
@@ -243,6 +245,7 @@ async function invokeProvider(
         role: 'reviewer',
         streamOutput: true,
         onActivity: ctx?.onActivity,
+        resumeSessionId,
       }),
     {
       role: 'reviewer',
@@ -250,6 +253,8 @@ async function invokeProvider(
       model: modelName,
       taskId,
       projectPath,
+      resumedFromSessionId: resumeSessionId ?? undefined,
+      invocationMode: resumeSessionId ? 'resume' : 'fresh',
     }
   );
 
@@ -315,6 +320,7 @@ export async function invokeReviewer(
   let sectionTasks: SectionTask[] = [];
   let rejectionHistory: ReturnType<typeof getTaskRejections> = [];
   let submissionNotes: string | null = null;
+  let resumeSessionId: string | null = null;
 
   try {
     const { db, close } = openDatabase(projectPath);
@@ -341,6 +347,20 @@ export async function invokeReviewer(
       console.log(`Coder included notes with submission`);
     }
 
+    // Check for resumable session (same provider/model/role)
+    if (effectiveReviewerConfig?.provider && effectiveReviewerConfig?.model) {
+      resumeSessionId = findResumableSession(
+        db,
+        task.id,
+        'reviewer',
+        effectiveReviewerConfig.provider,
+        effectiveReviewerConfig.model
+      );
+      if (resumeSessionId) {
+        console.log(`Found resumable session: ${resumeSessionId.substring(0, 8)}... (resuming with delta prompt)`);
+      }
+    }
+
     close();
   } catch (error) {
     console.warn('Could not fetch task context:', error);
@@ -363,13 +383,25 @@ export async function invokeReviewer(
     coordinatorDecision,
   };
 
-  const prompt = generateReviewerPrompt(context);
+  let prompt: string;
+  if (resumeSessionId) {
+    prompt = generateResumingReviewerDeltaPrompt(context);
+  } else {
+    prompt = generateReviewerPrompt(context);
+  }
 
   // Write prompt to temp file
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    const result = await invokeProvider(promptFile, 600_000, task.id, projectPath, effectiveReviewerConfig);
+    const result = await invokeProvider(
+      promptFile,
+      600_000,
+      task.id,
+      projectPath,
+      effectiveReviewerConfig,
+      resumeSessionId ?? undefined
+    );
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`REVIEWER COMPLETED`);

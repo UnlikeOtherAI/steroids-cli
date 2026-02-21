@@ -8,12 +8,15 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync, unlinkSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { readdirSync } from 'node:fs';
 import {
   BaseAIProvider,
   type InvokeOptions,
   type InvokeResult,
   type ModelInfo,
   type ProviderError,
+  type TokenUsage,
 } from './interface.js';
 
 /**
@@ -64,7 +67,7 @@ const DEFAULT_TIMEOUT = 900_000;
  * Default invocation template for Vibe CLI
  * Model selection is injected through VIBE_ACTIVE_MODEL/VIBE_MODELS env vars.
  */
-const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" --output text --max-turns 80 --agent auto-approve';
+const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" {session_id} --output text --max-turns 80 --agent auto-approve';
 
 /**
  * Mistral Vibe Provider implementation
@@ -125,11 +128,57 @@ export class MistralProvider extends BaseAIProvider {
     const createdTempFile = !options.promptFile;
 
     try {
-      return await this.invokeWithFile(promptFile, options.model, timeout, cwd, streamOutput, onActivity);
+      return await this.invokeWithFile(
+        promptFile,
+        options.model,
+        timeout,
+        cwd,
+        streamOutput,
+        onActivity,
+        options.resumeSessionId
+      );
     } finally {
       if (createdTempFile) {
         this.cleanupPromptFile(promptFile);
       }
+    }
+  }
+
+  /**
+   * Extract session ID and token usage from Vibe logs on disk.
+   * Vibe does not include session metadata in structured output.
+   */
+  private extractSessionInfo(): { sessionId?: string; tokenUsage?: TokenUsage } {
+    try {
+      const sessionsDir = join(homedir(), '.vibe', 'logs', 'session');
+      if (!existsSync(sessionsDir)) return {};
+
+      // Find newest session directory (named session_YYYYMMDD_HHMMSS_shortid)
+      const dirs = readdirSync(sessionsDir)
+        .filter((d) => d.startsWith('session_'))
+        .sort()
+        .reverse();
+
+      if (dirs.length === 0) return {};
+
+      const metaPath = join(sessionsDir, dirs[0], 'meta.json');
+      if (!existsSync(metaPath)) return {};
+
+      const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
+      if (!meta.session_id) return {};
+
+      const tokenUsage: TokenUsage | undefined = meta.stats ? {
+        inputTokens: meta.stats.session_prompt_tokens,
+        outputTokens: meta.stats.session_completion_tokens,
+        totalCostUsd: meta.stats.session_cost,
+      } : undefined;
+
+      return {
+        sessionId: meta.session_id,
+        tokenUsage,
+      };
+    } catch {
+      return {};
     }
   }
 
@@ -142,7 +191,8 @@ export class MistralProvider extends BaseAIProvider {
     timeout: number,
     cwd: string,
     streamOutput: boolean,
-    onActivity?: InvokeOptions['onActivity']
+    onActivity?: InvokeOptions['onActivity'],
+    resumeSessionId?: string
   ): Promise<InvokeResult> {
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -168,8 +218,9 @@ export class MistralProvider extends BaseAIProvider {
       // Default path uses argument-based invocation (no shell interpolation),
       // which avoids command injection through prompt content.
       // If a custom template is explicitly set, preserve template behavior.
+      const sessionIdFlag = resumeSessionId ? `--resume ${resumeSessionId}` : '';
       const child = this.invocationTemplate
-        ? spawn(this.buildCommand(promptFile, model), {
+        ? spawn(this.buildCommand(promptFile, model, sessionIdFlag), {
           shell: true,
           cwd,
           env,
@@ -178,6 +229,7 @@ export class MistralProvider extends BaseAIProvider {
         : spawn(this.getCliPath() ?? this.cliPath ?? 'vibe', [
           '-p',
           readFileSync(promptFile, 'utf-8'),
+          ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
           '--output',
           'text',
           '--max-turns',
@@ -224,6 +276,7 @@ export class MistralProvider extends BaseAIProvider {
       child.on('close', (code) => {
         clearTimeout(timeoutHandle);
         const duration = Date.now() - startTime;
+        const sessionInfo = this.extractSessionInfo();
 
         resolve({
           success: code === 0 && !timedOut,
@@ -232,12 +285,14 @@ export class MistralProvider extends BaseAIProvider {
           stderr,
           duration,
           timedOut,
+          ...sessionInfo,
         });
       });
 
       child.on('error', (error) => {
         clearTimeout(timeoutHandle);
         const duration = Date.now() - startTime;
+        const sessionInfo = this.extractSessionInfo();
 
         resolve({
           success: false,
@@ -246,6 +301,7 @@ export class MistralProvider extends BaseAIProvider {
           stderr: error.message,
           duration,
           timedOut: false,
+          ...sessionInfo,
         });
       });
     });

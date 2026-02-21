@@ -24,6 +24,54 @@ export interface CoderPromptContext {
 }
 
 /**
+ * Generate a minimal delta prompt for a resumed coder session
+ */
+export function generateResumingCoderDeltaPrompt(context: CoderPromptContext): string {
+  const { task, rejectionHistory, coordinatorGuidance } = context;
+
+  // Find the last rejection notes
+  const lastRejection = rejectionHistory && rejectionHistory.length > 0
+    ? rejectionHistory[rejectionHistory.length - 1]
+    : null;
+
+  if (!lastRejection && !coordinatorGuidance) {
+    // If no rejection and no guidance, just a general "resume" prompt
+    return `You are resuming work on task ${task.id}: "${task.title}".
+All previous context is still in your session history.
+Review your previous progress and complete the task.
+
+**REMINDER:**
+1. BUILD MUST PASS before submitting
+2. COMMIT YOUR WORK with a descriptive message
+3. Output "TASK COMPLETE" when finished
+`;
+  }
+
+  let prompt = `The reviewer rejected your last submission for task ${task.id}: "${task.title}".\n\n`;
+
+  if (lastRejection) {
+    prompt += `**Rejection #${lastRejection.rejection_number} notes:**
+"${lastRejection.notes}"\n\n`;
+  }
+
+  if (coordinatorGuidance) {
+    prompt += `**Coordinator guidance:**
+"${coordinatorGuidance}"\n\n`;
+  }
+
+  prompt += `Fix these issues and resubmit. All previous context and code is still in your session.
+
+**REMINDER:**
+1. Address ALL reviewer feedback
+2. BUILD MUST PASS before submitting
+3. COMMIT YOUR WORK with a descriptive message
+4. Output "TASK COMPLETE" when finished
+`;
+
+  return prompt;
+}
+
+/**
  * Generate the coder prompt for a new task
  */
 export function generateCoderPrompt(context: CoderPromptContext): string {

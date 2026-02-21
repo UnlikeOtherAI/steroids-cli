@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 13,
+  "latestDbVersion": 14,
   "migrations": [
     {
       "id": 1,
@@ -105,6 +105,14 @@
       "description": "Add applied commit SHA column and uniqueness indexes to merge_progress",
       "checksum": "",
       "cliVersion": "0.8.33"
+    },
+    {
+      "id": 14,
+      "name": "014_add_session_context",
+      "file": "014_add_session_context.sql",
+      "description": "Add session context and token usage to task_invocations",
+      "checksum": "",
+      "cliVersion": "0.8.34"
     }
   ]
 }

@@ -340,6 +340,9 @@ export async function logInvocation(
     taskId?: string;
     projectPath?: string;
     rejectionNumber?: number;
+    sessionId?: string;
+    resumedFromSessionId?: string;
+    invocationMode?: 'fresh' | 'resume';
   }
 ): Promise<InvokeResult> {
   const logger = getInvocationLogger();
@@ -366,8 +369,10 @@ export async function logInvocation(
       dbConn = conn;
 
       const insert = conn.db.prepare(
-        `INSERT INTO task_invocations (task_id, role, provider, model, prompt, started_at_ms, status, rejection_number)
-         VALUES (?, ?, ?, ?, ?, ?, 'running', ?)`
+        `INSERT INTO task_invocations (
+          task_id, role, provider, model, prompt, started_at_ms, status,
+          rejection_number, session_id, resumed_from_session_id, invocation_mode
+        ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)`
       );
 
       const info = insert.run(
@@ -377,13 +382,16 @@ export async function logInvocation(
         metadata.model,
         prompt,
         startedAtMs,
-        metadata.rejectionNumber ?? null
+        metadata.rejectionNumber ?? null,
+        metadata.sessionId ?? null,
+        metadata.resumedFromSessionId ?? null,
+        metadata.invocationMode ?? 'fresh'
       );
 
       invocationId = Number(info.lastInsertRowid);
       const invDir = ensureInvocationsDir(projectPath);
       activityLogFile = join(invDir, `${invocationId}.log`);
-      activity({ type: 'start', role: metadata.role, provider: metadata.provider, model: metadata.model });
+      activity({ type: 'start', role: metadata.role, provider: metadata.provider, model: metadata.model, mode: metadata.invocationMode ?? 'fresh' });
     } catch (error) {
       console.warn(`Failed to create running invocation record: ${error}`);
       if (dbConn) {
@@ -404,7 +412,7 @@ export async function logInvocation(
     const completedAtMs = Date.now();
     const status = result.timedOut ? 'timeout' : result.success ? 'completed' : 'failed';
 
-    activity({ type: 'complete', success: result.success, duration: result.duration, exitCode: result.exitCode, timedOut: result.timedOut });
+    activity({ type: 'complete', success: result.success, duration: result.duration, exitCode: result.exitCode, timedOut: result.timedOut, sessionId: result.sessionId });
 
     // Human-readable log (legacy: .steroids/logs) for `steroids logs`
     logger.log({
@@ -426,7 +434,9 @@ export async function logInvocation(
       try {
         dbConn.db.prepare(
           `UPDATE task_invocations
-           SET completed_at_ms = ?, status = ?, response = ?, error = ?, exit_code = ?, duration_ms = ?, success = ?, timed_out = ?, rejection_number = ?
+           SET completed_at_ms = ?, status = ?, response = ?, error = ?, exit_code = ?,
+               duration_ms = ?, success = ?, timed_out = ?, rejection_number = ?,
+               session_id = ?, token_usage_json = ?
            WHERE id = ?`
         ).run(
           completedAtMs,
@@ -438,6 +448,8 @@ export async function logInvocation(
           result.success ? 1 : 0,
           result.timedOut ? 1 : 0,
           metadata.rejectionNumber ?? null,
+          result.sessionId ?? metadata.sessionId ?? null,
+          result.tokenUsage ? JSON.stringify(result.tokenUsage) : null,
           invocationId
         );
       } catch (error) {

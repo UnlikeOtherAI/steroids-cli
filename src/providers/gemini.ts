@@ -12,6 +12,7 @@ import {
   type InvokeOptions,
   type InvokeResult,
   type ModelInfo,
+  type TokenUsage,
 } from './interface.js';
 
 /**
@@ -54,9 +55,10 @@ const DEFAULT_TIMEOUT = 900_000;
 
 /**
  * Default invocation template for Gemini CLI
- * Uses -p flag for non-interactive mode with stream-json for realtime output
+ * Uses --prompt flag for non-interactive mode with stream-json for realtime output
+ * --output-format=stream-json is more stable than space-separated flags
  */
-const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" -m {model} --output-format stream-json';
+const DEFAULT_INVOCATION_TEMPLATE = '{cli} --output-format=stream-json -m {model} {session_id} --prompt "$(cat {prompt_file})"';
 
 /**
  * Gemini AI Provider implementation
@@ -113,7 +115,15 @@ export class GeminiProvider extends BaseAIProvider {
     const createdTempFile = !options.promptFile;
 
     try {
-      return await this.invokeWithFile(promptFile, options.model, timeout, cwd, streamOutput, onActivity);
+      return await this.invokeWithFile(
+        promptFile,
+        options.model,
+        timeout,
+        cwd,
+        streamOutput,
+        onActivity,
+        options.resumeSessionId
+      );
     } finally {
       if (createdTempFile) {
         this.cleanupPromptFile(promptFile);
@@ -127,9 +137,20 @@ export class GeminiProvider extends BaseAIProvider {
   /**
    * Parse a stream-json line from Gemini CLI
    */
-  private parseStreamJsonLine(line: string): { text?: string; tool?: string; result?: string } {
+  private parseStreamJsonLine(line: string): {
+    text?: string;
+    tool?: string;
+    result?: string;
+    sessionId?: string;
+    tokenUsage?: TokenUsage;
+  } {
     try {
       const event = JSON.parse(line);
+
+      // Session ID is in the 'init' event
+      if (event.type === 'init' && event.session_id) {
+        return { sessionId: event.session_id };
+      }
 
       // Assistant message with delta text
       if (event.type === 'message' && event.role === 'assistant' && event.content) {
@@ -141,9 +162,18 @@ export class GeminiProvider extends BaseAIProvider {
         return { tool: event.name || event.function?.name || 'tool' };
       }
 
-      // Final result
+      // Final result includes token usage stats
       if (event.type === 'result') {
-        return { result: event.content || '' };
+        const usage: TokenUsage | undefined = event.stats ? {
+          inputTokens: event.stats.input_tokens,
+          outputTokens: event.stats.output_tokens,
+          cachedInputTokens: event.stats.cached,
+        } : undefined;
+
+        return {
+          result: event.content || '',
+          tokenUsage: usage,
+        };
       }
     } catch {
       if (line.trim()) return { text: line };
@@ -157,7 +187,8 @@ export class GeminiProvider extends BaseAIProvider {
     timeout: number,
     cwd: string,
     streamOutput: boolean,
-    onActivity?: InvokeOptions['onActivity']
+    onActivity?: InvokeOptions['onActivity'],
+    resumeSessionId?: string
   ): Promise<InvokeResult> {
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -165,9 +196,13 @@ export class GeminiProvider extends BaseAIProvider {
       let stderr = '';
       let timedOut = false;
       let stdoutLineBuffer = '';
+      let sessionId: string | undefined = resumeSessionId;
+      let tokenUsage: TokenUsage | undefined;
       const isStreamJson = this.getInvocationTemplate().includes('stream-json');
+
       // Build command from invocation template
-      const command = this.buildCommand(promptFile, model);
+      const sessionIdFlag = resumeSessionId ? `--resume ${resumeSessionId}` : '';
+      const command = this.buildCommand(promptFile, model, sessionIdFlag);
 
 
       // Spawn using shell to handle the command template
@@ -229,6 +264,9 @@ export class GeminiProvider extends BaseAIProvider {
 
           const parsed = this.parseStreamJsonLine(line);
 
+          if (parsed.sessionId) sessionId = parsed.sessionId;
+          if (parsed.tokenUsage) tokenUsage = parsed.tokenUsage;
+
           if (parsed.result !== undefined) {
             if (parsed.result) stdout = parsed.result;
           } else if (parsed.text) {
@@ -263,6 +301,8 @@ export class GeminiProvider extends BaseAIProvider {
           stderr,
           duration,
           timedOut,
+          sessionId,
+          tokenUsage,
         });
       });
 
@@ -277,6 +317,8 @@ export class GeminiProvider extends BaseAIProvider {
           stderr: error.message,
           duration,
           timedOut: false,
+          sessionId,
+          tokenUsage,
         });
       });
     });

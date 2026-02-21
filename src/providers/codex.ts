@@ -12,6 +12,7 @@ import {
   type InvokeOptions,
   type InvokeResult,
   type ModelInfo,
+  type TokenUsage,
 } from './interface.js';
 
 /**
@@ -56,9 +57,10 @@ const DEFAULT_TIMEOUT = 900_000;
  * Default invocation template for Codex CLI
  * Uses dangerously-bypass-approvals-and-sandbox for full git access
  * --skip-git-repo-check allows running outside trusted directories
+ * --json mode for session and token tracking
  * WARNING: This bypasses all sandboxing - use only in controlled environments
  */
-const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec --model {model} --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -';
+const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec {session_id} --model {model} --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -';
 
 /**
  * Codex AI Provider implementation
@@ -115,12 +117,64 @@ export class CodexProvider extends BaseAIProvider {
     const createdTempFile = !options.promptFile;
 
     try {
-      return await this.invokeWithFile(promptFile, options.model, timeout, cwd, streamOutput, onActivity);
+      return await this.invokeWithFile(
+        promptFile,
+        options.model,
+        timeout,
+        cwd,
+        streamOutput,
+        onActivity,
+        options.resumeSessionId
+      );
     } finally {
       if (createdTempFile) {
         this.cleanupPromptFile(promptFile);
       }
     }
+  }
+
+  /**
+   * Parse a JSONL line from Codex CLI and extract relevant information
+   */
+  private parseJsonlLine(line: string): {
+    text?: string;
+    tool?: string;
+    sessionId?: string;
+    tokenUsage?: TokenUsage;
+  } {
+    try {
+      const event = JSON.parse(line);
+
+      // Thread started — capture thread_id as session ID
+      if (event.type === 'thread.started' && event.thread_id) {
+        return { sessionId: event.thread_id };
+      }
+
+      // Item completed — extract text content if it's an agent message
+      if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
+        return { text: event.item.text };
+      }
+
+      // Tool call — from item.started or item.completed
+      if (event.item?.type === 'tool_call') {
+        return { tool: event.item.name };
+      }
+
+      // Turn completed — capture token usage
+      if (event.type === 'turn.completed' && event.usage) {
+        return {
+          tokenUsage: {
+            inputTokens: event.usage.input_tokens,
+            outputTokens: event.usage.output_tokens,
+            cachedInputTokens: event.usage.cached_input_tokens,
+          },
+        };
+      }
+    } catch {
+      // Not JSON — fallback to plain text if not empty
+      if (line.trim()) return { text: line };
+    }
+    return {};
   }
 
   /**
@@ -132,18 +186,24 @@ export class CodexProvider extends BaseAIProvider {
     timeout: number,
     cwd: string,
     streamOutput: boolean,
-    onActivity?: InvokeOptions['onActivity']
+    onActivity?: InvokeOptions['onActivity'],
+    resumeSessionId?: string
   ): Promise<InvokeResult> {
     return new Promise((resolve) => {
       const startTime = Date.now();
       let stdout = '';
       let stderr = '';
       let timedOut = false;
-      let stdoutParseBuffer = '';
+      let stdoutLineBuffer = '';
+      let sessionId: string | undefined = resumeSessionId;
+      let tokenUsage: TokenUsage | undefined;
       let expectingToolCmd = false;
+      const isJson = this.getInvocationTemplate().includes('--json');
 
       // Build command from invocation template
-      const command = this.buildCommand(promptFile, model);
+      // Convert resumeSessionId to subcommand if present
+      const sessionIdSubcmd = resumeSessionId ? `resume ${resumeSessionId}` : '';
+      const command = this.buildCommand(promptFile, model, sessionIdSubcmd);
 
       // Spawn using shell to handle the command template
       const child = spawn(command, {
@@ -183,40 +243,63 @@ export class CodexProvider extends BaseAIProvider {
       resetActivityTimer();
 
       child.stdout?.on('data', (data: Buffer) => {
-        const text = data.toString();
-        if (stdout.length < MAX_BUFFER) stdout += text;
+        const raw = data.toString();
         resetActivityTimer();
-        if (streamOutput) {
-          process.stdout.write(text);
+
+        if (!isJson) {
+          // Plain text mode (legacy or custom template)
+          if (stdout.length < MAX_BUFFER) stdout += raw;
+          if (streamOutput) process.stdout.write(raw);
+
+          if (!onActivity) return;
+
+          // Best-effort parsing for Codex CLI tool execution markers
+          stdoutLineBuffer += raw;
+          while (true) {
+            const nl = stdoutLineBuffer.indexOf('\n');
+            if (nl === -1) break;
+            const line = stdoutLineBuffer.slice(0, nl);
+            stdoutLineBuffer = stdoutLineBuffer.slice(nl + 1);
+
+            if (expectingToolCmd) {
+              const cmd = line.trim();
+              if (cmd) onActivity({ type: 'tool', cmd });
+              expectingToolCmd = false;
+              continue;
+            }
+
+            if (line === 'exec') {
+              expectingToolCmd = true;
+              continue;
+            }
+
+            onActivity({ type: 'output', stream: 'stdout', msg: `${line}\n` });
+          }
+          return;
         }
 
-        if (!onActivity) return;
-
-        // Best-effort parsing for Codex CLI tool execution markers:
-        // Some versions emit lines like:
-        //   exec
-        //   <command>
-        // We interpret that as a tool event and otherwise forward text as output.
-        stdoutParseBuffer += text;
+        // JSONL mode: parse JSONL events
+        stdoutLineBuffer += raw;
         while (true) {
-          const nl = stdoutParseBuffer.indexOf('\n');
+          const nl = stdoutLineBuffer.indexOf('\n');
           if (nl === -1) break;
-          const line = stdoutParseBuffer.slice(0, nl);
-          stdoutParseBuffer = stdoutParseBuffer.slice(nl + 1);
+          const line = stdoutLineBuffer.slice(0, nl).trim();
+          stdoutLineBuffer = stdoutLineBuffer.slice(nl + 1);
+          if (!line) continue;
 
-          if (expectingToolCmd) {
-            const cmd = line.trim();
-            if (cmd) onActivity({ type: 'tool', cmd });
-            expectingToolCmd = false;
-            continue;
+          const parsed = this.parseJsonlLine(line);
+
+          if (parsed.sessionId) sessionId = parsed.sessionId;
+          if (parsed.tokenUsage) tokenUsage = { ...tokenUsage, ...parsed.tokenUsage };
+
+          if (parsed.text) {
+            if (stdout.length < MAX_BUFFER) stdout += parsed.text;
+            onActivity?.({ type: 'output', stream: 'stdout', msg: parsed.text });
+            if (streamOutput) process.stdout.write(parsed.text);
+          } else if (parsed.tool) {
+            onActivity?.({ type: 'tool', cmd: parsed.tool });
+            if (streamOutput) process.stdout.write(`[tool: ${parsed.tool}]\n`);
           }
-
-          if (line === 'exec') {
-            expectingToolCmd = true;
-            continue;
-          }
-
-          onActivity({ type: 'output', stream: 'stdout', msg: `${line}\n` });
         }
       });
 
@@ -234,13 +317,13 @@ export class CodexProvider extends BaseAIProvider {
         clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
 
-        if (onActivity && stdoutParseBuffer) {
+        if (onActivity && stdoutLineBuffer && !isJson) {
           // Flush remaining unterminated line.
           if (expectingToolCmd) {
-            const cmd = stdoutParseBuffer.trim();
+            const cmd = stdoutLineBuffer.trim();
             if (cmd) onActivity({ type: 'tool', cmd });
           } else {
-            onActivity({ type: 'output', stream: 'stdout', msg: stdoutParseBuffer });
+            onActivity({ type: 'output', stream: 'stdout', msg: stdoutLineBuffer });
           }
         }
 
@@ -251,6 +334,8 @@ export class CodexProvider extends BaseAIProvider {
           stderr,
           duration,
           timedOut,
+          sessionId,
+          tokenUsage,
         });
       });
 
@@ -265,6 +350,8 @@ export class CodexProvider extends BaseAIProvider {
           stderr: error.message,
           duration,
           timedOut: false,
+          sessionId,
+          tokenUsage,
         });
       });
     });

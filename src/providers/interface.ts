@@ -26,6 +26,8 @@ export interface InvokeOptions {
    * Providers should emit lightweight JSON-serializable events as work progresses.
    */
   onActivity?: (activity: InvocationActivity) => void;
+  /** Resume a previous session instead of starting fresh */
+  resumeSessionId?: string;
 }
 
 /**
@@ -33,6 +35,24 @@ export interface InvokeOptions {
  * Kept intentionally flexible (JSONL logger appends arbitrary fields).
  */
 export type InvocationActivity = Record<string, unknown> & { type: string };
+
+/**
+ * Token usage information
+ */
+export interface TokenUsage {
+  /** Total input tokens */
+  inputTokens: number;
+  /** Total output tokens */
+  outputTokens: number;
+  /** Subset served from server-side cache (Codex, Gemini) */
+  cachedInputTokens?: number;
+  /** Tokens served from cache (Claude) */
+  cacheReadTokens?: number;
+  /** Tokens written to cache (Claude) */
+  cacheCreationTokens?: number;
+  /** Total cost for the invocation (Claude, Vibe) */
+  totalCostUsd?: number;
+}
 
 /**
  * Result of an AI provider invocation
@@ -50,6 +70,10 @@ export interface InvokeResult {
   duration: number;
   /** Whether the process was killed due to timeout */
   timedOut: boolean;
+  /** Session ID from the provider CLI (if available) */
+  sessionId?: string;
+  /** Token usage statistics (if available) */
+  tokenUsage?: TokenUsage;
 }
 
 /**
@@ -111,6 +135,15 @@ export interface IAIProvider {
    * @returns Promise resolving to the invocation result
    */
   invoke(prompt: string, options: InvokeOptions): Promise<InvokeResult>;
+
+  /**
+   * Resume a previous session with a new prompt
+   * @param sessionId The ID of the session to resume
+   * @param prompt The prompt text to send
+   * @param options Invocation options
+   * @returns Promise resolving to the invocation result
+   */
+  resume(sessionId: string, prompt: string, options: InvokeOptions): Promise<InvokeResult>;
 
   /**
    * Check if this provider is available (CLI installed and accessible)
@@ -196,6 +229,14 @@ export abstract class BaseAIProvider implements IAIProvider {
 
   abstract invoke(prompt: string, options: InvokeOptions): Promise<InvokeResult>;
   abstract isAvailable(): Promise<boolean>;
+
+  /**
+   * Default implementation of resume calls invoke with resumeSessionId in options
+   */
+  async resume(sessionId: string, prompt: string, options: InvokeOptions): Promise<InvokeResult> {
+    return this.invoke(prompt, { ...options, resumeSessionId: sessionId });
+  }
+
   abstract listModels(): string[];
   abstract getModelInfo(): ModelInfo[];
   abstract getDefaultModel(role: 'orchestrator' | 'coder' | 'reviewer'): string | undefined;
@@ -364,16 +405,18 @@ export abstract class BaseAIProvider implements IAIProvider {
    * Build the command from the invocation template
    * @param promptFile Path to the prompt file
    * @param model Model identifier
+   * @param sessionId Optional session ID for resumption
    * @returns Command string ready for execution
    */
-  protected buildCommand(promptFile: string, model: string): string {
+  protected buildCommand(promptFile: string, model: string, sessionId?: string): string {
     const template = this.getInvocationTemplate();
     const cli = this.cliPath ?? this.name;
 
     return template
       .replace('{cli}', cli)
       .replace('{prompt_file}', promptFile)
-      .replace('{model}', model);
+      .replace('{model}', model)
+      .replace('{session_id}', sessionId ?? '');
   }
 
   /**

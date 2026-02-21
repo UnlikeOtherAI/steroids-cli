@@ -23,6 +23,79 @@ export interface ReviewerPromptContext {
 }
 
 /**
+ * Generate a minimal delta prompt for a resumed reviewer session
+ */
+export function generateResumingReviewerDeltaPrompt(context: ReviewerPromptContext): string {
+  const { task, gitDiff, modifiedFiles, submissionNotes, rejectionHistory } = context;
+
+  // Truncate diff if too long
+  let diffContent = gitDiff;
+  if (diffContent.length > 20000) {
+    diffContent = diffContent.substring(0, 20000) + '\n\n[Diff truncated]';
+  }
+
+  const filesListFormatted = modifiedFiles.length > 0
+    ? modifiedFiles.map(f => `- ${f}`).join('\n')
+    : 'No files modified';
+
+  // Find the last rejection notes the reviewer gave
+  const lastRejection = rejectionHistory && rejectionHistory.length > 0
+    ? rejectionHistory[rejectionHistory.length - 1]
+    : null;
+
+  let prompt = `The coder has submitted a new attempt for task ${task.id}: "${task.title}".
+All previous context and your past review notes are still in your session history.
+
+---
+
+## New Changes Made by Coder
+
+\`\`\`diff
+${diffContent}
+\`\`\`
+
+---
+
+## Files Modified in This Attempt
+
+${filesListFormatted}
+`;
+
+  if (submissionNotes) {
+    prompt += `\n---
+
+## Coder's New Notes
+
+> ${submissionNotes}
+`;
+  }
+
+  if (lastRejection) {
+    prompt += `\n---
+
+## Your Previous Rejection Notes (Rejection #${lastRejection.rejection_number})
+
+"${lastRejection.notes}"
+`;
+  }
+
+  prompt += `\n---
+
+## Your Decision
+
+Review this new submission. Has the coder addressed your previous feedback? Are there any new issues?
+All previous context is still in your session.
+
+**REMINDER:**
+1. Your first non-empty line MUST be an explicit decision token: \`DECISION: APPROVE|REJECT|DISPUTE|SKIP\`
+2. If REJECTing, use checkboxes for EACH actionable item.
+3. Be specific and actionable.
+`;
+
+  return prompt;
+}
+
+/**
  * Format rejection history for display
  */
 function formatRejectionHistory(rejections?: RejectionEntry[]): string {

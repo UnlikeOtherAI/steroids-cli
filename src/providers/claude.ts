@@ -12,6 +12,7 @@ import {
   type InvokeOptions,
   type InvokeResult,
   type ModelInfo,
+  type TokenUsage,
 } from './interface.js';
 
 /**
@@ -57,7 +58,7 @@ const DEFAULT_TIMEOUT = 900_000;
  * Default invocation template for Claude CLI
  * Uses -p flag for print mode with stream-json for realtime output
  */
-const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" --model {model} --output-format stream-json --verbose';
+const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" {session_id} --model {model} --output-format stream-json --verbose';
 
 /**
  * Claude AI Provider implementation
@@ -108,7 +109,15 @@ export class ClaudeProvider extends BaseAIProvider {
     const createdTempFile = !options.promptFile;
 
     try {
-      return await this.invokeWithFile(promptFile, model, timeout, cwd, streamOutput, onActivity);
+      return await this.invokeWithFile(
+        promptFile,
+        model,
+        timeout,
+        cwd,
+        streamOutput,
+        onActivity,
+        options.resumeSessionId
+      );
     } finally {
       if (createdTempFile) {
         this.cleanupPromptFile(promptFile);
@@ -117,9 +126,15 @@ export class ClaudeProvider extends BaseAIProvider {
   }
 
   /**
-   * Parse a stream-json line from Claude CLI and extract text content
+   * Parse a stream-json line from Claude CLI and extract text content, sessionId and tokenUsage
    */
-  private parseStreamJsonLine(line: string): { text?: string; tool?: string; result?: string } {
+  private parseStreamJsonLine(line: string): {
+    text?: string;
+    tool?: string;
+    result?: string;
+    sessionId?: string;
+    tokenUsage?: TokenUsage;
+  } {
     try {
       const event = JSON.parse(line);
 
@@ -128,24 +143,41 @@ export class ClaudeProvider extends BaseAIProvider {
         const parts: string[] = [];
         for (const block of event.message.content) {
           if (block.type === 'text' && block.text) parts.push(block.text);
-          if (block.type === 'tool_use') return { tool: `${block.name}` };
+          if (block.type === 'tool_use') return { tool: `${block.name}`, sessionId: event.session_id };
         }
-        if (parts.length > 0) return { text: parts.join('') };
+        if (parts.length > 0) return { text: parts.join(''), sessionId: event.session_id };
       }
 
       // Content block delta (raw streaming events)
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-        return { text: event.delta.text };
+        return { text: event.delta.text, sessionId: event.session_id };
       }
 
       // Tool use events from content_block_start
       if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
-        return { tool: event.content_block.name };
+        return { tool: event.content_block.name, sessionId: event.session_id };
       }
 
-      // Final result contains the complete text
+      // Final result contains the complete text and token usage
       if (event.type === 'result') {
-        return { result: typeof event.result === 'string' ? event.result : '' };
+        const usage: TokenUsage | undefined = event.usage ? {
+          inputTokens: event.usage.input_tokens,
+          outputTokens: event.usage.output_tokens,
+          cacheReadTokens: event.usage.cache_read_input_tokens,
+          cacheCreationTokens: event.usage.cache_creation_input_tokens,
+          totalCostUsd: event.total_cost_usd,
+        } : undefined;
+
+        return {
+          result: typeof event.result === 'string' ? event.result : '',
+          sessionId: event.session_id,
+          tokenUsage: usage,
+        };
+      }
+
+      // Catch session_id from any event type (like 'init')
+      if (event.session_id) {
+        return { sessionId: event.session_id };
       }
     } catch {
       // Not JSON or unexpected format — treat as plain text
@@ -163,7 +195,8 @@ export class ClaudeProvider extends BaseAIProvider {
     timeout: number,
     cwd: string,
     streamOutput: boolean,
-    onActivity?: InvokeOptions['onActivity']
+    onActivity?: InvokeOptions['onActivity'],
+    resumeSessionId?: string
   ): Promise<InvokeResult> {
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -171,10 +204,14 @@ export class ClaudeProvider extends BaseAIProvider {
       let stderr = '';
       let timedOut = false;
       let stdoutLineBuffer = '';
+      let sessionId: string | undefined = resumeSessionId;
+      let tokenUsage: TokenUsage | undefined;
       const isStreamJson = this.getInvocationTemplate().includes('stream-json');
 
       // Build command from invocation template
-      const command = this.buildCommand(promptFile, model);
+      // Convert resumeSessionId to flag if present
+      const sessionIdFlag = resumeSessionId ? `--resume ${resumeSessionId}` : '';
+      const command = this.buildCommand(promptFile, model, sessionIdFlag);
 
       // Spawn using shell to handle the command template
       const child = spawn(command, {
@@ -237,6 +274,9 @@ export class ClaudeProvider extends BaseAIProvider {
 
           const parsed = this.parseStreamJsonLine(line);
 
+          if (parsed.sessionId) sessionId = parsed.sessionId;
+          if (parsed.tokenUsage) tokenUsage = parsed.tokenUsage;
+
           if (parsed.result !== undefined) {
             // Final result — use as the definitive stdout
             stdout = parsed.result;
@@ -272,6 +312,8 @@ export class ClaudeProvider extends BaseAIProvider {
           stderr,
           duration,
           timedOut,
+          sessionId,
+          tokenUsage,
         });
       });
 
@@ -286,6 +328,8 @@ export class ClaudeProvider extends BaseAIProvider {
           stderr: error.message,
           duration,
           timedOut: false,
+          sessionId,
+          tokenUsage,
         });
       });
     });

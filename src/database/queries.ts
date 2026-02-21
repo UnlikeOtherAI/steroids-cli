@@ -4,6 +4,7 @@
 
 import type Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
+import type { TokenUsage } from '../providers/interface.js';
 
 // Task status enum matching the spec
 export type TaskStatus =
@@ -976,6 +977,10 @@ export interface TaskInvocation {
   success: number;
   timed_out: number;
   rejection_number: number | null;
+  session_id: string | null;
+  resumed_from_session_id: string | null;
+  invocation_mode: 'fresh' | 'resume';
+  token_usage_json: string | null;
   created_at: string;
 }
 
@@ -992,6 +997,10 @@ export interface CreateInvocationParams {
   success: boolean;
   timedOut: boolean;
   rejectionNumber?: number;
+  sessionId?: string;
+  resumedFromSessionId?: string;
+  invocationMode?: 'fresh' | 'resume';
+  tokenUsage?: TokenUsage;
 }
 
 /**
@@ -1005,8 +1014,9 @@ export function createTaskInvocation(
   const result = db.prepare(
     `INSERT INTO task_invocations (
       task_id, role, provider, model, prompt, response, error,
-      exit_code, duration_ms, success, timed_out, rejection_number
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      exit_code, duration_ms, success, timed_out, rejection_number,
+      session_id, resumed_from_session_id, invocation_mode, token_usage_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     params.taskId,
     params.role,
@@ -1019,7 +1029,11 @@ export function createTaskInvocation(
     params.durationMs,
     params.success ? 1 : 0,
     params.timedOut ? 1 : 0,
-    params.rejectionNumber ?? null
+    params.rejectionNumber ?? null,
+    params.sessionId ?? null,
+    params.resumedFromSessionId ?? null,
+    params.invocationMode ?? 'fresh',
+    params.tokenUsage ? JSON.stringify(params.tokenUsage) : null
   );
 
   return result.lastInsertRowid as number;
@@ -1102,6 +1116,37 @@ export function getInvocationCount(
     counts.total += row.count;
   }
   return counts;
+}
+
+/**
+ * Find a resumable session for a task and role
+ */
+export function findResumableSession(
+  db: Database.Database,
+  taskId: string,
+  role: 'coder' | 'reviewer',
+  provider: string,
+  model: string,
+  ttlMinutes: number = 30
+): string | null {
+  const row = db.prepare(
+    `SELECT session_id, created_at
+     FROM task_invocations
+     WHERE task_id = ? AND role = ? AND provider = ? AND model = ?
+       AND success = 1 AND session_id IS NOT NULL
+     ORDER BY created_at DESC LIMIT 1`
+  ).get(taskId, role, provider, model) as { session_id: string; created_at: string } | undefined;
+
+  if (!row) return null;
+
+  // Check TTL
+  const createdAt = new Date(row.created_at).getTime();
+  const now = Date.now();
+  if (now - createdAt > ttlMinutes * 60 * 1000) {
+    return null;
+  }
+
+  return row.session_id;
 }
 
 // ============ Credit Exhaustion Incidents ============

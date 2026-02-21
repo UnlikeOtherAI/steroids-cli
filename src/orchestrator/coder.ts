@@ -7,11 +7,12 @@ import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
-import { getTaskRejections } from '../database/queries.js';
+import { getTaskRejections, findResumableSession } from '../database/queries.js';
 import { openDatabase } from '../database/connection.js';
 import {
   generateCoderPrompt,
   generateResumingCoderPrompt,
+  generateResumingCoderDeltaPrompt,
   generateBatchCoderPrompt,
   type CoderPromptContext,
   type BatchCoderPromptContext,
@@ -57,7 +58,8 @@ async function invokeProvider(
   promptFile: string,
   timeoutMs: number = 900_000, // 15 minutes default
   taskId?: string,
-  projectPath?: string
+  projectPath?: string,
+  resumeSessionId?: string
 ): Promise<CoderResult> {
   // Load configuration to get coder provider settings
   // Project config overrides global config
@@ -99,6 +101,7 @@ async function invokeProvider(
         role: 'coder',
         streamOutput: true,
         onActivity: ctx?.onActivity,
+        resumeSessionId,
       }),
     {
       role: 'coder',
@@ -106,6 +109,8 @@ async function invokeProvider(
       model: modelName,
       taskId,
       projectPath,
+      resumedFromSessionId: resumeSessionId ?? undefined,
+      invocationMode: resumeSessionId ? 'resume' : 'fresh',
     }
   );
 
@@ -146,15 +151,32 @@ export async function invokeCoder(
 
   // Fetch rejection history so coder can see past attempts
   let rejectionHistory: ReturnType<typeof getTaskRejections> = [];
+  let resumeSessionId: string | null = null;
   try {
     const { db, close } = openDatabase(projectPath);
     rejectionHistory = getTaskRejections(db, task.id);
     if (rejectionHistory.length > 0) {
       console.log(`Found ${rejectionHistory.length} previous rejection(s) - coder will see full history`);
     }
+
+    // Check for resumable session (same provider/model/role)
+    const coderConfig = config.ai?.coder;
+    if (coderConfig?.provider && coderConfig?.model) {
+      resumeSessionId = findResumableSession(
+        db,
+        task.id,
+        'coder',
+        coderConfig.provider,
+        coderConfig.model
+      );
+      if (resumeSessionId) {
+        console.log(`Found resumable session: ${resumeSessionId.substring(0, 8)}... (resuming with delta prompt)`);
+      }
+    }
+
     close();
   } catch (error) {
-    console.warn('Could not fetch rejection history:', error);
+    console.warn('Could not fetch rejection history or session info:', error);
   }
 
   const context: CoderPromptContext = {
@@ -167,12 +189,16 @@ export async function invokeCoder(
 
   let prompt: string;
 
-  if (action === 'resume') {
-    // Get git status for resuming prompt
+  if (resumeSessionId) {
+    // Session reuse: send delta prompt only
+    prompt = generateResumingCoderDeltaPrompt(context);
+  } else if (action === 'resume') {
+    // No session reuse, but work was partially done: send full resuming prompt
     context.gitStatus = getGitStatus(projectPath);
     context.gitDiff = getGitDiff(projectPath);
     prompt = generateResumingCoderPrompt(context);
   } else {
+    // New task: send full coder prompt
     prompt = generateCoderPrompt(context);
   }
 
@@ -180,7 +206,7 @@ export async function invokeCoder(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    const result = await invokeProvider(promptFile, 900_000, task.id, projectPath);
+    const result = await invokeProvider(promptFile, 900_000, task.id, projectPath, resumeSessionId ?? undefined);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`CODER COMPLETED`);
