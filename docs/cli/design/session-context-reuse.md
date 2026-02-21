@@ -677,6 +677,8 @@ Review this new submission. Has the coder addressed your feedback?
 
 Compare this to today's prompts which include the full task spec, all project context, coding standards, etc.
 
+**Important:** Even in delta prompts, always include a minimal **role and objective** preamble (e.g., "You are a code reviewer for task T-123. Your job is to verify the coder's submission meets the specification."). The resumed session has the original context, but the model needs to re-anchor its purpose — especially for providers like Vibe that window to the last 20 messages and may have lost the original system framing.
+
 ### Session Chain Lifecycle
 
 ```
@@ -763,18 +765,39 @@ Session reuse via CLI is the pragmatic first step. But for maximum token savings
 
 **Status:** CLI-level session reuse first. Direct API integration as a future phase.
 
+### 8. Session File Cleanup / Garbage Collection
+
+Provider CLIs accumulate session files on disk (`~/.claude/sessions/`, `~/.codex/sessions/`, `~/.gemini/tmp/`, `~/.vibe/logs/session/`). With high task throughput, these can grow unbounded.
+
+**Open questions:**
+- Should Steroids clean up sessions it created after task completion?
+- Should there be a `steroids sessions prune` command?
+- What's the retention policy — keep for N days? Keep only the latest per task?
+- How to handle `VIBE_HOME` isolation directories — prune per-runner homes after runner stops?
+
+**Proposed:** Add a configurable retention policy (default: 7 days). Run cleanup on daemon startup or as part of `steroids runners wakeup`. Only delete sessions Steroids created (tracked by `session_id` in `task_invocations`).
+
+### 9. Reviewer "Context Reset" Signal
+
+Sometimes the coder gets fundamentally lost — wrong approach, wrong files, misunderstood spec. Resuming the session just continues the confused context. The reviewer should be able to signal "start over" to force a fresh session.
+
+**Proposed:** Add a structured signal in reviewer output (e.g., `CONTEXT_RESET: true` in the rejection JSON). When the coder orchestrator sees this, it discards the session chain and starts a fresh invocation with the full prompt. This is distinct from a normal rejection (which resumes with delta feedback).
+
 ---
 
 ## Implementation Phases
 
 ### Phase 1: Infrastructure (Low Risk)
 
-1. Add `sessionId` to `InvokeResult` and `resumeSessionId` to `InvokeOptions`
-2. Add `session_id` column to `task_invocations` table (migration)
+1. Add `sessionId` and `tokenUsage` to `InvokeResult`; add `resumeSessionId` to `InvokeOptions`
+2. Add `session_id`, `resumed_from_session_id`, `invocation_mode`, and `token_usage_json` columns to `task_invocations` table (migration + manifest update)
 3. Extract session IDs from Claude's stream-json output (most reliable provider to start with)
-4. Store session IDs in database alongside invocations
+4. Extract token usage from provider output (Claude `result` event, Codex `turn.completed`, Gemini `result` stats, Vibe `meta.json`)
+5. Store session IDs and token usage in database alongside invocations
+6. Add `{session_id}` placeholder support to `buildCommand()` for resume templates
+7. Add provider-level `resume(sessionId, prompt)` method alongside existing `invoke()` — each provider implements its own resume command construction
 
-**No behavior change yet** — just capturing the data.
+**No behavior change yet** — just capturing the data and preparing the resume interface.
 
 ### Phase 2: Claude Session Resumption
 
@@ -850,28 +873,40 @@ This forces each CLI to use its own auth (OAuth, `login`, subscription). The `ST
 
 ---
 
-## Vibe Integration Gaps (Blocking)
+## Vibe Integration Gaps (Resolved)
 
-**Tested 2026-02-21.** Vibe (Mistral) is not reliably usable for automated/headless invocations with large prompts. Multiple attempts to invoke `vibe -p "$(cat large-prompt.txt)"` resulted in:
+**Original issue (2026-02-21):** Vibe appeared to hang on large prompts (~38KB) with zero stdout/stderr output.
 
-- **100% CPU usage with zero stdout/stderr output** — process hangs indefinitely
-- Tested with `--output text`, `--max-turns 1`, `--max-turns 5`, `--agent auto-approve`
-- Both shell argument expansion (`-p "$(cat file)"`) and stdin piping (`cat file | vibe`) fail silently
-- Small prompts (1-2 sentences) work fine — the issue is specific to large (30-40KB) prompts
+**Root cause found:** The `-p` / `--prompt` flag is **required** for non-interactive (programmatic) mode. Without it, Vibe enters interactive mode and waits for terminal input indefinitely — even if a prompt is provided as a positional argument. The original test likely used positional argument syntax or was missing the `-p` flag.
 
-**Contrast with other providers:**
-- Claude: Handles 38KB prompts via `$(cat)` with `--output-format stream-json` — works reliably
-- Codex: Handles 38KB via stdin piping with `--json` — works reliably
-- Gemini: Handles 38KB via `--prompt "$(cat)"` with `--output-format=stream-json` — works reliably
+**Verified working patterns (Vibe v2.2.1, tested with 37KB prompt):**
+```bash
+# Correct — programmatic mode, auto-exits after response
+vibe -p "$(cat large_prompt.txt)" --output text           # ✅ Works
+vibe -p "$(cat large_prompt.txt)" --output json            # ✅ Works
+vibe -p "$(cat large_prompt.txt)" --output streaming       # ✅ Works
+vibe -p "$(cat large_prompt.txt)" --max-turns 5            # ✅ Works
 
-**Open questions before Vibe can be used for coder/reviewer:**
-1. Is there a file-based prompt input flag (e.g., `--prompt-file`)? The `-p` flag may not be designed for large inputs
-2. Does `--output text` buffer all output until process exit? If so, the process may be working but never flushing stdout
-3. Does `--agent auto-approve` interact badly with `--output text` redirection? Interactive agents may expect a TTY
-4. Is there a maximum prompt size? The 38KB prompt may exceed an internal limit
-5. Does `VIBE_HOME` isolation (suggested by Gemini review) affect invocation behavior?
+# WRONG — positional argument enters interactive mode, hangs
+vibe "$(cat large_prompt.txt)"                             # ❌ Hangs
+echo "prompt" | vibe                                       # ❌ Error (no stdin support)
+```
 
-**Impact on design:** Vibe is currently limited to the session resumption research (verified with small prompts). It cannot be used as a coder or reviewer provider until these issues are resolved. Phase 3 implementation for Vibe should be deferred until we have a reliable invocation method.
+**Key Vibe CLI facts:**
+- `-p` / `--prompt` = programmatic mode: sends prompt, auto-approves tools, outputs response, exits
+- Positional `PROMPT` argument = interactive mode: opens session, waits for user input
+- `--agent auto-approve` is only relevant in interactive mode; `-p` auto-approves by default
+- `--enabled-tools TOOL` whitelists specific tools in programmatic mode (supports globs, regex)
+- `--workdir DIR` sets CWD before running (useful for project-scoped invocations)
+- Max shell argument size (ARG_MAX): 1,048,576 bytes — well above typical prompt sizes
+
+**Impact on design:** Vibe is fully usable for coder/reviewer invocations with large prompts. The current Steroids Mistral provider template already uses `-p`, so this is consistent. Phase 3 implementation for Vibe can proceed as planned.
+
+**Remaining Vibe-specific considerations:**
+1. Session ID extraction requires filesystem scan (no structured output for session metadata)
+2. 20-message session windowing may lose early context on resume — test with real coder sessions
+3. `VIBE_HOME` isolation per runner is recommended for parallel execution
+4. No `--list-sessions` command ([issue #249](https://github.com/mistralai/mistral-vibe/issues/249))
 
 ---
 
