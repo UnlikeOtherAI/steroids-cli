@@ -106,7 +106,7 @@ jest.unstable_mockModule('../src/runners/lock.js', () => ({
 const createMockDb = () => ({
   prepare: jest.fn().mockReturnThis(),
   get: jest.fn(),
-  all: jest.fn(),
+  all: jest.fn().mockReturnValue([]),
   run: jest.fn(),
   exec: jest.fn(),
   close: jest.fn(),
@@ -221,7 +221,7 @@ describe('hasActiveParallelSessionForProject()', () => {
       expect.stringContaining('SELECT 1 FROM parallel_sessions')
     );
     expect(mockPrepare).toHaveBeenCalledWith(
-      expect.stringContaining('status IN')
+      expect.stringContaining('status NOT IN')
     );
   });
 

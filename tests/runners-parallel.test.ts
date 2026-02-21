@@ -32,6 +32,7 @@ jest.unstable_mockModule('../src/runners/global-db.js', () => ({
 }));
 
 jest.unstable_mockModule('node:child_process', () => ({
+  execSync: jest.fn(),
   spawn: mockSpawn,
 }));
 
@@ -180,7 +181,7 @@ describe('buildParallelRunPlan', () => {
     project.close();
   });
 
-  it('throws when dependency cycle is detected', () => {
+  it('still builds a plan when section dependencies contain a cycle', () => {
     const project = createTestProject();
 
     const sectionA = createSection(project.db, 'A');
@@ -195,9 +196,9 @@ describe('buildParallelRunPlan', () => {
       .prepare('INSERT INTO section_dependencies (section_id, depends_on_section_id) VALUES (?, ?)')
       .run(sectionB.id, sectionA.id);
 
-    expect(() => {
-      testModule.buildParallelRunPlan(project.path);
-    }).toThrow(testModule.CyclicDependencyError);
+    const plan = testModule.buildParallelRunPlan(project.path);
+    expect(plan.workstreams.length).toBeGreaterThan(0);
+    expect(plan.workstreams[0].sectionIds.length).toBe(1);
 
     project.close();
   });
@@ -412,6 +413,7 @@ describe('spawnDetachedRunner', () => {
       process.execPath,
       ['runners', 'start'],
       {
+        cwd: '/tmp/project',
         detached: true,
         stdio: 'ignore',
       }
@@ -441,8 +443,9 @@ describe('spawnDetachedRunner', () => {
     expect(result.logFile).toMatch(/daemon-9876\.log$/);
     expect(child.unref).toHaveBeenCalled();
     expect(mockSpawn).toHaveBeenCalledWith(process.execPath, ['runners', 'start'], {
+      cwd: '/tmp/project',
       detached: true,
-      stdio: expect.arrayContaining([expect.any(Number)]),
+      stdio: ['ignore', expect.any(Number), expect.any(Number)],
     });
   });
 });

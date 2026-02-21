@@ -47,6 +47,12 @@ jest.unstable_mockModule('../src/runners/orchestrator-loop.js', () => ({
 
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
   openGlobalDatabase: mockOpenGlobalDatabase,
+  updateParallelSessionStatus: jest.fn(),
+  revokeWorkstreamLeasesForSession: jest.fn(),
+  listParallelSessionRunners: jest.fn().mockReturnValue([]),
+  removeParallelSessionRunner: jest.fn(),
+  recordValidationEscalation: jest.fn().mockReturnValue({ id: 1 }),
+  resolveValidationEscalationsForSession: jest.fn().mockReturnValue(0),
 }));
 
 jest.unstable_mockModule('../src/runners/heartbeat.js', () => ({
@@ -67,6 +73,16 @@ jest.unstable_mockModule('../src/database/connection.js', () => ({
 }));
 
 jest.unstable_mockModule('../src/database/queries.js', () => ({
+  createTask: jest.fn(),
+  getTask: jest.fn(),
+  updateTaskStatus: jest.fn(),
+  approveTask: jest.fn(),
+  rejectTask: jest.fn(),
+  getTaskRejections: jest.fn().mockReturnValue([]),
+  getTaskAudit: jest.fn().mockReturnValue([]),
+  getLatestSubmissionNotes: jest.fn(),
+  listTasks: jest.fn().mockReturnValue([]),
+  addAuditEntry: jest.fn(),
   getTaskCountsByStatus: jest.fn().mockReturnValue({
     pending: 0, in_progress: 0, review: 0, completed: 0,
   }),

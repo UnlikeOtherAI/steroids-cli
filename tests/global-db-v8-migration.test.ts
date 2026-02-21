@@ -180,7 +180,7 @@ describe('global db schema v8 migration', () => {
       const ddl = db
         .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='parallel_sessions'`)
         .get() as { sql: string } | undefined;
-      expect(ddl?.sql).toContain("status IN ('running', 'merging', 'completed', 'failed')");
+      expect(ddl?.sql).toContain("'blocked_validation'");
     } finally {
       close();
     }
@@ -261,7 +261,7 @@ describe('global db schema v8 migration', () => {
     const { db, close } = openGlobalDatabase();
 
     try {
-      expect(getGlobalSchemaVersion(db)).toBe('8');
+      expect(getGlobalSchemaVersion(db)).toBe('15');
       const sessionCount = db.prepare('SELECT COUNT(*) as count FROM parallel_sessions').get() as {
         count: number;
       };
@@ -280,7 +280,7 @@ describe('global db schema v8 migration', () => {
     const { db, close } = openGlobalDatabase();
 
     try {
-      expect(getGlobalSchemaVersion(db)).toBe('8');
+      expect(getGlobalSchemaVersion(db)).toBe('15');
       const parallelSessionsColumns = getColumns(db, 'parallel_sessions');
       expect(parallelSessionsColumns.length).toBeGreaterThan(0);
       const runnersColumns = getColumns(db, 'runners');

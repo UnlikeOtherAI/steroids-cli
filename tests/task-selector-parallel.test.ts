@@ -203,7 +203,14 @@ describe('orchestrator loop and runner wiring', () => {
     jest.unstable_mockModule('../src/database/queries.js', () => ({
       getTask: mockGetTask,
       getSection: mockGetSection,
+      createTask: jest.fn(),
+      approveTask: jest.fn(),
+      rejectTask: jest.fn(),
+      getTaskRejections: jest.fn().mockReturnValue([]),
+      getTaskAudit: jest.fn().mockReturnValue([]),
+      getLatestSubmissionNotes: jest.fn(),
       listTasks: mockListTasks,
+      addAuditEntry: jest.fn(),
       getTaskCountsByStatus: jest.fn().mockReturnValue({
         pending: 0,
         in_progress: 0,
@@ -245,10 +252,17 @@ describe('orchestrator loop and runner wiring', () => {
     }));
     jest.unstable_mockModule('node:child_process', () => ({
       execSync: jest.fn(),
+      execFileSync: jest.fn(),
       spawn: jest.fn(),
     }));
     jest.unstable_mockModule('../src/runners/global-db.js', () => ({
       openGlobalDatabase: mockOpenGlobalDatabase,
+      updateParallelSessionStatus: jest.fn(),
+      revokeWorkstreamLeasesForSession: jest.fn(),
+      listParallelSessionRunners: jest.fn().mockReturnValue([]),
+      removeParallelSessionRunner: jest.fn(),
+      recordValidationEscalation: jest.fn().mockReturnValue({ id: 1 }),
+      resolveValidationEscalationsForSession: jest.fn().mockReturnValue(0),
       getGlobalSteroidsDir: () => '/tmp/.steroids',
       getGlobalDbPath: () => '/tmp/.steroids/steroids.db',
       isGlobalDbInitialized: () => true,
@@ -321,7 +335,8 @@ describe('orchestrator loop and runner wiring', () => {
       '/tmp/test',
       false,
       undefined,
-      'steroids/ws-stream'
+      'steroids/ws-stream',
+      { runnerId: undefined, parallelSessionId: undefined }
     );
   });
 
@@ -343,7 +358,8 @@ describe('orchestrator loop and runner wiring', () => {
       '/tmp/test',
       false,
       undefined,
-      'main'
+      'main',
+      { runnerId: undefined, parallelSessionId: undefined }
     );
   });
 

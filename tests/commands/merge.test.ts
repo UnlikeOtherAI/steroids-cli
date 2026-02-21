@@ -489,7 +489,7 @@ describe('mergeCommand', () => {
 
   it('returns not found when session has no completed workstreams', async () => {
     const projectPath = makeProjectPath('steroids-merge-empty');
-    writeParallelSession(globalDb, 'empty', projectPath, '2024-01-01T00:00:00Z');
+    writeParallelSession(globalDb, 'empty', projectPath, '2024-01-01T00:00:00Z', 'completed');
     writeWorkstream(globalDb, {
       id: 'ws-empty',
       sessionId: 'empty',

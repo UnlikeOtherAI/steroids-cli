@@ -22,10 +22,35 @@ import { join, resolve } from 'node:path';
 import { SCHEMA_SQL } from '../../src/database/schema.js';
 
 let db: Database.Database;
+let globalDb: Database.Database;
 
 const mockLoadConfig = jest.fn();
 jest.unstable_mockModule('../../src/config/loader.js', () => ({
   loadConfig: mockLoadConfig,
+}));
+
+const mockGetDefaultWorkspaceRoot = jest.fn(() => '/tmp/steroids-workspaces');
+const mockGetProjectHash = jest.fn(() => 'project-hash');
+const mockCreateIntegrationWorkspace = jest.fn((options: { projectPath: string }) => ({
+  workspacePath: options.projectPath,
+}));
+
+jest.unstable_mockModule('../../src/parallel/clone.js', () => ({
+  getDefaultWorkspaceRoot: mockGetDefaultWorkspaceRoot,
+  getProjectHash: mockGetProjectHash,
+  createIntegrationWorkspace: mockCreateIntegrationWorkspace,
+}));
+
+const mockOpenGlobalDatabase = jest.fn();
+const mockUpdateParallelSessionStatus = jest.fn();
+const mockRecordValidationEscalation = jest.fn(() => ({ id: 1 }));
+const mockResolveValidationEscalationsForSession = jest.fn(() => 0);
+
+jest.unstable_mockModule('../../src/runners/global-db.js', () => ({
+  openGlobalDatabase: mockOpenGlobalDatabase,
+  updateParallelSessionStatus: mockUpdateParallelSessionStatus,
+  recordValidationEscalation: mockRecordValidationEscalation,
+  resolveValidationEscalationsForSession: mockResolveValidationEscalationsForSession,
 }));
 
 const mockCreateHash = jest.fn((algorithm: string) => {
@@ -122,6 +147,77 @@ function createProjectDb(projectPath: string): Database.Database {
   const next = new Database(resolve(projectPath, '.steroids', 'steroids.db'));
   next.exec(SCHEMA_SQL);
   return next;
+}
+
+function createGlobalDb(): Database.Database {
+  const next = new Database(':memory:');
+  next.exec(`
+    CREATE TABLE parallel_sessions (
+      id TEXT PRIMARY KEY,
+      project_path TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT
+    );
+
+    CREATE TABLE workstreams (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      branch_name TEXT NOT NULL,
+      section_ids TEXT NOT NULL DEFAULT '[]',
+      clone_path TEXT,
+      status TEXT NOT NULL,
+      runner_id TEXT,
+      claim_generation INTEGER NOT NULL DEFAULT 0,
+      lease_expires_at TEXT,
+      sealed_base_sha TEXT,
+      sealed_head_sha TEXT,
+      sealed_commit_shas TEXT,
+      completion_order INTEGER,
+      conflict_attempts INTEGER NOT NULL DEFAULT 0,
+      recovery_attempts INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TEXT,
+      last_reconcile_action TEXT,
+      last_reconciled_at TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE validation_escalations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      project_path TEXT NOT NULL,
+      workspace_path TEXT,
+      validation_command TEXT,
+      error_message TEXT NOT NULL,
+      stdout_snippet TEXT,
+      stderr_snippet TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+  `);
+  return next;
+}
+
+function seedGlobalSession(
+  sessionId: string,
+  projectPath: string,
+  workstreams: Array<{ id: string; branchName: string }>
+): void {
+  globalDb
+    .prepare(`INSERT INTO parallel_sessions (id, project_path, status) VALUES (?, ?, 'running')`)
+    .run(sessionId, projectPath);
+
+  const insertWorkstream = globalDb.prepare(`
+    INSERT INTO workstreams (
+      id, session_id, branch_name, section_ids, clone_path, status, runner_id, claim_generation
+    ) VALUES (?, ?, ?, ?, ?, 'running', NULL, 0)
+  `);
+
+  for (const stream of workstreams) {
+    insertWorkstream.run(stream.id, sessionId, stream.branchName, '[]', projectPath);
+  }
 }
 
 function setGitPlan(steps: GitPlanStep[]): void {
@@ -278,13 +374,11 @@ function configureMergeGitMocks(): void {
   });
 }
 
-const [mergeMod, lockMod, progressMod, conflictMod, cloneMod] = await Promise.all([
-  import('../../src/parallel/merge.js'),
-  import('../../src/parallel/merge-lock.js'),
-  import('../../src/parallel/merge-progress.js'),
-  import('../../src/parallel/merge-conflict.js'),
-  import('../../src/parallel/clone.js'),
-]);
+const mergeMod = await import('../../src/parallel/merge.js');
+const lockMod = await import('../../src/parallel/merge-lock.js');
+const progressMod = await import('../../src/parallel/merge-progress.js');
+const conflictMod = await import('../../src/parallel/merge-conflict.js');
+const cloneMod = await import('../../src/parallel/clone.js');
 
 mergeModule = mergeMod;
 lockModule = lockMod;
@@ -296,10 +390,15 @@ const registryModule = await import('../../src/providers/registry.js');
 
 beforeEach(async () => {
   db = createDb();
+  globalDb = createGlobalDb();
   jest.clearAllMocks();
   gitPlan = [];
   invocationOutputs = [];
   commandLog.splice(0, commandLog.length);
+  mockOpenGlobalDatabase.mockReturnValue({
+    db: globalDb,
+    close: jest.fn(),
+  });
 
   mockLoadConfig.mockReturnValue({
     ai: {
@@ -330,6 +429,9 @@ beforeEach(async () => {
 afterEach(() => {
   if (db) {
     db.close();
+  }
+  if (globalDb) {
+    globalDb.close();
   }
 });
 
@@ -410,7 +512,13 @@ describe('merge lock behavior', () => {
     const before = lockModule.getLatestMergeLock(db, 'session-4');
     expect(before).toBeTruthy();
 
-    const after = lockModule.refreshMergeLock(db, 'session-4', 'runner-refresh', 120);
+    const after = lockModule.refreshMergeLock(
+      db,
+      'session-4',
+      'runner-refresh',
+      120,
+      before!.lock_epoch
+    );
     expect(after.id).toBe(before!.id);
     expect(new Date(after.heartbeat_at).getTime()).toBeGreaterThanOrEqual(new Date(before!.heartbeat_at).getTime());
   });
@@ -443,13 +551,19 @@ describe('runParallelMerge integration', () => {
 
   it('merges successfully with clean cherry-pick path', async () => {
     const { projectPath, workspaceRoot } = createProjectAndWorkspace();
+    seedGlobalSession('merge-session', projectPath, [{ id: 'alpha', branchName: 'steroids/ws-alpha' }]);
     setGitPlan([
       { args: ['status', '--porcelain'], output: '' },
       { args: ['fetch', '--prune', 'origin', 'steroids/ws-alpha'], output: '' },
+      { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-a\ncommit-b' },
+      { args: ['rev-parse', 'origin/steroids/ws-alpha'], output: 'remote-head-a' },
+      { args: ['merge-base', 'origin/main', 'origin/steroids/ws-alpha'], output: 'merge-base-a' },
       { args: ['pull', '--ff-only', 'origin', 'main'], output: '' },
       { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-a\ncommit-b' },
       { args: ['cherry-pick', 'commit-a'], output: '' },
+      { args: ['rev-parse', 'HEAD'], output: 'applied-commit-a' },
       { args: ['cherry-pick', 'commit-b'], output: '' },
+      { args: ['rev-parse', 'HEAD'], output: 'applied-commit-b' },
       { args: ['push', 'origin', 'main'], output: 'ok' },
       { args: ['push', 'origin', '--delete', 'steroids/ws-alpha'], output: '' },
       { args: ['remote', 'prune', 'origin'], output: '' },
@@ -461,6 +575,7 @@ describe('runParallelMerge integration', () => {
       runnerId: 'runner-1',
       workstreams: [{ id: 'alpha', branchName: 'steroids/ws-alpha' }],
       remoteWorkspaceRoot: workspaceRoot,
+      cleanupOnSuccess: false,
     });
 
     expect(result.success).toBe(true);
@@ -471,14 +586,29 @@ describe('runParallelMerge integration', () => {
 
   it('resumes from prior progress rows', async () => {
     const { projectPath } = createProjectAndWorkspace();
-    progressModule.upsertProgressEntry(db, 'resume-session', 'alpha', 0, 'commit-a', 'applied');
+    seedGlobalSession('resume-session', projectPath, [{ id: 'alpha', branchName: 'steroids/ws-alpha' }]);
+    progressModule.upsertProgressEntry(
+      db,
+      'resume-session',
+      'alpha',
+      0,
+      'commit-a',
+      'applied',
+      null,
+      'commit-a'
+    );
 
     setGitPlan([
       { args: ['status', '--porcelain'], output: '' },
       { args: ['fetch', '--prune', 'origin', 'steroids/ws-alpha'], output: '' },
+      { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-a\ncommit-b' },
+      { args: ['rev-parse', 'origin/steroids/ws-alpha'], output: 'remote-head-a' },
+      { args: ['merge-base', 'origin/main', 'origin/steroids/ws-alpha'], output: 'merge-base-a' },
       { args: ['pull', '--ff-only', 'origin', 'main'], output: '' },
       { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-a\ncommit-b' },
+      { args: ['branch', '--contains', 'commit-a', '--list', 'HEAD'], output: 'HEAD' },
       { args: ['cherry-pick', 'commit-b'], output: '' },
+      { args: ['rev-parse', 'HEAD'], output: 'applied-commit-b' },
       { args: ['push', 'origin', 'main'], output: 'ok' },
       { args: ['push', 'origin', '--delete', 'steroids/ws-alpha'], output: '' },
       { args: ['remote', 'prune', 'origin'], output: '' },
@@ -489,9 +619,11 @@ describe('runParallelMerge integration', () => {
       sessionId: 'resume-session',
       runnerId: 'runner-1',
       workstreams: [{ id: 'alpha', branchName: 'steroids/ws-alpha' }],
+      cleanupOnSuccess: false,
     });
 
     expect(result.success).toBe(true);
+    expect(result.errors).toEqual([]);
     expect(result.completedCommits).toBe(2);
 
     const rows = progressModule.listMergeProgress(db, 'resume-session');
@@ -500,6 +632,7 @@ describe('runParallelMerge integration', () => {
 
   it('handles merge conflict with coder/reviewer loop', async () => {
     const { projectPath } = createProjectAndWorkspace();
+    seedGlobalSession('conflict-session', projectPath, [{ id: 'alpha', branchName: 'steroids/ws-alpha' }]);
     queueInvocationOutputs([
       'coder resolved',
       'APPROVE - conflict resolved',
@@ -512,16 +645,19 @@ describe('runParallelMerge integration', () => {
       { args: ['status', '--porcelain'], output: '' },
       { args: ['fetch', '--prune', 'origin', 'steroids/ws-alpha'], output: '' },
       { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-conflict' },
+      { args: ['rev-parse', 'origin/steroids/ws-alpha'], output: 'remote-head-conflict' },
+      { args: ['merge-base', 'origin/main', 'origin/steroids/ws-alpha'], output: 'merge-base-conflict' },
+      { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-conflict' },
       { args: ['cherry-pick', 'commit-conflict'], error: 'CONFLICT: could not apply commit-conflict' },
       { args: ['diff', '--name-only', '--diff-filter=U'], output: 'src/file.ts' },
       { args: ['show', 'commit-conflict', '--'], output: 'patch' },
       { args: ['log', '-1', '--format=%s%n%b', 'commit-conflict'], output: 'Conflicting commit' },
-      { args: ['diff', '--name-only', '--diff-filter=U'], output: 'src/file.ts' },
       { args: ['diff', '--name-only', '--diff-filter=U'], output: '' },
       { args: ['diff', '--cached', '--name-only'], output: 'src/file.ts' },
       { args: ['diff', '--cached'], output: 'staged diff' },
       { args: ['diff', '--name-only', '--diff-filter=U'], output: '' },
       { args: ['-c', 'core.editor=true', 'cherry-pick', '--continue'], output: '' },
+      { args: ['rev-parse', 'HEAD'], output: 'applied-conflict-commit' },
       { args: ['push', 'origin', 'main'], output: 'ok' },
       { args: ['push', 'origin', '--delete', 'steroids/ws-alpha'], output: '' },
       { args: ['remote', 'prune', 'origin'], output: '' },
@@ -532,8 +668,10 @@ describe('runParallelMerge integration', () => {
       sessionId: 'conflict-session',
       runnerId: 'runner-1',
       workstreams: [{ id: 'alpha', branchName: 'steroids/ws-alpha' }],
+      cleanupOnSuccess: false,
     });
 
+    expect(result.errors).toEqual([]);
     expect(result.success).toBe(true);
     expect(result.completedCommits).toBe(1);
     expect(result.conflicts).toBe(1);
@@ -541,6 +679,7 @@ describe('runParallelMerge integration', () => {
 
   it('cleans workspace directory after successful merge', async () => {
     const { projectPath, workspaceRoot } = createProjectAndWorkspace();
+    seedGlobalSession('cleanup-session', projectPath, [{ id: 'alpha', branchName: 'steroids/ws-alpha' }]);
     const projectHash = getProjectHash(projectPath);
     const sessionPath = resolve(workspaceRoot, projectHash, 'ws-alpha');
     mkdirSync(sessionPath, { recursive: true });
@@ -549,9 +688,13 @@ describe('runParallelMerge integration', () => {
     setGitPlan([
       { args: ['status', '--porcelain'], output: '' },
       { args: ['fetch', '--prune', 'origin', 'steroids/ws-alpha'], output: '' },
+      { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-a' },
+      { args: ['rev-parse', 'origin/steroids/ws-alpha'], output: 'remote-head-a' },
+      { args: ['merge-base', 'origin/main', 'origin/steroids/ws-alpha'], output: 'merge-base-a' },
       { args: ['pull', '--ff-only', 'origin', 'main'], output: '' },
       { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-a' },
       { args: ['cherry-pick', 'commit-a'], output: '' },
+      { args: ['rev-parse', 'HEAD'], output: 'applied-commit-a' },
       { args: ['push', 'origin', 'main'], output: 'ok' },
       { args: ['push', 'origin', '--delete', 'steroids/ws-alpha'], output: '' },
       { args: ['remote', 'prune', 'origin'], output: '' },
@@ -572,12 +715,17 @@ describe('runParallelMerge integration', () => {
 
   it('reports push failures as errors', async () => {
     const { projectPath } = createProjectAndWorkspace();
+    seedGlobalSession('push-fail-session', projectPath, [{ id: 'alpha', branchName: 'steroids/ws-alpha' }]);
     setGitPlan([
       { args: ['status', '--porcelain'], output: '' },
       { args: ['fetch', '--prune', 'origin', 'steroids/ws-alpha'], output: '' },
+      { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-a' },
+      { args: ['rev-parse', 'origin/steroids/ws-alpha'], output: 'remote-head-a' },
+      { args: ['merge-base', 'origin/main', 'origin/steroids/ws-alpha'], output: 'merge-base-a' },
       { args: ['pull', '--ff-only', 'origin', 'main'], output: '' },
       { args: ['log', 'main..origin/steroids/ws-alpha', '--format=%H', '--reverse'], output: 'commit-a' },
       { args: ['cherry-pick', 'commit-a'], output: '' },
+      { args: ['rev-parse', 'HEAD'], output: 'applied-commit-a' },
       { args: ['push', 'origin', 'main'], output: 'error: failed to push' },
     ]);
 
@@ -586,6 +734,7 @@ describe('runParallelMerge integration', () => {
       sessionId: 'push-fail-session',
       runnerId: 'runner-1',
       workstreams: [{ id: 'alpha', branchName: 'steroids/ws-alpha' }],
+      cleanupOnSuccess: false,
     });
 
     expect(result.success).toBe(false);

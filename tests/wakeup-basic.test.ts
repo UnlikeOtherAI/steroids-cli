@@ -113,7 +113,7 @@ jest.unstable_mockModule('../src/runners/lock.js', () => ({
 const createMockDb = () => ({
   prepare: jest.fn().mockReturnThis(),
   get: jest.fn(),
-  all: jest.fn(),
+  all: jest.fn().mockReturnValue([]),
   run: jest.fn(),
   exec: jest.fn(),
   close: jest.fn(),
@@ -218,13 +218,31 @@ describe('wakeup() - basic functionality', () => {
       { path: project.path, enabled: true, name: 'Project 1' },
     ]);
 
-    // Mock: project has an active runner
-    const mockGet = jest.fn().mockReturnValueOnce({ 1: 1 });
+    // Mock: project has an active non-parallel runner
+    mockGlobalDb.prepare.mockImplementation((query: unknown) => {
+      const sql = String(query);
 
-    mockGlobalDb.prepare.mockReturnValue({
-      get: mockGet,
-      all: jest.fn(),
-      run: jest.fn(),
+      if (sql.includes('FROM parallel_sessions')) {
+        return {
+          get: jest.fn().mockReturnValue(undefined),
+          all: jest.fn().mockReturnValue([]),
+          run: jest.fn(),
+        };
+      }
+
+      if (sql.includes('FROM runners')) {
+        return {
+          get: jest.fn().mockReturnValue({ 1: 1 }),
+          all: jest.fn().mockReturnValue([]),
+          run: jest.fn(),
+        };
+      }
+
+      return {
+        get: jest.fn().mockReturnValue(undefined),
+        all: jest.fn().mockReturnValue([]),
+        run: jest.fn(),
+      };
     });
 
     const results = await wakeup({ quiet: true });

@@ -113,7 +113,7 @@ jest.unstable_mockModule('../src/runners/lock.js', () => ({
 const createMockDb = () => ({
   prepare: jest.fn().mockReturnThis(),
   get: jest.fn(),
-  all: jest.fn(),
+  all: jest.fn().mockReturnValue([]),
   run: jest.fn(),
   exec: jest.fn(),
   close: jest.fn(),
@@ -226,7 +226,7 @@ describe('wakeup() - multi-project iteration', () => {
     // Should spawn a new runner with --project flag
     expect(mockSpawn).toHaveBeenCalledWith(
       'steroids',
-      ['runners', 'start', '--detach', '--project', project.path],
+      ['runners', 'start', '--parallel', '--project', project.path],
       expect.objectContaining({
         detached: true,
         stdio: 'ignore',

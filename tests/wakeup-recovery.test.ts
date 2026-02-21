@@ -92,7 +92,7 @@ jest.unstable_mockModule('../src/health/stuck-task-recovery.js', () => ({
 const createMockDb = () => ({
   prepare: jest.fn().mockReturnThis(),
   get: jest.fn(),
-  all: jest.fn(),
+  all: jest.fn().mockReturnValue([]),
   run: jest.fn(),
   exec: jest.fn(),
   close: jest.fn(),

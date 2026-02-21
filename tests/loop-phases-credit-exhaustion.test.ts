@@ -26,6 +26,7 @@ const mockUpdateTaskStatus = jest.fn();
 const mockApproveTask = jest.fn();
 const mockRejectTask = jest.fn();
 const mockGetTaskRejections = jest.fn().mockReturnValue([]);
+const mockGetTaskAudit = jest.fn().mockReturnValue([]);
 const mockGetLatestSubmissionNotes = jest.fn().mockReturnValue(undefined);
 const mockListTasks = jest.fn().mockReturnValue([]);
 const mockAddAuditEntry = jest.fn();
@@ -69,6 +70,7 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   approveTask: mockApproveTask,
   rejectTask: mockRejectTask,
   getTaskRejections: mockGetTaskRejections,
+  getTaskAudit: mockGetTaskAudit,
   getLatestSubmissionNotes: mockGetLatestSubmissionNotes,
   listTasks: mockListTasks,
   addAuditEntry: mockAddAuditEntry,

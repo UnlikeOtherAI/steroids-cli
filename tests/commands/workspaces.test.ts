@@ -15,9 +15,15 @@ import { getProjectHash } from '../../src/parallel/clone.js';
 
 const mockOpenGlobalDatabase = jest.fn();
 const mockLoadConfig = jest.fn();
+const mockListParallelSessionRunners = jest.fn();
+const mockRemoveParallelSessionRunner = jest.fn();
+const mockRevokeWorkstreamLeasesForSession = jest.fn();
 
 jest.unstable_mockModule('../../src/runners/global-db.js', () => ({
   openGlobalDatabase: mockOpenGlobalDatabase,
+  listParallelSessionRunners: mockListParallelSessionRunners,
+  removeParallelSessionRunner: mockRemoveParallelSessionRunner,
+  revokeWorkstreamLeasesForSession: mockRevokeWorkstreamLeasesForSession,
 }));
 
 jest.unstable_mockModule('../../src/config/loader.js', () => ({
@@ -173,6 +179,9 @@ beforeEach(async () => {
       },
     },
   });
+  mockListParallelSessionRunners.mockReturnValue([]);
+  mockRemoveParallelSessionRunner.mockReturnValue(undefined);
+  mockRevokeWorkstreamLeasesForSession.mockReturnValue(0);
 
   mockOpenGlobalDatabase.mockReturnValue({
     db: globalDb,
