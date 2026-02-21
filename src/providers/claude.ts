@@ -64,7 +64,7 @@ const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" --model {mo
  */
 export class ClaudeProvider extends BaseAIProvider {
   readonly name = 'claude';
-  readonly displayName = 'Anthropic Claude';
+  readonly displayName = 'Anthropic (claude)';
 
   /**
    * Write prompt to a temporary file

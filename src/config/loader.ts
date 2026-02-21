@@ -11,23 +11,33 @@ import { parse, stringify } from 'yaml';
 const STEROIDS_DIR = '.steroids';
 const CONFIG_FILE = 'config.yaml';
 
+export type ProviderName = 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral';
+
+export interface ReviewerConfig {
+  provider?: ProviderName;
+  model?: string;
+  cli?: string;
+}
+
+export interface ReviewPolicy {
+  strict?: boolean;          // Default: true (fail if any reviewer unavailable)
+}
+
 export interface SteroidsConfig {
   ai?: {
     orchestrator?: {
-      provider?: 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral';
+      provider?: ProviderName;
       model?: string;
       cli?: string;
     };
     coder?: {
-      provider?: 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral';
+      provider?: ProviderName;
       model?: string;
       cli?: string;
     };
-    reviewer?: {
-      provider?: 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral';
-      model?: string;
-      cli?: string;
-    };
+    reviewer?: ReviewerConfig;         // Existing single reviewer
+    reviewers?: ReviewerConfig[];      // NEW: multi-reviewer array
+    review?: ReviewPolicy;             // NEW: review policy
   };
   output?: {
     format?: 'table' | 'json';
@@ -154,6 +164,9 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       provider: 'claude',
       model: 'claude-sonnet-4',
     },
+    review: {
+      strict: true,
+    }
   },
   output: {
     format: 'table',
@@ -337,6 +350,7 @@ export function mergeConfigs(
 /**
  * Apply environment variable overrides
  * STEROIDS_AI_CODER_MODEL -> ai.coder.model
+ * STEROIDS_AI_REVIEWERS="codex:gpt-4.1,claude:claude-sonnet-4" -> ai.reviewers = [{provider: 'codex', model: 'gpt-4.1'}, {provider: 'claude', model: 'claude-sonnet-4'}]
  */
 export function applyEnvOverrides(
   config: Partial<SteroidsConfig>
@@ -345,6 +359,16 @@ export function applyEnvOverrides(
 
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith('STEROIDS_')) continue;
+
+    // Handle STEROIDS_AI_REVIEWERS shorthand
+    if (key === 'STEROIDS_AI_REVIEWERS' && value) {
+      if (!result.ai) result.ai = {};
+      result.ai.reviewers = value.split(',').map(s => {
+        const [provider, model] = s.split(':');
+        return { provider: provider as ProviderName, model };
+      });
+      continue;
+    }
 
     // Convert STEROIDS_AI_CODER_MODEL to ['ai', 'coder', 'model']
     const path = key
@@ -355,7 +379,7 @@ export function applyEnvOverrides(
     // Set nested value
     let current: Record<string, unknown> = result as Record<string, unknown>;
     for (let i = 0; i < path.length - 1; i++) {
-      if (!(path[i] in current) || typeof current[path[i]] !== 'object') {
+      if (!(path[i] in current) || typeof current[path[i]] !== 'object' || Array.isArray(current[path[i]])) {
         current[path[i]] = {};
       }
       current = current[path[i]] as Record<string, unknown>;
@@ -367,7 +391,7 @@ export function applyEnvOverrides(
       current[finalKey] = true;
     } else if (value === 'false') {
       current[finalKey] = false;
-    } else if (!isNaN(Number(value))) {
+    } else if (value !== undefined && !isNaN(Number(value)) && value.trim() !== '') {
       current[finalKey] = Number(value);
     } else {
       current[finalKey] = value;

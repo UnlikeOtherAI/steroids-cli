@@ -584,6 +584,10 @@ async function runAI(args: string[], flags: GlobalFlags): Promise<void> {
       global: { type: 'boolean', default: false },
       provider: { type: 'string', short: 'p' },
       model: { type: 'string', short: 'm' },
+      add: { type: 'boolean' },
+      remove: { type: 'string' },
+      list: { type: 'boolean' },
+      set: { type: 'string' },
     },
     allowPositionals: true,
   });
@@ -599,9 +603,13 @@ ARGUMENTS:
   [role]              Role to configure: coder | reviewer | orchestrator
 
 OPTIONS:
-  -p, --provider      Provider (claude | openai | gemini | mistral) - skip interactive selection
+  -p, --provider      Provider (claude | codex | gemini | mistral | openai) - skip interactive selection
   -m, --model         Model ID - skip interactive selection
   --global            Save to global config
+  --add               Add a reviewer (requires -p and -m)
+  --remove <provider> Remove a reviewer by provider name
+  --list              List configured reviewers
+  --set <shorthand>   Set multiple reviewers (e.g., "codex:gpt-4.1,claude:sonnet")
   -h, --help          Show help
 
 EXAMPLES:
@@ -609,10 +617,12 @@ EXAMPLES:
   steroids config ai coder                        # Configure coder role
   steroids config ai coder -p claude -m sonnet    # Non-interactive setup
   steroids config ai reviewer --global            # Configure reviewer in global config
+  steroids config ai reviewer --list              # List all reviewers
+  steroids config ai reviewer --add -p gemini -m gemini-2.5-pro
 
 ENVIRONMENT VARIABLES:
   STEROIDS_ANTHROPIC_API_KEY   Required for Claude models
-  STEROIDS_OPENAI_API_KEY      Required for OpenAI models
+  STEROIDS_OPENAI_API_KEY      Required for OpenAI/Codex models
   STEROIDS_GOOGLE_API_KEY      Required for Gemini models (or STEROIDS_GEMINI_API_KEY)
   STEROIDS_MISTRAL_API_KEY     Required for Mistral models
 `);
@@ -627,11 +637,79 @@ ENVIRONMENT VARIABLES:
     process.exit(1);
   }
 
+  if (role === 'reviewer') {
+    if (values.list) {
+      const config = loadConfig();
+      const reviewers = config.ai?.reviewers && config.ai.reviewers.length > 0 
+        ? config.ai.reviewers 
+        : (config.ai?.reviewer ? [config.ai.reviewer] : []);
+      
+      if (reviewers.length === 0) {
+        console.log('No reviewers configured.');
+      } else {
+        console.log('Current reviewers:');
+        reviewers.forEach((r, i) => {
+          console.log(`  ${i + 1}. ${r.provider} / ${r.model}`);
+        });
+      }
+      return;
+    }
+
+    if (values.add) {
+       if (!values.provider || !values.model) {
+         console.error('--provider and --model are required when using --add');
+         process.exit(1);
+       }
+       const configPath = values.global ? getGlobalConfigPath() : getProjectConfigPath();
+       const config = loadConfigFile(configPath);
+       if (!config.ai) config.ai = {};
+       if (!config.ai.reviewers) {
+         config.ai.reviewers = config.ai.reviewer ? [{...config.ai.reviewer}] : [];
+       }
+       config.ai.reviewers.push({ provider: values.provider as any, model: values.model });
+       saveConfig(config, configPath);
+       console.log(`Added reviewer: ${values.provider} / ${values.model}`);
+       return;
+    }
+
+    if (values.remove) {
+       const configPath = values.global ? getGlobalConfigPath() : getProjectConfigPath();
+       const config = loadConfigFile(configPath);
+       if (!config.ai?.reviewers) {
+         console.error('No multi-reviewers configured to remove from.');
+         process.exit(1);
+       }
+       const initialLength = config.ai.reviewers.length;
+       config.ai.reviewers = config.ai.reviewers.filter(r => r.provider !== values.remove);
+       if (config.ai.reviewers.length === initialLength) {
+         console.error(`Reviewer with provider '${values.remove}' not found in reviewers list.`);
+         process.exit(1);
+       }
+       saveConfig(config, configPath);
+       console.log(`Removed reviewer: ${values.remove}`);
+       return;
+    }
+
+    if (values.set) {
+       const configPath = values.global ? getGlobalConfigPath() : getProjectConfigPath();
+       const reviewers = values.set.split(',').map(s => {
+         const [provider, model] = s.split(':');
+         return { provider: provider as any, model };
+       });
+       const config = loadConfigFile(configPath);
+       if (!config.ai) config.ai = {};
+       config.ai.reviewers = reviewers;
+       saveConfig(config, configPath);
+       console.log(`Set ${reviewers.length} reviewers.`);
+       return;
+    }
+  }
+
   if (values.provider) {
-    const provider = values.provider as 'claude' | 'openai' | 'gemini' | 'mistral';
-    if (!['claude', 'openai', 'gemini', 'mistral'].includes(provider)) {
+    const provider = values.provider as any;
+    if (!['claude', 'codex', 'gemini', 'mistral', 'openai'].includes(provider)) {
       console.error(`Invalid provider: ${provider}`);
-      console.error('Valid providers: claude, openai, gemini, mistral');
+      console.error('Valid providers: claude, codex, gemini, mistral, openai');
       process.exit(1);
     }
 

@@ -23,7 +23,7 @@ import {
   getCommitDiff,
   getCommitFiles,
 } from '../git/status.js';
-import { loadConfig } from '../config/loader.js';
+import { loadConfig, type ReviewerConfig, type SteroidsConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
 
@@ -36,6 +36,105 @@ export interface ReviewerResult {
   timedOut: boolean;
   decision?: 'approve' | 'reject' | 'dispute' | 'skip';
   notes?: string;
+  provider?: string;
+  model?: string;
+}
+
+export type FinalDecision = 'approve' | 'reject' | 'dispute' | 'skip' | 'unclear';
+
+/**
+ * Deterministic policy engine for multi-reviewer decisions
+ */
+export function resolveDecision(
+  results: ReviewerResult[],
+): { decision: FinalDecision; needsMerge: boolean } {
+  if (results.length === 0) return { decision: 'unclear', needsMerge: false };
+
+  // Use the decision matrix priority: REJECT > DISPUTE > APPROVE > SKIP
+  const decisions = results.map(r => r.decision);
+
+  // 1. Any reject -> REJECT
+  if (decisions.some(d => d === 'reject')) {
+    const rejectorsWithNotes = results.filter(r => r.decision === 'reject' && r.notes);
+    return { decision: 'reject', needsMerge: rejectorsWithNotes.length > 1 };
+  }
+
+  // 2. Any dispute (with no rejections) -> DISPUTE
+  if (decisions.some(d => d === 'dispute')) {
+    return { decision: 'dispute', needsMerge: false };
+  }
+
+  // 3. All approve -> APPROVE
+  if (decisions.length > 0 && decisions.every(d => d === 'approve')) {
+    return { decision: 'approve', needsMerge: false };
+  }
+
+  // 4. Mix of approve/skip or all skip -> depends
+  const approvals = decisions.filter(d => d === 'approve').length;
+  if (approvals === 0) {
+    if (decisions.every(d => d === 'skip')) {
+      return { decision: 'skip', needsMerge: false };
+    }
+    return { decision: 'unclear', needsMerge: false };
+  }
+
+  // Some approve, some skip -> not enough approvals for a definitive APPROVE in multi-review
+  return { decision: 'unclear', needsMerge: false };
+}
+
+/**
+ * Helper to get reviewer configurations, handling both singular and plural config
+ */
+export function getReviewerConfigs(config: SteroidsConfig): ReviewerConfig[] {
+  if (config.ai?.reviewers && config.ai.reviewers.length > 0) {
+    return config.ai.reviewers;
+  }
+  if (config.ai?.reviewer) {
+    return [config.ai.reviewer];
+  }
+  return [];
+}
+
+/**
+ * Check if multi-review is enabled
+ */
+export function isMultiReviewEnabled(config: SteroidsConfig): boolean {
+  return !!(config.ai?.reviewers && config.ai.reviewers.length > 1);
+}
+
+/**
+ * Invoke multiple reviewers in parallel
+ */
+export async function invokeReviewers(
+  task: Task,
+  projectPath: string,
+  reviewerConfigs: ReviewerConfig[],
+  coordinatorGuidance?: string,
+  coordinatorDecision?: string
+): Promise<ReviewerResult[]> {
+  const results = await Promise.allSettled(
+    reviewerConfigs.map(config =>
+      invokeReviewer(task, projectPath, coordinatorGuidance, coordinatorDecision, config)
+    )
+  );
+
+  return results.map((r, i) => {
+    if (r.status === 'fulfilled') {
+      return r.value;
+    } else {
+      // Return a failed reviewer result
+      return {
+        success: false,
+        exitCode: 1,
+        stdout: '',
+        stderr: r.reason?.message || String(r.reason),
+        duration: 0,
+        timedOut: false,
+        provider: reviewerConfigs[i].provider,
+        model: reviewerConfigs[i].model,
+      };
+    }
+  });
 }
 
 export interface BatchReviewerResult {
@@ -99,12 +198,15 @@ async function invokeProvider(
   promptFile: string,
   timeoutMs: number = 600_000, // 10 minutes default for reviewer
   taskId?: string,
-  projectPath?: string
+  projectPath?: string,
+  reviewerConfig?: ReviewerConfig
 ): Promise<ReviewerResult> {
-  // Load configuration to get reviewer provider settings
+  // Load configuration to get reviewer provider settings if not provided
   // Project config overrides global config
-  const config = loadConfig(projectPath);
-  const reviewerConfig = config.ai?.reviewer;
+  if (!reviewerConfig) {
+    const config = loadConfig(projectPath);
+    reviewerConfig = config.ai?.reviewer;
+  }
 
   const providerName = reviewerConfig?.provider;
   const modelName = reviewerConfig?.model;
@@ -163,6 +265,8 @@ async function invokeProvider(
     timedOut: result.timedOut,
     decision,
     notes,
+    provider: providerName,
+    model: modelName,
   };
 }
 
@@ -170,23 +274,25 @@ async function invokeProvider(
  * Invoke reviewer for a task
  * @param coordinatorGuidance Optional guidance from coordinator after repeated rejections
  * @param coordinatorDecision Optional decision type from coordinator
+ * @param reviewerConfig Optional reviewer configuration to override default
  */
 export async function invokeReviewer(
   task: Task,
   projectPath: string,
   coordinatorGuidance?: string,
-  coordinatorDecision?: string
+  coordinatorDecision?: string,
+  reviewerConfig?: ReviewerConfig
 ): Promise<ReviewerResult> {
   // Load config to show provider/model being used
   const config = loadConfig(projectPath);
-  const reviewerConfig = config.ai?.reviewer;
+  const effectiveReviewerConfig = reviewerConfig || config.ai?.reviewer;
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`REVIEWER: ${task.title}`);
   console.log(`Task ID: ${task.id}`);
   console.log(`Rejection count: ${task.rejection_count}/15`);
-  console.log(`Provider: ${reviewerConfig?.provider ?? 'not configured'}`);
-  console.log(`Model: ${reviewerConfig?.model ?? 'not configured'}`);
+  console.log(`Provider: ${effectiveReviewerConfig?.provider ?? 'not configured'}`);
+  console.log(`Model: ${effectiveReviewerConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
   // Try to find the specific commit for this task
@@ -241,7 +347,7 @@ export async function invokeReviewer(
   }
 
   // Reuse config loaded earlier, get reviewer model
-  const reviewerModel = reviewerConfig?.model || 'unknown';
+  const reviewerModel = effectiveReviewerConfig?.model || 'unknown';
 
   const context: ReviewerPromptContext = {
     task,
@@ -263,7 +369,7 @@ export async function invokeReviewer(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    const result = await invokeProvider(promptFile, 600_000, task.id, projectPath);
+    const result = await invokeProvider(promptFile, 600_000, task.id, projectPath, effectiveReviewerConfig);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`REVIEWER COMPLETED`);
@@ -282,22 +388,27 @@ export async function invokeReviewer(
 
 /**
  * Invoke reviewer for a batch of tasks
+ * @param tasks Tasks to review
+ * @param sectionName Section name
+ * @param projectPath Project path
+ * @param reviewerConfig Optional reviewer configuration to override default
  */
 export async function invokeReviewerBatch(
   tasks: Task[],
   sectionName: string,
-  projectPath: string
+  projectPath: string,
+  reviewerConfig?: ReviewerConfig
 ): Promise<BatchReviewerResult> {
   // Load config for quality settings and to show provider/model being used
   const config = loadConfig(projectPath);
-  const reviewerConfig = config.ai?.reviewer;
+  const effectiveReviewerConfig = reviewerConfig || config.ai?.reviewer;
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`BATCH REVIEWER: Section "${sectionName}"`);
   console.log(`Tasks: ${tasks.length}`);
   tasks.forEach((t, i) => console.log(`  ${i + 1}. ${t.title} (${t.id})`));
-  console.log(`Provider: ${reviewerConfig?.provider ?? 'not configured'}`);
-  console.log(`Model: ${reviewerConfig?.model ?? 'not configured'}`);
+  console.log(`Provider: ${effectiveReviewerConfig?.provider ?? 'not configured'}`);
+  console.log(`Model: ${effectiveReviewerConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
   // Get combined git diff for all tasks (compare against base before batch started)
@@ -320,7 +431,7 @@ export async function invokeReviewerBatch(
   try {
     // Longer timeout for batch: base 20 minutes + 3 minutes per task
     const timeoutMs = 20 * 60 * 1000 + tasks.length * 3 * 60 * 1000;
-    const result = await invokeProvider(promptFile, timeoutMs, undefined, projectPath);
+    const result = await invokeProvider(promptFile, timeoutMs, undefined, projectPath, effectiveReviewerConfig);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`BATCH REVIEWER COMPLETED`);

@@ -15,15 +15,19 @@ interface RoleConfig {
 const INSTALL_COMMANDS: Record<string, { command: string; description: string }> = {
   claude: {
     command: 'npm install -g @anthropic-ai/claude-code',
-    description: 'Install the Claude Code CLI to use Anthropic models.',
+    description: 'Install the Claude CLI to use Anthropic models.',
   },
   gemini: {
-    command: 'npm install -g @anthropic-ai/gemini-cli',
-    description: 'Install the Gemini CLI to use Google AI models.',
+    command: 'npm install -g @google/gemini-cli',
+    description: 'Install the Gemini CLI to use Google models.',
   },
   codex: {
     command: 'npm install -g @openai/codex',
     description: 'Install the Codex CLI to use OpenAI models.',
+  },
+  mistral: {
+    command: 'uv tool install mistral-vibe',
+    description: 'Install the Vibe CLI to use Mistral models.',
   },
 };
 
@@ -32,6 +36,7 @@ const API_KEY_ENV_VARS: Record<string, string> = {
   claude: 'ANTHROPIC_API_KEY',
   gemini: 'GOOGLE_API_KEY',
   codex: 'OPENAI_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
 };
 
 export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose }) => {
@@ -47,6 +52,8 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
   const [orchestrator, setOrchestrator] = useState<RoleConfig>({ provider: '', model: '' });
   const [coder, setCoder] = useState<RoleConfig>({ provider: '', model: '' });
   const [reviewer, setReviewer] = useState<RoleConfig>({ provider: '', model: '' });
+  const [reviewers, setReviewers] = useState<RoleConfig[]>([]);
+  const [useMultiReview, setUseMultiReview] = useState(false);
 
   useEffect(() => {
     loadProviders();
@@ -62,11 +69,18 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
       setProviders(providerList);
 
       // Pre-fill from existing config
-      const ai = globalConfig.ai as Record<string, Record<string, string>> | undefined;
+      const ai = globalConfig.ai as any;
       if (ai) {
         if (ai.orchestrator?.provider) setOrchestrator({ provider: ai.orchestrator.provider, model: ai.orchestrator.model || '' });
         if (ai.coder?.provider) setCoder({ provider: ai.coder.provider, model: ai.coder.model || '' });
-        if (ai.reviewer?.provider) setReviewer({ provider: ai.reviewer.provider, model: ai.reviewer.model || '' });
+        
+        if (ai.reviewers && Array.isArray(ai.reviewers) && ai.reviewers.length > 0) {
+          setUseMultiReview(true);
+          setReviewers(ai.reviewers.map((r: any) => ({ provider: r.provider || '', model: r.model || '' })));
+          setReviewer({ provider: ai.reviewers[0].provider || '', model: ai.reviewers[0].model || '' });
+        } else if (ai.reviewer?.provider) {
+          setReviewer({ provider: ai.reviewer.provider, model: ai.reviewer.model || '' });
+        }
       }
 
       // Load models for installed providers
@@ -93,9 +107,15 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
     }
   };
 
-  const handleProviderChange = async (role: 'orchestrator' | 'coder' | 'reviewer', providerId: string) => {
-    const setter = role === 'orchestrator' ? setOrchestrator : role === 'coder' ? setCoder : setReviewer;
-    setter({ provider: providerId, model: '' });
+  const handleProviderChange = async (role: 'orchestrator' | 'coder' | 'reviewer' | number, providerId: string) => {
+    if (typeof role === 'number') {
+      const next = [...reviewers];
+      next[role] = { ...next[role], provider: providerId, model: '' };
+      setReviewers(next);
+    } else {
+      const setter = role === 'orchestrator' ? setOrchestrator : role === 'coder' ? setCoder : setReviewer;
+      setter({ provider: providerId, model: '' });
+    }
 
     // Load models if not already loaded
     if (providerId && !models[providerId]) {
@@ -112,9 +132,18 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
 
   const handleSave = async () => {
     if (!orchestrator.provider || !orchestrator.model ||
-        !coder.provider || !coder.model ||
-        !reviewer.provider || !reviewer.model) {
-      setError('Please configure all three roles');
+        !coder.provider || !coder.model) {
+      setError('Please configure orchestrator and coder roles');
+      return;
+    }
+
+    if (useMultiReview && (reviewers.length < 2 || reviewers.some(r => !r.provider || !r.model))) {
+      setError('Please configure at least 2 reviewers for multi-review mode');
+      return;
+    }
+
+    if (!useMultiReview && (!reviewer.provider || !reviewer.model)) {
+      setError('Please configure the reviewer role');
       return;
     }
 
@@ -122,14 +151,24 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
     setError(null);
 
     try {
-      await configApi.setConfig({
+      const updates: Record<string, any> = {
         'ai.orchestrator.provider': orchestrator.provider,
         'ai.orchestrator.model': orchestrator.model,
         'ai.coder.provider': coder.provider,
         'ai.coder.model': coder.model,
-        'ai.reviewer.provider': reviewer.provider,
-        'ai.reviewer.model': reviewer.model,
-      }, 'global');
+      };
+
+      if (useMultiReview) {
+        updates['ai.reviewers'] = reviewers;
+        updates['ai.reviewer.provider'] = reviewers[0].provider;
+        updates['ai.reviewer.model'] = reviewers[0].model;
+      } else {
+        updates['ai.reviewer.provider'] = reviewer.provider;
+        updates['ai.reviewer.model'] = reviewer.model;
+        updates['ai.reviewers'] = [];
+      }
+
+      await configApi.setConfig(updates, 'global');
 
       onComplete();
     } catch (err) {
@@ -151,15 +190,17 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
   const isFormComplete =
     orchestrator.provider && orchestrator.model &&
     coder.provider && coder.model &&
-    reviewer.provider && reviewer.model;
+    (useMultiReview ? 
+      (reviewers.length >= 2 && reviewers.every(r => r.provider && r.model)) : 
+      (reviewer.provider && reviewer.model));
 
   const renderRoleSelector = (
     label: string,
     icon: string,
     config: RoleConfig,
-    setConfig: (role: 'orchestrator' | 'coder' | 'reviewer', provider: string) => void,
-    setModel: React.Dispatch<React.SetStateAction<RoleConfig>>,
-    role: 'orchestrator' | 'coder' | 'reviewer'
+    onProviderChange: (role: any, provider: string) => void,
+    onModelChange: (val: any) => void,
+    role: any
   ) => {
     const selectedProvider = getProviderById(config.provider);
     const isNotInstalled = selectedProvider && !selectedProvider.installed;
@@ -174,13 +215,13 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
           <span className="font-medium text-text-primary">{label}</span>
         </div>
 
-        {/* Provider and Model Selection - always visible side by side */}
+        {/* Provider and Model Selection */}
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
             <label className="block text-xs text-text-secondary mb-1">Provider</label>
             <select
               value={config.provider}
-              onChange={(e) => setConfig(role, e.target.value)}
+              onChange={(e) => onProviderChange(role, e.target.value)}
               className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent"
             >
               <option value="">Select provider...</option>
@@ -203,7 +244,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
             </label>
             <select
               value={config.model}
-              onChange={(e) => setModel(prev => ({ ...prev, model: e.target.value }))}
+              onChange={(e) => onModelChange(e.target.value)}
               disabled={!config.provider || isNotInstalled}
               className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-50"
             >
@@ -215,7 +256,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
           </div>
         </div>
 
-        {/* Not Installed Warning - shown below provider/model */}
+        {/* Not Installed Warning */}
         {isNotInstalled && installInfo && (
           <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg">
             <div className="flex items-start gap-2 text-warning text-sm mb-2">
@@ -227,38 +268,33 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
                 {installInfo.command}
               </code>
               <button
-                onClick={() => copyToClipboard(installInfo.command, `${role}-install`)}
+                onClick={() => copyToClipboard(installInfo.command, `${label}-install`)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
-                title="Copy to clipboard"
               >
-                <i className={`fa-solid ${copiedCommand === `${role}-install` ? 'fa-check text-success' : 'fa-copy'}`}></i>
+                <i className={`fa-solid ${copiedCommand === `${label}-install` ? 'fa-check text-success' : 'fa-copy'}`}></i>
               </button>
             </div>
           </div>
         )}
 
-        {/* Needs API Key Warning - shown below provider/model */}
+        {/* Needs API Key Warning */}
         {needsApiKey && envVar && (
           <div className="p-3 bg-info/10 border border-info/30 rounded-lg">
             <div className="flex items-start gap-2 text-info text-sm mb-2">
               <i className="fa-solid fa-key mt-0.5"></i>
-              <span>Set your API key to load models dynamically:</span>
+              <span>Set API key for dynamic models:</span>
             </div>
             <div className="relative">
               <code className="block bg-bg-surface text-text-primary text-xs p-2 pr-10 rounded font-mono overflow-x-auto">
-                export {envVar}="your-api-key-here"
+                export {envVar}="your-api-key"
               </code>
               <button
-                onClick={() => copyToClipboard(`export ${envVar}="your-api-key-here"`, `${role}-env`)}
+                onClick={() => copyToClipboard(`export ${envVar}="your-api-key"`, `${label}-env`)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
-                title="Copy to clipboard"
               >
-                <i className={`fa-solid ${copiedCommand === `${role}-env` ? 'fa-check text-success' : 'fa-copy'}`}></i>
+                <i className={`fa-solid ${copiedCommand === `${label}-env` ? 'fa-check text-success' : 'fa-copy'}`}></i>
               </button>
             </div>
-            <p className="text-xs text-text-secondary mt-2">
-              Add this to your shell profile (~/.zshrc or ~/.bashrc), then restart the API.
-            </p>
           </div>
         )}
       </div>
@@ -267,12 +303,8 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop with slight blur */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
-
-      {/* Modal */}
       <div className="relative bg-bg-shell rounded-2xl shadow-2xl w-full max-w-xl mx-4 overflow-hidden">
-        {/* Header */}
         <div className="px-6 py-4 border-b border-border">
           <div className="flex items-start justify-between">
             <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
@@ -280,78 +312,95 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
               AI Configuration Required
             </h2>
             {onClose && (
-              <button
-                onClick={onClose}
-                className="p-1 rounded-lg hover:bg-bg-surface2 text-text-muted hover:text-text-primary transition-colors"
-                title="Close"
-              >
+              <button onClick={onClose} className="p-1 rounded-lg hover:bg-bg-surface2 text-text-muted hover:text-text-primary transition-colors">
                 <i className="fa-solid fa-xmark text-lg"></i>
               </button>
             )}
           </div>
-          <p className="text-sm text-text-secondary mt-1">
-            Configure the AI models for each role before using Steroids
-          </p>
+          <p className="text-sm text-text-secondary mt-1">Configure models for each role</p>
         </div>
 
-        {/* Content */}
-        <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
+        <div className="px-6 py-4 max-h-[65vh] overflow-y-auto">
           {loading ? (
             <div className="text-center py-8">
               <i className="fa-solid fa-spinner fa-spin text-2xl text-accent mb-3"></i>
-              <p className="text-text-muted">Discovering available providers...</p>
+              <p className="text-text-muted">Loading providers...</p>
             </div>
           ) : (
-            <>
-              {/* Setup info message */}
-              <div className="mb-4 p-3 bg-bg-base border border-border rounded-lg">
-                <p className="text-sm text-text-primary">
-                  <i className="fa-solid fa-circle-info text-accent mr-2"></i>
-                  Select AI providers that are already installed and configured on your system.
-                  Steroids will use them with your existing credentials, just like you would from the command line.
-                </p>
-              </div>
+            <div className="space-y-4">
+              {renderRoleSelector('Orchestrator', 'fa-sitemap', orchestrator, handleProviderChange, (m) => setOrchestrator(prev => ({...prev, model: m})), 'orchestrator')}
+              {renderRoleSelector('Coder', 'fa-code', coder, handleProviderChange, (m) => setCoder(prev => ({...prev, model: m})), 'coder')}
+              
+              <div className="border-t border-border pt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <i className="fa-solid fa-magnifying-glass text-accent"></i>
+                    <span className="font-medium text-text-primary text-sm uppercase tracking-wider">Reviewers</span>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={useMultiReview} 
+                      onChange={(e) => {
+                        setUseMultiReview(e.target.checked);
+                        if (e.target.checked && reviewers.length === 0) {
+                          setReviewers([{...reviewer}, {provider: 'claude', model: 'claude-sonnet-4'}]);
+                        }
+                      }}
+                      className="w-4 h-4 rounded border-border text-accent focus:ring-accent" 
+                    />
+                    <span className="text-xs text-text-secondary">Multi-Review Mode</span>
+                  </label>
+                </div>
 
-              <div className="space-y-4">
-                {renderRoleSelector('Orchestrator', 'fa-sitemap', orchestrator, handleProviderChange, setOrchestrator, 'orchestrator')}
-                {renderRoleSelector('Coder', 'fa-code', coder, handleProviderChange, setCoder, 'coder')}
-                {renderRoleSelector('Reviewer', 'fa-magnifying-glass', reviewer, handleProviderChange, setReviewer, 'reviewer')}
+                {useMultiReview ? (
+                  <div className="space-y-3">
+                    {reviewers.map((r, i) => (
+                      <div key={i} className="relative">
+                        {renderRoleSelector(`Reviewer ${i+1}`, 'fa-user-check', r, handleProviderChange, (m) => {
+                          const next = [...reviewers];
+                          next[i].model = m;
+                          setReviewers(next);
+                        }, i)}
+                        {reviewers.length > 2 && (
+                          <button 
+                            onClick={() => setReviewers(reviewers.filter((_, idx) => idx !== i))}
+                            className="absolute top-4 right-4 text-text-muted hover:text-danger transition-colors"
+                          >
+                            <i className="fa-solid fa-trash-can text-xs"></i>
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button 
+                      onClick={() => setReviewers([...reviewers, {provider: 'claude', model: 'claude-sonnet-4'}])}
+                      className="w-full py-2 border border-dashed border-border rounded-lg text-xs text-text-muted hover:text-accent hover:border-accent transition-colors"
+                    >
+                      <i className="fa-solid fa-plus mr-1"></i> Add Reviewer
+                    </button>
+                  </div>
+                ) : (
+                  renderRoleSelector('Reviewer', 'fa-magnifying-glass', reviewer, handleProviderChange, (m) => setReviewer(prev => ({...prev, model: m})), 'reviewer')
+                )}
               </div>
 
               {error && (
-                <div className="mt-4 p-3 bg-danger/10 border border-danger/20 rounded-lg text-danger text-sm">
-                  <i className="fa-solid fa-exclamation-circle mr-2"></i>
-                  {error}
+                <div className="p-3 bg-danger/10 border border-danger/20 rounded-lg text-danger text-sm">
+                  <i className="fa-solid fa-exclamation-circle mr-2"></i>{error}
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-border bg-bg-base">
           <button
             onClick={handleSave}
             disabled={saving || !isFormComplete}
-            className="w-full px-4 py-3 bg-accent hover:bg-accent/80 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full px-4 py-3 bg-accent hover:bg-accent/80 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {saving ? (
-              <>
-                <i className="fa-solid fa-spinner fa-spin"></i>
-                Saving...
-              </>
-            ) : (
-              <>
-                <i className="fa-solid fa-check"></i>
-                Save & Continue
-              </>
-            )}
+            {saving ? <><i className="fa-solid fa-spinner fa-spin"></i>Saving...</> : <><i className="fa-solid fa-check"></i>Save & Continue</>}
           </button>
-          {!isFormComplete && (
-            <p className="text-xs text-text-secondary text-center mt-2">
-              Please select a provider and model for all three roles
-            </p>
-          )}
         </div>
       </div>
     </div>

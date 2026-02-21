@@ -120,12 +120,11 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
           .replace(/^./, (str) => str.toUpperCase())
           .trim();
 
-        // Check if this is an AI role section (orchestrator, coder, reviewer under ai)
+        // Check if this is an AI role section (orchestrator, coder, reviewer, reviewers under ai)
         const isAIRoleSection =
           basePath === 'ai' &&
-          (key === 'orchestrator' || key === 'coder' || key === 'reviewer') &&
-          fieldSchema.type === 'object' &&
-          fieldSchema.properties;
+          (key === 'orchestrator' || key === 'coder' || key === 'reviewer' || key === 'reviewers') &&
+          (fieldSchema.type === 'object' || fieldSchema.type === 'array');
 
         // If it's an AI role section, use the custom AIRoleSettings component
         if (isAIRoleSection) {
@@ -153,7 +152,7 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
               {!sectionCollapsed && (
                 <div className="p-4 bg-bg-surface">
                   <AIRoleSettings
-                    role={key as 'orchestrator' | 'coder' | 'reviewer'}
+                    role={key as 'orchestrator' | 'coder' | 'reviewer' | 'reviewers'}
                     schema={fieldSchema}
                     values={values}
                     onChange={onChange}

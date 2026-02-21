@@ -72,3 +72,25 @@ export interface ReviewerContext {
     deletions: number;
   };
 }
+
+export interface MultiReviewerContext {
+  task: {
+    id: string;
+    title: string;
+    rejection_count: number;
+  };
+  reviewer_results: Array<{
+    provider: string;
+    model: string;
+    decision: string;
+    stdout: string;
+    stderr: string;
+    duration_ms: number;
+  }>;
+  git_context: {
+    commit_sha: string;
+    files_changed: string[];
+    additions: number;
+    deletions: number;
+  };
+}

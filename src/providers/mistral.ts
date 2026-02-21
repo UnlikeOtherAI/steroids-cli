@@ -71,7 +71,7 @@ const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" --output te
  */
 export class MistralProvider extends BaseAIProvider {
   readonly name = 'mistral';
-  readonly displayName = 'Mistral Vibe';
+  readonly displayName = 'Mistral (vibe)';
 
   constructor() {
     super();

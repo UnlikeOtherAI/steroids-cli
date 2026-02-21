@@ -17,7 +17,14 @@ import {
 } from '../database/queries.js';
 import type { openDatabase } from '../database/connection.js';
 import { invokeCoder, type CoderResult } from '../orchestrator/coder.js';
-import { invokeReviewer, type ReviewerResult } from '../orchestrator/reviewer.js';
+import {
+  invokeReviewer,
+  invokeReviewers,
+  getReviewerConfigs,
+  isMultiReviewEnabled,
+  resolveDecision,
+  type ReviewerResult,
+} from '../orchestrator/reviewer.js';
 import { invokeCoordinator, type CoordinatorContext, type CoordinatorResult } from '../orchestrator/coordinator.js';
 import { pushToRemote } from '../git/push.js';
 import {
@@ -29,10 +36,14 @@ import {
   getDiffSummary,
   getDiffStats,
 } from '../git/status.js';
-import { invokeCoderOrchestrator, invokeReviewerOrchestrator } from '../orchestrator/invoke.js';
+import {
+  invokeCoderOrchestrator,
+  invokeReviewerOrchestrator,
+  invokeMultiReviewerOrchestrator,
+} from '../orchestrator/invoke.js';
 import { OrchestrationFallbackHandler } from '../orchestrator/fallback-handler.js';
-import type { CoderContext, ReviewerContext } from '../orchestrator/types.js';
-import { loadConfig } from '../config/loader.js';
+import type { CoderContext, ReviewerContext, MultiReviewerContext, ReviewerOrchestrationResult } from '../orchestrator/types.js';
+import { loadConfig, type ReviewerConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { InvokeResult } from '../providers/interface.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
@@ -108,12 +119,13 @@ export interface CreditExhaustionResult {
 function checkCreditExhaustion(
   result: InvokeResult,
   role: 'coder' | 'reviewer',
-  projectPath: string
+  projectPath: string,
+  reviewerConfig?: ReviewerConfig
 ): CreditExhaustionResult | null {
   if (result.success) return null;
 
   const config = loadConfig(projectPath);
-  const roleConfig = config.ai?.[role];
+  const roleConfig = reviewerConfig || config.ai?.[role];
   const providerName = roleConfig?.provider;
   const modelName = roleConfig?.model;
 
@@ -411,32 +423,76 @@ export async function runReviewerPhase(
   if (!task) return;
   refreshParallelWorkstreamLease(projectPath, leaseFence);
 
-  // STEP 1: Invoke reviewer (no status commands in prompt anymore)
-  if (!jsonMode) {
-    console.log('\n>>> Invoking REVIEWER...\n');
-    if (coordinatorResult) {
-      console.log(`Coordinator guidance included (decision: ${coordinatorResult.decision})`);
-    }
-  }
+  const config = loadConfig(projectPath);
+  const multiReviewEnabled = isMultiReviewEnabled(config);
+  const strict = config.ai?.review?.strict ?? true;
 
-  const reviewerResult: ReviewerResult = await invokeReviewer(
-    task,
-    projectPath,
-    coordinatorResult?.guidance,
-    coordinatorResult?.decision
-  );
+  let reviewerResult: ReviewerResult | undefined;
+  let reviewerResults: ReviewerResult[] = [];
 
-  if (reviewerResult.timedOut) {
+  // STEP 1: Invoke reviewer(s)
+  if (multiReviewEnabled) {
+    const reviewerConfigs = getReviewerConfigs(config);
     if (!jsonMode) {
-      console.warn('Reviewer timed out. Will retry next iteration.');
+      console.log(`\n>>> Invoking ${reviewerConfigs.length} REVIEWERS in parallel...\n`);
+      if (coordinatorResult) {
+        console.log(`Coordinator guidance included (decision: ${coordinatorResult.decision})`);
+      }
     }
-    return;
-  }
 
-  // Check for credit exhaustion before proceeding to orchestrator
-  const creditCheck = checkCreditExhaustion(reviewerResult, 'reviewer', projectPath);
-  if (creditCheck) {
-    return creditCheck;
+    reviewerResults = await invokeReviewers(
+      task,
+      projectPath,
+      reviewerConfigs,
+      coordinatorResult?.guidance,
+      coordinatorResult?.decision
+    );
+
+    // Check for credit exhaustion in any reviewer
+    for (let i = 0; i < reviewerResults.length; i++) {
+      const res = reviewerResults[i];
+      const creditCheck = checkCreditExhaustion(res as any, 'reviewer', projectPath, reviewerConfigs[i]);
+      if (creditCheck) {
+        return creditCheck;
+      }
+    }
+
+    // Handle failures in strict mode
+    const failures = reviewerResults.filter(r => !r.success);
+    if (strict && failures.length > 0) {
+      if (!jsonMode) {
+        console.warn(`${failures.length} reviewer(s) failed in strict mode. Will retry.`);
+      }
+      return;
+    }
+    // If not strict, we continue with the successful ones (resolveDecision handles empty/unclear)
+  } else {
+    if (!jsonMode) {
+      console.log('\n>>> Invoking REVIEWER...\n');
+      if (coordinatorResult) {
+        console.log(`Coordinator guidance included (decision: ${coordinatorResult.decision})`);
+      }
+    }
+
+    reviewerResult = await invokeReviewer(
+      task,
+      projectPath,
+      coordinatorResult?.guidance,
+      coordinatorResult?.decision
+    );
+
+    if (reviewerResult.timedOut) {
+      if (!jsonMode) {
+        console.warn('Reviewer timed out. Will retry next iteration.');
+      }
+      return;
+    }
+
+    // Check for credit exhaustion
+    const creditCheck = checkCreditExhaustion(reviewerResult as any, 'reviewer', projectPath);
+    if (creditCheck) {
+      return creditCheck;
+    }
   }
 
   // STEP 2: Gather git context
@@ -451,48 +507,112 @@ export async function runReviewerPhase(
     deletions: diffStats.deletions,
   };
 
-  // STEP 3: Build orchestrator context
-  const context: ReviewerContext = {
-    task: {
-      id: task.id,
-      title: task.title,
-      rejection_count: task.rejection_count,
-    },
-    reviewer_output: {
-      stdout: reviewerResult.stdout,
-      stderr: reviewerResult.stderr,
-      exit_code: reviewerResult.exitCode,
-      timed_out: reviewerResult.timedOut,
-      duration_ms: reviewerResult.duration,
-    },
-    git_context: gitContext,
-  };
+  // STEP 3: Resolve decision and merge notes if needed
+  let decision: ReviewerOrchestrationResult;
 
-  // STEP 4: Invoke orchestrator
-  let orchestratorOutput: string;
-  try {
-    orchestratorOutput = await invokeReviewerOrchestrator(context, projectPath);
-  } catch (error) {
-    console.error('Orchestrator invocation failed:', error);
-    // Fallback to safe default: unclear
-    orchestratorOutput = JSON.stringify({
-      decision: 'unclear',
-      reasoning: 'Orchestrator failed, retrying review',
-      notes: 'Review unclear, retrying',
-      next_status: 'review',
-      metadata: {
-        rejection_count: task.rejection_count,
-        confidence: 'low',
-        push_to_remote: false,
-        repeated_issue: false,
+  if (multiReviewEnabled) {
+    const { decision: finalDecision, needsMerge } = resolveDecision(reviewerResults);
+
+    if (needsMerge) {
+      // Invoke multi-reviewer orchestrator to merge notes
+      const multiContext: MultiReviewerContext = {
+        task: {
+          id: task.id,
+          title: task.title,
+          rejection_count: task.rejection_count,
+        },
+        reviewer_results: reviewerResults.map(r => ({
+          provider: r.provider || 'unknown',
+          model: r.model || 'unknown',
+          decision: r.decision || 'unclear',
+          stdout: r.stdout,
+          stderr: r.stderr,
+          duration_ms: r.duration,
+        })),
+        git_context: gitContext,
+      };
+
+      try {
+        const orchestratorOutput = await invokeMultiReviewerOrchestrator(multiContext, projectPath);
+        const handler = new OrchestrationFallbackHandler();
+        decision = handler.parseReviewerOutput(orchestratorOutput);
+      } catch (error) {
+        console.error('Multi-reviewer orchestrator failed:', error);
+        decision = {
+          decision: 'unclear',
+          reasoning: 'Multi-reviewer orchestrator failed',
+          notes: 'Review unclear, retrying',
+          next_status: 'review',
+          metadata: {
+            rejection_count: task.rejection_count,
+            confidence: 'low',
+            push_to_remote: false,
+            repeated_issue: false,
+          }
+        };
       }
-    });
+    } else {
+      // No merge needed - find the primary result for notes
+      const primaryResult = reviewerResults.find(r => r.decision === finalDecision) || reviewerResults[0];
+      
+      decision = {
+        decision: (finalDecision === 'unclear' ? 'unclear' : finalDecision) as any,
+        reasoning: `Multi-review consolidated decision: ${finalDecision}`,
+        notes: primaryResult?.notes || primaryResult?.stdout || 'No notes provided',
+        next_status: finalDecision === 'approve' ? 'completed' : 
+                     finalDecision === 'reject' ? 'in_progress' : 
+                     finalDecision === 'dispute' ? 'disputed' :
+                     finalDecision === 'skip' ? 'skipped' : 'review',
+        metadata: {
+          rejection_count: task.rejection_count,
+          confidence: 'high',
+          push_to_remote: ['approve', 'dispute', 'skip'].includes(finalDecision),
+          repeated_issue: false,
+        }
+      };
+    }
+  } else {
+    // Single reviewer flow
+    const context: ReviewerContext = {
+      task: {
+        id: task.id,
+        title: task.title,
+        rejection_count: task.rejection_count,
+      },
+      reviewer_output: {
+        stdout: reviewerResult!.stdout,
+        stderr: reviewerResult!.stderr,
+        exit_code: reviewerResult!.exitCode,
+        timed_out: reviewerResult!.timedOut,
+        duration_ms: reviewerResult!.duration,
+      },
+      git_context: gitContext,
+    };
+
+    let orchestratorOutput: string;
+    try {
+      orchestratorOutput = await invokeReviewerOrchestrator(context, projectPath);
+    } catch (error) {
+      console.error('Orchestrator invocation failed:', error);
+      orchestratorOutput = JSON.stringify({
+        decision: 'unclear',
+        reasoning: 'Orchestrator failed, retrying review',
+        notes: 'Review unclear, retrying',
+        next_status: 'review',
+        metadata: {
+          rejection_count: task.rejection_count,
+          confidence: 'low',
+          push_to_remote: false,
+          repeated_issue: false,
+        }
+      });
+    }
+
+    const handler = new OrchestrationFallbackHandler();
+    decision = handler.parseReviewerOutput(orchestratorOutput);
   }
 
-  // STEP 5: Parse orchestrator output with fallback
-  const handler = new OrchestrationFallbackHandler();
-  let decision = handler.parseReviewerOutput(orchestratorOutput);
-
+  // STEP 4: Fallback for unclear decisions
   if (decision.decision === 'unclear' && decision.reasoning.startsWith('FALLBACK: Orchestrator failed')) {
     const consecutiveParseFallbackRetries =
       countConsecutiveOrchestratorFallbackEntries(db, task.id, REVIEWER_PARSE_FALLBACK_MARKER) + 1;
@@ -518,13 +638,13 @@ export async function runReviewerPhase(
     }
   }
 
-  // STEP 6: Log orchestrator decision for audit trail
+  // STEP 5: Log orchestrator decision for audit trail
   addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
     actorType: 'orchestrator',
     notes: `[${decision.decision}] ${decision.reasoning} (confidence: ${decision.metadata.confidence})`,
   });
 
-  // STEP 7: Execute the decision
+  // STEP 6: Execute the decision
   const commitSha = commit_sha || undefined;
 
   switch (decision.decision) {

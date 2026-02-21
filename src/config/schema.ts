@@ -86,6 +86,20 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _default: '',
       },
     },
+    reviewers: {
+      _description: 'Multiple independent AI reviewers (all must approve)',
+      _type: 'array',
+      _default: [],
+    },
+    review: {
+      _description: 'Review policy settings',
+      _type: 'object',
+      strict: {
+        _description: 'Fail if any reviewer is unavailable (strict mode)',
+        _type: 'boolean',
+        _default: true,
+      },
+    },
   },
   output: {
     _description: 'Output formatting options',

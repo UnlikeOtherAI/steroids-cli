@@ -13,6 +13,11 @@ import { colors, markers } from '../cli/colors.js';
 import { registerProject } from '../runners/projects.js';
 import { generateHelp } from '../cli/help.js';
 import { runAISetup } from '../config/ai-setup.js';
+import {
+  getGlobalConfigPath,
+  loadConfigFile,
+  saveConfig,
+} from '../config/loader.js';
 
 const HELP = generateHelp({
   command: 'init',
@@ -93,6 +98,7 @@ export async function initCommand(args: string[], flags: GlobalFlags): Promise<v
       help: { type: 'boolean', short: 'h', default: false },
       'no-register': { type: 'boolean', default: false },
       'skip-ai-setup': { type: 'boolean', default: false },
+      reviewers: { type: 'string' },
     },
     allowPositionals: false,
   });
@@ -160,6 +166,20 @@ export async function initCommand(args: string[], flags: GlobalFlags): Promise<v
   // Run AI setup wizard (unless --yes or --skip-ai-setup is used, or JSON output)
   const skipAISetup = values.yes || values['skip-ai-setup'] || flags.json;
 
+  // Handle non-interactive reviewers flag
+  if (values.reviewers) {
+    const configPath = getGlobalConfigPath(); // Default to global for init
+    const reviewers = values.reviewers.split(',').map(s => {
+      const [provider, model] = s.split(':');
+      return { provider: provider as any, model };
+    });
+    const config = loadConfigFile(configPath);
+    if (!config.ai) config.ai = {};
+    config.ai.reviewers = reviewers;
+    saveConfig(config, configPath);
+    out.log(markers.success(`Configured ${reviewers.length} reviewers.`));
+  }
+
   if (!skipAISetup) {
     out.log('');
     out.log(markers.info('AI Provider Configuration'));
@@ -171,9 +191,12 @@ export async function initCommand(args: string[], flags: GlobalFlags): Promise<v
       // Run wizard for coder role first (most important)
       await runAISetup({ role: 'coder', global: true });
 
+      // Run wizard for reviewer role
+      await runAISetup({ role: 'reviewer', global: true });
+
       // Ask if user wants to configure other roles
       out.log('');
-      out.log(`${colors.dim('Tip: Run "steroids config ai" to configure other roles (orchestrator, reviewer)')}`);
+      out.log(`${colors.dim('Tip: Run "steroids config ai orchestrator" to configure the orchestrator role')}`);
     } catch (error) {
       // AI setup failed or was cancelled - don't fail init
       out.verbose(`AI setup skipped or cancelled: ${error}`);

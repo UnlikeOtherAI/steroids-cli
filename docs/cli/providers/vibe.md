@@ -65,12 +65,19 @@ This avoids command injection through prompt content.
 | `devstral-small` | `devstral-small-latest` | quick/cheap tasks |
 | `local` | `devstral` (llamacpp) | offline development |
 
-**Model selection mechanism:** Vibe has **no `--model` flag**. Models are selected via environment variables:
+**Model selection mechanism:** Vibe has **no `--model` flag** (`--model` causes `error: unrecognized arguments`). Models are selected via environment variables:
 
 ```bash
-VIBE_ACTIVE_MODEL=devstral-2     # Select model by alias
-VIBE_MODELS='[{"name":"...","provider":"mistral","alias":"devstral-2",...}]'  # Override model list
+# BOTH env vars required for runtime model injection:
+VIBE_ACTIVE_MODEL=mistral-large-latest                    # Which model to use
+VIBE_MODELS='[{"name":"mistral-large-latest","provider":"mistral","alias":"mistral-large-latest","input_price":0,"output_price":0}]'  # Model definition
 ```
+
+**Critical (verified 2026-02-21):**
+- `VIBE_ACTIVE_MODEL` alone fails if the model isn't already in `~/.vibe/config.toml` — `ValueError: Active model 'X' not found in configuration`
+- `VIBE_MODELS` injects runtime model definitions, bypassing `config.toml` — this is the key mechanism
+- BOTH env vars must be set together for reliable model selection
+- Pre-configured models in `~/.vibe/config.toml`: `devstral-2`, `devstral-small`, `local`
 
 Steroids injects both env vars in `getSanitizedCliEnv()`.
 

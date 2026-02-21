@@ -10,8 +10,8 @@ import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
 import { buildPostCoderPrompt } from './post-coder.js';
-import { buildPostReviewerPrompt } from './post-reviewer.js';
-import type { CoderContext, ReviewerContext } from './types.js';
+import { buildPostReviewerPrompt, buildMultiReviewerOrchestratorPrompt } from './post-reviewer.js';
+import type { CoderContext, ReviewerContext, MultiReviewerContext } from './types.js';
 
 /**
  * Invoke post-coder orchestrator to analyze coder output
@@ -32,6 +32,17 @@ export async function invokeReviewerOrchestrator(
   projectPath: string = process.cwd()
 ): Promise<string> {
   const prompt = buildPostReviewerPrompt(context);
+  return await invokeOrchestrator(prompt, 'orchestrator', projectPath, context.task.id);
+}
+
+/**
+ * Invoke multi-reviewer orchestrator to merge multi-reviewer notes
+ */
+export async function invokeMultiReviewerOrchestrator(
+  context: MultiReviewerContext,
+  projectPath: string = process.cwd()
+): Promise<string> {
+  const prompt = buildMultiReviewerOrchestratorPrompt(context);
   return await invokeOrchestrator(prompt, 'orchestrator', projectPath, context.task.id);
 }
 

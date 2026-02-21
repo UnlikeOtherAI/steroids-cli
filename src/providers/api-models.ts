@@ -479,7 +479,7 @@ function preferMistralModel(candidate: APIModel, existing: APIModel): boolean {
  * Fetch models for a specific provider
  */
 export async function fetchModelsForProvider(
-  provider: 'claude' | 'openai' | 'gemini' | 'mistral'
+  provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex'
 ): Promise<FetchModelsResult> {
   switch (provider) {
     case 'claude':
@@ -490,6 +490,14 @@ export async function fetchModelsForProvider(
       return fetchGeminiModels();
     case 'mistral':
       return fetchMistralModels();
+    case 'codex':
+      return {
+        success: true,
+        models: getModelsForProvider('codex').map(m => ({
+          id: m.id,
+          name: m.name,
+        })),
+      };
     default:
       return {
         success: false,
@@ -502,7 +510,7 @@ export async function fetchModelsForProvider(
 /**
  * Get the environment variable name for a provider's API key
  */
-export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mistral'): string {
+export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex'): string {
   switch (provider) {
     case 'claude':
       return 'STEROIDS_ANTHROPIC_API_KEY';
@@ -512,13 +520,16 @@ export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mist
       return 'STEROIDS_GOOGLE_API_KEY';
     case 'mistral':
       return 'STEROIDS_MISTRAL_API_KEY';
+    case 'codex':
+      return 'STEROIDS_OPENAI_API_KEY'; // Codex often uses OpenAI key
   }
 }
 
 /**
  * Check if API key is set for a provider
  */
-export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral'): boolean {
+export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex'): boolean {
+  if (provider === 'codex') return true; // Codex might use local session/CLI auth
   switch (provider) {
     case 'claude':
       return !!process.env.STEROIDS_ANTHROPIC_API_KEY;
@@ -528,5 +539,7 @@ export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral'):
       return !!(process.env.STEROIDS_GOOGLE_API_KEY ?? process.env.STEROIDS_GEMINI_API_KEY);
     case 'mistral':
       return !!process.env.STEROIDS_MISTRAL_API_KEY;
+    default:
+      return false;
   }
 }

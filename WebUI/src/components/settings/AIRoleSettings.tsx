@@ -1,25 +1,36 @@
 /**
  * AI Role Settings Component
  * Handles provider and model selection with dynamic model loading
+ * Supports multi-reviewer management
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { ArrowPathIcon, CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline';
+import { 
+  ArrowPathIcon, 
+  CheckCircleIcon, 
+  ExclamationCircleIcon,
+  TrashIcon,
+  PlusIcon
+} from '@heroicons/react/24/outline';
 import { aiApi, AIModel, AIProvider, ConfigSchema } from '../../services/api';
 
 // Installation commands for each provider
 const INSTALL_COMMANDS: Record<string, { command: string; description: string }> = {
   claude: {
     command: 'npm install -g @anthropic-ai/claude-code',
-    description: 'Install the Claude Code CLI to use Anthropic models.',
+    description: 'Install the Claude CLI to use Anthropic models.',
   },
   gemini: {
     command: 'npm install -g @google/gemini-cli',
-    description: 'Install the Gemini CLI to use Google AI models.',
+    description: 'Install the Gemini CLI to use Google models.',
   },
   codex: {
     command: 'npm install -g @openai/codex',
     description: 'Install the Codex CLI to use OpenAI models.',
+  },
+  mistral: {
+    command: 'uv tool install mistral-vibe',
+    description: 'Install the Vibe CLI to use Mistral models.',
   },
 };
 
@@ -28,10 +39,11 @@ const API_KEY_ENV_VARS: Record<string, string> = {
   claude: 'ANTHROPIC_API_KEY',
   gemini: 'GOOGLE_API_KEY',
   codex: 'OPENAI_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
 };
 
 interface AIRoleSettingsProps {
-  role: 'orchestrator' | 'coder' | 'reviewer';
+  role: 'orchestrator' | 'coder' | 'reviewer' | 'reviewers';
   schema: ConfigSchema;
   values: Record<string, unknown>;
   onChange: (path: string, value: unknown) => void;
@@ -49,17 +61,164 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
   scope = 'global',
   globalValues,
 }) => {
-  const [models, setModels] = useState<AIModel[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [modelSource, setModelSource] = useState<'api' | 'cache' | 'fallback' | null>(null);
-  const [modelError, setModelError] = useState<string | null>(null);
   const [providers, setProviders] = useState<AIProvider[]>([]);
-  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
 
   // Load providers on mount
   useEffect(() => {
     aiApi.getProviders().then(setProviders).catch(() => {});
   }, []);
+
+  const getNestedValue = (obj: Record<string, unknown>, path: string): unknown => {
+    const keys = path.split('.');
+    let current: unknown = obj;
+    for (const key of keys) {
+      if (current === null || current === undefined) return undefined;
+      current = (current as Record<string, unknown>)[key];
+    }
+    return current;
+  };
+
+  // If role is 'reviewers' (plural), render the multi-reviewer manager
+  if (role === 'reviewers') {
+    const reviewers = (getNestedValue(values, basePath) as any[]) || [];
+    const globalReviewers = globalValues ? (getNestedValue(globalValues, basePath) as any[]) || [] : [];
+    const isInherited = scope === 'project' && reviewers.length === 0;
+    const activeReviewers = isInherited ? globalReviewers : reviewers;
+
+    return (
+      <div className="space-y-4">
+        {scope === 'project' && (
+          <div className="flex items-center gap-3 pb-3 border-b border-border">
+            <label className="text-sm font-medium text-text-primary">Mode:</label>
+            <div className="flex rounded-lg border border-border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => onChange(basePath, [])}
+                className={`px-3 py-1.5 text-sm transition-colors ${
+                  isInherited
+                    ? 'bg-accent text-white'
+                    : 'bg-bg-surface text-text-secondary hover:bg-bg-surface2'
+                }`}
+              >
+                Inherited
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isInherited && globalReviewers.length > 0) {
+                    onChange(basePath, JSON.parse(JSON.stringify(globalReviewers)));
+                  } else if (isInherited) {
+                    onChange(basePath, [{ provider: 'claude', model: 'claude-sonnet-4' }]);
+                  }
+                }}
+                className={`px-3 py-1.5 text-sm transition-colors ${
+                  !isInherited
+                    ? 'bg-accent text-white'
+                    : 'bg-bg-surface text-text-secondary hover:bg-bg-surface2'
+                }`}
+              >
+                Custom
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {activeReviewers.map((r, index) => (
+            <div key={index} className="border border-border rounded-lg p-3 bg-bg-surface2">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-text-muted uppercase tracking-wider">
+                  Reviewer {index + 1} {index === 0 ? '(Primary for style)' : ''}
+                </span>
+                {!isInherited && activeReviewers.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = [...reviewers];
+                      next.splice(index, 1);
+                      onChange(basePath, next);
+                    }}
+                    className="text-text-muted hover:text-red-500 transition-colors"
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              <AIRoleSettingsSingle
+                role="reviewer"
+                schema={schema.items || { type: 'object' }}
+                values={values}
+                onChange={(path, val) => {
+                  if (isInherited) return;
+                  const next = JSON.parse(JSON.stringify(reviewers));
+                  const subPath = path.replace(`${basePath}.${index}.`, '');
+                  const keys = subPath.split('.');
+                  let current: any = next[index];
+                  for (let i = 0; i < keys.length - 1; i++) {
+                    if (!current[keys[i]]) current[keys[i]] = {};
+                    current = current[keys[i]];
+                  }
+                  current[keys[keys.length - 1]] = val;
+                  onChange(basePath, next);
+                }}
+                basePath={`${basePath}.${index}`}
+                scope="global"
+                providers={providers}
+              />
+            </div>
+          ))}
+          
+          {!isInherited && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = [...reviewers, { provider: 'claude', model: 'claude-sonnet-4' }];
+                onChange(basePath, next);
+              }}
+              className="w-full py-2 border-2 border-dashed border-border rounded-lg text-text-muted hover:text-accent hover:border-accent transition-all flex items-center justify-center gap-2 text-sm font-medium"
+            >
+              <PlusIcon className="w-4 h-4" />
+              Add Reviewer
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <AIRoleSettingsSingle
+      role={role as any}
+      schema={schema}
+      values={values}
+      onChange={onChange}
+      basePath={basePath}
+      scope={scope}
+      globalValues={globalValues}
+      providers={providers}
+    />
+  );
+};
+
+interface AIRoleSettingsSingleProps extends AIRoleSettingsProps {
+  providers: AIProvider[];
+}
+
+const AIRoleSettingsSingle: React.FC<AIRoleSettingsSingleProps> = ({
+  role,
+  schema,
+  values,
+  onChange,
+  basePath,
+  scope = 'global',
+  globalValues,
+  providers,
+}) => {
+  const [models, setModels] = useState<AIModel[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelSource, setModelSource] = useState<'api' | 'cache' | 'fallback' | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
 
   // Get current values
   const getNestedValue = (obj: Record<string, unknown>, path: string): unknown => {
@@ -111,17 +270,14 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
     }
   }, [activeProvider, loadModels]);
 
-  // Get provider options from schema
-  const providerSchema = schema.properties?.provider;
-  const providerOptions = providerSchema?.enum || ['claude', 'openai', 'gemini'];
-
   // Format display names
   const formatProviderName = (id: string): string => {
     switch (id) {
-      case 'claude': return 'Claude (Anthropic)';
-      case 'openai': return 'OpenAI';
-      case 'gemini': return 'Gemini (Google)';
-      case 'codex': return 'Codex';
+      case 'claude': return 'Anthropic (claude)';
+      case 'openai': return 'OpenAI API';
+      case 'gemini': return 'Google (gemini)';
+      case 'codex': return 'OpenAI (codex)';
+      case 'mistral': return 'Mistral (vibe)';
       default: return id;
     }
   };
@@ -143,6 +299,8 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
   const installInfo = INSTALL_COMMANDS[currentProvider];
   const envVar = API_KEY_ENV_VARS[currentProvider];
 
+  const providerOptions = schema.properties?.provider?.enum || ['claude', 'openai', 'gemini', 'mistral', 'codex'];
+
   return (
     <div className="space-y-4">
       {/* Inherited/Custom Toggle for Project Scope */}
@@ -153,7 +311,6 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
             <button
               type="button"
               onClick={() => {
-                // Switch to inherited - clear project values
                 onChange(`${basePath}.provider`, '');
                 onChange(`${basePath}.model`, '');
               }}
@@ -168,7 +325,6 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
             <button
               type="button"
               onClick={() => {
-                // Switch to custom - copy global values as starting point
                 if (isInherited && globalProvider) {
                   onChange(`${basePath}.provider`, globalProvider);
                   onChange(`${basePath}.model`, globalModel);
@@ -200,7 +356,6 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
           value={isInherited ? globalProvider : currentProvider}
           onChange={(e) => {
             onChange(`${basePath}.provider`, e.target.value);
-            // Clear model when provider changes
             onChange(`${basePath}.model`, '');
           }}
           disabled={isInherited}
@@ -210,7 +365,7 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
         >
           <option value="">Select provider...</option>
           {providerOptions.map((provider) => {
-            const providerInfo = providers.find(p => p.id === provider);
+            const providerInfo = providers.find(p => p.id === String(provider));
             return (
               <option key={String(provider)} value={String(provider)}>
                 {formatProviderName(String(provider))}{providerInfo && !providerInfo.installed ? ' (not installed)' : ''}
@@ -218,9 +373,6 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
             );
           })}
         </select>
-        <p className="text-xs text-text-muted mt-1">
-          AI provider for {formatRoleName(role)} tasks
-        </p>
       </div>
 
       {/* Not Installed Warning */}
@@ -235,11 +387,10 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
               {installInfo.command}
             </code>
             <button
-              onClick={() => copyToClipboard(installInfo.command, `${role}-install`)}
+              onClick={() => copyToClipboard(installInfo.command, `${basePath}-install`)}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
-              title="Copy to clipboard"
             >
-              {copiedCommand === `${role}-install` ? (
+              {copiedCommand === `${basePath}-install` ? (
                 <CheckCircleIcon className="w-4 h-4 text-green-500" />
               ) : (
                 <span className="text-xs">Copy</span>
@@ -249,36 +400,7 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
         </div>
       )}
 
-      {/* Needs API Key Warning */}
-      {needsApiKey && envVar && (
-        <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-          <div className="flex items-start gap-2 text-blue-400 text-sm mb-2">
-            <ExclamationCircleIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <span>Set your API key to load models dynamically:</span>
-          </div>
-          <div className="relative">
-            <code className="block bg-bg-surface text-text-primary text-xs p-2 pr-10 rounded font-mono overflow-x-auto">
-              export {envVar}="your-api-key-here"
-            </code>
-            <button
-              onClick={() => copyToClipboard(`export ${envVar}="your-api-key-here"`, `${role}-env`)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
-              title="Copy to clipboard"
-            >
-              {copiedCommand === `${role}-env` ? (
-                <CheckCircleIcon className="w-4 h-4 text-green-500" />
-              ) : (
-                <span className="text-xs">Copy</span>
-              )}
-            </button>
-          </div>
-          <p className="text-xs text-text-secondary mt-2">
-            Add this to your shell profile (~/.zshrc or ~/.bashrc), then restart the API.
-          </p>
-        </div>
-      )}
-
-      {/* Model Selection - only show if provider is installed */}
+      {/* Model Selection */}
       {(!currentProviderInfo || currentProviderInfo.installed) && (
         <div>
           <div className="flex items-center justify-between mb-1">
@@ -288,24 +410,6 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
             <div className="flex items-center gap-2">
               {loadingModels && (
                 <ArrowPathIcon className="w-4 h-4 animate-spin text-text-muted" />
-              )}
-              {!loadingModels && modelSource === 'api' && (
-                <span className="flex items-center gap-1 text-xs text-green-600">
-                  <CheckCircleIcon className="w-3 h-3" />
-                  Live
-                </span>
-              )}
-              {!loadingModels && modelSource === 'cache' && (
-                <span className="flex items-center gap-1 text-xs text-green-600">
-                  <CheckCircleIcon className="w-3 h-3" />
-                  From CLI
-                </span>
-              )}
-              {!loadingModels && modelSource === 'fallback' && (
-                <span className="flex items-center gap-1 text-xs text-yellow-600">
-                  <ExclamationCircleIcon className="w-3 h-3" />
-                  Static
-                </span>
               )}
               {!isInherited && (
                 <button
@@ -334,41 +438,25 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
               </option>
             ))}
           </select>
-          {modelError && (
-            <p className="text-xs text-yellow-600 mt-1">
-              {modelError} - showing cached models
-            </p>
-          )}
-          {!modelError && modelSource === 'api' && (
-            <p className="text-xs text-text-muted mt-1">
-              Models fetched from {formatProviderName(currentProvider)} API
-            </p>
-          )}
-          {!modelError && modelSource === 'cache' && (
-            <p className="text-xs text-text-muted mt-1">
-              Models loaded from CLI cache
-            </p>
-          )}
         </div>
       )}
 
       {/* CLI Path (optional) */}
-      <div>
-        <label className="block text-sm font-medium text-text-primary mb-1">
-          CLI Path
-          <span className="text-text-muted font-normal ml-1">(optional)</span>
-        </label>
-        <input
-          type="text"
-          value={currentCli}
-          onChange={(e) => onChange(`${basePath}.cli`, e.target.value)}
-          placeholder={`Default: ${currentProvider === 'claude' ? 'claude' : currentProvider === 'openai' ? 'codex' : currentProvider}`}
-          className="w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent"
-        />
-        <p className="text-xs text-text-muted mt-1">
-          Custom path to the provider CLI executable
-        </p>
-      </div>
+      {!role.endsWith('s') && (
+        <div>
+          <label className="block text-sm font-medium text-text-primary mb-1">
+            CLI Path
+            <span className="text-text-muted font-normal ml-1">(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={currentCli}
+            onChange={(e) => onChange(`${basePath}.cli`, e.target.value)}
+            placeholder={`Default: ${currentProvider}`}
+            className="w-full px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+        </div>
+      )}
     </div>
   );
 };

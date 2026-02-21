@@ -682,22 +682,22 @@ router.get('/ai/providers', (req: Request, res: Response) => {
   const providers = [
     {
       id: 'claude',
-      name: 'Claude (Anthropic)',
-      installed: true, // Uses claude CLI or API
+      name: 'Anthropic (claude)',
+      installed: isCliInstalled('claude'),
     },
     {
       id: 'gemini',
-      name: 'Gemini (Google)',
-      installed: true, // Uses API
+      name: 'Google (gemini)',
+      installed: isCliInstalled('gemini'),
     },
     {
       id: 'mistral',
-      name: 'Mistral',
+      name: 'Mistral (vibe)',
       installed: isCliInstalled('vibe'),
     },
     {
       id: 'codex',
-      name: 'OpenAI (Codex)',
+      name: 'OpenAI (codex)',
       installed: isCliInstalled('codex'),
     },
   ];

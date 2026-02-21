@@ -69,7 +69,7 @@ const DEFAULT_INVOCATION_TEMPLATE = '{cli} api chat.completions.create --model {
  */
 export class OpenAIProvider extends BaseAIProvider {
   readonly name = 'openai';
-  readonly displayName = 'OpenAI';
+  readonly displayName = 'OpenAI (codex)';
 
   /**
    * Write prompt to a temporary file

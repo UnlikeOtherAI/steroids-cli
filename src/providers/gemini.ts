@@ -63,7 +63,7 @@ const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" -m {model} 
  */
 export class GeminiProvider extends BaseAIProvider {
   readonly name = 'gemini';
-  readonly displayName = 'Google Gemini';
+  readonly displayName = 'Google (gemini)';
 
   /**
    * Write prompt to a temporary file

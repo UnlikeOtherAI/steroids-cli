@@ -3,7 +3,7 @@
  * Analyzes reviewer output and decides task outcome
  */
 
-import { ReviewerContext } from './types.js';
+import { ReviewerContext, MultiReviewerContext } from './types.js';
 
 /**
  * Generate post-reviewer orchestrator prompt
@@ -201,6 +201,89 @@ ${stderrSection}
 \`\`\`
 
 ---
+
+Analyze the context above and respond with JSON:`;
+}
+
+/**
+ * Generate multi-reviewer orchestrator prompt for merging notes
+ */
+export function buildMultiReviewerOrchestratorPrompt(context: MultiReviewerContext): string {
+  const {
+    task,
+    reviewer_results,
+    git_context: { commit_sha, files_changed, additions, deletions }
+  } = context;
+
+  const reviewers_formatted = reviewer_results.map((r, i) => `
+### Reviewer ${i} (${r.provider}/${r.model})
+**Decision:** ${r.decision}
+**Stdout (last 5000 chars):**
+\`\`\`
+${r.stdout.slice(-5000)}
+\`\`\`
+`).join('\n---\n');
+
+  return `# MULTI-REVIEWER ORCHESTRATOR
+
+You are receiving rejection notes from ${reviewer_results.length} independent reviewers.
+The DECISION is already REJECT. Your job is to MERGE THE NOTES into a single checklist.
+
+**CRITICAL: You MUST respond ONLY with valid JSON. No markdown, no other text.**
+
+---
+
+## Task Context
+
+**Task ID:** ${task.id}
+**Task Title:** ${task.title}
+**Rejection Count:** ${task.rejection_count}/15
+
+---
+
+## Reviewer Execution Outputs
+${reviewers_formatted}
+
+---
+
+## Git Diff Context
+
+**Commit:** ${commit_sha}
+**Files Changed:** ${files_changed.join(', ')}
+**Lines:** +${additions} -${deletions}
+
+---
+
+## Your Task (Review Note Merger)
+
+1. Group findings by file path, then by line proximity (within 5 lines = same area).
+2. When multiple reviewers flag the same issue, consolidate and note it was caught by multiple.
+3. **Do NOT rewrite findings** -- quote the original reviewer text verbatim where possible.
+4. **Do NOT add your own findings** -- you are a grouper, not a reviewer.
+5. **Do NOT drop any finding**, even if it seems minor.
+6. If findings conflict on STYLE (not correctness), mark as [STYLE CONFLICT] and keep only the primary reviewer's preference (Reviewer 0 is primary).
+7. Order: file path -> line number.
+8. Use checkbox format for the final notes: - [ ] Finding text (Reviewer Name)
+
+---
+
+## Output Format (JSON ONLY)
+
+\`\`\`json
+{
+  "decision": "reject",
+  "reasoning": "Consolidated rejection notes from ${reviewer_results.length} reviewers",
+  "notes": "## Merged Review Findings\\n\\n### File.ts\\n- [ ] Issue found (Reviewer name)\\n...",
+  "next_status": "in_progress",
+  "metadata": {
+    "rejection_count": ${task.rejection_count},
+    "confidence": "high",
+    "push_to_remote": false,
+    "repeated_issue": false,
+    "reviewer_count": ${reviewer_results.length}
+  }
+}
+\`\`\`
 
 Analyze the context above and respond with JSON:`;
 }

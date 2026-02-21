@@ -19,8 +19,20 @@ import {
  */
 const CODEX_MODELS: ModelInfo[] = [
   {
-    id: 'codex',
-    name: 'Codex',
+    id: 'gpt-5.3-codex',
+    name: 'GPT-5.3 Codex',
+    recommendedFor: ['coder', 'reviewer'],
+    supportsStreaming: true,
+  },
+  {
+    id: 'o3',
+    name: 'O3',
+    recommendedFor: ['orchestrator'],
+    supportsStreaming: true,
+  },
+  {
+    id: 'gpt-4.1',
+    name: 'GPT-4.1',
     recommendedFor: ['reviewer'],
     supportsStreaming: true,
   },
@@ -30,9 +42,9 @@ const CODEX_MODELS: ModelInfo[] = [
  * Default models per role
  */
 const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string | undefined> = {
-  orchestrator: undefined,
-  coder: undefined,
-  reviewer: 'codex',
+  orchestrator: 'o3',
+  coder: 'gpt-5.3-codex',
+  reviewer: 'gpt-5.3-codex',
 };
 
 /**
@@ -46,14 +58,14 @@ const DEFAULT_TIMEOUT = 900_000;
  * --skip-git-repo-check allows running outside trusted directories
  * WARNING: This bypasses all sandboxing - use only in controlled environments
  */
-const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -';
+const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec --model {model} --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -';
 
 /**
  * Codex AI Provider implementation
  */
 export class CodexProvider extends BaseAIProvider {
   readonly name = 'codex';
-  readonly displayName = 'OpenAI (Codex)';
+  readonly displayName = 'OpenAI (codex)';
 
   /**
    * Write prompt to a temporary file
