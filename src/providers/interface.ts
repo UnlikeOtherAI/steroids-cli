@@ -378,11 +378,28 @@ export abstract class BaseAIProvider implements IAIProvider {
 
   /**
    * Build child process env for provider CLI invocation.
+   *
+   * Strips known provider API-key env vars so the spawned CLI
+   * falls back to its own OAuth / login credentials instead of
+   * accidentally using Steroids' internal keys (e.g.
+   * STEROIDS_ANTHROPIC_API_KEY leaking as ANTHROPIC_API_KEY).
    */
   protected getSanitizedCliEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-    return {
-      ...process.env,
-      ...overrides,
-    };
+    const env = { ...process.env };
+
+    // Remove raw provider API keys — CLIs should use their own auth
+    const keysToStrip = [
+      'ANTHROPIC_API_KEY',
+      'OPENAI_API_KEY',
+      'GOOGLE_API_KEY',
+      'GEMINI_API_KEY',
+      'GOOGLE_CLOUD_API_KEY',
+      'MISTRAL_API_KEY',
+    ];
+    for (const key of keysToStrip) {
+      delete env[key];
+    }
+
+    return { ...env, ...overrides };
   }
 }
