@@ -145,7 +145,7 @@ export interface SteroidsConfig {
     maxBatchSize?: number;
   };
   followUpTasks?: {
-    autoImplement?: boolean;
+    autoImplementDepth1?: boolean; // Automatically do the first round of follow-ups
     maxDepth?: number;
     maxPerApproval?: number;
     minDescriptionLength?: number;
@@ -276,7 +276,7 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
     maxBatchSize: 10,
   },
   followUpTasks: {
-    autoImplement: false,
+    autoImplementDepth1: true,
     maxDepth: 2,
     maxPerApproval: 3,
     minDescriptionLength: 100,

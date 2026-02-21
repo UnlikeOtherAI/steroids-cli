@@ -512,10 +512,10 @@ export const CONFIG_SCHEMA: SchemaObject = {
   followUpTasks: {
     _description: 'Follow-up task generation settings',
     _type: 'object',
-    autoImplement: {
-      _description: 'Automatically implement follow-up tasks without human promotion',
+    autoImplementDepth1: {
+      _description: 'Automatically implement the first round of follow-up tasks (depth 1)',
       _type: 'boolean',
-      _default: false,
+      _default: true,
     },
     maxDepth: {
       _description: 'Maximum chain depth for follow-up tasks',

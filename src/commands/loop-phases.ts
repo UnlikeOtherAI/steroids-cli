@@ -657,26 +657,36 @@ export async function runReviewerPhase(
     notes: `[${decision.decision}] ${decision.reasoning} (confidence: ${decision.metadata.confidence})`,
   });
 
-  // STEP 5.5: Create follow-up tasks if any
-  if (decision.follow_up_tasks && decision.follow_up_tasks.length > 0) {
+  // STEP 5.5: Create follow-up tasks if any (ONLY on approval)
+  if (decision.decision === 'approve' && decision.follow_up_tasks && decision.follow_up_tasks.length > 0) {
     const depth = getFollowUpDepth(db, task.id);
     const maxDepth = config.followUpTasks?.maxDepth ?? 2;
 
     if (depth < maxDepth) {
       for (const followUp of decision.follow_up_tasks) {
         try {
+          const nextDepth = depth + 1;
+          
+          // Policy: Auto-implement depth 1 if configured. 
+          // Depth 2+ always requires human promotion (approval).
+          let requiresPromotion = true;
+          if (nextDepth === 1 && config.followUpTasks?.autoImplementDepth1) {
+            requiresPromotion = false;
+          }
+
           const followUpId = createFollowUpTask(db, {
             title: followUp.title,
             description: followUp.description,
             sectionId: task.section_id,
             referenceTaskId: task.id,
             referenceCommit: commit_sha || undefined,
-            requiresPromotion: !(config.followUpTasks?.autoImplement ?? false),
-            depth: depth + 1,
+            requiresPromotion,
+            depth: nextDepth,
           });
           
           if (!jsonMode) {
-            console.log(`\n+ Created follow-up task: ${followUp.title} (${followUpId.substring(0, 8)})`);
+            const statusLabel = requiresPromotion ? '(deferred)' : '(active)';
+            console.log(`\n+ Created follow-up task ${statusLabel}: ${followUp.title} (${followUpId.substring(0, 8)})`);
           }
         } catch (error) {
           console.warn(`Failed to create follow-up task "${followUp.title}":`, error);

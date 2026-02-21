@@ -279,6 +279,7 @@ ${reviewers_formatted}
 7. Order: file path -> line number.
 8. Use checkbox format for the final notes: - [ ] Finding text (Reviewer Name)
 9. **Follow-up Tasks:** If any reviewer suggested a follow-up task, consolidate and deduplicate them. Include them in the \`follow_up_tasks\` field.
+10. **Prevent Death Loops:** If the coder has made significant progress and the remaining issues are non-blocking (technical debt, missing docs, minor refactors), you are ENCOURAGED to APPROVE the current task and move the remaining issues to a FOLLOW-UP TASK. This prevents infinite rejection cycles.
 
 ---
 
