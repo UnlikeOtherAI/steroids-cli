@@ -948,6 +948,166 @@ This design document was reviewed by Claude (Opus 4.6), Codex (OpenAI), and Gemi
 
 ---
 
+## Appendix: Vibe Architecture Deep Dive (2026-02-21)
+
+Comprehensive analysis of Vibe's internals based on source code reading and documentation review. This informs how Steroids should invoke Vibe differently from Claude/Codex/Gemini.
+
+### Agent Loop Architecture
+
+Vibe's core is `AgentLoop` in `core/agent_loop.py`. The flow:
+
+```
+User prompt → _conversation_loop()
+  ├─ Append user message
+  ├─ Loop: while not should_break_loop
+  │   ├─ Run middleware (turn limits, price limits, auto-compact)
+  │   ├─ _perform_llm_turn()
+  │   │   ├─ Call Mistral API (complete or complete_streaming)
+  │   │   ├─ Update stats (tokens, cost, duration)
+  │   │   └─ Append assistant message
+  │   ├─ Parse tool calls
+  │   └─ _handle_tool_calls() if present
+  │       ├─ Check permission (ALWAYS/ASK/NEVER)
+  │       ├─ Execute tool → async generator yields events
+  │       └─ Append tool result messages
+  └─ _flush_new_messages() → save to session log
+```
+
+**Key insight**: The loop continues until the assistant message has no tool calls (task complete) or a middleware limit is hit.
+
+### Execution Modes
+
+| Mode | Flag | Auto-Approve | Output | Session Logging |
+|------|------|-------------|--------|-----------------|
+| Interactive | (none) | No | TUI | Yes |
+| Programmatic | `-p "prompt"` | **Yes** (default) | text/json/streaming | If enabled in config |
+| ACP | (protocol) | Configurable | Protocol events | N/A |
+
+Steroids uses **programmatic mode** exclusively. Key behaviors:
+- `run_programmatic()` creates `AgentLoop` with `enable_streaming=False`
+- Auto-approve agent is default (line 26-27 in `cli.py`): if `-p` used and no `--agent` override, agent = `auto-approve`
+- `--agent auto-approve` in our template is redundant but harmless
+
+### System Prompt: Automatic Context Injection
+
+Unlike Claude/Codex/Gemini where Steroids controls all context, Vibe **automatically injects** into its system prompt (`core/system_prompt.py`):
+
+1. **Base system prompt** (from `system_prompt_id`, default: "cli")
+2. **Commit signature** instructions
+3. **Model name** (e.g., `devstral-2`)
+4. **OS + shell info** (e.g., "macOS with shell /bin/zsh")
+5. **Tool descriptions** for all enabled tools
+6. **Skills** (from SKILL.md files)
+7. **Subagents** (explore agent)
+8. **Project context**: directory tree (up to 1000 files, depth 3), git status + 5 recent commits
+9. **AGENTS.md / VIBE.md** content if present and trusted
+
+**Impact on Steroids prompts:**
+- Steroids' coder/reviewer prompts include git diff and section specs
+- Vibe additionally includes directory tree and git status — some duplication is harmless
+- Do NOT include tool-specific instructions (e.g., "use the Edit tool") since Vibe's tools have different names (`search_replace`, `write_file`, `read_file`, etc.)
+- Steroids prompts should use generic language: "modify the file" not "use search_replace"
+
+### Tool Comparison
+
+| Vibe Tool | Claude Code | Notes |
+|-----------|------------|-------|
+| `bash` | Bash | Sets `CI=true`, `NONINTERACTIVE=1`; 300s timeout default (30s in user config) |
+| `read_file` | Read | Max 64KB read |
+| `write_file` | Write | Max 64KB write |
+| `search_replace` | Edit | Fuzzy matching (0.9 threshold), backup optional |
+| `grep` | Grep | Uses ripgrep under the hood, max 100 matches |
+| `todo` | TaskCreate/Update | Built-in task tracking |
+| `task` | Task (subagent) | Delegates to `explore` subagent (read-only) |
+| `ask_user_question` | AskUserQuestion | **Blocked in auto-approve mode** — Vibe won't ask questions |
+
+**Critical**: Vibe's `ask_user_question` tool exists but **auto-approve mode skips user interaction**. If the agent tries to ask a question, it will be auto-approved without actual user input. Steroids prompts should be explicit enough that the agent never needs to ask.
+
+### Model Selection
+
+Vibe has **no `--model` flag**. Model selection uses:
+1. `VIBE_ACTIVE_MODEL` env var → selects by alias
+2. `VIBE_MODELS` env var → JSON array of model configs, injected at runtime
+3. `active_model` in `~/.vibe/config.toml`
+
+Current Steroids provider injects both env vars correctly. But the `MISTRAL_MODELS` list uses API model IDs (`codestral-latest`) which are stale:
+
+| Current (Stale) | Correct Vibe Alias | API Model Name |
+|-----|------|------|
+| `codestral-latest` | `devstral-2` | `mistral-vibe-cli-latest` |
+| `mistral-large-latest` | (not aliased) | `mistral-large-latest` |
+| `mistral-medium-latest` | (not aliased) | `mistral-medium-latest` |
+| `mistral-small-latest` | `devstral-small` | `devstral-small-latest` |
+
+**Action item**: Update model list to include `devstral-2` and `devstral-small` as primary recommendations.
+
+### Output Formats
+
+```
+--output text      → Final assistant message only (current Steroids default)
+--output json      → All messages as JSON array (tool calls + results included)
+--output streaming → NDJSON, one message per line as they're produced
+```
+
+For session context reuse, `--output streaming` would be ideal — it provides real-time NDJSON events similar to Claude's `stream-json`, enabling:
+- Activity monitoring (resettable timeout)
+- Token usage extraction from message metadata
+- Session ID capture from session metadata
+
+### Session Management
+
+Sessions stored at `~/.vibe/logs/session/session_YYYYMMDD_HHMMSS_UUID/`:
+```
+session_20260221_173836_576805d1/
+├── messages.jsonl     # One JSON message per line (LLMMessage format)
+└── meta.json          # session_id, timestamps, model, cost stats
+```
+
+Resume supports:
+- `--continue` → most recent session
+- `--resume SESSION_ID` → partial match on first 8 chars of UUID
+
+On resume, previous non-system messages are prepended to the agent loop. System prompt is regenerated fresh — it's never from the old session.
+
+### Known Issues (GitHub)
+
+| Issue | Impact on Steroids |
+|-------|-------------------|
+| [#275](https://github.com/mistralai/mistral-vibe/issues/275): Rate limiting — vague errors | Need retry/backoff in Steroids; classify rate limit errors |
+| [#264](https://github.com/mistralai/mistral-vibe/issues/264): No retry/backoff built in | Steroids must handle retries externally |
+| [#174](https://github.com/mistralai/mistral-vibe/issues/174): Stalls + gibberish output | Activity timer needed (like Claude/Codex providers) |
+| [#261](https://github.com/mistralai/mistral-vibe/issues/261): Mid-task stopping | Steroids should detect incomplete output and retry |
+| [#249](https://github.com/mistralai/mistral-vibe/issues/249): No `--list-sessions` | Must scan filesystem for session IDs |
+
+### Provider Improvements Needed
+
+Based on this analysis, the Steroids Mistral provider (`src/providers/mistral.ts`) needs these improvements:
+
+1. **Update model list**: Replace `codestral-latest` with `devstral-2` (alias) and `devstral-small` as defaults
+2. **Add `--max-price` safety net**: Currently no cost ceiling — a runaway agent could incur unbounded costs
+3. **Add activity timer**: Like Claude/Codex providers have resettable timers; kill only when truly silent. Current fixed timeout may kill active agents prematurely
+4. **Add rate limit error classification**: `classifyError()` should detect rate limit responses and mark as `retryable: true`
+5. **Consider `--output streaming`**: Switch from `text` to `streaming` for richer monitoring (token counts, tool execution events)
+6. **Consider `--enabled-tools`**: For reviewer invocations, restrict to read-only tools: `--enabled-tools read_file --enabled-tools grep --enabled-tools bash`
+
+### Prompt Compatibility Assessment
+
+**Do Steroids prompts need Vibe-specific changes?**
+
+| Aspect | Verdict | Notes |
+|--------|---------|-------|
+| Task instructions | Compatible | Language-agnostic instructions work across all providers |
+| Tool references | **Needs care** | Don't name Claude-specific tools; use generic verbs ("modify", "read", "search") |
+| Git diff context | Compatible | Vibe adds its own git status but Steroids' diff is more specific |
+| Section spec | Compatible | Plain text, any model understands |
+| Rejection history | Compatible | Markdown format, universal |
+| Coverage instructions | Compatible | "Modified files only" is tool-agnostic |
+| Coordinator guidance | Compatible | High-level direction, no tool specifics |
+
+**Conclusion**: No Vibe-specific prompt template needed. The existing prompts work as long as they avoid naming provider-specific tools. A review of `src/prompts/coder.ts` and `src/prompts/reviewer.ts` should verify no Claude-specific tool names are used.
+
+---
+
 ## References
 
 - [Claude Code CLI Reference — Session Flags](https://code.claude.com/docs/en/cli-reference)
