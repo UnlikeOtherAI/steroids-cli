@@ -5,7 +5,7 @@
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync, unlinkSync, existsSync, readFileSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync, readFileSync, mkdirSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -147,10 +147,12 @@ export class MistralProvider extends BaseAIProvider {
   /**
    * Extract session ID and token usage from Vibe logs on disk.
    * Vibe does not include session metadata in structured output.
+   * @param vibeHome The specific VIBE_HOME directory to scan
    */
-  private extractSessionInfo(): { sessionId?: string; tokenUsage?: TokenUsage } {
+  private extractSessionInfo(vibeHome?: string): { sessionId?: string; tokenUsage?: TokenUsage } {
     try {
-      const sessionsDir = join(homedir(), '.vibe', 'logs', 'session');
+      const home = vibeHome ?? join(homedir(), '.vibe');
+      const sessionsDir = join(home, 'logs', 'session');
       if (!existsSync(sessionsDir)) return {};
 
       // Find newest session directory (named session_YYYYMMDD_HHMMSS_shortid)
@@ -194,6 +196,31 @@ export class MistralProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
+    const uuid = randomUUID();
+    const isolatedHome = join(tmpdir(), `steroids-vibe-${uuid}`);
+
+    // Set up isolated VIBE_HOME
+    try {
+      mkdirSync(isolatedHome, { recursive: true });
+      const realHome = join(homedir(), '.vibe');
+
+      // Copy/symlink auth and config from real home if available
+      // state.json (auth) and config.yaml (settings) are critical
+      ['state.json', 'config.yaml'].forEach((f) => {
+        const src = join(realHome, f);
+        if (existsSync(src)) {
+          try {
+            symlinkSync(src, join(isolatedHome, f));
+          } catch {
+            // Fallback to copy if symlink fails
+            writeFileSync(join(isolatedHome, f), readFileSync(src));
+          }
+        }
+      });
+    } catch (e) {
+      console.warn(`Failed to set up isolated Vibe home: ${e}`);
+    }
+
     return new Promise((resolve) => {
       const startTime = Date.now();
       let stdout = '';
@@ -203,6 +230,7 @@ export class MistralProvider extends BaseAIProvider {
       // Vibe chooses models by alias. We inject a one-model runtime list so any
       // requested model ID can be selected deterministically.
       const env = this.getSanitizedCliEnv({
+        VIBE_HOME: isolatedHome,
         VIBE_ACTIVE_MODEL: model,
         VIBE_MODELS: JSON.stringify([
           {
@@ -276,7 +304,14 @@ export class MistralProvider extends BaseAIProvider {
       child.on('close', (code) => {
         clearTimeout(timeoutHandle);
         const duration = Date.now() - startTime;
-        const sessionInfo = this.extractSessionInfo();
+        const sessionInfo = this.extractSessionInfo(isolatedHome);
+
+        // Cleanup isolated home
+        try {
+          rmSync(isolatedHome, { recursive: true, force: true });
+        } catch {
+          // Ignore cleanup errors
+        }
 
         resolve({
           success: code === 0 && !timedOut,
@@ -292,7 +327,14 @@ export class MistralProvider extends BaseAIProvider {
       child.on('error', (error) => {
         clearTimeout(timeoutHandle);
         const duration = Date.now() - startTime;
-        const sessionInfo = this.extractSessionInfo();
+        const sessionInfo = this.extractSessionInfo(isolatedHome);
+
+        // Cleanup isolated home
+        try {
+          rmSync(isolatedHome, { recursive: true, force: true });
+        } catch {
+          // Ignore cleanup errors
+        }
 
         resolve({
           success: false,
