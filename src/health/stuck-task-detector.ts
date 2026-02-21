@@ -77,6 +77,8 @@ export interface HangingTaskSignal {
   runnerId: string;
   runnerPid: number | null;
   runnerHeartbeatAt: Date;
+  lastActivityAt: Date | null;
+  secondsSinceActivity: number | null;
 }
 
 export interface ZombieRunnerSignal {
@@ -389,37 +391,65 @@ function detectTaskSignalsInternal(
   }
 
   // Hanging invocations: in_progress/review for too long with an active runner currently executing the task.
-  // Approximates "invocation started but not completed" using task age + runner current_task_id.
+  // Approximates "invocation started but not completed" using activity heartbeats.
   {
-    const coderCutoff = formatSqliteDateTimeUtc(new Date(now.getTime() - cfg.maxCoderDurationSec * 1000));
-    const reviewerCutoff = formatSqliteDateTimeUtc(new Date(now.getTime() - cfg.maxReviewerDurationSec * 1000));
-
     const rows = projectDb.prepare(
-      `SELECT t.id, t.title, t.status, t.updated_at
+      `SELECT t.id, t.title, t.status, t.updated_at, i.last_activity_at_ms, i.role
        FROM tasks t
-       WHERE (t.status = 'in_progress' AND t.updated_at < ?)
-          OR (t.status = 'review' AND t.updated_at < ?)`
-    ).all(coderCutoff, reviewerCutoff) as Array<{ id: string; title: string; status: 'in_progress' | 'review'; updated_at: string }>;
+       JOIN task_invocations i ON i.task_id = t.id
+       WHERE (t.status = 'in_progress' OR t.status = 'review')
+         AND i.status = 'running'
+       ORDER BY i.created_at DESC`
+    ).all() as Array<{
+      id: string;
+      title: string;
+      status: 'in_progress' | 'review';
+      updated_at: string;
+      last_activity_at_ms: number | null;
+      role: 'coder' | 'reviewer';
+    }>;
 
     for (const row of rows) {
       const activeRunner = getActiveRunnerForTask(globalDb, projectPath, row.id, cfg, now, isPidAlive);
       if (!activeRunner) continue;
 
       const updatedAt = parseSqliteDateTimeUtc(row.updated_at);
+      const lastActivityAt = row.last_activity_at_ms ? new Date(row.last_activity_at_ms) : null;
       const hbAt = parseSqliteDateTimeUtc(activeRunner.heartbeat_at);
 
-      hangingInvocations.push({
-        failureMode: 'hanging_invocation',
-        phase: row.status === 'review' ? 'reviewer' : 'coder',
-        taskId: row.id,
-        title: row.title,
-        status: row.status,
-        updatedAt,
-        secondsSinceUpdate: secondsBetween(now, updatedAt),
-        runnerId: activeRunner.id,
-        runnerPid: activeRunner.pid,
-        runnerHeartbeatAt: hbAt,
-      });
+      const secondsSinceUpdate = secondsBetween(now, updatedAt);
+      const secondsSinceActivity = lastActivityAt ? secondsBetween(now, lastActivityAt) : null;
+
+      // RULE: If we have activity heartbeats, use silence threshold (invocationStalenessSec).
+      // If we DON'T have activity yet, use the wall-clock phase limit.
+      let isStuck = false;
+      if (secondsSinceActivity !== null) {
+        if (secondsSinceActivity > cfg.invocationStalenessSec) {
+          isStuck = true;
+        }
+      } else {
+        const wallClockLimit = row.status === 'review' ? cfg.maxReviewerDurationSec : cfg.maxCoderDurationSec;
+        if (secondsSinceUpdate > wallClockLimit) {
+          isStuck = true;
+        }
+      }
+
+      if (isStuck) {
+        hangingInvocations.push({
+          failureMode: 'hanging_invocation',
+          phase: row.role as 'coder' | 'reviewer',
+          taskId: row.id,
+          title: row.title,
+          status: row.status,
+          updatedAt,
+          secondsSinceUpdate,
+          runnerId: activeRunner.id,
+          runnerPid: activeRunner.pid,
+          runnerHeartbeatAt: hbAt,
+          lastActivityAt,
+          secondsSinceActivity,
+        });
+      }
     }
   }
 

@@ -114,8 +114,13 @@ function describeSignals(result: Awaited<ReturnType<typeof recoverStuckTasks>>):
       lines.push(`  - orphaned_task: ${t.taskId} (${mins}min inactive)`);
     }
     for (const h of report.hangingInvocations) {
-      const mins = Math.round(h.secondsSinceUpdate / 60);
-      lines.push(`  - hanging_invocation: ${h.taskId} (${h.phase}, ${mins}min)`);
+      if (h.secondsSinceActivity !== null) {
+        const mins = Math.round(h.secondsSinceActivity / 60);
+        lines.push(`  - hanging_invocation: ${h.taskId} (${h.phase}, ${mins}min silent)`);
+      } else {
+        const mins = Math.round(h.secondsSinceUpdate / 60);
+        lines.push(`  - hanging_invocation: ${h.taskId} (${h.phase}, ${mins}min active)`);
+      }
     }
     for (const r of report.zombieRunners) {
       const mins = Math.round(r.secondsSinceHeartbeat / 60);

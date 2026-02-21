@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 15,
+  "latestDbVersion": 16,
   "migrations": [
     {
       "id": 1,
@@ -121,6 +121,14 @@
       "description": "Add follow-up task fields to support non-blocking improvements",
       "checksum": "",
       "cliVersion": "0.8.45"
+    },
+    {
+      "id": 16,
+      "name": "016_add_invocation_activity_timestamp",
+      "file": "016_add_invocation_activity_timestamp.sql",
+      "description": "Add last_activity_at_ms to task_invocations for smart hanging detection",
+      "checksum": "",
+      "cliVersion": "0.8.46"
     }
   ]
 }

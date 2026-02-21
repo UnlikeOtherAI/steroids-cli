@@ -359,7 +359,19 @@ export async function logInvocation(
 
   const activity = (entry: InvocationActivity): void => {
     if (!activityLogFile) return;
-    appendJsonlLine(activityLogFile, { ts: Date.now(), ...entry });
+    const now = Date.now();
+    appendJsonlLine(activityLogFile, { ts: now, ...entry });
+
+    // Update the database with the last activity timestamp
+    if (canDbLog && dbConn && invocationId !== null) {
+      try {
+        dbConn.db.prepare(
+          `UPDATE task_invocations SET last_activity_at_ms = ? WHERE id = ?`
+        ).run(now, invocationId);
+      } catch {
+        // ignore best-effort update failures
+      }
+    }
   };
 
   if (canDbLog && projectPath) {
