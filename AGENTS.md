@@ -87,3 +87,31 @@ After a design document is reviewed and finalized:
 | [docs/](./docs/) | Feature designs and architecture documentation |
 
 Any agent (Claude, Codex, Gemini, or future providers) working on this codebase must read both CLAUDE.md and AGENTS.md as their first action.
+
+---
+
+## Follow-up Tasks (Non-blocking improvements)
+
+When acting as a **REVIEWER**, if you identify improvements that are valuable but **not blocking** for the current task, you should suggest them as **Follow-up Tasks** rather than rejecting the submission.
+
+### When to create a Follow-up
+- Adding more comprehensive tests where basic tests exist
+- Minor refactors for readability
+- Documentation improvements
+- Extracting hardcoded values to config
+- Performance optimizations where current performance is acceptable
+
+### When to REJECT instead
+- Missing critical functionality from task requirements
+- Security vulnerabilities
+- Data corruption risks
+- Test failures or zero test coverage
+- Required functionality not working
+
+### Follow-up Task Requirements
+Each follow-up must include:
+1. **WHAT**: Specific work to be done (files, modules, functions)
+2. **WHY**: Reason it's needed (technical debt, missing functionality, etc.)
+3. **HOW**: Suggested approach or implementation hints
+
+**Limit:** Suggest a maximum of 3 follow-up tasks per approval. Prioritize the most impactful ones.

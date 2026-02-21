@@ -28,6 +28,7 @@ import {
   getInvocationCount,
   getOrCreateFeedbackSection,
   updateTaskFields,
+  promoteTask,
   STATUS_MARKERS,
   type Task,
   type TaskStatus,
@@ -73,9 +74,11 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { name: 'reject', args: '<id|title>', description: 'Reject a task (back to in_progress)' },
     { name: 'skip', args: '<id|title>', description: 'Skip a task (external/manual work)' },
     { name: 'audit', args: '<id|title>', description: 'View task audit trail' },
+    { name: 'promote', args: '<id>', description: 'Enable auto-implementation for a deferred follow-up' },
   ],
   options: [
     { short: 's', long: 'status', description: 'Filter by status', values: 'pending | in_progress | review | completed | disputed | failed | skipped | partial | active | all', default: 'pending' },
+    { long: 'follow-ups', description: 'Filter for deferred follow-up tasks only' },
     { short: 'g', long: 'global', description: 'List tasks across ALL registered projects' },
     { long: 'section', description: 'Filter by section ID (local project only)', values: '<id>' },
     { long: 'search', description: 'Search in task titles', values: '<query>' },
@@ -181,6 +184,9 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
     case 'audit':
       await auditTask(subArgs, flags);
       break;
+    case 'promote':
+      await promoteTaskCmd(subArgs, flags);
+      break;
     case 'list':
       await listAllTasks(subArgs, flags);
       break;
@@ -213,6 +219,7 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
       help: { type: 'boolean', short: 'h', default: false },
       json: { type: 'boolean', short: 'j', default: false },
       status: { type: 'string', short: 's', default: 'pending' },
+      'follow-ups': { type: 'boolean', default: false },
       section: { type: 'string' },
       search: { type: 'string' },
       global: { type: 'boolean', short: 'g', default: false },
@@ -230,6 +237,7 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
 
   const statusFilter = values.status as string;
   const isGlobalQuery = values.global as boolean;
+  const followUpsOnly = values['follow-ups'] as boolean;
 
   // For --global flag, query all registered projects
   if (isGlobalQuery) {
@@ -244,7 +252,12 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
         const { db, close } = openDatabase(project.path);
         try {
           let tasks: Task[];
-          if (statusFilter === 'active') {
+          
+          if (followUpsOnly) {
+            tasks = db.prepare(
+              `SELECT * FROM tasks WHERE is_follow_up = 1 AND requires_promotion = 1 AND status != 'completed'`
+            ).all() as Task[];
+          } else if (statusFilter === 'active') {
             const inProgress = listTasks(db, { status: 'in_progress', search: values.search });
             const review = listTasks(db, { status: 'review', search: values.search });
             tasks = [...inProgress, ...review];
@@ -342,7 +355,11 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
     }
 
     let tasks: Task[];
-    if (statusFilter === 'active') {
+    if (followUpsOnly) {
+      tasks = db.prepare(
+        `SELECT * FROM tasks WHERE is_follow_up = 1 AND requires_promotion = 1 AND status != 'completed'`
+      ).all() as Task[];
+    } else if (statusFilter === 'active') {
       const inProgress = listTasks(db, { status: 'in_progress', sectionId, search: values.search });
       const review = listTasks(db, { status: 'review', sectionId, search: values.search });
       tasks = [...inProgress, ...review];
@@ -1365,6 +1382,67 @@ OPTIONS:
         const notes = entry.notes ?? '-';
         out.log(`${ts}  ${from} ${to} ${actor} ${notes}`);
       }
+    }
+  } finally {
+    close();
+  }
+}
+
+async function promoteTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'tasks', subcommand: 'promote', flags });
+
+  const { values, positionals } = parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean', short: 'h', default: false },
+      actor: { type: 'string', default: 'human:cli' },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help || flags.help || positionals.length === 0) {
+    out.log(`
+steroids tasks promote <id> - Enable auto-implementation for a follow-up task
+
+USAGE:
+  steroids tasks promote <id> [options]
+
+OPTIONS:
+  --actor <name>    Actor name (default: human:cli)
+  -h, --help        Show help
+
+DESCRIPTION:
+  Some follow-up tasks are created in a "deferred" state (requires_promotion=1).
+  These tasks are ignored by the orchestrator until they are promoted.
+  Use this command to activate a task for automatic implementation.
+
+EXAMPLES:
+  steroids tasks promote abc123
+`);
+    return;
+  }
+
+  const identifier = positionals[0];
+  const actor = values.actor ?? 'human:cli';
+
+  const { db, close } = openDatabase();
+  try {
+    let task = getTask(db, identifier);
+    if (!task) task = getTaskByTitle(db, identifier);
+
+    if (!task) {
+      out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`, { identifier });
+      process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
+    }
+
+    promoteTask(db, task.id, actor);
+
+    const updated = getTask(db, task.id);
+
+    out.success({ task: updated });
+    if (!flags.json) {
+      out.log(`Task promoted: ${task.title}`);
+      out.log(`  Auto-implementation enabled. The loop will pick this up next.`);
     }
   } finally {
     close();

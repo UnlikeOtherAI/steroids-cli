@@ -36,6 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_sections_priority ON sections(priority);
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    description TEXT CHECK(length(description) <= 4000),
     status TEXT NOT NULL DEFAULT 'pending',
     section_id TEXT REFERENCES sections(id),
     source_file TEXT,
@@ -46,6 +47,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     rejection_count INTEGER NOT NULL DEFAULT 0,
     failure_count INTEGER NOT NULL DEFAULT 0,
     last_failure_at TEXT,
+    reference_task_id TEXT REFERENCES tasks(id),
+    reference_commit TEXT,
+    reference_commit_message TEXT,
+    is_follow_up INTEGER NOT NULL DEFAULT 0 CHECK(is_follow_up IN (0, 1)),
+    requires_promotion INTEGER NOT NULL DEFAULT 0 CHECK(requires_promotion IN (0, 1)),
+    follow_up_depth INTEGER NOT NULL DEFAULT 0 CHECK(follow_up_depth >= 0),
+    dedupe_key TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -53,6 +61,10 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_section ON tasks(section_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_failures ON tasks(failure_count) WHERE failure_count > 0;
+CREATE INDEX IF NOT EXISTS idx_tasks_reference_task ON tasks(reference_task_id) WHERE reference_task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_follow_up_state ON tasks(is_follow_up, requires_promotion) WHERE is_follow_up = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_dedupe ON tasks(dedupe_key) WHERE dedupe_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_selection_followup ON tasks(status, is_follow_up, requires_promotion);
 
 -- Audit trail (immutable log of status changes)
 CREATE TABLE IF NOT EXISTS audit (
@@ -142,6 +154,11 @@ CREATE TABLE IF NOT EXISTS task_invocations (
     success INTEGER NOT NULL DEFAULT 0,
     timed_out INTEGER NOT NULL DEFAULT 0,
     rejection_number INTEGER,
+    session_id TEXT,
+    resumed_from_session_id TEXT,
+    invocation_mode TEXT DEFAULT 'fresh',
+    token_usage_json TEXT,
+    last_activity_at_ms INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -149,6 +166,7 @@ CREATE INDEX IF NOT EXISTS idx_task_invocations_task ON task_invocations(task_id
 CREATE INDEX IF NOT EXISTS idx_task_invocations_role ON task_invocations(role);
 CREATE INDEX IF NOT EXISTS idx_task_invocations_created ON task_invocations(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_task_invocations_task_status ON task_invocations(task_id, status, started_at_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_task_invocations_session ON task_invocations(session_id);
 
 -- Incidents (stuck-task detection/recovery)
 CREATE TABLE IF NOT EXISTS incidents (
@@ -222,4 +240,7 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (10, '010_add_life
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (11, '011_add_merge_locks_and_progress', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (12, '012_add_merge_lock_epoch', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (13, '013_add_merge_progress_applied_commit_sha', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (14, '014_add_session_context', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (15, '015_add_follow_up_fields', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (16, '016_add_invocation_activity_timestamp', 'builtin');
 `;
