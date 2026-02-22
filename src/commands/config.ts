@@ -624,7 +624,7 @@ ENVIRONMENT VARIABLES:
   STEROIDS_ANTHROPIC_API_KEY   Required for Claude models
   STEROIDS_OPENAI_API_KEY      Required for OpenAI/Codex models
   STEROIDS_GOOGLE_API_KEY      Required for Gemini models (or STEROIDS_GEMINI_API_KEY)
-  STEROIDS_MISTRAL_API_KEY     Required for Mistral models
+  STEROIDS_MISTRAL_API_KEY     Optional for Mistral (Vibe) models
 `);
     return;
   }
@@ -766,7 +766,7 @@ ENVIRONMENT VARIABLES:
   STEROIDS_ANTHROPIC_API_KEY   Required for Claude
   STEROIDS_OPENAI_API_KEY      Required for OpenAI
   STEROIDS_GOOGLE_API_KEY      Required for Gemini (or STEROIDS_GEMINI_API_KEY)
-  STEROIDS_MISTRAL_API_KEY     Required for Mistral
+  STEROIDS_MISTRAL_API_KEY     Optional for Mistral (Vibe) model listing
 `);
     return;
   }

@@ -11,6 +11,7 @@ import { loadConfig } from '../../../dist/config/loader.js';
 import {
   detectStuckTasks,
   type StuckTaskDetectionConfig,
+  type StuckTaskDetectionReport,
 } from '../../../dist/health/stuck-task-detector.js';
 import { getGlobalDbPath } from '../../../dist/runners/global-db.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
@@ -56,6 +57,22 @@ function parseBoolean(value: unknown): boolean | undefined {
   if (value === 'true') return true;
   if (value === 'false') return false;
   return undefined;
+}
+
+function isLikelySchemaError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /no such table|no such column|has no column|syntax error/i.test(error.message);
+}
+
+function fallbackStuckTaskReport(): StuckTaskDetectionReport {
+  return {
+    timestamp: new Date(),
+    orphanedTasks: [],
+    hangingInvocations: [],
+    zombieRunners: [],
+    deadRunners: [],
+    dbInconsistencies: [],
+  };
 }
 
 type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
@@ -112,12 +129,23 @@ router.get('/health', (req: Request, res: Response) => {
       invocationStalenessSec: cfg.health?.invocationStaleness,
     };
 
-    const report = detectStuckTasks({
-      projectPath,
-      projectDb,
-      globalDb,
-      config: detectionConfig,
-    });
+    let report: StuckTaskDetectionReport;
+    try {
+      report = detectStuckTasks({
+        projectPath,
+        projectDb,
+        globalDb,
+        config: detectionConfig,
+      });
+    } catch (error) {
+      if (!isLikelySchemaError(error)) {
+        throw error;
+      }
+      if (process.env.NODE_ENV !== 'test') {
+        console.warn('Falling back to minimal health signals due to missing schema:', error);
+      }
+      report = fallbackStuckTaskReport();
+    }
 
     // Incident counts (best-effort: table might not exist)
     let activeIncidents = 0;

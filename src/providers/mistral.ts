@@ -205,7 +205,6 @@ export class MistralProvider extends BaseAIProvider {
     // Set up isolated VIBE_HOME.
     // setupIsolatedHome('.vibe', ...) puts auth files at isolatedHome/.vibe/
     // VIBE_HOME must point at that .vibe subdirectory so Vibe finds config.toml there.
-    // .env: API key (CRITICAL — without this, VibeConfig.load() throws MissingAPIKeyError → onboarding TUI)
     // config.toml: main config with model definitions
     // trusted_folders.toml: folder trust allowlist
     const isolatedHome = this.setupIsolatedHome('.vibe', ['.env', 'config.toml', 'trusted_folders.toml']);
@@ -396,11 +395,10 @@ export class MistralProvider extends BaseAIProvider {
       };
     }
 
-    if (/missing .* environment variable .* provider/i.test(stderr) ||
-        /mistral_api_key/i.test(stderr)) {
+    if (/missing .* environment variable .* provider/i.test(stderr) || /missing environment variable for provider/i.test(stderr)) {
       return {
         type: 'auth_error',
-        message: 'STEROIDS_MISTRAL_API_KEY is missing or invalid',
+        message: 'Vibe authentication is missing or invalid',
         retryable: false,
       };
     }

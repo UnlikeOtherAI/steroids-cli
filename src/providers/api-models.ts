@@ -347,10 +347,14 @@ export async function fetchMistralModels(): Promise<FetchModelsResult> {
   const apiKey = process.env.STEROIDS_MISTRAL_API_KEY;
 
   if (!apiKey) {
+    const fallbackModels = (await getModelsForProvider('mistral')).map((m) => ({
+      id: m.id,
+      name: m.name,
+    }));
+
     return {
-      success: false,
-      models: [],
-      error: 'STEROIDS_MISTRAL_API_KEY not set',
+      success: true,
+      models: fallbackModels,
     };
   }
 
@@ -594,6 +598,7 @@ export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mist
 export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex' | 'minimax' | 'ollama'): boolean {
   if (provider === 'codex') return true;
   if (provider === 'ollama') return true; // Local service
+  if (provider === 'mistral') return true; // Vibe CLI can operate with local auth and does not require API key
   switch (provider) {
     case 'claude':
       return !!process.env.STEROIDS_ANTHROPIC_API_KEY;
@@ -601,8 +606,6 @@ export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral' |
       return !!process.env.STEROIDS_OPENAI_API_KEY;
     case 'gemini':
       return !!(process.env.STEROIDS_GOOGLE_API_KEY ?? process.env.STEROIDS_GEMINI_API_KEY);
-    case 'mistral':
-      return !!process.env.STEROIDS_MISTRAL_API_KEY;
     case 'minimax':
       return !!(process.env.STEROIDS_MINIMAX_API_KEY || process.env.MINIMAX_API_KEY);
     default:

@@ -4,14 +4,18 @@
  */
 
 import { CoderOrchestrationResult, ReviewerOrchestrationResult } from './types.js';
-import { validateCoderResult, validateReviewerResult } from './schemas.js';
+import { 
+  validateCoderResultWithLogging,
+  validateReviewerResultWithLogging,
+  ValidationResult
+} from './schemas.js';
 
 export class OrchestrationFallbackHandler {
   private static readonly UNQUOTED_KEY_REGEX = /([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g;
   private static readonly SINGLE_QUOTED_STRING_REGEX = /'((?:\\.|[^'\\])*)'/g;
 
   private hasCompletionIndicator(lowerOutput: string): boolean {
-    if (/\b(?:not|no)\s+(?:task\s+)?(?:is\s+)?(?:complete|complete[d]?|finished|done|ready)\b/.test(lowerOutput)) {
+    if (/\b(?:not|no|not yet|still not|cannot|can't|unable to)\s+(?:task\s+)?(?:is\s+)?(?:complete|complete[d]?|finished|done|ready)\b/.test(lowerOutput)) {
       return false;
     }
 
@@ -75,7 +79,7 @@ export class OrchestrationFallbackHandler {
 
   private tryRepairAndParse<T>(
     rawOutput: string,
-    validator: any,
+    validator: (data: any) => ValidationResult,
     successLog: string
   ): T | null {
     const candidates: string[] = [rawOutput];
@@ -95,9 +99,10 @@ export class OrchestrationFallbackHandler {
       const normalized = this.normalizeJsonCandidate(candidate);
       try {
         const parsed = JSON.parse(normalized);
-        if (validator(parsed)) {
+        const { valid, data } = validator(parsed);
+        if (valid) {
           console.log(successLog);
-          return parsed as T;
+          return data as T;
         }
       } catch {
         // Continue to next candidate
@@ -114,9 +119,10 @@ export class OrchestrationFallbackHandler {
     // Layer 1: Direct JSON parse
     try {
       const parsed = JSON.parse(rawOutput);
-      if (validateCoderResult(parsed)) {
+      const { valid, data } = validateCoderResultWithLogging(parsed);
+      if (valid) {
         console.log('[Orchestrator] ✓ Layer 1: Direct JSON parse succeeded');
-        return parsed as unknown as CoderOrchestrationResult;
+        return data as unknown as CoderOrchestrationResult;
       }
     } catch (e) {
       // Continue to next layer
@@ -127,9 +133,10 @@ export class OrchestrationFallbackHandler {
     if (jsonBlock) {
       try {
         const parsed = JSON.parse(jsonBlock[1]);
-        if (validateCoderResult(parsed)) {
+        const { valid, data } = validateCoderResultWithLogging(parsed);
+        if (valid) {
           console.log('[Orchestrator] ✓ Layer 2: Markdown extraction succeeded');
-          return parsed as unknown as CoderOrchestrationResult;
+          return data as unknown as CoderOrchestrationResult;
         }
       } catch (e) {
         // Continue to next layer
@@ -142,9 +149,10 @@ export class OrchestrationFallbackHandler {
     if (start !== -1 && end !== -1 && end > start) {
       try {
         const parsed = JSON.parse(rawOutput.substring(start, end + 1));
-        if (validateCoderResult(parsed)) {
+        const { valid, data } = validateCoderResultWithLogging(parsed);
+        if (valid) {
           console.log('[Orchestrator] ✓ Layer 3: Substring extraction succeeded');
-          return parsed as unknown as CoderOrchestrationResult;
+          return data as unknown as CoderOrchestrationResult;
         }
       } catch (e) {
         // Continue to next layer
@@ -154,7 +162,7 @@ export class OrchestrationFallbackHandler {
     // Layer 4: Repair malformed JSON and validate
     const repaired = this.tryRepairAndParse<CoderOrchestrationResult>(
       rawOutput,
-      validateCoderResult,
+      validateCoderResultWithLogging,
       '[Orchestrator] ✓ Layer 4: JSON repair succeeded'
     );
     if (repaired) {
@@ -173,9 +181,10 @@ export class OrchestrationFallbackHandler {
     // Layer 1: Direct JSON parse
     try {
       const parsed = JSON.parse(rawOutput);
-      if (validateReviewerResult(parsed)) {
+      const { valid, data } = validateReviewerResultWithLogging(parsed);
+      if (valid) {
         console.log('[Orchestrator] ✓ Layer 1: Direct JSON parse succeeded');
-        return parsed as unknown as ReviewerOrchestrationResult;
+        return data as unknown as ReviewerOrchestrationResult;
       }
     } catch (e) {
       // Continue to next layer
@@ -186,9 +195,10 @@ export class OrchestrationFallbackHandler {
     if (jsonBlock) {
       try {
         const parsed = JSON.parse(jsonBlock[1]);
-        if (validateReviewerResult(parsed)) {
+        const { valid, data } = validateReviewerResultWithLogging(parsed);
+        if (valid) {
           console.log('[Orchestrator] ✓ Layer 2: Markdown extraction succeeded');
-          return parsed as unknown as ReviewerOrchestrationResult;
+          return data as unknown as ReviewerOrchestrationResult;
         }
       } catch (e) {
         // Continue to next layer
@@ -201,9 +211,10 @@ export class OrchestrationFallbackHandler {
     if (start !== -1 && end !== -1 && end > start) {
       try {
         const parsed = JSON.parse(rawOutput.substring(start, end + 1));
-        if (validateReviewerResult(parsed)) {
+        const { valid, data } = validateReviewerResultWithLogging(parsed);
+        if (valid) {
           console.log('[Orchestrator] ✓ Layer 3: Substring extraction succeeded');
-          return parsed as unknown as ReviewerOrchestrationResult;
+          return data as unknown as ReviewerOrchestrationResult;
         }
       } catch (e) {
         // Continue to next layer
@@ -213,7 +224,7 @@ export class OrchestrationFallbackHandler {
     // Layer 4: Repair malformed JSON and validate
     const repaired = this.tryRepairAndParse<ReviewerOrchestrationResult>(
       rawOutput,
-      validateReviewerResult,
+      validateReviewerResultWithLogging,
       '[Orchestrator] ✓ Layer 4: JSON repair succeeded'
     );
     if (repaired) {

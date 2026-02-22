@@ -17,3 +17,5 @@ The following files are the **absolute source of truth** for architectural stand
 ### 2. Documentation Alignment
 - Every feature implementation is incomplete until `README.md`, `AGENTS.md`, and the CLI's internal `CONFIG_SCHEMA` are synchronized with the changes.
 - Always verify the "Help" strings in `src/commands/` after adding new flags or subcommands.
+### 3. Interactive Commands
+- **NEVER** run commands in interactive mode. If you need to launch a command line utility (like codex, vibe, or any other agent), ALWAYS use non-interactive mode (e.g. passing flags like `--yes`, `exec`, `-p`, etc.).

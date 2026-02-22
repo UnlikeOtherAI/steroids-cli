@@ -9,7 +9,7 @@
 |-------|-------|
 | Binary | `vibe` |
 | Package | `mistral-vibe` (installed via `uv` or `pip`) |
-| Auth | `vibe --setup` or `MISTRAL_API_KEY` env var |
+| Auth | `vibe --setup` (preferred), or `MISTRAL_API_KEY` if present |
 | Provider name | `mistral` |
 | Source file | `src/providers/mistral.ts` |
 | Vibe source | `~/.local/share/uv/tools/mistral-vibe/lib/python3.12/site-packages/vibe/` |
@@ -210,7 +210,7 @@ This means Vibe sessions have more context than Steroids provides — some dupli
 - **No activity timeout in provider** — Unlike Claude/Codex/Gemini, the Mistral provider uses a fixed timeout (15 min) rather than a resettable activity timer. This may kill active agents prematurely.
 - **Dual spawn path:** Custom template uses shell spawning; default uses argument-based spawning (safer).
 - **Env vars injected:** `VIBE_ACTIVE_MODEL`, `VIBE_MODELS` (JSON model config).
-- **Env sanitization:** `MISTRAL_API_KEY` stripped from child env to force CLI's own auth.
+- **Env handling:** `MISTRAL_API_KEY` is not required when `vibe --setup` auth state is present.
 - **No stream-json equivalent yet** — Using `--output text` means no structured monitoring. Switching to `--output streaming` would enable real-time NDJSON events.
 
 ### VIBE_HOME Isolation (CRITICAL)
@@ -219,7 +219,7 @@ Steroids uses `setupIsolatedHome('.vibe', [...])` to create an isolated VIBE_HOM
 
 | File | Why Required |
 |------|-------------|
-| `.env` | **Critical** — contains Mistral API key. Without it, `VibeConfig.load()` raises `MissingAPIKeyError` → triggers `run_onboarding()` → animated TUI loops indefinitely |
+| `.env` | Optional auth file. Vibe can use local CLI auth; keyless operation works when login/setup is already complete. |
 | `config.toml` | Model definitions and settings |
 | `trusted_folders.toml` | Folder trust allowlist |
 

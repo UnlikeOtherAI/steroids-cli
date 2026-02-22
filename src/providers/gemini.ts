@@ -68,6 +68,38 @@ export class GeminiProvider extends BaseAIProvider {
   readonly displayName = 'Google (gemini)';
 
   /**
+   * Override getSanitizedCliEnv to preserve GEMINI_API_KEY
+   * Gemini CLI needs this for authentication
+   */
+  protected getSanitizedCliEnv(overrides: Record<string, string> = {}): Record<string, string> {
+    const env = { ...process.env, ...overrides };
+
+    // Remove raw provider API keys — CLIs should use their own auth
+    // But preserve GEMINI_API_KEY since Gemini CLI can use it directly
+    const keysToStrip = [
+      'ANTHROPIC_API_KEY',
+      'OPENAI_API_KEY',
+      'GOOGLE_API_KEY',
+      'GOOGLE_CLOUD_API_KEY',
+      'MISTRAL_API_KEY',
+      'CLAUDECODE',
+    ];
+    for (const key of keysToStrip) {
+      delete env[key];
+    }
+
+    // Filter out undefined values to satisfy Record<string, string> type
+    const result: Record<string, string> = { ...overrides };
+    for (const key in env) {
+      if (env[key] !== undefined) {
+        result[key] = env[key] as string;
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Write prompt to a temporary file
    */
   private writePromptFile(prompt: string): string {
@@ -191,7 +223,7 @@ export class GeminiProvider extends BaseAIProvider {
     resumeSessionId?: string
   ): Promise<InvokeResult> {
     // Set up isolated HOME
-    const isolatedHome = this.setupIsolatedHome('.gemini', ['config.json']);
+    const isolatedHome = this.setupIsolatedHome('.gemini', ['settings.json']);
     // Also isolate gcloud config if present in the same isolated home
     this.setupIsolatedHome('.config/gcloud', ['active_config', 'credentials.db', 'configurations/config_default'], isolatedHome);
 
