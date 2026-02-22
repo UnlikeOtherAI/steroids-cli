@@ -4,6 +4,21 @@
 
 ## Cross-Provider Design Reviews (CRITICAL)
 
+## Provider Invocation Protocol (vibe / gemini)
+
+- Use non-interactive mode for scripted checks and fixes.
+- Never pass model flags or model aliases (no `--model`, `-m`, or explicit model names) unless explicitly requested.
+- Start with CLI availability checks:
+  - `vibe --help`
+  - `gemini --help`
+- Run smoke checks:
+  - `vibe -p "say hi"`
+  - `gemini -p "say hi"`
+- For codebase feedback or any long analysis, cap runtime at 5 minutes:
+  - `timeout 300 vibe -p "<prompt>"`
+  - `timeout 300 gemini -p "<prompt>"`
+- If terminating a stuck command, only do so after sustained inactivity and effectively 0.0% CPU; do not kill active, progressing processes.
+
 **For any significant design or architectural change, you MUST get a second opinion from a different AI provider before implementation.**
 
 This applies to:

@@ -49,6 +49,7 @@ import { loadConfig, type ReviewerConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { InvokeResult } from '../providers/interface.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
+import type { ProviderError } from '../providers/interface.js';
 
 export { type CoordinatorResult };
 
@@ -122,44 +123,67 @@ async function checkCreditExhaustion(
   result: InvokeResult,
   role: 'coder' | 'reviewer',
   projectPath: string,
-  reviewerConfig?: ReviewerConfig
+  reviewerConfig?: ReviewerConfig,
+  classification?: ProviderError | null
 ): Promise<CreditExhaustionResult | null> {
   if (result.success) return null;
+
+  const resolvedClassification =
+    classification === undefined ? await classifyProviderResult(result, role, projectPath, reviewerConfig) : classification;
+  if (!resolvedClassification) return null;
 
   const config = loadConfig(projectPath);
   const roleConfig = reviewerConfig || config.ai?.[role];
   const providerName = roleConfig?.provider;
   const modelName = roleConfig?.model;
-
   if (!providerName || !modelName) return null;
 
-  const registry = await getProviderRegistry();
-  const provider = registry.tryGet(providerName);
-  if (!provider) return null;
-
-  const classification = provider.classifyResult(result);
-  if (classification?.type === 'credit_exhaustion') {
+  if (resolvedClassification.type === 'credit_exhaustion') {
     return {
       action: 'pause_credit_exhaustion',
       provider: providerName,
       model: modelName,
       role,
-      message: classification.message,
+      message: resolvedClassification.message,
     };
   }
 
-  if (classification?.type === 'rate_limit') {
+  if (resolvedClassification.type === 'rate_limit') {
     return {
       action: 'rate_limit',
       provider: providerName,
       model: modelName,
       role,
-      message: classification.message,
-      retryAfterMs: classification.retryAfterMs,
+      message: resolvedClassification.message,
+      retryAfterMs: resolvedClassification.retryAfterMs,
     };
   }
 
   return null;
+}
+
+/**
+ * Classify a provider invocation result exactly once per path.
+ */
+async function classifyProviderResult(
+  result: InvokeResult,
+  role: 'coder' | 'reviewer',
+  projectPath: string,
+  reviewerConfig?: ReviewerConfig
+): Promise<ProviderError | null> {
+  if (result.success) return null;
+
+  const config = loadConfig(projectPath);
+  const roleConfig = reviewerConfig || config.ai?.[role];
+  const providerName = roleConfig?.provider;
+
+  if (!providerName) return null;
+
+  const registry = await getProviderRegistry();
+  const provider = registry.tryGet(providerName);
+  if (!provider) return null;
+
+  return provider.classifyResult(result);
 }
 
 /**
@@ -169,7 +193,8 @@ async function checkNonRetryableProviderFailure(
   result: InvokeResult,
   role: 'coder' | 'reviewer',
   projectPath: string,
-  reviewerConfig?: ReviewerConfig
+  reviewerConfig?: ReviewerConfig,
+  classification?: ProviderError | null
 ): Promise<{ type: string; provider: string; model: string; message: string } | null> {
   if (result.success) return null;
 
@@ -184,15 +209,16 @@ async function checkNonRetryableProviderFailure(
   const provider = registry.tryGet(providerName);
   if (!provider) return null;
 
-  const classification = provider.classifyResult(result);
-  if (!classification) return null;
+  const resolvedClassification =
+    classification === undefined ? await classifyProviderResult(result, role, projectPath, reviewerConfig) : classification;
+  if (!resolvedClassification) return null;
 
-  if (classification.type === 'model_not_found' || classification.type === 'context_exceeded') {
+  if (resolvedClassification.type === 'model_not_found' || resolvedClassification.type === 'context_exceeded') {
     return {
-      type: classification.type,
+      type: resolvedClassification.type,
       provider: providerName,
       model: modelName,
-      message: classification.message,
+      message: resolvedClassification.message,
     };
   }
 
@@ -250,6 +276,18 @@ function countConsecutiveUnclearEntries(
   }
 
   return count;
+}
+
+function hasCoderCompletionSignal(output: string): boolean {
+  const lower = output.toLowerCase();
+
+  if (/\b(?:not|no)\s+(?:task\s+)?(?:is\s+)?(?:complete|complete[d]?|finished|done|ready)\b/.test(lower)) {
+    return false;
+  }
+
+  return /\b(?:task\s+)?(?:is\s+)?(?:complete|complete[d]?|implemented|finished|done|ready for review|ready)\b/.test(
+    lower
+  );
 }
 
 export async function runCoderPhase(
@@ -340,15 +378,15 @@ export async function runCoderPhase(
     return;
   }
 
-  const hardFailure = await checkNonRetryableProviderFailure(coderResult, 'coder', projectPath);
-  if (hardFailure) {
-    const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during coder phase: ${hardFailure.message}`;
+  const classification = await classifyProviderResult(coderResult, 'coder', projectPath);
+  const hardFailureFromKnownTypes = await checkNonRetryableProviderFailure(coderResult, 'coder', projectPath, undefined, classification);
+  // Check for credit/rate-limit classification (once).
+  const creditCheck = await checkCreditExhaustion(coderResult, 'coder', projectPath, undefined, classification);
+  if (hardFailureFromKnownTypes) {
+    const reason = `Task failed: provider ${hardFailureFromKnownTypes.provider}/${hardFailureFromKnownTypes.model} returned non-recoverable error (${hardFailureFromKnownTypes.type}) during coder phase: ${hardFailureFromKnownTypes.message}`;
     updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
     return;
   }
-
-  // Check for credit exhaustion before proceeding to orchestrator
-  const creditCheck = await checkCreditExhaustion(coderResult, 'coder', projectPath);
   if (creditCheck) {
     return creditCheck;
   }
@@ -407,8 +445,7 @@ export async function runCoderPhase(
     console.error('Orchestrator invocation failed:', error);
     
     // Check if coder seems finished even if orchestrator failed
-    const coderStdout = coderResult.stdout.toLowerCase();
-    const isTaskComplete = /complete|finished|done|ready/.test(coderStdout);
+    const isTaskComplete = hasCoderCompletionSignal(coderResult.stdout);
     // Only count as having work if there are actual relevant uncommitted changes,
     // changed files, or recent commits
     const hasWork = hasRelevantChanges;
@@ -450,8 +487,7 @@ export async function runCoderPhase(
   // When orchestrator parse falls back to retry, check coder output + git state
   // for completion signals before giving up (same logic as the catch block above)
   if (decision.action === 'retry' && decision.reasoning.includes('FALLBACK: Orchestrator failed')) {
-    const coderStdout = coderResult.stdout.toLowerCase();
-    const isTaskComplete = /task complete|complete|finished|done|ready for review/.test(coderStdout);
+    const isTaskComplete = hasCoderCompletionSignal(coderResult.stdout);
     const hasWork = hasRelevantChanges;
 
     if (isTaskComplete && hasWork) {
@@ -601,14 +637,15 @@ export async function runReviewerPhase(
     // Check for credit exhaustion in any reviewer
     for (let i = 0; i < reviewerResults.length; i++) {
       const res = reviewerResults[i];
-      const hardFailure = await checkNonRetryableProviderFailure(res, 'reviewer', projectPath, reviewerConfigs[i]);
+      const classification = await classifyProviderResult(res, 'reviewer', projectPath, reviewerConfigs[i]);
+      const hardFailure = await checkNonRetryableProviderFailure(res, 'reviewer', projectPath, reviewerConfigs[i], classification);
       if (hardFailure) {
         const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during reviewer phase: ${hardFailure.message}`;
         updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
         return;
       }
 
-      const creditCheck = await checkCreditExhaustion(res as any, 'reviewer', projectPath, reviewerConfigs[i]);
+      const creditCheck = await checkCreditExhaustion(res as any, 'reviewer', projectPath, reviewerConfigs[i], classification);
       if (creditCheck) {
         return creditCheck;
       }
@@ -645,7 +682,8 @@ export async function runReviewerPhase(
       return;
     }
 
-    const hardFailure = await checkNonRetryableProviderFailure(reviewerResult as any, 'reviewer', projectPath);
+    const classification = await classifyProviderResult(reviewerResult as any, 'reviewer', projectPath);
+    const hardFailure = await checkNonRetryableProviderFailure(reviewerResult as any, 'reviewer', projectPath, undefined, classification);
     if (hardFailure) {
       const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during reviewer phase: ${hardFailure.message}`;
       updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
@@ -653,7 +691,7 @@ export async function runReviewerPhase(
     }
 
     // Check for credit exhaustion
-    const creditCheck = await checkCreditExhaustion(reviewerResult as any, 'reviewer', projectPath);
+    const creditCheck = await checkCreditExhaustion(reviewerResult as any, 'reviewer', projectPath, undefined, classification);
     if (creditCheck) {
       return creditCheck;
     }

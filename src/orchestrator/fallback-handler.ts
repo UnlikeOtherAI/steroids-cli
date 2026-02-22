@@ -10,6 +10,34 @@ export class OrchestrationFallbackHandler {
   private static readonly UNQUOTED_KEY_REGEX = /([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g;
   private static readonly SINGLE_QUOTED_STRING_REGEX = /'((?:\\.|[^'\\])*)'/g;
 
+  private hasCompletionIndicator(lowerOutput: string): boolean {
+    if (/\b(?:not|no)\s+(?:task\s+)?(?:is\s+)?(?:complete|complete[d]?|finished|done|ready)\b/.test(lowerOutput)) {
+      return false;
+    }
+
+    return /\b(?:task\s+)?(?:is\s+)?(?:complete|complete[d]?|implemented|finished|done|ready for review|ready)\b/.test(
+      lowerOutput
+    );
+  }
+
+  private hasCommitIndicator(lowerOutput: string): boolean {
+    if (/\b(commit|committed)\b.*\b(?:fail|failed|failure|error|unable|cannot|denied|rejected|blocked|aborted)\b/.test(
+      lowerOutput
+    )) {
+      return false;
+    }
+
+    if (/\b(?:fail|failed|error|unable|cannot|denied|rejected|blocked|aborted)\b.*\b(commit|committed)\b/.test(lowerOutput)) {
+      return false;
+    }
+
+    return /\b(committed|commit)\b/.test(lowerOutput);
+  }
+
+  private hasErrorIndicator(lowerOutput: string): boolean {
+    return /\b(fatal|error|failed)\b/.test(lowerOutput);
+  }
+
   private normalizeJsonCandidate(raw: string): string {
     let normalized = raw.trim();
 
@@ -47,7 +75,7 @@ export class OrchestrationFallbackHandler {
 
   private tryRepairAndParse<T>(
     rawOutput: string,
-    validator: (value: unknown) => boolean,
+    validator: any,
     successLog: string
   ): T | null {
     const candidates: string[] = [rawOutput];
@@ -89,11 +117,9 @@ export class OrchestrationFallbackHandler {
       if (validateCoderResult(parsed)) {
         console.log('[Orchestrator] ✓ Layer 1: Direct JSON parse succeeded');
         return parsed as unknown as CoderOrchestrationResult;
-      } else {
-        console.warn('[Orchestrator] Layer 1 JSON parsed but validation failed');
       }
     } catch (e) {
-      console.warn('[Orchestrator] Layer 1: JSON.parse failed');
+      // Continue to next layer
     }
 
     // Layer 2: Extract from markdown code block
@@ -104,11 +130,9 @@ export class OrchestrationFallbackHandler {
         if (validateCoderResult(parsed)) {
           console.log('[Orchestrator] ✓ Layer 2: Markdown extraction succeeded');
           return parsed as unknown as CoderOrchestrationResult;
-        } else {
-          console.warn('[Orchestrator] Layer 2 JSON parsed but validation failed');
         }
       } catch (e) {
-        console.warn('[Orchestrator] Layer 2: Markdown block found but JSON.parse failed');
+        // Continue to next layer
       }
     }
 
@@ -121,11 +145,9 @@ export class OrchestrationFallbackHandler {
         if (validateCoderResult(parsed)) {
           console.log('[Orchestrator] ✓ Layer 3: Substring extraction succeeded');
           return parsed as unknown as CoderOrchestrationResult;
-        } else {
-          console.warn('[Orchestrator] Layer 3 JSON parsed but validation failed');
         }
       } catch (e) {
-        console.warn('[Orchestrator] Layer 3: Substring found but JSON.parse failed');
+        // Continue to next layer
       }
     }
 
@@ -154,11 +176,9 @@ export class OrchestrationFallbackHandler {
       if (validateReviewerResult(parsed)) {
         console.log('[Orchestrator] ✓ Layer 1: Direct JSON parse succeeded');
         return parsed as unknown as ReviewerOrchestrationResult;
-      } else {
-        console.warn('[Orchestrator] Layer 1 JSON parsed but validation failed');
       }
     } catch (e) {
-      console.warn('[Orchestrator] Layer 1: JSON.parse failed');
+      // Continue to next layer
     }
 
     // Layer 2: Extract from markdown code block
@@ -169,11 +189,9 @@ export class OrchestrationFallbackHandler {
         if (validateReviewerResult(parsed)) {
           console.log('[Orchestrator] ✓ Layer 2: Markdown extraction succeeded');
           return parsed as unknown as ReviewerOrchestrationResult;
-        } else {
-          console.warn('[Orchestrator] Layer 2 JSON parsed but validation failed');
         }
       } catch (e) {
-        console.warn('[Orchestrator] Layer 2: Markdown block found but JSON.parse failed');
+        // Continue to next layer
       }
     }
 
@@ -186,11 +204,9 @@ export class OrchestrationFallbackHandler {
         if (validateReviewerResult(parsed)) {
           console.log('[Orchestrator] ✓ Layer 3: Substring extraction succeeded');
           return parsed as unknown as ReviewerOrchestrationResult;
-        } else {
-          console.warn('[Orchestrator] Layer 3 JSON parsed but validation failed');
         }
       } catch (e) {
-        console.warn('[Orchestrator] Layer 3: Substring found but JSON.parse failed');
+        // Continue to next layer
       }
     }
 
@@ -270,7 +286,7 @@ export class OrchestrationFallbackHandler {
     }
 
     // Check for errors
-    if (/fatal|error|failed/.test(lower) && !/commit/.test(lower)) {
+    if (this.hasErrorIndicator(lower) && !this.hasCommitIndicator(lower)) {
       return {
         action: 'error',
         reasoning: 'FALLBACK: Detected error keywords',
@@ -286,7 +302,7 @@ export class OrchestrationFallbackHandler {
     }
 
     // Check for completion with commit
-    if (/commit|committed/.test(lower) && !/error|failed/.test(lower)) {
+    if (this.hasCommitIndicator(lower) && !this.hasErrorIndicator(lower)) {
       return {
         action: 'submit',
         reasoning: 'FALLBACK: Detected commit keywords',
@@ -302,7 +318,7 @@ export class OrchestrationFallbackHandler {
     }
 
     // Check for completion signals
-    if (/complete|finished|done|ready/.test(lower)) {
+    if (this.hasCompletionIndicator(lower)) {
       return {
         action: 'submit',
         reasoning: 'FALLBACK: Detected completion keywords',
