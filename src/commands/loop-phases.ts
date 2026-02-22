@@ -463,7 +463,6 @@ export async function runReviewerPhase(
 
   let reviewerResult: ReviewerResult | undefined;
   let reviewerResults: ReviewerResult[] = [];
-  let orchestratorOutput: string = '';
 
   // STEP 1: Invoke reviewer(s)
   if (multiReviewEnabled) {
@@ -568,13 +567,17 @@ export async function runReviewerPhase(
       };
 
       try {
-        orchestratorOutput = await invokeMultiReviewerOrchestrator(multiContext, projectPath);
+        const orchestratorOutput = await invokeMultiReviewerOrchestrator(multiContext, projectPath);
         const handler = new OrchestrationFallbackHandler();
         decision = handler.parseReviewerOutput(orchestratorOutput);
       } catch (error) {
         console.error('Multi-reviewer orchestrator failed:', error);
         
-        const anyApprove = reviewerResults.some(r => r.stdout.toUpperCase().includes('APPROVE') || (r.decision === 'approve'));
+        const handler = new OrchestrationFallbackHandler();
+        const anyApprove = reviewerResults.some(r => {
+          if (r.decision === 'approve') return true;
+          return handler.extractExplicitReviewerDecision(r.stdout) === 'approve';
+        });
         
         if (anyApprove) {
           decision = {
@@ -643,15 +646,17 @@ export async function runReviewerPhase(
     };
 
     try {
-      orchestratorOutput = await invokeReviewerOrchestrator(context, projectPath);
+      const orchestratorOutput = await invokeReviewerOrchestrator(context, projectPath);
+      const handler = new OrchestrationFallbackHandler();
+      decision = handler.parseReviewerOutput(orchestratorOutput);
     } catch (error) {
       console.error('Orchestrator invocation failed:', error);
       
-      const reviewerStdout = reviewerResult!.stdout.toUpperCase();
-      const hasApprove = reviewerStdout.includes('APPROVE') || reviewerStdout.includes('DECISION: APPROVE');
+      const handler = new OrchestrationFallbackHandler();
+      const explicitDecision = handler.extractExplicitReviewerDecision(reviewerResult!.stdout);
       
-      if (hasApprove) {
-        orchestratorOutput = JSON.stringify({
+      if (explicitDecision === 'approve') {
+        decision = {
           decision: 'approve',
           reasoning: 'FALLBACK: Orchestrator failed but reviewer explicitly approved',
           notes: reviewerResult!.stdout,
@@ -662,9 +667,9 @@ export async function runReviewerPhase(
             push_to_remote: true,
             repeated_issue: false,
           }
-        });
+        };
       } else {
-        orchestratorOutput = JSON.stringify({
+        decision = {
           decision: 'unclear',
           reasoning: 'FALLBACK: Orchestrator failed, retrying review',
           notes: 'Review unclear, retrying',
@@ -675,13 +680,10 @@ export async function runReviewerPhase(
             push_to_remote: false,
             repeated_issue: false,
           }
-        });
+        };
       }
     }
   }
-
-  const handler = new OrchestrationFallbackHandler();
-  decision = handler.parseReviewerOutput(orchestratorOutput);
 
   // STEP 4: Fallback for unclear decisions
   if (decision.decision === 'unclear' && decision.reasoning.includes('FALLBACK: Orchestrator failed')) {

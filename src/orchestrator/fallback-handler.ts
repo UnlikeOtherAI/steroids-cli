@@ -209,7 +209,7 @@ export class OrchestrationFallbackHandler {
     return this.keywordFallbackReviewer(rawOutput);
   }
 
-  private extractExplicitReviewerDecision(
+  public extractExplicitReviewerDecision(
     output: string
   ): 'approve' | 'reject' | 'dispute' | 'skip' | null {
     const map: Record<string, 'approve' | 'reject' | 'dispute' | 'skip'> = {

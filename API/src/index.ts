@@ -55,7 +55,7 @@ export function createApp(): express.Express {
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
-      version: '0.4.3',
+      version: '0.2.6',
     });
   });
 
@@ -63,7 +63,7 @@ export function createApp(): express.Express {
   app.get('/', (req, res) => {
     res.json({
       name: 'Steroids API',
-      version: '0.4.3',
+      version: '0.2.6',
       endpoints: [
         'GET /health',
         'GET /api/projects',
