@@ -5,10 +5,7 @@
 
 import { resolve } from 'node:path';
 import { rmSync } from 'node:fs';
-import { execSync } from 'node:child_process';
-import { getDefaultWorkspaceRoot } from './clone.js';
-import { getProjectHash } from './clone.js';
-import { createIntegrationWorkspace } from './clone.js';
+import { getDefaultWorkspaceRoot, getProjectHash, createIntegrationWorkspace } from './clone.js';
 import { openDatabase } from '../database/connection.js';
 import {
   openGlobalDatabase,
@@ -17,13 +14,10 @@ import {
   updateParallelSessionStatus,
 } from '../runners/global-db.js';
 import {
-  getCommitShortSha,
-  getWorkstreamCommitList,
   hasCherryPickInProgress,
-  gitStatusLines,
-  safeRunMergeCommand,
   runGitCommand,
   isNoPushError,
+  safeRunMergeCommand,
 } from './merge-git.js';
 import {
   MergeLockRecord,
@@ -32,15 +26,12 @@ import {
   refreshMergeLock,
   releaseMergeLock,
 } from './merge-lock.js';
-import {
-  clearProgressEntry,
-  listMergeProgress,
-  upsertProgressEntry,
-  getMergeProgressForWorkstream,
-  MergeProgressRow,
-} from './merge-progress.js';
-import { runConflictResolutionCycle } from './merge-conflict.js';
+import { listMergeProgress } from './merge-progress.js';
 import { ParallelMergeError } from './merge-errors.js';
+import { runValidationGate, snippet } from './merge-validation.js';
+import { ensureMergeWorkingTree, cleanupWorkspaceState } from './merge-workspace.js';
+import { sealWorkstreamsForMerge } from './merge-sealing.js';
+import { processWorkstream } from './merge-process.js';
 
 export interface MergeWorkstreamSpec {
   id: string;
@@ -84,351 +75,6 @@ const DEFAULT_REMOTE = 'origin';
 const DEFAULT_MAIN_BRANCH = 'main';
 const DEFAULT_LOCK_TIMEOUT_MINUTES = 120;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
-const VALIDATION_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
-const VALIDATION_SNIPPET_LIMIT = 8_000;
-
-function getNowISOString(): string {
-  return new Date().toISOString();
-}
-
-function ensureMergeWorkingTree(projectPath: string): void {
-  const lines = gitStatusLines(projectPath);
-  if (lines.length === 0) return;
-
-  if (!hasCherryPickInProgress(projectPath)) {
-    throw new ParallelMergeError(
-      'Working tree is dirty. Commit or stash changes before merging.',
-      'DIRTY_WORKTREE'
-    );
-  }
-}
-
-function cleanupWorkspaceState(
-  projectPath: string,
-  workspaceRoot: string,
-  workstreamIds: string[],
-  options: { cleanupOnSuccess: boolean }
-): void {
-  if (!options.cleanupOnSuccess) return;
-
-  const baseRoot = resolve(workspaceRoot);
-  const hash = getProjectHash(projectPath);
-  const projectWorkspaceRoot = resolve(baseRoot, hash);
-
-  if (!projectWorkspaceRoot.startsWith(baseRoot)) {
-    return;
-  }
-
-  for (const workstreamId of workstreamIds) {
-    const folder = resolve(
-      projectWorkspaceRoot,
-      workstreamId.startsWith('ws-') ? workstreamId : `ws-${workstreamId}`
-    );
-
-    if (resolve(folder).startsWith(projectWorkspaceRoot)) {
-      rmSync(folder, { recursive: true, force: true });
-    }
-  }
-}
-
-function runValidationGate(mergePath: string, validationCommand?: string): void {
-  if (!validationCommand || validationCommand.trim().length === 0) {
-    return;
-  }
-
-  try {
-    execSync(validationCommand, {
-      cwd: mergePath,
-      stdio: 'pipe',
-      encoding: 'utf-8',
-      maxBuffer: VALIDATION_MAX_BUFFER_BYTES,
-    });
-  } catch (error: unknown) {
-    const err = error as Error & { code?: string; stderr?: Buffer | string; stdout?: Buffer | string };
-    const stderr = typeof err.stderr === 'string' ? err.stderr : err.stderr?.toString() ?? '';
-    const stdout = typeof err.stdout === 'string' ? err.stdout : err.stdout?.toString() ?? '';
-    if (err.code === 'ENOBUFS') {
-      throw new ParallelMergeError(
-        'Validation gate output exceeded the maximum buffer size. Reduce output verbosity or split the command.',
-        'VALIDATION_FAILED',
-        {
-          details: {
-            command: validationCommand.trim(),
-            stderr: stderr ?? '',
-            stdout: stdout ?? '',
-          },
-        }
-      );
-    }
-
-    const message = [stderr, stdout, err.message].filter(Boolean).join('\n') || String(error);
-    throw new ParallelMergeError(
-      `Validation gate failed: ${message}`,
-      'VALIDATION_FAILED',
-      {
-        details: {
-          command: validationCommand.trim(),
-          stderr,
-          stdout,
-        },
-      }
-    );
-  }
-}
-
-function snippet(value: string | null | undefined, limit = VALIDATION_SNIPPET_LIMIT): string {
-  if (!value) {
-    return '';
-  }
-
-  const trimmed = value.trim();
-  if (trimmed.length <= limit) {
-    return trimmed;
-  }
-
-  return trimmed.slice(-limit);
-}
-
-function isAppliedCommitIntegrated(projectPath: string, commitSha: string | null): boolean {
-  if (!commitSha) {
-    return false;
-  }
-
-  const output = runGitCommand(
-    projectPath,
-    ['branch', '--contains', commitSha, '--list', 'HEAD'],
-    { allowFailure: true }
-  );
-  const lower = output.toLowerCase();
-
-  if (lower.includes('fatal:') || lower.includes('error:')) {
-    return false;
-  }
-
-  return output.trim().length > 0;
-}
-
-function resolveGitSha(output: string): string | null {
-  const trimmed = output.trim();
-  if (!trimmed) return null;
-  if (/fatal:|error:/i.test(trimmed)) return null;
-  return trimmed.split('\n').at(-1)?.trim() ?? null;
-}
-
-function sealWorkstreamsForMerge(
-  mergeDb: ReturnType<typeof openDatabase>['db'],
-  sessionId: string,
-  runnerId: string,
-  lockEpoch: number,
-  mergePath: string,
-  remote: string,
-  mainBranch: string,
-  workstreams: MergeWorkstreamSpec[]
-): void {
-  const { db, close } = openGlobalDatabase();
-  try {
-    const sealedEntries: Array<{
-      streamId: string;
-      sealedBaseSha: string;
-      sealedHeadSha: string;
-      commits: string[];
-      completionOrder: number;
-    }> = [];
-
-    assertMergeLockEpoch(mergeDb, sessionId, runnerId, lockEpoch);
-
-    for (let index = 0; index < workstreams.length; index += 1) {
-      assertMergeLockEpoch(mergeDb, sessionId, runnerId, lockEpoch);
-      const stream = workstreams[index];
-      const commits = getWorkstreamCommitList(mergePath, remote, stream.branchName, mainBranch);
-      const sealedHeadSha = resolveGitSha(
-        runGitCommand(mergePath, ['rev-parse', `${remote}/${stream.branchName}`], { allowFailure: true })
-      );
-      const sealedBaseSha = resolveGitSha(
-        runGitCommand(mergePath, ['merge-base', `${remote}/${mainBranch}`, `${remote}/${stream.branchName}`], { allowFailure: true })
-      );
-
-      if (!sealedHeadSha || !sealedBaseSha) {
-        throw new ParallelMergeError(
-          `Could not resolve sealed merge SHAs for ${remote}/${stream.branchName}`,
-          'REMOTE_BRANCH_MISSING'
-        );
-      }
-
-      sealedEntries.push({
-        streamId: stream.id,
-        sealedBaseSha,
-        sealedHeadSha,
-        commits,
-        completionOrder: index + 1,
-      });
-    }
-
-    const applySealedUpdates = db.transaction(() => {
-      for (const entry of sealedEntries) {
-        const update = db.prepare(
-          `UPDATE workstreams
-           SET sealed_base_sha = ?,
-               sealed_head_sha = ?,
-               sealed_commit_shas = ?,
-               completion_order = COALESCE(completion_order, ?),
-               completed_at = COALESCE(completed_at, datetime('now')),
-               status = 'completed'
-           WHERE session_id = ?
-             AND id = ?
-             AND status IN ('running', 'completed')`
-        ).run(
-          entry.sealedBaseSha,
-          entry.sealedHeadSha,
-          JSON.stringify(entry.commits),
-          entry.completionOrder,
-          sessionId,
-          entry.streamId
-        );
-
-        if (update.changes !== 1) {
-          throw new ParallelMergeError(
-            `Workstream lease check failed while sealing ${entry.streamId}`,
-            'LEASE_FENCE_FAILED'
-          );
-        }
-      }
-    });
-
-    applySealedUpdates();
-  } finally {
-    close();
-  }
-}
-
-async function processWorkstream(
-  db: ReturnType<typeof openDatabase>['db'],
-  projectPath: string,
-  sessionId: string,
-  workstream: MergeWorkstreamSpec,
-  mainBranch: string,
-  remote: string,
-  progressRows: MergeProgressRow[],
-  heartbeat: { sessionId: string; runnerId: string; timeoutMinutes: number; lockEpoch: number }
-): Promise<{ applied: number; skipped: number; conflicts: number }> {
-  const summary = { applied: 0, skipped: 0, conflicts: 0 };
-  const commits = getWorkstreamCommitList(projectPath, remote, workstream.branchName, mainBranch);
-
-  if (commits.length === 0) {
-    return summary;
-  }
-
-  const workstreamProgress = getMergeProgressForWorkstream(progressRows, workstream.id);
-  const workstreamLookup = new Map<number, MergeProgressRow>();
-  for (const row of workstreamProgress) {
-    workstreamLookup.set(row.position, row);
-  }
-
-  for (let position = 0; position < commits.length; position += 1) {
-    const commitSha = commits[position];
-    const shortSha = getCommitShortSha(commitSha);
-    const prior = workstreamLookup.get(position);
-
-    if (prior?.status === 'applied' && prior.commit_sha === commitSha) {
-      if (isAppliedCommitIntegrated(projectPath, prior.applied_commit_sha)) {
-        summary.applied += 1;
-        continue;
-      }
-
-      clearProgressEntry(db, sessionId, workstream.id, position);
-    }
-
-    if (prior?.status === 'skipped' && prior.commit_sha === commitSha) {
-      summary.skipped += 1;
-      continue;
-    }
-
-    if (prior?.status === 'conflict' && prior.commit_sha === commitSha) {
-      if (hasCherryPickInProgress(projectPath)) {
-      const outcome = await runConflictResolutionCycle({
-        db,
-        projectPath,
-        sessionId,
-        workstreamId: workstream.id,
-        runnerId: heartbeat.runnerId,
-        mergeLockHeartbeat: {
-          lockEpoch: heartbeat.lockEpoch,
-          timeoutMinutes: heartbeat.timeoutMinutes,
-        },
-        branchName: workstream.branchName,
-        position,
-        commitSha,
-        existingTaskId: prior.conflict_task_id ?? undefined,
-      });
-
-        if (outcome === 'skipped') summary.skipped += 1;
-        else summary.applied += 1;
-        summary.conflicts += 1;
-        continue;
-      }
-
-      clearProgressEntry(db, sessionId, workstream.id, position);
-    }
-
-    if (prior && prior.commit_sha !== commitSha) {
-      clearProgressEntry(db, sessionId, workstream.id, position);
-    }
-
-    try {
-      runGitCommand(projectPath, ['cherry-pick', commitSha]);
-      const appliedCommitSha = runGitCommand(projectPath, ['rev-parse', 'HEAD']).trim();
-      upsertProgressEntry(
-        db,
-        sessionId,
-        workstream.id,
-        position,
-        commitSha,
-        'applied',
-        null,
-        appliedCommitSha
-      );
-      summary.applied += 1;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/CONFLICT|merge conflict|could not apply|needs merge/i.test(message)) {
-        throw error;
-      }
-
-      const outcome = await runConflictResolutionCycle({
-        db,
-        projectPath,
-        sessionId,
-        workstreamId: workstream.id,
-        runnerId: heartbeat.runnerId,
-        mergeLockHeartbeat: {
-          lockEpoch: heartbeat.lockEpoch,
-          timeoutMinutes: heartbeat.timeoutMinutes,
-        },
-        branchName: workstream.branchName,
-        position,
-        commitSha,
-      });
-
-      if (outcome === 'skipped') {
-        summary.skipped += 1;
-      } else {
-        summary.applied += 1;
-      }
-
-      summary.conflicts += 1;
-    }
-
-    refreshMergeLock(
-      db,
-      heartbeat.sessionId,
-      heartbeat.runnerId,
-      heartbeat.timeoutMinutes,
-      heartbeat.lockEpoch
-    );
-  }
-
-  return summary;
-}
 
 /**
  * Run cherry-pick merge loop across completed workstreams.
@@ -662,6 +308,5 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
 export {
   MergeLockRecord,
   ParallelMergeError,
-  getNowISOString,
   cleanupWorkspaceState,
 };
