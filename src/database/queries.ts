@@ -539,9 +539,9 @@ export function updateTaskStatus(
 
   const oldStatus = task.status;
 
-  // When manually restarting a task from failed -> pending,
-  // decrement failure_count by 1 to reflect one recovered failure.
-  if (oldStatus === 'failed' && newStatus === 'pending') {
+  // Handle failure_count updates for tasks transitioning from failed status
+  // Only decrement once per failure, regardless of the recovery path
+  if (oldStatus === 'failed' && (newStatus === 'pending' || newStatus === 'completed')) {
     db.prepare(
       `UPDATE tasks
        SET status = ?,
@@ -551,6 +551,13 @@ export function updateTaskStatus(
            END,
            updated_at = datetime('now')
        WHERE id = ?`
+    ).run(newStatus, taskId);
+  }
+  // For other transitions from failed (disputed, skipped, etc.),
+  // keep failure_count unchanged but update status
+  else if (oldStatus === 'failed') {
+    db.prepare(
+      `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`
     ).run(newStatus, taskId);
   } else {
     db.prepare(

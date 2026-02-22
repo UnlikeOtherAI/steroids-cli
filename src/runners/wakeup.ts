@@ -24,7 +24,7 @@ import {
   hasActiveRunnerForProject,
   hasActiveParallelSessionForProject,
 } from './wakeup-checks.js';
-import { startRunner, killProcess } from './wakeup-runner.js';
+import { startRunner, killProcess, restartWorkstreamRunner } from './wakeup-runner.js';
 import { recordWakeupTime, getLastWakeupTime } from './wakeup-timing.js';
 
 export interface WakeupOptions {
@@ -234,8 +234,11 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         let retrySummary = '';
         if (!dryRun) {
           const recovery = reconcileParallelSessionRecovery(global.db, project.path);
-          if (recovery.scheduledRetries > 0) {
-            retrySummary += `, scheduled ${recovery.scheduledRetries} recovery retry(s)`;
+          if (recovery.workstreamsToRestart.length > 0) {
+            for (const ws of recovery.workstreamsToRestart) {
+              restartWorkstreamRunner(ws);
+            }
+            retrySummary += `, restarted ${recovery.workstreamsToRestart.length} workstream runner(s)`;
           }
           if (recovery.blockedWorkstreams > 0) {
             retrySummary += `, blocked ${recovery.blockedWorkstreams} workstream(s)`;

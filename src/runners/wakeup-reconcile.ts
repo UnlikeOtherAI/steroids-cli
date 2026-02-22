@@ -4,25 +4,18 @@
 
 import { openGlobalDatabase } from './global-db.js';
 
-export function releaseExpiredWorkstreamLeases(
-  db: ReturnType<typeof openGlobalDatabase>['db']
-): number {
-  const result = db.prepare(
-    `UPDATE workstreams
-     SET runner_id = NULL,
-         lease_expires_at = NULL
-     WHERE status = 'running'
-       AND lease_expires_at IS NOT NULL
-       AND lease_expires_at <= datetime('now')`
-  ).run();
-
-  return result.changes;
+export interface WorkstreamToRestart {
+  workstreamId: string;
+  sessionId: string;
+  clonePath: string;
+  sectionIds: string;
+  branchName: string;
 }
 
 export function reconcileParallelSessionRecovery(
   db: ReturnType<typeof openGlobalDatabase>['db'],
   projectPath: string
-): { scheduledRetries: number; blockedWorkstreams: number } {
+): { scheduledRetries: number; blockedWorkstreams: number; workstreamsToRestart: WorkstreamToRestart[] } {
   const sessions = db
     .prepare(
       `SELECT id
@@ -34,19 +27,26 @@ export function reconcileParallelSessionRecovery(
 
   let scheduledRetries = 0;
   let blockedWorkstreams = 0;
+  const workstreamsToRestart: WorkstreamToRestart[] = [];
 
   for (const session of sessions) {
     let blockedInSession = 0;
     const candidates = db
       .prepare(
-        `SELECT id, recovery_attempts
+        `SELECT id, recovery_attempts, clone_path, section_ids, branch_name
          FROM workstreams
          WHERE session_id = ?
            AND status = 'running'
            AND (lease_expires_at IS NULL OR lease_expires_at <= datetime('now'))
            AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))`
       )
-      .all(session.id) as Array<{ id: string; recovery_attempts: number }>;
+      .all(session.id) as Array<{
+        id: string;
+        recovery_attempts: number;
+        clone_path: string;
+        section_ids: string;
+        branch_name: string;
+      }>;
 
     for (const candidate of candidates) {
       const nextAttempts = (candidate.recovery_attempts ?? 0) + 1;
@@ -66,15 +66,22 @@ export function reconcileParallelSessionRecovery(
         continue;
       }
 
-      const backoffMinutes = Math.min(2 ** nextAttempts, 30);
       db.prepare(
         `UPDATE workstreams
          SET recovery_attempts = ?,
-             next_retry_at = datetime('now', ?),
-             last_reconcile_action = 'retry_scheduled',
+             next_retry_at = NULL,
+             last_reconcile_action = 'runner_restarted',
              last_reconciled_at = datetime('now')
          WHERE id = ?`
-      ).run(nextAttempts, `+${backoffMinutes} minutes`, candidate.id);
+      ).run(nextAttempts, candidate.id);
+
+      workstreamsToRestart.push({
+        workstreamId: candidate.id,
+        sessionId: session.id,
+        clonePath: candidate.clone_path,
+        sectionIds: candidate.section_ids,
+        branchName: candidate.branch_name,
+      });
       scheduledRetries += 1;
     }
 
@@ -113,5 +120,5 @@ export function reconcileParallelSessionRecovery(
     }
   }
 
-  return { scheduledRetries, blockedWorkstreams };
+  return { scheduledRetries, blockedWorkstreams, workstreamsToRestart };
 }
