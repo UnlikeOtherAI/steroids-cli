@@ -21,6 +21,7 @@ function setupProjectDb(): Database.Database {
       role TEXT NOT NULL,
       status TEXT,
       created_at TEXT NOT NULL,
+      started_at_ms INTEGER,
       last_activity_at_ms INTEGER
     );
   `);

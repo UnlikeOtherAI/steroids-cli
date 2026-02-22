@@ -399,6 +399,10 @@ function detectTaskSignalsInternal(
        JOIN task_invocations i ON i.task_id = t.id
        WHERE (t.status = 'in_progress' OR t.status = 'review')
          AND i.status = 'running'
+         AND (
+           i.started_at_ms IS NULL
+           OR i.started_at_ms >= CAST(STRFTIME('%s', t.updated_at) AS INTEGER) * 1000
+         )
        ORDER BY i.created_at DESC`
     ).all() as Array<{
       id: string;
