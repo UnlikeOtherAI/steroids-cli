@@ -460,6 +460,7 @@ export abstract class BaseAIProvider implements IAIProvider {
     const env = { ...process.env };
 
     // Remove raw provider API keys — CLIs should use their own auth
+    // Also remove session nesting markers (CLAUDECODE) so spawned CLIs don't refuse to run
     const keysToStrip = [
       'ANTHROPIC_API_KEY',
       'OPENAI_API_KEY',
@@ -467,6 +468,7 @@ export abstract class BaseAIProvider implements IAIProvider {
       'GEMINI_API_KEY',
       'GOOGLE_CLOUD_API_KEY',
       'MISTRAL_API_KEY',
+      'CLAUDECODE',
     ];
     for (const key of keysToStrip) {
       delete env[key];
