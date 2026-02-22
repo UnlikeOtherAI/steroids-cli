@@ -9,6 +9,8 @@ import { CodexProvider } from './codex.js';
 import { GeminiProvider } from './gemini.js';
 import { MistralProvider } from './mistral.js';
 import { OpenAIProvider } from './openai.js';
+import { MiniMaxProvider } from './minimax.js';
+import { OllamaProvider } from './ollama.js';
 
 /**
  * Provider availability status
@@ -176,15 +178,30 @@ export class ProviderRegistry {
 /**
  * Create a registry with default providers registered
  */
-export function createDefaultRegistry(): ProviderRegistry {
+export async function createDefaultRegistry(): Promise<ProviderRegistry> {
   const registry = new ProviderRegistry();
 
-  // Register built-in providers
-  registry.register(new ClaudeProvider());
-  registry.register(new CodexProvider());
-  registry.register(new GeminiProvider());
-  registry.register(new MistralProvider());
-  registry.register(new OpenAIProvider());
+  const providers = [
+    new ClaudeProvider(),
+    new CodexProvider(),
+    new GeminiProvider(),
+    new MistralProvider(),
+    new OpenAIProvider(),
+    new MiniMaxProvider(),
+    new OllamaProvider(),
+  ];
+
+  for (const provider of providers) {
+    const anyProvider = provider as any;
+    if (anyProvider.initialize) {
+      try {
+        await anyProvider.initialize();
+      } catch (error) {
+        console.warn(`Warning: Failed to initialize provider '${provider.name}': ${error}`);
+      }
+    }
+    registry.register(provider);
+  }
 
   return registry;
 }
@@ -192,17 +209,17 @@ export function createDefaultRegistry(): ProviderRegistry {
 /**
  * Global singleton registry instance
  */
-let globalRegistry: ProviderRegistry | null = null;
+let globalRegistryPromise: Promise<ProviderRegistry> | null = null;
 
 /**
  * Get the global provider registry
  * Creates a default registry if none exists
  */
-export function getProviderRegistry(): ProviderRegistry {
-  if (!globalRegistry) {
-    globalRegistry = createDefaultRegistry();
+export async function getProviderRegistry(): Promise<ProviderRegistry> {
+  if (!globalRegistryPromise) {
+    globalRegistryPromise = createDefaultRegistry();
   }
-  return globalRegistry;
+  return globalRegistryPromise;
 }
 
 /**
@@ -210,7 +227,7 @@ export function getProviderRegistry(): ProviderRegistry {
  * Useful for testing
  */
 export function setProviderRegistry(registry: ProviderRegistry): void {
-  globalRegistry = registry;
+  globalRegistryPromise = Promise.resolve(registry);
 }
 
 /**
@@ -218,5 +235,5 @@ export function setProviderRegistry(registry: ProviderRegistry): void {
  * Useful for testing
  */
 export function resetProviderRegistry(): void {
-  globalRegistry = null;
+  globalRegistryPromise = null;
 }

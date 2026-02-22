@@ -118,12 +118,12 @@ export interface CreditExhaustionResult {
  * Uses provider.classifyResult() which checks both stderr and stdout.
  * Returns a CreditExhaustionResult if credits are exhausted or rate limited, null otherwise.
  */
-function checkCreditExhaustion(
+async function checkCreditExhaustion(
   result: InvokeResult,
   role: 'coder' | 'reviewer',
   projectPath: string,
   reviewerConfig?: ReviewerConfig
-): CreditExhaustionResult | null {
+): Promise<CreditExhaustionResult | null> {
   if (result.success) return null;
 
   const config = loadConfig(projectPath);
@@ -133,7 +133,7 @@ function checkCreditExhaustion(
 
   if (!providerName || !modelName) return null;
 
-  const registry = getProviderRegistry();
+  const registry = await getProviderRegistry();
   const provider = registry.tryGet(providerName);
   if (!provider) return null;
 
@@ -277,7 +277,7 @@ export async function runCoderPhase(
   }
 
   // Check for credit exhaustion before proceeding to orchestrator
-  const creditCheck = checkCreditExhaustion(coderResult, 'coder', projectPath);
+  const creditCheck = await checkCreditExhaustion(coderResult, 'coder', projectPath);
   if (creditCheck) {
     return creditCheck;
   }
@@ -464,7 +464,7 @@ export async function runReviewerPhase(
     // Check for credit exhaustion in any reviewer
     for (let i = 0; i < reviewerResults.length; i++) {
       const res = reviewerResults[i];
-      const creditCheck = checkCreditExhaustion(res as any, 'reviewer', projectPath, reviewerConfigs[i]);
+      const creditCheck = await checkCreditExhaustion(res as any, 'reviewer', projectPath, reviewerConfigs[i]);
       if (creditCheck) {
         return creditCheck;
       }
@@ -502,7 +502,7 @@ export async function runReviewerPhase(
     }
 
     // Check for credit exhaustion
-    const creditCheck = checkCreditExhaustion(reviewerResult as any, 'reviewer', projectPath);
+    const creditCheck = await checkCreditExhaustion(reviewerResult as any, 'reviewer', projectPath);
     if (creditCheck) {
       return creditCheck;
     }

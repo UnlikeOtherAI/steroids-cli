@@ -110,7 +110,7 @@ DESCRIPTION:
     return;
   }
 
-  const registry = getProviderRegistry();
+  const registry = await getProviderRegistry();
   const statuses = await registry.getStatus();
 
   if (flags.json) {
@@ -238,7 +238,7 @@ ENVIRONMENT VARIABLES:
     out.log(`Total: ${result.models.length} models`);
   } else {
     // Get from CLI provider registry
-    const models = getModelsForProvider(provider as 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral');
+    const models = await getModelsForProvider(provider as any);
 
     if (models.length === 0) {
       out.error('NOT_FOUND', `No models found for provider: ${provider}`);

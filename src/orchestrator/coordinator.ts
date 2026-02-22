@@ -251,7 +251,7 @@ export async function invokeCoordinator(
   console.log(`Provider: ${providerName} / ${modelName}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  const registry = getProviderRegistry();
+  const registry = await getProviderRegistry();
   const provider = registry.get(providerName);
 
   if (!(await provider.isAvailable())) {

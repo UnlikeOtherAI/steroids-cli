@@ -151,6 +151,12 @@ export interface IAIProvider {
   resume(sessionId: string, prompt: string, options: InvokeOptions): Promise<InvokeResult>;
 
   /**
+   * Initialize the provider (e.g., fetch dynamic models)
+   * @returns Promise resolving when initialization is complete
+   */
+  initialize?(): Promise<void>;
+
+  /**
    * Check if this provider is available (CLI installed and accessible)
    * @returns Promise resolving to true if available
    */

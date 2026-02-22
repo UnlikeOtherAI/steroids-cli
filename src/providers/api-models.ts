@@ -26,9 +26,9 @@ export interface ProviderModel {
  * Uses the provider registry to verify CLI availability
  */
 export async function checkProviderCLI(
-  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral'
+  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral' | 'minimax' | 'ollama'
 ): Promise<ProviderStatus> {
-  const registry = getProviderRegistry();
+  const registry = await getProviderRegistry();
   const providerInstance = registry.tryGet(provider);
 
   if (!providerInstance) {
@@ -54,10 +54,10 @@ export async function checkProviderCLI(
  * Get models for a provider from the registry (CLI-based)
  * Does not require API keys - uses hardcoded model lists from provider implementations
  */
-export function getModelsForProvider(
-  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral'
-): ProviderModel[] {
-  const registry = getProviderRegistry();
+export async function getModelsForProvider(
+  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral' | 'minimax' | 'ollama'
+): Promise<ProviderModel[]> {
+  const registry = await getProviderRegistry();
   const providerInstance = registry.tryGet(provider);
 
   if (!providerInstance) {
@@ -76,11 +76,11 @@ export function getModelsForProvider(
 /**
  * Get the default model for a provider and role
  */
-export function getDefaultModel(
-  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral',
+export async function getDefaultModel(
+  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral' | 'minimax' | 'ollama',
   role: 'orchestrator' | 'coder' | 'reviewer'
-): string | undefined {
-  const registry = getProviderRegistry();
+): Promise<string | undefined> {
+  const registry = await getProviderRegistry();
   const providerInstance = registry.tryGet(provider);
   return providerInstance?.getDefaultModel(role);
 }
@@ -479,7 +479,7 @@ function preferMistralModel(candidate: APIModel, existing: APIModel): boolean {
  * Fetch models for a specific provider
  */
 export async function fetchModelsForProvider(
-  provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex'
+  provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex' | 'minimax' | 'ollama'
 ): Promise<FetchModelsResult> {
   switch (provider) {
     case 'claude':
@@ -490,10 +490,14 @@ export async function fetchModelsForProvider(
       return fetchGeminiModels();
     case 'mistral':
       return fetchMistralModels();
+    case 'minimax':
+      return fetchMiniMaxModels();
+    case 'ollama':
+      return fetchOllamaModels();
     case 'codex':
       return {
         success: true,
-        models: getModelsForProvider('codex').map(m => ({
+        models: (await getModelsForProvider('codex')).map(m => ({
           id: m.id,
           name: m.name,
         })),
@@ -508,9 +512,64 @@ export async function fetchModelsForProvider(
 }
 
 /**
+ * Fetch models from MiniMax API
+ */
+export async function fetchMiniMaxModels(): Promise<FetchModelsResult> {
+  const apiKey = process.env.STEROIDS_MINIMAX_API_KEY || process.env.MINIMAX_API_KEY;
+
+  if (!apiKey) {
+    return {
+      success: false,
+      models: [],
+      error: 'STEROIDS_MINIMAX_API_KEY not set',
+    };
+  }
+
+  try {
+    // MiniMax uses a list of static models mostly, but we can fetch account info or similar if needed.
+    // For now, return the list from the provider.
+    const models = (await getModelsForProvider('minimax')).map(m => ({
+      id: m.id,
+      name: m.name,
+    }));
+    return { success: true, models };
+  } catch (error) {
+    return {
+      success: false,
+      models: [],
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Fetch models from local Ollama service
+ */
+export async function fetchOllamaModels(): Promise<FetchModelsResult> {
+  try {
+    const registry = await getProviderRegistry();
+    const ollama = registry.get('ollama') as any;
+    if (ollama.fetchModels) {
+      await ollama.fetchModels();
+    }
+    const models = (await getModelsForProvider('ollama')).map(m => ({
+      id: m.id,
+      name: m.name,
+    }));
+    return { success: true, models };
+  } catch (error) {
+    return {
+      success: false,
+      models: [],
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
  * Get the environment variable name for a provider's API key
  */
-export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex'): string {
+export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex' | 'minimax' | 'ollama'): string {
   switch (provider) {
     case 'claude':
       return 'STEROIDS_ANTHROPIC_API_KEY';
@@ -521,15 +580,20 @@ export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mist
     case 'mistral':
       return 'STEROIDS_MISTRAL_API_KEY';
     case 'codex':
-      return 'STEROIDS_OPENAI_API_KEY'; // Codex often uses OpenAI key
+      return 'STEROIDS_OPENAI_API_KEY';
+    case 'minimax':
+      return 'STEROIDS_MINIMAX_API_KEY';
+    case 'ollama':
+      return ''; // No API key for local Ollama
   }
 }
 
 /**
  * Check if API key is set for a provider
  */
-export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex'): boolean {
-  if (provider === 'codex') return true; // Codex might use local session/CLI auth
+export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex' | 'minimax' | 'ollama'): boolean {
+  if (provider === 'codex') return true;
+  if (provider === 'ollama') return true; // Local service
   switch (provider) {
     case 'claude':
       return !!process.env.STEROIDS_ANTHROPIC_API_KEY;
@@ -539,6 +603,8 @@ export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral' |
       return !!(process.env.STEROIDS_GOOGLE_API_KEY ?? process.env.STEROIDS_GEMINI_API_KEY);
     case 'mistral':
       return !!process.env.STEROIDS_MISTRAL_API_KEY;
+    case 'minimax':
+      return !!(process.env.STEROIDS_MINIMAX_API_KEY || process.env.MINIMAX_API_KEY);
     default:
       return false;
   }

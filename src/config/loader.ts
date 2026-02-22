@@ -11,7 +11,7 @@ import { parse, stringify } from 'yaml';
 const STEROIDS_DIR = '.steroids';
 const CONFIG_FILE = 'config.yaml';
 
-export type ProviderName = 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral';
+export type ProviderName = 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral' | 'minimax' | 'ollama';
 
 export interface ReviewerConfig {
   provider?: ProviderName;

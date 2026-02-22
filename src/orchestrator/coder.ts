@@ -76,7 +76,7 @@ async function invokeProvider(
   }
 
   // Get the provider from registry
-  const registry = getProviderRegistry();
+  const registry = await getProviderRegistry();
   const provider = registry.get(providerName);
 
   // Check if provider is available

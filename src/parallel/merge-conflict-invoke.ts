@@ -22,7 +22,7 @@ export async function invokeMergeConflictModel(
   const providerName = modelConfig.provider;
   const model = modelConfig.model;
 
-  const registry = getProviderRegistry();
+  const registry = await getProviderRegistry();
   const provider = registry.get(providerName);
   const result = await logInvocation(
     prompt,

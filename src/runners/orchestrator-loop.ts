@@ -172,7 +172,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           const batchCoderResult = await invokeCoderBatch(batch.tasks, batch.sectionName, projectPath);
 
           // Check for credit exhaustion in batch coder result
-          const batchCoderCredit = checkBatchCreditExhaustion(batchCoderResult, 'coder', projectPath);
+          const batchCoderCredit = await checkBatchCreditExhaustion(batchCoderResult, 'coder', projectPath);
           if (batchCoderCredit) {
             const pauseResult = await handleCreditExhaustion({
               provider: batchCoderCredit.provider,
@@ -203,7 +203,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             const batchReviewerResult = await invokeReviewerBatch(tasksInReview, batch.sectionName, projectPath);
 
             // Check for credit exhaustion in batch reviewer result
-            const batchReviewerCredit = checkBatchCreditExhaustion(batchReviewerResult, 'reviewer', projectPath);
+            const batchReviewerCredit = await checkBatchCreditExhaustion(batchReviewerResult, 'reviewer', projectPath);
             if (batchReviewerCredit) {
               const pauseResult = await handleCreditExhaustion({
                 provider: batchReviewerCredit.provider,

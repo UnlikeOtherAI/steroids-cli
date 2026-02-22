@@ -163,11 +163,11 @@ async function interruptibleSleep(
 /**
  * Check a batch result for credit exhaustion using the provider's classifier.
  */
-export function checkBatchCreditExhaustion(
+export async function checkBatchCreditExhaustion(
   result: { success: boolean; exitCode: number; stdout: string; stderr: string; duration: number; timedOut: boolean },
   role: 'coder' | 'reviewer',
   projectPath: string
-): CreditExhaustionResult | null {
+): Promise<CreditExhaustionResult | null> {
   if (result.success) return null;
 
   const config = loadConfig(projectPath);
@@ -177,7 +177,7 @@ export function checkBatchCreditExhaustion(
 
   if (!providerName || !modelName) return null;
 
-  const registry = getProviderRegistry();
+  const registry = await getProviderRegistry();
   const provider = registry.tryGet(providerName);
   if (!provider) return null;
 
