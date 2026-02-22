@@ -27,7 +27,7 @@ import type { SectionTask } from '../prompts/prompt-helpers.js';
 import { loadConfig, type ReviewerConfig, type SteroidsConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
-import { isCommitReachableWithFetch } from '../git/status.js';
+import { resolveLatestReachableSubmissionCommitSha } from '../git/submission-resolution.js';
 
 export interface ReviewerResult {
   success: boolean;
@@ -102,22 +102,6 @@ export function getReviewerConfigs(config: SteroidsConfig): ReviewerConfig[] {
  */
 export function isMultiReviewEnabled(config: SteroidsConfig): boolean {
   return !!(config.ai?.reviewers && config.ai.reviewers.length > 1);
-}
-
-function resolveLatestReachableSubmissionCommitSha(
-  projectPath: string,
-  taskId: string,
-  db: ReturnType<typeof openDatabase>['db']
-): string | null {
-  const candidateShas = getSubmissionCommitShas(db, taskId);
-
-  for (const sha of candidateShas) {
-    if (isCommitReachableWithFetch(projectPath, sha, { forceFetch: true })) {
-      return sha;
-    }
-  }
-
-  return null;
 }
 
 /**
@@ -349,7 +333,10 @@ export async function invokeReviewer(
         console.log(`Coder included notes with submission`);
       }
       
-      submissionCommitHash = resolveLatestReachableSubmissionCommitSha(projectPath, task.id, db);
+      submissionCommitHash = resolveLatestReachableSubmissionCommitSha(
+        projectPath,
+        getSubmissionCommitShas(db, task.id)
+      );
       if (!submissionCommitHash) {
         throw new Error(`No reachable submission commit hash found for task ${task.id}`);
       }
@@ -483,7 +470,10 @@ export async function invokeReviewerBatch(
     const unresolved: string[] = [];
 
     taskCommits = tasks.map(task => {
-      const commitHash = resolveLatestReachableSubmissionCommitSha(projectPath, task.id, db);
+      const commitHash = resolveLatestReachableSubmissionCommitSha(
+        projectPath,
+        getSubmissionCommitShas(db, task.id)
+      );
       if (!commitHash) {
         unresolved.push(task.id);
       }

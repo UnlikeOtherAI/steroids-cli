@@ -40,8 +40,8 @@ import {
   getDiffSummary,
   getDiffStats,
   isCommitReachable,
-  isCommitReachableWithFetch,
 } from '../git/status.js';
+import { resolveLatestReachableSubmissionCommitSha } from '../git/submission-resolution.js';
 import {
   invokeCoderOrchestrator,
   invokeReviewerOrchestrator,
@@ -232,21 +232,6 @@ async function checkNonRetryableProviderFailure(
 function summarizeErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   return raw.replace(/\s+/g, ' ').trim().slice(0, 220);
-}
-
-function resolveLatestReachableSubmissionCommitSha(
-  db: ReturnType<typeof openDatabase>['db'],
-  projectPath: string,
-  taskId: string
-): string | null {
-  const candidateShas = getSubmissionCommitShas(db, taskId);
-  for (const sha of candidateShas) {
-    if (isCommitReachableWithFetch(projectPath, sha, { forceFetch: true })) {
-      return sha;
-    }
-  }
-
-  return null;
 }
 
 /**
@@ -988,7 +973,10 @@ export async function runReviewerPhase(
   const config = loadConfig(projectPath);
   const multiReviewEnabled = isMultiReviewEnabled(config);
   const strict = config.ai?.review?.strict ?? true;
-  const submissionCommitSha = resolveLatestReachableSubmissionCommitSha(db, projectPath, task.id);
+  const submissionCommitSha = resolveLatestReachableSubmissionCommitSha(
+    projectPath,
+    getSubmissionCommitShas(db, task.id)
+  );
   if (!submissionCommitSha) {
     updateTaskStatus(
       db,
