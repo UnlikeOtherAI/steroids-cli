@@ -846,7 +846,7 @@ export function getLatestSubmissionCommitSha(
  * Get submission commit hashes for review transitions, from newest to oldest.
  */
 export function getSubmissionCommitShas(db: Database.Database, taskId: string): string[] {
-  return db
+  const rows = db
     .prepare(
       `SELECT commit_sha FROM audit
        WHERE task_id = ?
@@ -854,8 +854,10 @@ export function getSubmissionCommitShas(db: Database.Database, taskId: string): 
        AND commit_sha IS NOT NULL
        ORDER BY created_at DESC, id DESC`
     )
-    .all(taskId)
-    .map((row: { commit_sha: string | null }) => row.commit_sha)
+    .all(taskId) as Array<{ commit_sha: string | null }>;
+
+  return rows
+    .map((row) => row.commit_sha)
     .filter((sha): sha is string => Boolean(sha));
 }
 

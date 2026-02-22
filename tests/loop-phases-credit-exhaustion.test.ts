@@ -30,6 +30,8 @@ const mockGetTaskAudit = jest.fn().mockReturnValue([]);
 const mockGetLatestSubmissionNotes = jest.fn().mockReturnValue(undefined);
 const mockListTasks = jest.fn().mockReturnValue([]);
 const mockAddAuditEntry = jest.fn();
+const mockGetLatestMustImplementGuidance = jest.fn().mockReturnValue(null);
+const mockGetSubmissionCommitShas = jest.fn().mockReturnValue(['abc123']);
 
 const mockGetCurrentCommitSha = jest.fn().mockReturnValue('abc123');
 const mockGetModifiedFiles = jest.fn().mockReturnValue([]);
@@ -38,6 +40,8 @@ const mockGetChangedFiles = jest.fn().mockReturnValue([]);
 const mockHasUncommittedChanges = jest.fn().mockReturnValue(false);
 const mockGetDiffSummary = jest.fn().mockReturnValue('');
 const mockGetDiffStats = jest.fn().mockReturnValue({ additions: 0, deletions: 0 });
+const mockIsCommitReachable = jest.fn().mockReturnValue(true);
+const mockIsCommitReachableWithFetch = jest.fn().mockReturnValue(true);
 const mockPushToRemote = jest.fn().mockReturnValue({ success: true, commitHash: 'abc123' });
 const mockInvokeCoordinator = jest.fn();
 
@@ -77,6 +81,8 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   getTaskRejections: mockGetTaskRejections,
   getTaskAudit: mockGetTaskAudit,
   getLatestSubmissionNotes: mockGetLatestSubmissionNotes,
+  getLatestMustImplementGuidance: mockGetLatestMustImplementGuidance,
+  getSubmissionCommitShas: mockGetSubmissionCommitShas,
   listTasks: mockListTasks,
   addAuditEntry: mockAddAuditEntry,
   getFollowUpDepth: jest.fn().mockReturnValue(0),
@@ -91,6 +97,8 @@ jest.unstable_mockModule('../src/git/status.js', () => ({
   hasUncommittedChanges: mockHasUncommittedChanges,
   getDiffSummary: mockGetDiffSummary,
   getDiffStats: mockGetDiffStats,
+  isCommitReachable: mockIsCommitReachable,
+  isCommitReachableWithFetch: mockIsCommitReachableWithFetch,
 }));
 
 jest.unstable_mockModule('../src/git/push.js', () => ({
