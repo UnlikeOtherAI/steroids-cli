@@ -484,14 +484,14 @@ export const ProjectDetailPage: React.FC = () => {
               }`}>
                 <div className="flex items-center gap-2">
                   <i className="fa-solid fa-triangle-exclamation text-sm" />
-                  <span className="text-sm">{storage.clearable_human} of old logs can be cleared</span>
+                  <span className="text-sm">{storage.clearable_human} of old logs and backups can be cleared</span>
                 </div>
                 <button
                   onClick={handleClearLogs}
                   disabled={clearing}
                   className="px-3 py-1.5 text-sm font-medium bg-bg-elevated rounded-lg hover:bg-bg-surface2 transition-colors disabled:opacity-50"
                 >
-                  {clearing ? <ArrowPathIcon className="w-4 h-4 animate-spin inline" /> : 'Clear Old Logs'}
+                  {clearing ? <ArrowPathIcon className="w-4 h-4 animate-spin inline" /> : 'Cleanup Project'}
                 </button>
               </div>
             )}

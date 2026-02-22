@@ -34,14 +34,6 @@ const INSTALL_COMMANDS: Record<string, { command: string; description: string }>
   },
 };
 
-// API key environment variable names
-const API_KEY_ENV_VARS: Record<string, string> = {
-  claude: 'ANTHROPIC_API_KEY',
-  gemini: 'GOOGLE_API_KEY',
-  codex: 'OPENAI_API_KEY',
-  mistral: 'MISTRAL_API_KEY',
-};
-
 interface AIRoleSettingsProps {
   role: 'orchestrator' | 'coder' | 'reviewer' | 'reviewers';
   schema: ConfigSchema;
@@ -124,7 +116,7 @@ export const AIRoleSettings: React.FC<AIRoleSettingsProps> = ({
         )}
 
         <div className="space-y-3">
-          {activeReviewers.map((r, index) => (
+          {activeReviewers.map((_, index) => (
             <div key={index} className="border border-border rounded-lg p-3 bg-bg-surface2">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold text-text-muted uppercase tracking-wider">
@@ -216,8 +208,6 @@ const AIRoleSettingsSingle: React.FC<AIRoleSettingsSingleProps> = ({
 }) => {
   const [models, setModels] = useState<AIModel[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
-  const [modelSource, setModelSource] = useState<'api' | 'cache' | 'fallback' | null>(null);
-  const [modelError, setModelError] = useState<string | null>(null);
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
 
   // Get current values
@@ -245,16 +235,10 @@ const AIRoleSettingsSingle: React.FC<AIRoleSettingsSingleProps> = ({
   // Load models when provider changes
   const loadModels = useCallback(async (provider: string) => {
     setLoadingModels(true);
-    setModelError(null);
     try {
       const response = await aiApi.getModels(provider);
       setModels(response.models);
-      setModelSource(response.source);
-      if (response.error) {
-        setModelError(response.error);
-      }
     } catch (err) {
-      setModelError(err instanceof Error ? err.message : 'Failed to load models');
       setModels([]);
     } finally {
       setLoadingModels(false);
@@ -282,10 +266,6 @@ const AIRoleSettingsSingle: React.FC<AIRoleSettingsSingleProps> = ({
     }
   };
 
-  const formatRoleName = (r: string): string => {
-    return r.charAt(0).toUpperCase() + r.slice(1);
-  };
-
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedCommand(id);
@@ -295,9 +275,7 @@ const AIRoleSettingsSingle: React.FC<AIRoleSettingsSingleProps> = ({
   // Check if current provider is installed
   const currentProviderInfo = providers.find(p => p.id === currentProvider);
   const isNotInstalled = currentProviderInfo && !currentProviderInfo.installed;
-  const needsApiKey = currentProviderInfo?.installed && modelSource === 'fallback';
   const installInfo = INSTALL_COMMANDS[currentProvider];
-  const envVar = API_KEY_ENV_VARS[currentProvider];
 
   const providerOptions = schema.properties?.provider?.enum || ['claude', 'openai', 'gemini', 'mistral', 'codex'];
 

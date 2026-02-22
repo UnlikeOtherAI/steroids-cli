@@ -11,6 +11,7 @@ import {
 } from '../utils/storage-cache.js';
 import { cleanupInvocationLogs } from '../../../dist/cleanup/invocation-logs.js';
 import { cleanupTextLogs } from '../../../dist/cleanup/text-logs.js';
+import { cleanupBackups } from '../../../dist/cleanup/backups.js';
 import { formatBytes } from '../../../dist/cleanup/directory-size.js';
 
 const router = Router();
@@ -50,12 +51,13 @@ function parseRetentionDays(raw: unknown): { valid: true; days: number } | { val
 function runCleanup(projectPath: string, retentionDays: number) {
   const invResult = cleanupInvocationLogs(projectPath, { retentionDays });
   const textResult = cleanupTextLogs(projectPath, { retentionDays });
+  const backupResult = cleanupBackups(projectPath, { retentionDays: 30 }); // Keep backups longer
   bustStorageCache(projectPath);
   return {
     ok: true as const,
-    deleted_files: invResult.deletedFiles + textResult.deletedFiles,
-    freed_bytes: invResult.freedBytes + textResult.freedBytes,
-    freed_human: formatBytes(invResult.freedBytes + textResult.freedBytes),
+    deleted_files: invResult.deletedFiles + textResult.deletedFiles + backupResult.deletedFiles,
+    freed_bytes: invResult.freedBytes + textResult.freedBytes + backupResult.freedBytes,
+    freed_human: formatBytes(invResult.freedBytes + textResult.freedBytes + backupResult.freedBytes),
   };
 }
 

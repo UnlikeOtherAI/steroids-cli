@@ -22,7 +22,7 @@ export interface StorageBreakdown {
 }
 
 const MB = 1024 * 1024;
-const THRESHOLD_ORANGE = 50 * MB;
+const THRESHOLD_ORANGE = 10 * MB;
 const THRESHOLD_RED = 100 * MB;
 const DB_FILES = ['steroids.db', 'steroids.db-wal', 'steroids.db-shm'];
 const KNOWN_PATHS = new Set([...DB_FILES, 'invocations', 'logs', 'backup']);
@@ -103,7 +103,7 @@ export async function getStorageBreakdown(steroidsDir: string): Promise<StorageB
   } catch { /* tolerate */ }
 
   const totalBytes = dbBytes + invocations.bytes + logs.bytes + backups.bytes + otherBytes;
-  const clearableBytes = invocations.bytes + logs.bytes;
+  const clearableBytes = invocations.bytes + logs.bytes + backups.bytes;
   let warning: StorageBreakdown['threshold_warning'] = null;
   if (clearableBytes >= THRESHOLD_RED) warning = 'red';
   else if (clearableBytes >= THRESHOLD_ORANGE) warning = 'orange';

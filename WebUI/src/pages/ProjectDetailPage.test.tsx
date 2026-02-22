@@ -159,10 +159,10 @@ describe('ProjectDetailPage storage section', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText('46.0 MB of old logs can be cleared')).toBeInTheDocument();
+      expect(screen.getByText('46.0 MB of old logs and backups can be cleared')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Clear Old Logs')).toBeInTheDocument();
+    expect(screen.getByText('Cleanup Project')).toBeInTheDocument();
   });
 
   it('shows red warning banner when threshold_warning is red', async () => {
@@ -175,7 +175,7 @@ describe('ProjectDetailPage storage section', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText('120.0 MB of old logs can be cleared')).toBeInTheDocument();
+      expect(screen.getByText('120.0 MB of old logs and backups can be cleared')).toBeInTheDocument();
     });
   });
 
@@ -186,7 +186,7 @@ describe('ProjectDetailPage storage section', () => {
       expect(screen.getByText('Database')).toBeInTheDocument();
     });
 
-    expect(screen.queryByText(/of old logs can be cleared/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/of old logs and backups can be cleared/)).not.toBeInTheDocument();
   });
 
   it('shows success message and refetches storage after clearing logs', async () => {
@@ -205,10 +205,10 @@ describe('ProjectDetailPage storage section', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText('Clear Old Logs')).toBeInTheDocument();
+      expect(screen.getByText('Cleanup Project')).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText('Clear Old Logs'));
+    await user.click(screen.getByText('Cleanup Project'));
 
     await waitFor(() => {
       expect(screen.getByText('Freed 46.0 MB')).toBeInTheDocument();
@@ -231,10 +231,10 @@ describe('ProjectDetailPage storage section', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText('Clear Old Logs')).toBeInTheDocument();
+      expect(screen.getByText('Cleanup Project')).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText('Clear Old Logs'));
+    await user.click(screen.getByText('Cleanup Project'));
 
     await waitFor(() => {
       expect(screen.getByText('Cleanup failed')).toBeInTheDocument();

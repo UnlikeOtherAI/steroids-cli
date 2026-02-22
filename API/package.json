@@ -1,6 +1,6 @@
 {
   "name": "steroids-api",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "REST API for Steroids multi-project monitoring",
   "main": "dist/index.js",
   "type": "module",
