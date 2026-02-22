@@ -346,7 +346,13 @@ export class CodexProvider extends BaseAIProvider {
           }
 
           if (parsed.text) {
-            if (stdout.length < MAX_BUFFER) stdout += parsed.text;
+            // Ensure agent_message chunks are newline-separated so DECISION: tokens
+            // remain at line boundaries when multiple messages are concatenated
+            // (e.g. on session resume, history replay emits multiple item.completed events)
+            const chunk = stdout.length > 0 && !stdout.endsWith('\n')
+              ? '\n' + parsed.text
+              : parsed.text;
+            if (stdout.length < MAX_BUFFER) stdout += chunk;
             onActivity?.({ type: 'output', stream: 'stdout', msg: parsed.text });
             if (streamOutput) process.stdout.write(parsed.text);
           } else if (parsed.tool) {

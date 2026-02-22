@@ -124,8 +124,9 @@ export function findTaskCommit(
   taskTitle: string
 ): string | null {
   try {
-    // Search last 20 commits for one mentioning the task
-    const log = execSync('git log --oneline -20', {
+    // Search last 50 commits across all branches (including worktree branches)
+    // --all ensures commits made in parallel worktrees are visible
+    const log = execSync('git log --oneline --all -50', {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],

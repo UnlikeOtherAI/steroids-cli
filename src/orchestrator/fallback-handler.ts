@@ -219,19 +219,29 @@ export class OrchestrationFallbackHandler {
       SKIP: 'skip',
     };
 
-    const explicitMatch = output.match(
-      /^\s*(?:\*\*)?DECISION(?:\*\*)?\s*(?::|-)\s*(APPROVE|REJECT|DISPUTE|SKIP)\b/im
-    );
-    if (explicitMatch?.[1]) {
-      return map[explicitMatch[1].toUpperCase()] ?? null;
+    // Use the LAST DECISION token in the output, not the first.
+    // When a provider session is resumed, the full conversation history is replayed
+    // and old DECISION tokens from previous reviews appear before the current one.
+    const decisionPattern = /(?:^|[\n\r])\s*(?:\*\*)?DECISION(?:\*\*)?\s*(?::|-)\s*(APPROVE|REJECT|DISPUTE|SKIP)\b/gim;
+    let lastMatch: RegExpExecArray | null = null;
+    let match: RegExpExecArray | null;
+    while ((match = decisionPattern.exec(output)) !== null) {
+      lastMatch = match;
+    }
+    if (lastMatch?.[1]) {
+      return map[lastMatch[1].toUpperCase()] ?? null;
     }
 
-    const firstNonEmptyLine = output.split('\n').find(line => line.trim().length > 0)?.trim();
-    if (firstNonEmptyLine && /^(APPROVE|REJECT|DISPUTE|SKIP)\b/i.test(firstNonEmptyLine)) {
-      const token = firstNonEmptyLine.match(/^(APPROVE|REJECT|DISPUTE|SKIP)\b/i)?.[1];
+    // Fallback: last non-empty line starting with a bare decision token
+    const lines = output.split(/[\n\r]+/);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const token = line.match(/^(APPROVE|REJECT|DISPUTE|SKIP)\b/i)?.[1];
       if (token) {
         return map[token.toUpperCase()] ?? null;
       }
+      break; // only check the last non-empty line
     }
 
     return null;
