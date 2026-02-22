@@ -202,8 +202,14 @@ export class MistralProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
-    // Set up isolated VIBE_HOME
-    const isolatedHome = this.setupIsolatedHome('.vibe', ['state.json', 'config.yaml']);
+    // Set up isolated VIBE_HOME.
+    // setupIsolatedHome('.vibe', ...) puts auth files at isolatedHome/.vibe/
+    // VIBE_HOME must point at that .vibe subdirectory so Vibe finds config.toml there.
+    // .env: API key (CRITICAL — without this, VibeConfig.load() throws MissingAPIKeyError → onboarding TUI)
+    // config.toml: main config with model definitions
+    // trusted_folders.toml: folder trust allowlist
+    const isolatedHome = this.setupIsolatedHome('.vibe', ['.env', 'config.toml', 'trusted_folders.toml']);
+    const vibeHome = join(isolatedHome, '.vibe');
 
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -214,7 +220,7 @@ export class MistralProvider extends BaseAIProvider {
       // Vibe chooses models by alias. We inject a one-model runtime list so any
       // requested model ID can be selected deterministically.
       const env = this.getSanitizedCliEnv({
-        VIBE_HOME: isolatedHome,
+        VIBE_HOME: vibeHome,
         VIBE_ACTIVE_MODEL: model,
         VIBE_MODELS: JSON.stringify([
           {
@@ -288,7 +294,7 @@ export class MistralProvider extends BaseAIProvider {
       child.on('close', (code) => {
         clearTimeout(timeoutHandle);
         const duration = Date.now() - startTime;
-        const sessionInfo = this.extractSessionInfo(isolatedHome);
+        const sessionInfo = this.extractSessionInfo(vibeHome);
 
         // Cleanup isolated home
         try {
@@ -311,7 +317,7 @@ export class MistralProvider extends BaseAIProvider {
       child.on('error', (error) => {
         clearTimeout(timeoutHandle);
         const duration = Date.now() - startTime;
-        const sessionInfo = this.extractSessionInfo(isolatedHome);
+        const sessionInfo = this.extractSessionInfo(vibeHome);
 
         // Cleanup isolated home
         try {
