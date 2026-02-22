@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -507,9 +507,12 @@ export abstract class BaseAIProvider implements IAIProvider {
 
           if (existsSync(src)) {
             try {
+              // Ensure parent directories exist for nested auth files (e.g. configurations/config_default)
+              mkdirSync(dirname(dest), { recursive: true });
               symlinkSync(src, dest);
             } catch {
               // Fallback to copy if symlink fails
+              mkdirSync(dirname(dest), { recursive: true });
               writeFileSync(dest, readFileSync(src));
             }
           }
