@@ -106,6 +106,10 @@ async function invokeOrchestrator(
       }
     );
 
+    if (!result.success) {
+      throw new Error(`Provider ${providerName} failed during orchestrator invocation (exit ${result.exitCode}): ${result.stderr || result.stdout || 'Unknown error'}`);
+    }
+
     return result.stdout;
   } finally {
     // Cleanup temp file

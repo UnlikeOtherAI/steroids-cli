@@ -299,7 +299,9 @@ const FALLBACK_MODELS: Record<string, APIModel[]> = {
     { id: 'gpt-5.1', name: 'GPT-5.1' },
   ],
   mistral: [
-    { id: 'codestral-latest', name: 'Codestral (latest)' },
+    { id: 'pixtral-large-latest', name: 'Pixtral Large' },
+    { id: 'devstral-2', name: 'Devstral (Le Chat)' },
+    { id: 'devstral-small', name: 'Devstral Small (Le Chat)' },
     { id: 'mistral-large-latest', name: 'Mistral Large (latest)' },
     { id: 'mistral-medium-latest', name: 'Mistral Medium (latest)' },
     { id: 'mistral-small-latest', name: 'Mistral Small (latest)' },

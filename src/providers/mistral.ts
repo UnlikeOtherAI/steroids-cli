@@ -24,9 +24,21 @@ import {
  */
 const MISTRAL_MODELS: ModelInfo[] = [
   {
-    id: 'codestral-latest',
-    name: 'Codestral (latest)',
+    id: 'pixtral-large-latest',
+    name: 'Pixtral Large (latest)',
     recommendedFor: ['orchestrator', 'coder', 'reviewer'],
+    supportsStreaming: true,
+  },
+  {
+    id: 'devstral-2',
+    name: 'Devstral (Le Chat)',
+    recommendedFor: ['orchestrator', 'coder', 'reviewer'],
+    supportsStreaming: true,
+  },
+  {
+    id: 'devstral-small',
+    name: 'Devstral Small (Le Chat)',
+    recommendedFor: [],
     supportsStreaming: true,
   },
   {
@@ -53,9 +65,9 @@ const MISTRAL_MODELS: ModelInfo[] = [
  * Default models per role
  */
 const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string> = {
-  orchestrator: 'codestral-latest',
-  coder: 'codestral-latest',
-  reviewer: 'codestral-latest',
+  orchestrator: 'devstral-2',
+  coder: 'devstral-2',
+  reviewer: 'devstral-2',
 };
 
 /**

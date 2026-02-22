@@ -144,7 +144,7 @@ describe('Providers emit onActivity events', () => {
 
     const activities: any[] = [];
     const result = await provider.invoke('prompt', {
-      model: 'codestral-latest',
+      model: 'devstral-2',
       streamOutput: false,
       onActivity: (a) => activities.push(a),
     });

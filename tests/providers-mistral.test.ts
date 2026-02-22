@@ -60,10 +60,10 @@ describe('MistralProvider', () => {
 
     expect(provider.name).toBe('mistral');
     expect(provider.displayName).toBe('Mistral Vibe');
-    expect(provider.getDefaultModel('orchestrator')).toBe('codestral-latest');
-    expect(provider.getDefaultModel('coder')).toBe('codestral-latest');
-    expect(provider.getDefaultModel('reviewer')).toBe('codestral-latest');
-    expect(provider.listModels()).toContain('codestral-latest');
+    expect(provider.getDefaultModel('orchestrator')).toBe('devstral-2');
+    expect(provider.getDefaultModel('coder')).toBe('devstral-2');
+    expect(provider.getDefaultModel('reviewer')).toBe('devstral-2');
+    expect(provider.listModels()).toContain('devstral-2');
   });
 
   it('should classify model-not-found and auth errors', async () => {
@@ -86,7 +86,7 @@ describe('MistralProvider', () => {
     const provider = new MistralProvider();
 
     const result = await provider.invoke('prompt "$(touch /tmp/should-not-run)"', {
-      model: 'codestral-latest',
+      model: 'devstral-2',
       streamOutput: false,
     });
 
@@ -101,8 +101,8 @@ describe('MistralProvider', () => {
     expect((firstCall[2] as { shell?: boolean }).shell).toBe(false);
 
     const env = (firstCall[2] as { env?: Record<string, string> }).env ?? {};
-    expect(env.VIBE_ACTIVE_MODEL).toBe('codestral-latest');
-    expect(env.VIBE_MODELS).toContain('"codestral-latest"');
+    expect(env.VIBE_ACTIVE_MODEL).toBe('devstral-2');
+    expect(env.VIBE_MODELS).toContain('"devstral-2"');
     expect(env.VIBE_MODELS).not.toContain('"temperature"');
   });
 
@@ -114,7 +114,7 @@ describe('MistralProvider', () => {
     provider.setInvocationTemplate('{cli} -p "$(cat {prompt_file})" --output text --max-turns 80 --agent auto-approve');
 
     const result = await provider.invoke('prompt', {
-      model: 'codestral-latest',
+      model: 'devstral-2',
       streamOutput: false,
     });
 

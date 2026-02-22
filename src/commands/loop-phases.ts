@@ -496,7 +496,7 @@ export async function runCoderPhase(
       }
       decision = {
         action: has_uncommitted ? 'stage_commit_submit' : 'submit',
-        reasoning: 'FALLBACK: Orchestrator parse failed but coder signaled completion with commits/changes',
+        reasoning: 'FALLBACK: Orchestrator failed but coder signaled completion with commits/changes',
         commits: commits.map(c => c.sha),
         commit_message: has_uncommitted ? 'feat: implement task specification' : undefined,
         next_status: 'review',
