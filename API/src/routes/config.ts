@@ -292,6 +292,7 @@ const FALLBACK_MODELS: Record<string, APIModel[]> = {
   ],
   codex: [
     { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex' },
+    { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' },
     { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
     { id: 'gpt-5.2', name: 'GPT-5.2' },
     { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' },
@@ -709,4 +710,3 @@ router.get('/ai/providers', (req: Request, res: Response) => {
 });
 
 export default router;
-

@@ -12,8 +12,8 @@ export interface ReviewerPromptContext {
   task: Task;
   projectPath: string;
   reviewerModel: string;
-  gitDiff: string;
-  modifiedFiles: string[];
+  submissionCommitHash?: string | null;
+  fallbackCommitHash?: string;
   sectionTasks?: SectionTask[];  // Other tasks in the same section
   rejectionHistory?: RejectionEntry[];  // Past rejections with commit hashes
   submissionNotes?: string | null;  // Notes from coder when submitting for review
@@ -26,17 +26,9 @@ export interface ReviewerPromptContext {
  * Generate a minimal delta prompt for a resumed reviewer session
  */
 export function generateResumingReviewerDeltaPrompt(context: ReviewerPromptContext): string {
-  const { task, gitDiff, modifiedFiles, submissionNotes, rejectionHistory } = context;
-
-  // Truncate diff if too long
-  let diffContent = gitDiff;
-  if (diffContent.length > 20000) {
-    diffContent = diffContent.substring(0, 20000) + '\n\n[Diff truncated]';
-  }
-
-  const filesListFormatted = modifiedFiles.length > 0
-    ? modifiedFiles.map(f => `- ${f}`).join('\n')
-    : 'No files modified';
+  const { task, submissionCommitHash, submissionNotes, rejectionHistory, fallbackCommitHash, projectPath } = context;
+  const submissionCommit = submissionCommitHash || fallbackCommitHash || 'HEAD~1';
+  const sourceRef = getSourceFileReference(projectPath, task.source_file);
 
   // Find the last rejection notes the reviewer gave
   const lastRejection = rejectionHistory && rejectionHistory.length > 0
@@ -48,17 +40,23 @@ All previous context and your past review notes are still in your session histor
 
 ---
 
-## New Changes Made by Coder
+## What to Review
 
-\`\`\`diff
-${diffContent}
-\`\`\`
+## Specification
+
+${sourceRef}
+
+## Submission Commit
+
+\`${submissionCommit}\`
+
+Inspect with: \`git show ${submissionCommit}\`
 
 ---
 
-## Files Modified in This Attempt
+## Files touched in commit
 
-${filesListFormatted}
+Use: \`git show ${submissionCommit} --name-only\`
 `;
 
   if (submissionNotes) {
@@ -109,9 +107,9 @@ No previous rejections. This is the first review.
 `;
   }
 
-  const lines = rejections.map(r => {
+  const lines = rejections.slice(-2).map(r => {
     const commitRef = r.commit_sha ? ` (commit: ${r.commit_sha.substring(0, 7)})` : '';
-    const notes = r.notes || '(no notes provided)';
+    const notes = (r.notes || '(no notes provided)').slice(0, 800);
     return `### Rejection #${r.rejection_number}${commitRef}
 ${notes}
 `;
@@ -142,6 +140,7 @@ ${notes}
 ## Rejection History (${rejections.length} previous)
 ${highRejectionWarning}
 **Review this history carefully before making your decision.**
+**Showing latest 2 rejections only.**
 - Look for patterns: Is the same issue being raised repeatedly?
 - If an issue was raised before and not fixed, be MORE SPECIFIC about what exactly needs to change
 - Use commit hashes to examine previous attempts: \`git show <hash>\`
@@ -228,7 +227,20 @@ ${filesScope}
  * Generate the reviewer prompt
  */
 export function generateReviewerPrompt(context: ReviewerPromptContext): string {
-  const { task, projectPath, reviewerModel, gitDiff, modifiedFiles, sectionTasks, rejectionHistory, submissionNotes, config, coordinatorGuidance, coordinatorDecision } = context;
+  const {
+    task,
+    projectPath,
+    sectionTasks,
+    rejectionHistory,
+    submissionNotes,
+    config,
+    coordinatorGuidance,
+    coordinatorDecision,
+    submissionCommitHash,
+    fallbackCommitHash
+  } = context;
+
+  const submissionCommit = submissionCommitHash || fallbackCommitHash || 'HEAD~1';
 
   // Format coder's submission notes if present
   const submissionNotesSection = submissionNotes
@@ -242,7 +254,7 @@ The coder included these notes when submitting for review:
 > ${submissionNotes}
 
 **CRITICAL: If the coder claims work already exists:**
-1. **DO NOT reject just because the diff is empty or only shows version bumps**
+1. **DO NOT reject just because the referenced commit is empty or appears unchanged**
 2. If a commit hash is mentioned, run \`git show <hash>\` to verify the work
 3. Check if the files/functionality described actually exist in the codebase
 4. If the existing work fulfills the specification: **APPROVE**
@@ -253,15 +265,7 @@ The coder included these notes when submitting for review:
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const fileAnchorSection = buildFileAnchorSection(task);
 
-  // Truncate diff if too long (max 20000 chars per spec)
-  let diffContent = gitDiff;
-  if (diffContent.length > 20000) {
-    diffContent = diffContent.substring(0, 20000) + '\n\n[Diff truncated]';
-  }
-
-  const filesListFormatted = modifiedFiles.length > 0
-    ? modifiedFiles.map(f => `- ${f}`).join('\n')
-    : 'No files modified';
+  const reviewerCommands = `git show --stat ${submissionCommit}`;
 
   return `# TASK: ${task.id.substring(0, 8)} - ${task.title}
 # Status: review | Rejections: ${task.rejection_count}/15
@@ -285,17 +289,11 @@ ${sourceRef}
 
 ---
 
-## Changes Made by Coder
+## Review Target
 
-\`\`\`diff
-${diffContent}
-\`\`\`
-
----
-
-## Files Modified
-
-${filesListFormatted}
+Inspect this submission directly:
+\`${reviewerCommands}\`
+\`git show --name-only ${submissionCommit}\`
 
 ---
 
@@ -312,7 +310,7 @@ Answer these questions:
 
 **Check the coder's NEW or CHANGED code for security vulnerabilities.**
 
-**Scope rule:** Only evaluate code in the diff. Pre-existing patterns in unchanged code are NOT the coder's responsibility — note them as advisory but do NOT reject for them. If the coder follows an existing pattern already in the codebase, that is acceptable even if the pattern is imperfect.
+**Scope rule:** Only evaluate code in the submission commit. Pre-existing patterns in unchanged code are NOT the coder's responsibility — note them as advisory but do NOT reject for them. If the coder follows an existing pattern already in the codebase, that is acceptable even if the pattern is imperfect.
 
 Check for:
 - **Injection attacks**: User input concatenated directly into SQL strings (instead of parameterized queries), or user input interpolated into shell command strings. String interpolation of hardcoded constants or internal config values is NOT injection.
@@ -325,7 +323,7 @@ Check for:
 - **Dependency hygiene** (advisory only): If new dependencies are added, list them as a note and suggest alternatives if known. Do NOT reject solely for dependency choice.
 
 If you find a genuine vulnerability where an attacker could exploit the NEW code to gain unauthorized access, execute arbitrary code, or exfiltrate data — **REJECT** with a clear explanation and remediation steps. If the coder's notes explain why a flagged pattern is safe in context, evaluate their justification before rejecting. If you are uncertain, describe the concern as a security note rather than rejecting on uncertainty alone.
-${getTestCoverageInstructions(config, modifiedFiles)}
+${getTestCoverageInstructions(config)}
 ---
 
 ## Your Decision
@@ -434,7 +432,7 @@ Simply include these as notes in your decision output. They will be logged for h
 
 ## Review Now
 
-Examine the diff above, then output your explicit decision token first, followed by any notes.
+Inspect the referenced commit, then output your explicit decision token first, followed by any notes.
 The orchestrator will parse your decision and update task status accordingly.
 `;
 }
@@ -446,8 +444,7 @@ export interface BatchReviewerPromptContext {
   tasks: Task[];
   projectPath: string;
   sectionName: string;
-  gitDiff: string;
-  modifiedFiles: string[];
+  taskCommits?: Array<{ taskId: string; commitHash: string | null }>;
   config: SteroidsConfig;
 }
 
@@ -455,28 +452,21 @@ export interface BatchReviewerPromptContext {
  * Generate the reviewer prompt for a batch of tasks
  */
 export function generateBatchReviewerPrompt(context: BatchReviewerPromptContext): string {
-  const { tasks, projectPath, sectionName, gitDiff, modifiedFiles, config } = context;
+  const { tasks, projectPath, sectionName, config, taskCommits } = context;
 
   // Build task specs for each task
+  const commitMap = new Map(taskCommits?.map(item => [item.taskId, item.commitHash]) ?? []);
   const taskSpecs = tasks.map((task, index) => {
     const specRef = getSourceFileReference(projectPath, task.source_file);
+    const commitRef = commitMap.get(task.id) || 'HEAD~1';
     return `
 ### Task ${index + 1}: ${task.title}
 **Task ID:** ${task.id}
+\`commit: ${commitRef}\`
 
 ${specRef}
 `;
   }).join('\n---\n');
-
-  // Truncate diff if too long
-  let diffContent = gitDiff;
-  if (diffContent.length > 30000) {
-    diffContent = diffContent.substring(0, 30000) + '\n\n[Diff truncated - review individual commits for full changes]';
-  }
-
-  const filesListFormatted = modifiedFiles.length > 0
-    ? modifiedFiles.map(f => `- ${f}`).join('\n')
-    : 'No files modified';
 
   const taskIds = tasks.map(t => t.id);
 
@@ -498,20 +488,14 @@ ${taskSpecs}
 
 ---
 
-## Combined Changes (All Tasks)
+## Review Commands
 
-\`\`\`diff
-${diffContent}
-\`\`\`
-
----
-
-## Files Modified
-
-${filesListFormatted}
+For each task, inspect the indicated commit directly with:
+\`git show <commit>\`
+\`git show --name-only <commit>\`
 
 ---
-${getTestCoverageInstructions(config, modifiedFiles)}
+${getTestCoverageInstructions(config)}
 ## Review Checklist (For Each Task)
 
 For EACH task, verify:
@@ -560,7 +544,7 @@ ${taskIds.map((id, i) => `- Task ${i + 1}: ${id}`).join('\n')}
 
 ## Review Now
 
-Examine the diff, verify each task's specification is met, then clearly state your decision for each task.
+Inspect each referenced commit, verify each task's specification is met, then clearly state your decision for each task.
 The orchestrator will parse your decisions and update task status accordingly.
 `;
 }

@@ -162,6 +162,43 @@ async function checkCreditExhaustion(
   return null;
 }
 
+/**
+ * Check for non-retryable provider failures that should fail the task immediately.
+ */
+async function checkNonRetryableProviderFailure(
+  result: InvokeResult,
+  role: 'coder' | 'reviewer',
+  projectPath: string,
+  reviewerConfig?: ReviewerConfig
+): Promise<{ type: string; provider: string; model: string; message: string } | null> {
+  if (result.success) return null;
+
+  const config = loadConfig(projectPath);
+  const roleConfig = reviewerConfig || config.ai?.[role];
+  const providerName = roleConfig?.provider;
+  const modelName = roleConfig?.model;
+
+  if (!providerName || !modelName) return null;
+
+  const registry = await getProviderRegistry();
+  const provider = registry.tryGet(providerName);
+  if (!provider) return null;
+
+  const classification = provider.classifyResult(result);
+  if (!classification) return null;
+
+  if (classification.type === 'model_not_found' || classification.type === 'context_exceeded') {
+    return {
+      type: classification.type,
+      provider: providerName,
+      model: modelName,
+      message: classification.message,
+    };
+  }
+
+  return null;
+}
+
 const MAX_ORCHESTRATOR_PARSE_RETRIES = 3;
 const CODER_PARSE_FALLBACK_MARKER = '[retry] FALLBACK: Orchestrator failed, defaulting to retry';
 const REVIEWER_PARSE_FALLBACK_MARKER = '[unclear] FALLBACK: Orchestrator failed, retrying review';
@@ -303,6 +340,13 @@ export async function runCoderPhase(
     return;
   }
 
+  const hardFailure = await checkNonRetryableProviderFailure(coderResult, 'coder', projectPath);
+  if (hardFailure) {
+    const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during coder phase: ${hardFailure.message}`;
+    updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
+    return;
+  }
+
   // Check for credit exhaustion before proceeding to orchestrator
   const creditCheck = await checkCreditExhaustion(coderResult, 'coder', projectPath);
   if (creditCheck) {
@@ -322,6 +366,7 @@ export async function runCoderPhase(
   const files_changed = getChangedFiles(projectPath);
   const has_uncommitted = hasUncommittedChanges(projectPath);
   const diff_summary = getDiffSummary(projectPath);
+  const hasRelevantChanges = has_uncommitted || commits.length > 0 || files_changed.length > 0;
 
   const gitState = {
     commits,
@@ -364,8 +409,9 @@ export async function runCoderPhase(
     // Check if coder seems finished even if orchestrator failed
     const coderStdout = coderResult.stdout.toLowerCase();
     const isTaskComplete = /complete|finished|done|ready/.test(coderStdout);
-    // Only count as having work if there are actual uncommitted changes or very recent session commits
-    const hasWork = has_uncommitted || commits.length > 0;
+    // Only count as having work if there are actual relevant uncommitted changes,
+    // changed files, or recent commits
+    const hasWork = hasRelevantChanges;
 
     if (isTaskComplete && hasWork) {
       orchestratorOutput = JSON.stringify({
@@ -406,7 +452,7 @@ export async function runCoderPhase(
   if (decision.action === 'retry' && decision.reasoning.includes('FALLBACK: Orchestrator failed')) {
     const coderStdout = coderResult.stdout.toLowerCase();
     const isTaskComplete = /task complete|complete|finished|done|ready for review/.test(coderStdout);
-    const hasWork = has_uncommitted || commits.length > 0;
+    const hasWork = hasRelevantChanges;
 
     if (isTaskComplete && hasWork) {
       if (!jsonMode) {
@@ -467,6 +513,14 @@ export async function runCoderPhase(
       break;
 
     case 'stage_commit_submit':
+      if (!has_uncommitted) {
+        updateTaskStatus(db, task.id, 'review', 'orchestrator', 'Auto-commit skipped: no uncommitted changes');
+        if (!jsonMode) {
+          console.log('\n✓ Auto-commit skipped (no uncommitted files) and submitted to review');
+        }
+        break;
+      }
+
       refreshParallelWorkstreamLease(projectPath, leaseFence);
       // Stage all changes
       try {
@@ -547,6 +601,13 @@ export async function runReviewerPhase(
     // Check for credit exhaustion in any reviewer
     for (let i = 0; i < reviewerResults.length; i++) {
       const res = reviewerResults[i];
+      const hardFailure = await checkNonRetryableProviderFailure(res, 'reviewer', projectPath, reviewerConfigs[i]);
+      if (hardFailure) {
+        const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during reviewer phase: ${hardFailure.message}`;
+        updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
+        return;
+      }
+
       const creditCheck = await checkCreditExhaustion(res as any, 'reviewer', projectPath, reviewerConfigs[i]);
       if (creditCheck) {
         return creditCheck;
@@ -581,6 +642,13 @@ export async function runReviewerPhase(
       if (!jsonMode) {
         console.warn('Reviewer timed out. Will retry next iteration.');
       }
+      return;
+    }
+
+    const hardFailure = await checkNonRetryableProviderFailure(reviewerResult as any, 'reviewer', projectPath);
+    if (hardFailure) {
+      const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during reviewer phase: ${hardFailure.message}`;
+      updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
       return;
     }
 

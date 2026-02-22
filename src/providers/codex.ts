@@ -26,6 +26,12 @@ const CODEX_MODELS: ModelInfo[] = [
     supportsStreaming: true,
   },
   {
+    id: 'gpt-5.3-codex-spark',
+    name: 'GPT-5.3 Codex Spark',
+    recommendedFor: ['coder', 'reviewer'],
+    supportsStreaming: true,
+  },
+  {
     id: 'o3',
     name: 'O3',
     recommendedFor: ['orchestrator'],

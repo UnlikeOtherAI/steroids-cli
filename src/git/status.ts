@@ -4,6 +4,50 @@
 
 import { execSync, execFileSync } from 'node:child_process';
 
+interface GitStatusOptions {
+  ignoreWorkspaceNoise?: boolean;
+}
+
+const DEFAULT_GIT_STATUS_OPTIONS: GitStatusOptions = {
+  ignoreWorkspaceNoise: true,
+};
+
+function isWorkspaceNoisePath(filePath: string): boolean {
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  if (normalizedPath === '.steroids' || normalizedPath.startsWith('.steroids/')) {
+    return true;
+  }
+
+  const firstSegment = normalizedPath.split('/')[0];
+  if (firstSegment.startsWith('ws-') && /^ws-[a-f0-9]+-\d+$/i.test(firstSegment)) {
+    return true;
+  }
+
+  if (/^[a-f0-9]{12,}$/i.test(firstSegment) && /\/ws-/.test(normalizedPath)) {
+    return true;
+  }
+
+  return false;
+}
+
+function normalizePorcelainPath(rawPath: string): string {
+  if (rawPath.length >= 2 && rawPath[0] === '"' && rawPath.at(-1) === '"') {
+    return rawPath.slice(1, -1);
+  }
+  return rawPath;
+}
+
+function shouldIgnoreStatusLine(line: string): boolean {
+  const statusPayload = line.slice(3).trim();
+  if (!statusPayload) return true;
+
+  const candidates = statusPayload
+    .split(' -> ')
+    .map(piece => normalizePorcelainPath(piece));
+
+  return candidates.some(isWorkspaceNoisePath);
+}
+
 /**
  * Get the current HEAD commit SHA
  */
@@ -37,13 +81,27 @@ export function getShortCommitSha(projectPath: string = process.cwd()): string |
 /**
  * Get git status output
  */
-export function getGitStatus(projectPath: string = process.cwd()): string {
+export function getGitStatus(
+  projectPath: string = process.cwd(),
+  options: GitStatusOptions = DEFAULT_GIT_STATUS_OPTIONS
+): string {
   try {
-    return execSync('git status --porcelain', {
+    const status = execSync('git status --porcelain', {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    if (!options.ignoreWorkspaceNoise) {
+      return status;
+    }
+
+    return status
+      .split('\n')
+      .map(line => line.trimEnd())
+      .filter(line => line.length > 0)
+      .filter(line => !shouldIgnoreStatusLine(line))
+      .join('\n');
   } catch {
     return '';
   }
@@ -95,7 +153,7 @@ export function getModifiedFiles(
 export function hasUncommittedChanges(
   projectPath: string = process.cwd()
 ): boolean {
-  const status = getGitStatus(projectPath);
+  const status = getGitStatus(projectPath, { ignoreWorkspaceNoise: true });
   return status.trim().length > 0;
 }
 

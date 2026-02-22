@@ -67,6 +67,12 @@ export const LiveInvocationActivityPanel: React.FC<{
   liveActivity: TaskTimelineEvent[];
   onClear: () => void;
 }> = ({ isLive, streamState, liveActivity, onClear }) => {
+  const orderedLiveActivity = [...liveActivity].sort((a, b) => {
+    const aTs = typeof a.ts === 'number' ? a.ts : 0;
+    const bTs = typeof b.ts === 'number' ? b.ts : 0;
+    return bTs - aTs;
+  });
+
   return (
     <div className="card p-4 mb-6">
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -133,7 +139,7 @@ export const LiveInvocationActivityPanel: React.FC<{
           </div>
         ) : (
           <div className="max-h-64 overflow-y-auto divide-y divide-border">
-            {liveActivity.map((e, idx) => {
+            {orderedLiveActivity.map((e, idx) => {
               const info = summarizeTimelineEvent(e);
               const ts = typeof e.ts === 'number' ? e.ts : Date.now();
               return (
@@ -201,4 +207,3 @@ export const InvocationTimelineEventRow: React.FC<{ event: TaskTimelineEvent; ts
     </div>
   );
 };
-

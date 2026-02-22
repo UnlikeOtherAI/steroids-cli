@@ -18,11 +18,7 @@ import {
 } from '../prompts/reviewer.js';
 import type { SectionTask } from '../prompts/prompt-helpers.js';
 import {
-  getGitDiff,
-  getModifiedFiles,
   findTaskCommit,
-  getCommitDiff,
-  getCommitFiles,
 } from '../git/status.js';
 import { loadConfig, type ReviewerConfig, type SteroidsConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
@@ -300,20 +296,13 @@ export async function invokeReviewer(
   console.log(`Model: ${effectiveReviewerConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  // Try to find the specific commit for this task
-  let gitDiff: string;
-  let modifiedFiles: string[];
-  const commitHash = findTaskCommit(projectPath, task.title);
+  const submissionCommitHash = findTaskCommit(projectPath, task.title);
+  const fallbackCommitHash = 'HEAD~1';
 
-  if (commitHash) {
-    console.log(`Found task commit: ${commitHash}`);
-    gitDiff = getCommitDiff(projectPath, commitHash);
-    modifiedFiles = getCommitFiles(projectPath, commitHash);
+  if (submissionCommitHash) {
+    console.log(`Found task commit: ${submissionCommitHash}`);
   } else {
-    // Fallback to HEAD~1 if no matching commit found
-    console.log('No matching commit found, using HEAD~1 diff');
-    gitDiff = getGitDiff(projectPath, 'HEAD~1');
-    modifiedFiles = getModifiedFiles(projectPath);
+    console.log(`No matching commit found for task title. Reviewer will use fallback commit: ${fallbackCommitHash}`);
   }
 
   // Fetch other tasks in the same section for context
@@ -373,8 +362,8 @@ export async function invokeReviewer(
     task,
     projectPath,
     reviewerModel,
-    gitDiff,
-    modifiedFiles,
+    submissionCommitHash,
+    fallbackCommitHash,
     sectionTasks,
     rejectionHistory,
     submissionNotes,
@@ -468,17 +457,16 @@ export async function invokeReviewerBatch(
   console.log(`Model: ${effectiveReviewerConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  // Get combined git diff for all tasks (compare against base before batch started)
-  // We look for the earliest task's commit and diff from there
-  const gitDiff = getGitDiff(projectPath, 'HEAD~' + tasks.length);
-  const modifiedFiles = getModifiedFiles(projectPath);
+  const taskCommits = tasks.map(task => ({
+    taskId: task.id,
+    commitHash: findTaskCommit(projectPath, task.title),
+  }));
 
   const context: BatchReviewerPromptContext = {
     tasks,
     projectPath,
     sectionName,
-    gitDiff,
-    modifiedFiles,
+    taskCommits,
     config,
   };
 

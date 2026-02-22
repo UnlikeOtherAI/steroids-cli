@@ -211,7 +211,7 @@ OPTIONS:
 
   if (values.full) {
     console.log('\n--- Full Status ---');
-    const fullStatus = getGitStatus(projectPath);
+    const fullStatus = getGitStatus(projectPath, { ignoreWorkspaceNoise: false });
     if (fullStatus) {
       console.log(fullStatus);
     } else {

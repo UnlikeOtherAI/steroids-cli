@@ -427,7 +427,10 @@ export function loadConfig(projectPath?: string): SteroidsConfig {
 
   // Load and merge project config
   const projectConfig = loadConfigFile(getProjectConfigPath(projectPath));
-  config = mergeConfigs(config, projectConfig);
+  const { ai, ...projectConfigWithoutAI } = projectConfig as Partial<SteroidsConfig> & { ai?: unknown };
+  // AI settings are intentionally centralized in the global config so projects inherit
+  // the same provider/model defaults unless overridden via environment.
+  config = mergeConfigs(config, projectConfigWithoutAI);
 
   // Apply environment overrides
   config = applyEnvOverrides(config);
