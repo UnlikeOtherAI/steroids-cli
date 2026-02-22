@@ -325,28 +325,49 @@ export async function runCoderPhase(
     orchestratorOutput = await invokeCoderOrchestrator(context, projectPath);
   } catch (error) {
     console.error('Orchestrator invocation failed:', error);
-    // Fallback to safe default: retry
-    orchestratorOutput = JSON.stringify({
-      action: 'retry',
-      reasoning: 'Orchestrator failed, defaulting to retry',
-      commits: [],
-      next_status: 'in_progress',
-      metadata: {
-        files_changed: 0,
-        confidence: 'low',
-        exit_clean: true,
-        has_commits: false,
-      }
-    });
+    
+    // Check if coder seems finished even if orchestrator failed
+    const coderStdout = coderResult.stdout.toLowerCase();
+    const isTaskComplete = coderStdout.includes('task complete') || coderStdout.includes('implementation complete');
+    const hasWork = commits.length > 0 || has_uncommitted;
+
+    if (isTaskComplete && hasWork) {
+      orchestratorOutput = JSON.stringify({
+        action: has_uncommitted ? 'stage_commit_submit' : 'submit',
+        reasoning: 'FALLBACK: Orchestrator failed but coder signaled completion',
+        commits: commits.map(c => c.sha),
+        next_status: 'review',
+        metadata: {
+          files_changed: files_changed.length,
+          confidence: 'low',
+          exit_clean: true,
+          has_commits: commits.length > 0,
+        }
+      });
+    } else {
+      // Fallback to safe default: retry
+      orchestratorOutput = JSON.stringify({
+        action: 'retry',
+        reasoning: 'FALLBACK: Orchestrator failed, defaulting to retry',
+        commits: [],
+        next_status: 'in_progress',
+        metadata: {
+          files_changed: 0,
+          confidence: 'low',
+          exit_clean: true,
+          has_commits: false,
+        }
+      });
+    }
   }
 
   // STEP 5: Parse orchestrator output with fallback
   const handler = new OrchestrationFallbackHandler();
   let decision = handler.parseCoderOutput(orchestratorOutput);
 
-  if (decision.action === 'retry' && decision.reasoning.startsWith('FALLBACK: Orchestrator failed')) {
+  if (decision.action === 'retry' && decision.reasoning.includes('FALLBACK: Orchestrator failed')) {
     const consecutiveParseFallbackRetries =
-      countConsecutiveOrchestratorFallbackEntries(db, task.id, CODER_PARSE_FALLBACK_MARKER) + 1;
+      countConsecutiveOrchestratorFallbackEntries(db, task.id, 'FALLBACK: Orchestrator failed') + 1;
 
     if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
       decision = {
@@ -442,6 +463,7 @@ export async function runReviewerPhase(
 
   let reviewerResult: ReviewerResult | undefined;
   let reviewerResults: ReviewerResult[] = [];
+  let orchestratorOutput: string = '';
 
   // STEP 1: Invoke reviewer(s)
   if (multiReviewEnabled) {
@@ -546,23 +568,41 @@ export async function runReviewerPhase(
       };
 
       try {
-        const orchestratorOutput = await invokeMultiReviewerOrchestrator(multiContext, projectPath);
+        orchestratorOutput = await invokeMultiReviewerOrchestrator(multiContext, projectPath);
         const handler = new OrchestrationFallbackHandler();
         decision = handler.parseReviewerOutput(orchestratorOutput);
       } catch (error) {
         console.error('Multi-reviewer orchestrator failed:', error);
-        decision = {
-          decision: 'unclear',
-          reasoning: 'Multi-reviewer orchestrator failed',
-          notes: 'Review unclear, retrying',
-          next_status: 'review',
-          metadata: {
-            rejection_count: task.rejection_count,
-            confidence: 'low',
-            push_to_remote: false,
-            repeated_issue: false,
-          }
-        };
+        
+        const anyApprove = reviewerResults.some(r => r.stdout.toUpperCase().includes('APPROVE') || (r.decision === 'approve'));
+        
+        if (anyApprove) {
+          decision = {
+            decision: 'approve',
+            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed but reviewer signaled approval',
+            notes: reviewerResults.map(r => `[${r.provider}] ${r.stdout}`).join('\n---\n'),
+            next_status: 'completed',
+            metadata: {
+              rejection_count: task.rejection_count,
+              confidence: 'low',
+              push_to_remote: true,
+              repeated_issue: false,
+            }
+          };
+        } else {
+          decision = {
+            decision: 'unclear',
+            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed',
+            notes: 'Review unclear, retrying',
+            next_status: 'review',
+            metadata: {
+              rejection_count: task.rejection_count,
+              confidence: 'low',
+              push_to_remote: false,
+              repeated_issue: false,
+            }
+          };
+        }
       }
     } else {
       // No merge needed - find the primary result for notes
@@ -602,33 +642,51 @@ export async function runReviewerPhase(
       git_context: gitContext,
     };
 
-    let orchestratorOutput: string;
     try {
       orchestratorOutput = await invokeReviewerOrchestrator(context, projectPath);
     } catch (error) {
       console.error('Orchestrator invocation failed:', error);
-      orchestratorOutput = JSON.stringify({
-        decision: 'unclear',
-        reasoning: 'Orchestrator failed, retrying review',
-        notes: 'Review unclear, retrying',
-        next_status: 'review',
-        metadata: {
-          rejection_count: task.rejection_count,
-          confidence: 'low',
-          push_to_remote: false,
-          repeated_issue: false,
-        }
-      });
+      
+      const reviewerStdout = reviewerResult!.stdout.toUpperCase();
+      const hasApprove = reviewerStdout.includes('APPROVE') || reviewerStdout.includes('DECISION: APPROVE');
+      
+      if (hasApprove) {
+        orchestratorOutput = JSON.stringify({
+          decision: 'approve',
+          reasoning: 'FALLBACK: Orchestrator failed but reviewer explicitly approved',
+          notes: reviewerResult!.stdout,
+          next_status: 'completed',
+          metadata: {
+            rejection_count: task.rejection_count,
+            confidence: 'low',
+            push_to_remote: true,
+            repeated_issue: false,
+          }
+        });
+      } else {
+        orchestratorOutput = JSON.stringify({
+          decision: 'unclear',
+          reasoning: 'FALLBACK: Orchestrator failed, retrying review',
+          notes: 'Review unclear, retrying',
+          next_status: 'review',
+          metadata: {
+            rejection_count: task.rejection_count,
+            confidence: 'low',
+            push_to_remote: false,
+            repeated_issue: false,
+          }
+        });
+      }
     }
-
-    const handler = new OrchestrationFallbackHandler();
-    decision = handler.parseReviewerOutput(orchestratorOutput);
   }
 
+  const handler = new OrchestrationFallbackHandler();
+  decision = handler.parseReviewerOutput(orchestratorOutput);
+
   // STEP 4: Fallback for unclear decisions
-  if (decision.decision === 'unclear' && decision.reasoning.startsWith('FALLBACK: Orchestrator failed')) {
+  if (decision.decision === 'unclear' && decision.reasoning.includes('FALLBACK: Orchestrator failed')) {
     const consecutiveParseFallbackRetries =
-      countConsecutiveOrchestratorFallbackEntries(db, task.id, REVIEWER_PARSE_FALLBACK_MARKER) + 1;
+      countConsecutiveOrchestratorFallbackEntries(db, task.id, 'FALLBACK: Orchestrator failed') + 1;
 
     if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
       decision = {

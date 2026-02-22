@@ -292,7 +292,7 @@ export class OrchestrationFallbackHandler {
     }
 
     // Check for completion signals
-    if (/complete|finished|done|ready/.test(lower)) {
+    if (/task complete|complete|finished|done|ready/.test(lower)) {
       return {
         action: 'submit',
         reasoning: 'FALLBACK: Detected completion keywords',
