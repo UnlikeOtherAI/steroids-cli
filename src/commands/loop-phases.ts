@@ -41,7 +41,7 @@ import {
   getDiffStats,
   isCommitReachable,
 } from '../git/status.js';
-import { resolveLatestReachableSubmissionCommitSha } from '../git/submission-resolution.js';
+import { resolveSubmissionCommitWithRecovery } from '../git/submission-resolution.js';
 import {
   invokeCoderOrchestrator,
   invokeReviewerOrchestrator,
@@ -973,23 +973,25 @@ export async function runReviewerPhase(
   const config = loadConfig(projectPath);
   const multiReviewEnabled = isMultiReviewEnabled(config);
   const strict = config.ai?.review?.strict ?? true;
-  const submissionCommitSha = resolveLatestReachableSubmissionCommitSha(
+  const submissionResolution = resolveSubmissionCommitWithRecovery(
     projectPath,
     getSubmissionCommitShas(db, task.id)
   );
-  if (!submissionCommitSha) {
+  if (submissionResolution.status !== 'resolved') {
+    const attemptsText = submissionResolution.attempts.join(' | ') || 'none';
     updateTaskStatus(
       db,
       task.id,
       'failed',
       'orchestrator',
-      'Task failed: no reachable submission commit hash available for review phase'
+      `Task failed: no reachable submission commit hash available for review phase (${submissionResolution.reason}; attempts: ${attemptsText})`
     );
     if (!jsonMode) {
       console.log('\n✗ Task failed (submission commit not reachable in this workspace)');
     }
     return;
   }
+  const submissionCommitSha = submissionResolution.sha;
 
   let reviewerResult: ReviewerResult | undefined;
   let reviewerResults: ReviewerResult[] = [];

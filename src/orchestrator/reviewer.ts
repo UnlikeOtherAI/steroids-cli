@@ -27,7 +27,7 @@ import type { SectionTask } from '../prompts/prompt-helpers.js';
 import { loadConfig, type ReviewerConfig, type SteroidsConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
-import { resolveLatestReachableSubmissionCommitSha } from '../git/submission-resolution.js';
+import { resolveSubmissionCommitWithRecovery } from '../git/submission-resolution.js';
 
 export interface ReviewerResult {
   success: boolean;
@@ -333,13 +333,17 @@ export async function invokeReviewer(
         console.log(`Coder included notes with submission`);
       }
       
-      submissionCommitHash = resolveLatestReachableSubmissionCommitSha(
+      const submissionResolution = resolveSubmissionCommitWithRecovery(
         projectPath,
         getSubmissionCommitShas(db, task.id)
       );
-      if (!submissionCommitHash) {
-        throw new Error(`No reachable submission commit hash found for task ${task.id}`);
+      if (submissionResolution.status !== 'resolved') {
+        const attemptsText = submissionResolution.attempts.join(' | ') || 'none';
+        throw new Error(
+          `No reachable submission commit hash found for task ${task.id} (${submissionResolution.reason}; attempts: ${attemptsText})`
+        );
       }
+      submissionCommitHash = submissionResolution.sha;
       console.log(`Using submission commit: ${submissionCommitHash}`);
 
       // Check for resumable session (same provider/model/role)
@@ -470,14 +474,15 @@ export async function invokeReviewerBatch(
     const unresolved: string[] = [];
 
     taskCommits = tasks.map(task => {
-      const commitHash = resolveLatestReachableSubmissionCommitSha(
+      const submissionResolution = resolveSubmissionCommitWithRecovery(
         projectPath,
         getSubmissionCommitShas(db, task.id)
       );
-      if (!commitHash) {
-        unresolved.push(task.id);
+      if (submissionResolution.status !== 'resolved') {
+        const attemptsText = submissionResolution.attempts.join(' | ') || 'none';
+        unresolved.push(`${task.id} (${submissionResolution.reason}; attempts: ${attemptsText})`);
       }
-      return { taskId: task.id, commitHash: commitHash ?? '' };
+      return { taskId: task.id, commitHash: submissionResolution.status === 'resolved' ? submissionResolution.sha : '' };
     });
 
     if (unresolved.length > 0) {
