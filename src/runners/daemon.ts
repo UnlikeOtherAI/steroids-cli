@@ -12,6 +12,7 @@ import { updateProjectStats, getRegisteredProject } from './projects.js';
 import { openDatabase } from '../database/connection.js';
 import { getTaskCountsByStatus } from '../database/queries.js';
 import { runParallelMerge, type MergeWorkstreamSpec } from '../parallel/merge.js';
+import { updateParallelSessionStatus } from './global-db.js';
 import { loadConfig } from '../config/loader.js';
 
 export type RunnerStatus = 'idle' | 'running' | 'stopping';
@@ -384,10 +385,28 @@ async function autoMergeOnCompletion(
       mainBranch,
       cleanupOnSuccess: config.runners?.parallel?.cleanupOnSuccess ?? true,
       validationCommand,
+      // Don't mark session complete yet — only do so when ALL workstreams are done.
+      // This prevents a fast workstream (e.g. a blocked section with no tasks) from
+      // prematurely completing the session while other workstreams still run, which
+      // caused wakeup to spawn duplicate parallel sessions.
+      skipSessionComplete: true,
     });
 
     if (result.success) {
       console.log(`[AUTO-MERGE] Success: ${result.completedCommits} commits applied, ${result.conflicts} conflicts, ${result.skipped} skipped`);
+
+      // Mark session complete only if ALL workstreams in this session are now done.
+      const remaining = db.prepare(
+        `SELECT COUNT(*) as count FROM workstreams
+         WHERE session_id = ? AND status NOT IN ('completed', 'failed', 'aborted')`
+      ).get(parallelSessionId) as { count: number };
+
+      if (remaining.count === 0) {
+        console.log('[AUTO-MERGE] All workstreams complete — marking session as completed');
+        updateParallelSessionStatus(parallelSessionId, 'completed', true);
+      } else {
+        console.log(`[AUTO-MERGE] ${remaining.count} workstream(s) still running — session stays active`);
+      }
     } else {
       console.error(`[AUTO-MERGE] Failed: ${result.errors.join('; ')}`);
     }

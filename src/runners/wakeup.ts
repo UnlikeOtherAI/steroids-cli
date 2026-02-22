@@ -107,7 +107,8 @@ export function hasActiveRunnerForProject(projectPath: string): boolean {
 export function hasActiveParallelSessionForProject(projectPath: string): boolean {
   const { db, close } = openGlobalDatabase();
   try {
-    const row = db
+    // Primary check: session record in non-terminal state.
+    const sessionRow = db
       .prepare(
         `SELECT 1 FROM parallel_sessions
          WHERE project_path = ?
@@ -116,7 +117,24 @@ export function hasActiveParallelSessionForProject(projectPath: string): boolean
       )
       .get(projectPath) as { 1: number } | undefined;
 
-    return row !== undefined;
+    if (sessionRow !== undefined) return true;
+
+    // Belt-and-suspenders: if any runner for this project has an active
+    // parallel_session_id and a fresh heartbeat, treat it as active even if the
+    // session record somehow ended up in a terminal state. This prevents wakeup
+    // from spawning a new parallel session while workstream runners are still live.
+    const runnerRow = db
+      .prepare(
+        `SELECT 1 FROM runners r
+         JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
+         WHERE ps.project_path = ?
+           AND r.status != 'stopped'
+           AND r.heartbeat_at > datetime('now', '-5 minutes')
+         LIMIT 1`
+      )
+      .get(projectPath) as { 1: number } | undefined;
+
+    return runnerRow !== undefined;
   } finally {
     close();
   }
@@ -201,6 +219,31 @@ function reconcileParallelSessionRecovery(
              completed_at = NULL
          WHERE id = ?`
       ).run(session.id);
+      continue;
+    }
+
+    // If all workstreams are in a terminal state but the session is still marked
+    // running (e.g. because autoMergeOnCompletion crashed before it could call
+    // updateParallelSessionStatus), close it out now so wakeup doesn't block.
+    const nonTerminal = db.prepare(
+      `SELECT COUNT(*) as count FROM workstreams
+       WHERE session_id = ? AND status NOT IN ('completed', 'failed', 'aborted')`
+    ).get(session.id) as { count: number };
+
+    if (nonTerminal.count === 0) {
+      const total = db.prepare(
+        `SELECT COUNT(*) as count FROM workstreams WHERE session_id = ?`
+      ).get(session.id) as { count: number };
+
+      if (total.count > 0) {
+        // All workstreams finished — mark session completed so wakeup can move on.
+        db.prepare(
+          `UPDATE parallel_sessions
+           SET status = 'completed',
+               completed_at = COALESCE(completed_at, datetime('now'))
+           WHERE id = ?`
+        ).run(session.id);
+      }
     }
   }
 

@@ -60,6 +60,14 @@ export interface MergeOptions {
   cleanupOnSuccess?: boolean;
   integrationBranchName?: string;
   validationCommand?: string;
+  /**
+   * When true, do NOT mark the session as 'completed' after merging this
+   * workstream. The caller is responsible for checking whether all workstreams
+   * are done and marking the session complete. Used by autoMergeOnCompletion
+   * so that a single fast workstream finishing doesn't mark the whole session
+   * complete while other workstreams are still running.
+   */
+  skipSessionComplete?: boolean;
 }
 
 export interface MergeResult {
@@ -588,7 +596,13 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     } catch {
       // best-effort resolution marker; merge completion should not fail because of escalation bookkeeping.
     }
-    updateParallelSessionStatus(sessionId, 'completed', true);
+    if (options.skipSessionComplete) {
+      // Caller will decide when to mark session complete (e.g. after all workstreams finish).
+      // Reset to 'running' so wakeup does not see a terminal-ish status and spawn a new session.
+      updateParallelSessionStatus(sessionId, 'running');
+    } else {
+      updateParallelSessionStatus(sessionId, 'completed', true);
+    }
     return summary;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -8,7 +8,7 @@ import { createWorkspaceClone } from '../parallel/clone.js';
 import { loadConfig } from '../config/loader.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
 import { CyclicDependencyError, type WorkstreamSection } from '../parallel/scheduler.js';
-import { listSections } from '../database/queries.js';
+import { listSections, hasDependenciesMet } from '../database/queries.js';
 
 export interface ParallelWorkstreamPlan {
   sessionId: string;
@@ -130,11 +130,21 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
 
     const pendingMap = new Map<string, number>(pendingRows.map((row) => [row.sectionId, row.count]));
 
-    // Each section with pending work gets its own workstream.
-    // The task selector inside each runner already respects section dependencies
-    // at runtime, so we don't need to group connected components together.
+    // Each section with pending work AND met dependencies gets its own workstream.
+    // Sections whose upstream dependencies aren't all completed are excluded so they
+    // don't burn a workstream slot (and immediately exit with no tasks), pushing
+    // unlocked sections like Frontend Scaffolding beyond the maxClones cutoff.
     const sectionsWithWork = sections
-      .filter((s) => (pendingMap.get(s.id) ?? 0) > 0)
+      .filter((s) => {
+        if ((pendingMap.get(s.id) ?? 0) === 0) return false;
+        try {
+          return hasDependenciesMet(db, s.id);
+        } catch {
+          // If dependency check fails, include the section — runner's task selector
+          // will enforce dependencies at runtime anyway.
+          return true;
+        }
+      })
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
 
     const activeWorkstreams = sectionsWithWork.map((section, index) => ({
