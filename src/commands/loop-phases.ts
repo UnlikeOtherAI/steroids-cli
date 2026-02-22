@@ -40,6 +40,7 @@ import {
   getDiffSummary,
   getDiffStats,
   isCommitReachable,
+  isCommitReachableWithFetch,
 } from '../git/status.js';
 import { resolveSubmissionCommitWithRecovery } from '../git/submission-resolution.js';
 import {
@@ -394,6 +395,36 @@ function hasCoderCompletionSignal(output: string): boolean {
   );
 }
 
+function extractSubmissionCommitToken(output: string): string | null {
+  const match = output.match(/^\s*SUBMISSION_COMMIT\s*:\s*([0-9a-fA-F]{7,40})\b/im);
+  return match?.[1] ?? null;
+}
+
+function resolveCoderSubmittedCommitSha(
+  projectPath: string,
+  coderOutput: string,
+  options: { requireExplicitToken?: boolean } = {}
+): string | undefined {
+  const tokenSha = extractSubmissionCommitToken(coderOutput);
+  if (tokenSha && isCommitReachableWithFetch(projectPath, tokenSha, { forceFetch: true })) {
+    try {
+      return execSync(`git rev-parse ${tokenSha}^{commit}`, {
+        cwd: projectPath,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+    } catch {
+      return tokenSha;
+    }
+  }
+
+  if (options.requireExplicitToken) {
+    return undefined;
+  }
+
+  return getCurrentCommitSha(projectPath) || undefined;
+}
+
 export async function runCoderPhase(
   db: ReturnType<typeof openDatabase>['db'],
   task: ReturnType<typeof getTask>,
@@ -564,6 +595,7 @@ export async function runCoderPhase(
   const lastRejectionNotes = task.rejection_count > 0
     ? getTaskRejections(db, task.id).slice(-1)[0]?.notes ?? undefined
     : undefined;
+  const requiresExplicitSubmissionCommit = (lastRejectionNotes ?? '').includes('[commit_recovery]');
   const rejectionItemCount = countLatestOpenRejectionItems(lastRejectionNotes);
 
   const context: CoderContext = {
@@ -799,7 +831,19 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
   switch (decision.action) {
     case 'submit':
       {
-        const submissionCommitSha = getCurrentCommitSha(projectPath) || undefined;
+        const submissionCommitSha = resolveCoderSubmittedCommitSha(projectPath, coderResult.stdout, {
+          requireExplicitToken: requiresExplicitSubmissionCommit,
+        });
+        if (!submissionCommitSha && requiresExplicitSubmissionCommit) {
+          addAuditEntry(db, task.id, task.status, task.status, 'orchestrator', {
+            actorType: 'orchestrator',
+            notes: '[retry] Awaiting explicit SUBMISSION_COMMIT token for commit recovery',
+          });
+          if (!jsonMode) {
+            console.log('\n⟳ Waiting for explicit SUBMISSION_COMMIT token from coder');
+          }
+          break;
+        }
         if (!submissionCommitSha || !isCommitReachable(projectPath, submissionCommitSha)) {
           updateTaskStatus(
             db,
@@ -838,7 +882,19 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
 
     case 'stage_commit_submit':
       if (!has_uncommitted) {
-        const submissionCommitSha = getCurrentCommitSha(projectPath) || undefined;
+        const submissionCommitSha = resolveCoderSubmittedCommitSha(projectPath, coderResult.stdout, {
+          requireExplicitToken: requiresExplicitSubmissionCommit,
+        });
+        if (!submissionCommitSha && requiresExplicitSubmissionCommit) {
+          addAuditEntry(db, task.id, task.status, task.status, 'orchestrator', {
+            actorType: 'orchestrator',
+            notes: '[retry] Awaiting explicit SUBMISSION_COMMIT token for commit recovery',
+          });
+          if (!jsonMode) {
+            console.log('\n⟳ Waiting for explicit SUBMISSION_COMMIT token from coder');
+          }
+          break;
+        }
         if (!submissionCommitSha || !isCommitReachable(projectPath, submissionCommitSha)) {
           updateTaskStatus(
             db,
@@ -982,12 +1038,13 @@ export async function runReviewerPhase(
     updateTaskStatus(
       db,
       task.id,
-      'failed',
+      'in_progress',
       'orchestrator',
-      `Task failed: no reachable submission commit hash available for review phase (${submissionResolution.reason}; attempts: ${attemptsText})`
+      `[commit_recovery] Missing reachable submission hash (${submissionResolution.reason}; attempts: ${attemptsText}). ` +
+      `Treating task as resubmission. Coder must output exact line: SUBMISSION_COMMIT: <sha> for the commit that implements the task.`
     );
     if (!jsonMode) {
-      console.log('\n✗ Task failed (submission commit not reachable in this workspace)');
+      console.log('\n⟳ Reviewer hash missing; returning task to coder for hash resubmission');
     }
     return;
   }
