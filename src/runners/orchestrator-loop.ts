@@ -158,6 +158,13 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       console.log(`\n─── Iteration ${iteration} ───\n`);
       options.onIteration?.(iteration);
       refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId);
+      const iterationProvider = config.ai?.coder?.provider ?? 'claude';
+      const iterationBackoffMs = getProviderBackoffRemainingMs(iterationProvider);
+      if (iterationBackoffMs > 0) {
+        const waitSec = (iterationBackoffMs / 1000).toFixed(0);
+        console.log(`[RATE LIMIT] Global backoff active for ${iterationProvider}. Waiting ${waitSec}s...`);
+        await sleep(iterationBackoffMs);
+      }
 
       // Batch mode: process multiple pending tasks at once
       // Only active when not focusing on a specific section and batch mode is enabled
@@ -341,12 +348,6 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       const providerName = action === 'review'
         ? (config.ai?.reviewer?.provider ?? 'claude')
         : (config.ai?.coder?.provider ?? 'claude');
-      const globalBackoffMs = getProviderBackoffRemainingMs(providerName);
-      if (globalBackoffMs > 0) {
-        const waitSec = (globalBackoffMs / 1000).toFixed(0);
-        console.log(`[RATE LIMIT] Global backoff active for ${providerName}. Waiting ${waitSec}s...`);
-        await sleep(globalBackoffMs);
-      }
 
       let phaseResult;
       if (action === 'start') {
