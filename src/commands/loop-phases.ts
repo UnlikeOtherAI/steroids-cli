@@ -225,6 +225,63 @@ async function checkNonRetryableProviderFailure(
   return null;
 }
 
+function summarizeErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 220);
+}
+
+/**
+ * Classify orchestrator invocation failures so we can distinguish transient parse
+ * noise from hard provider/config failures (auth/model/availability).
+ */
+async function classifyOrchestratorFailure(
+  error: unknown,
+  projectPath: string
+): Promise<{ type: string; message: string; retryable: boolean } | null> {
+  const message = summarizeErrorMessage(error);
+  const lower = message.toLowerCase();
+
+  if (lower.includes('orchestrator ai provider not configured')) {
+    return { type: 'orchestrator_unconfigured', message, retryable: false };
+  }
+
+  if (lower.includes("provider '") && lower.includes('is not available')) {
+    return { type: 'provider_unavailable', message, retryable: false };
+  }
+
+  const config = loadConfig(projectPath);
+  const providerName = config.ai?.orchestrator?.provider;
+  if (!providerName) {
+    return { type: 'orchestrator_unconfigured', message, retryable: false };
+  }
+
+  const registry = await getProviderRegistry();
+  const provider = registry.tryGet(providerName);
+  if (!provider) {
+    return { type: 'provider_unavailable', message, retryable: false };
+  }
+
+  const syntheticFailure: InvokeResult = {
+    success: false,
+    exitCode: 1,
+    stdout: '',
+    stderr: message,
+    duration: 0,
+    timedOut: false,
+  };
+
+  const classified = provider.classifyResult(syntheticFailure);
+  if (!classified) {
+    return null;
+  }
+
+  return {
+    type: classified.type,
+    message: classified.message || message,
+    retryable: classified.retryable,
+  };
+}
+
 const MAX_ORCHESTRATOR_PARSE_RETRIES = 3;
 const CODER_PARSE_FALLBACK_MARKER = '[retry] FALLBACK: Orchestrator failed, defaulting to retry';
 const REVIEWER_PARSE_FALLBACK_MARKER = '[unclear] FALLBACK: Orchestrator failed, retrying review';
@@ -443,7 +500,22 @@ export async function runCoderPhase(
     orchestratorOutput = await invokeCoderOrchestrator(context, projectPath);
   } catch (error) {
     console.error('Orchestrator invocation failed:', error);
-    
+    const orchestratorFailure = await classifyOrchestratorFailure(error, projectPath);
+
+    if (orchestratorFailure && !orchestratorFailure.retryable) {
+      orchestratorOutput = JSON.stringify({
+        action: 'error',
+        reasoning: `FALLBACK: Non-retryable orchestrator failure (${orchestratorFailure.type})`,
+        commits: [],
+        next_status: 'failed',
+        metadata: {
+          files_changed: 0,
+          confidence: 'low',
+          exit_clean: false,
+          has_commits: false,
+        }
+      });
+    } else {
     // Check if coder seems finished even if orchestrator failed
     const isTaskComplete = hasCoderCompletionSignal(coderResult.stdout);
     // Only count as having work if there are actual relevant uncommitted changes,
@@ -477,6 +549,7 @@ export async function runCoderPhase(
           has_commits: false,
         }
       });
+    }
     }
   }
 
@@ -874,15 +947,19 @@ export async function runReviewerPhase(
       }
     } catch (error) {
       console.error('Orchestrator invocation failed:', error);
+      const orchestratorFailure = await classifyOrchestratorFailure(error, projectPath);
       
       const handler = new OrchestrationFallbackHandler();
       const reviewerStdout = reviewerResult?.stdout ?? '';
       const explicitDecision = handler.extractExplicitReviewerDecision(reviewerStdout);
+      const failureReason = orchestratorFailure
+        ? `${orchestratorFailure.type}: ${orchestratorFailure.message}`
+        : summarizeErrorMessage(error);
       
       if (explicitDecision) {
         decision = {
           decision: explicitDecision,
-          reasoning: `FALLBACK: Orchestrator failed but reviewer explicitly signaled ${explicitDecision.toUpperCase()}`,
+          reasoning: `FALLBACK: Orchestrator failed (${failureReason}) but reviewer explicitly signaled ${explicitDecision.toUpperCase()}`,
           notes: reviewerStdout,
           next_status: explicitDecision === 'approve' ? 'completed' : 
                        explicitDecision === 'reject' ? 'in_progress' : 
@@ -898,7 +975,7 @@ export async function runReviewerPhase(
       } else {
         decision = {
           decision: 'unclear',
-          reasoning: 'FALLBACK: Orchestrator failed, retrying review',
+          reasoning: `FALLBACK: Orchestrator failed (${failureReason}), retrying review`,
           notes: 'Review unclear, retrying',
           next_status: 'review',
           metadata: {
