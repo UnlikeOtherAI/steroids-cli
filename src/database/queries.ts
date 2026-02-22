@@ -843,6 +843,23 @@ export function getLatestSubmissionCommitSha(
 }
 
 /**
+ * Get submission commit hashes for review transitions, from newest to oldest.
+ */
+export function getSubmissionCommitShas(db: Database.Database, taskId: string): string[] {
+  return db
+    .prepare(
+      `SELECT commit_sha FROM audit
+       WHERE task_id = ?
+       AND to_status = 'review'
+       AND commit_sha IS NOT NULL
+       ORDER BY created_at DESC, id DESC`
+    )
+    .all(taskId)
+    .map((row: { commit_sha: string | null }) => row.commit_sha)
+    .filter((sha): sha is string => Boolean(sha));
+}
+
+/**
  * Get the latest persisted MUST_IMPLEMENT guidance for a task.
  * Guidance is stored as coordinator audit notes with marker:
  * [must_implement][rc=<rejection_count>] <guidance text>

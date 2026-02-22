@@ -64,6 +64,26 @@ export function getCurrentCommitSha(projectPath: string = process.cwd()): string
 }
 
 /**
+ * Check whether a commit hash exists in the current repository.
+ */
+export function isCommitReachable(projectPath: string, commitSha: string): boolean {
+  if (!commitSha || !/^[0-9a-fA-F]{7,40}$/.test(commitSha)) {
+    return false;
+  }
+
+  try {
+    const type = execFileSync('git', ['cat-file', '-t', commitSha], {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return type === 'commit';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Get short (7 char) commit SHA
  */
 export function getShortCommitSha(projectPath: string = process.cwd()): string | null {

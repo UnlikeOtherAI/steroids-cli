@@ -12,7 +12,7 @@ import {
   getTaskRejections,
   getTaskAudit,
   getLatestSubmissionNotes,
-  getLatestSubmissionCommitSha,
+  getSubmissionCommitShas,
   getLatestMustImplementGuidance,
   listTasks,
   addAuditEntry,
@@ -39,6 +39,7 @@ import {
   hasUncommittedChanges,
   getDiffSummary,
   getDiffStats,
+  isCommitReachable,
 } from '../git/status.js';
 import {
   invokeCoderOrchestrator,
@@ -230,6 +231,21 @@ async function checkNonRetryableProviderFailure(
 function summarizeErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   return raw.replace(/\s+/g, ' ').trim().slice(0, 220);
+}
+
+function resolveLatestReachableSubmissionCommitSha(
+  db: ReturnType<typeof openDatabase>['db'],
+  projectPath: string,
+  taskId: string
+): string | null {
+  const candidateShas = getSubmissionCommitShas(db, taskId);
+  for (const sha of candidateShas) {
+    if (isCommitReachable(projectPath, sha)) {
+      return sha;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -797,16 +813,16 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
     case 'submit':
       {
         const submissionCommitSha = getCurrentCommitSha(projectPath) || undefined;
-        if (!submissionCommitSha) {
+        if (!submissionCommitSha || !isCommitReachable(projectPath, submissionCommitSha)) {
           updateTaskStatus(
             db,
             task.id,
             'failed',
             'orchestrator',
-            'Task failed: cannot submit to review without a commit hash'
+            'Task failed: cannot submit to review without a valid commit hash'
           );
           if (!jsonMode) {
-            console.log('\n✗ Task failed (missing commit hash on submit)');
+            console.log('\n✗ Task failed (submission commit missing or not in workspace)');
           }
           break;
         }
@@ -820,16 +836,16 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
     case 'stage_commit_submit':
       if (!has_uncommitted) {
         const submissionCommitSha = getCurrentCommitSha(projectPath) || undefined;
-        if (!submissionCommitSha) {
+        if (!submissionCommitSha || !isCommitReachable(projectPath, submissionCommitSha)) {
           updateTaskStatus(
             db,
             task.id,
             'failed',
             'orchestrator',
-            'Task failed: cannot submit to review without a commit hash'
+            'Task failed: cannot submit to review without a valid commit hash'
           );
           if (!jsonMode) {
-            console.log('\n✗ Task failed (missing commit hash on auto-commit skip path)');
+            console.log('\n✗ Task failed (submission commit missing or not in workspace)');
           }
           break;
         }
@@ -857,16 +873,16 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
           stdio: 'pipe'
         });
         const submissionCommitSha = getCurrentCommitSha(projectPath) || undefined;
-        if (!submissionCommitSha) {
+        if (!submissionCommitSha || !isCommitReachable(projectPath, submissionCommitSha)) {
           updateTaskStatus(
             db,
             task.id,
             'failed',
             'orchestrator',
-            'Task failed: auto-commit succeeded but commit hash could not be resolved'
+            'Task failed: auto-committed but commit hash is not in current workspace'
           );
           if (!jsonMode) {
-            console.log('\n✗ Task failed (auto-commit hash could not be resolved)');
+            console.log('\n✗ Task failed (auto-commit hash not in workspace)');
           }
           break;
         }
@@ -922,17 +938,17 @@ export async function runReviewerPhase(
   const config = loadConfig(projectPath);
   const multiReviewEnabled = isMultiReviewEnabled(config);
   const strict = config.ai?.review?.strict ?? true;
-  const submissionCommitSha = getLatestSubmissionCommitSha(db, task.id);
+  const submissionCommitSha = resolveLatestReachableSubmissionCommitSha(db, projectPath, task.id);
   if (!submissionCommitSha) {
     updateTaskStatus(
       db,
       task.id,
       'failed',
       'orchestrator',
-      'Task failed: submission commit hash missing for review phase'
+      'Task failed: no reachable submission commit hash available for review phase'
     );
     if (!jsonMode) {
-      console.log('\n✗ Task failed (missing submission commit hash before review)');
+      console.log('\n✗ Task failed (submission commit not reachable in this workspace)');
     }
     return;
   }

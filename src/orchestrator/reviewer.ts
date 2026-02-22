@@ -11,7 +11,7 @@ import {
   listTasks,
   getTaskRejections,
   getLatestSubmissionNotes,
-  getLatestSubmissionCommitSha,
+  getSubmissionCommitShas,
   findResumableSession,
   invalidateSession,
 } from '../database/queries.js';
@@ -27,6 +27,7 @@ import type { SectionTask } from '../prompts/prompt-helpers.js';
 import { loadConfig, type ReviewerConfig, type SteroidsConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
+import { isCommitReachable } from '../git/status.js';
 
 export interface ReviewerResult {
   success: boolean;
@@ -101,6 +102,22 @@ export function getReviewerConfigs(config: SteroidsConfig): ReviewerConfig[] {
  */
 export function isMultiReviewEnabled(config: SteroidsConfig): boolean {
   return !!(config.ai?.reviewers && config.ai.reviewers.length > 1);
+}
+
+function resolveLatestReachableSubmissionCommitSha(
+  projectPath: string,
+  taskId: string,
+  db: ReturnType<typeof openDatabase>['db']
+): string | null {
+  const candidateShas = getSubmissionCommitShas(db, taskId);
+
+  for (const sha of candidateShas) {
+    if (isCommitReachable(projectPath, sha)) {
+      return sha;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -332,9 +349,9 @@ export async function invokeReviewer(
         console.log(`Coder included notes with submission`);
       }
       
-      submissionCommitHash = getLatestSubmissionCommitSha(db, task.id);
+      submissionCommitHash = resolveLatestReachableSubmissionCommitSha(projectPath, task.id, db);
       if (!submissionCommitHash) {
-        throw new Error(`Submission commit hash not found for task ${task.id}`);
+        throw new Error(`No reachable submission commit hash found for task ${task.id}`);
       }
       console.log(`Using submission commit: ${submissionCommitHash}`);
 
@@ -463,19 +480,19 @@ export async function invokeReviewerBatch(
   const { db, close } = openDatabase(projectPath);
   let taskCommits: Array<{ taskId: string; commitHash: string }> = [];
   try {
-    const unresolved = tasks
-      .map(task => ({ taskId: task.id, commitHash: getLatestSubmissionCommitSha(db, task.id) }))
-      .filter(item => !item.commitHash)
-      .map(item => item.taskId);
+    const unresolved: string[] = [];
+
+    taskCommits = tasks.map(task => {
+      const commitHash = resolveLatestReachableSubmissionCommitSha(projectPath, task.id, db);
+      if (!commitHash) {
+        unresolved.push(task.id);
+      }
+      return { taskId: task.id, commitHash: commitHash ?? '' };
+    });
 
     if (unresolved.length > 0) {
-      throw new Error(`Missing submission commit hash for batch review tasks: ${unresolved.join(', ')}`);
+      throw new Error(`Missing reachable submission commit hash for batch review tasks: ${unresolved.join(', ')}`);
     }
-
-    taskCommits = tasks.map(task => ({
-      taskId: task.id,
-      commitHash: getLatestSubmissionCommitSha(db, task.id)!,
-    }));
   } finally {
     close();
   }
