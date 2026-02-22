@@ -7,7 +7,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
-import { listTasks, getTaskRejections, getLatestSubmissionNotes, findResumableSession } from '../database/queries.js';
+import { listTasks, getTaskRejections, getLatestSubmissionNotes, findResumableSession, invalidateSession } from '../database/queries.js';
 import { openDatabase } from '../database/connection.js';
 import {
   generateReviewerPrompt,
@@ -394,7 +394,7 @@ export async function invokeReviewer(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    const result = await invokeProvider(
+    let result = await invokeProvider(
       promptFile,
       600_000,
       task.id,
@@ -402,6 +402,31 @@ export async function invokeReviewer(
       effectiveReviewerConfig,
       resumeSessionId ?? undefined
     );
+
+    // If session resume returned empty output, invalidate session and retry fresh
+    if (resumeSessionId && result.stdout.trim().length === 0) {
+      console.warn(`Session resume returned empty output — invalidating session ${resumeSessionId.substring(0, 8)}... and retrying fresh`);
+      try {
+        const { db, close } = openDatabase(projectPath);
+        invalidateSession(db, resumeSessionId);
+        close();
+      } catch {}
+
+      // Generate fresh prompt and retry
+      const freshPrompt = generateReviewerPrompt(context);
+      const freshPromptFile = writePromptToTempFile(freshPrompt);
+      try {
+        result = await invokeProvider(
+          freshPromptFile,
+          600_000,
+          task.id,
+          projectPath,
+          effectiveReviewerConfig
+        );
+      } finally {
+        if (existsSync(freshPromptFile)) unlinkSync(freshPromptFile);
+      }
+    }
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`REVIEWER COMPLETED`);

@@ -1153,6 +1153,19 @@ export function findResumableSession(
 }
 
 /**
+ * Invalidate a resumable session by clearing session_id on the invocations.
+ * Called when a session resume returns empty output, indicating the session is dead.
+ */
+export function invalidateSession(
+  db: Database.Database,
+  sessionId: string
+): void {
+  db.prepare(
+    `UPDATE task_invocations SET session_id = NULL WHERE session_id = ?`
+  ).run(sessionId);
+}
+
+/**
  * Get the chain depth of a follow-up task
  */
 export function getFollowUpDepth(db: Database.Database, taskId: string): number {

@@ -7,7 +7,7 @@ import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
-import { getTaskRejections, findResumableSession } from '../database/queries.js';
+import { getTaskRejections, findResumableSession, invalidateSession } from '../database/queries.js';
 import { openDatabase } from '../database/connection.js';
 import {
   generateCoderPrompt,
@@ -206,7 +206,26 @@ export async function invokeCoder(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    const result = await invokeProvider(promptFile, 900_000, task.id, projectPath, resumeSessionId ?? undefined);
+    let result = await invokeProvider(promptFile, 900_000, task.id, projectPath, resumeSessionId ?? undefined);
+
+    // If session resume returned empty output, invalidate session and retry fresh
+    if (resumeSessionId && result.stdout.trim().length === 0) {
+      console.warn(`Session resume returned empty output — invalidating session ${resumeSessionId.substring(0, 8)}... and retrying fresh`);
+      try {
+        const { db, close } = openDatabase(projectPath);
+        invalidateSession(db, resumeSessionId);
+        close();
+      } catch {}
+
+      // Generate fresh prompt and retry
+      const freshPrompt = generateCoderPrompt(context);
+      const freshPromptFile = writePromptToTempFile(freshPrompt);
+      try {
+        result = await invokeProvider(freshPromptFile, 900_000, task.id, projectPath);
+      } finally {
+        if (existsSync(freshPromptFile)) unlinkSync(freshPromptFile);
+      }
+    }
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`CODER COMPLETED`);

@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, existsSync, rmSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync, rmSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -178,6 +178,36 @@ export class CodexProvider extends BaseAIProvider {
   }
 
   /**
+   * Get or create a persistent Codex home for the given project.
+   * Unlike temp-dir isolated homes, this persists across invocations
+   * so Codex session/thread state is preserved for resume.
+   */
+  private getPersistentHome(cwd: string): { home: string; isPersistent: boolean } {
+    try {
+      // Check if cwd has a .steroids directory (project-managed)
+      const steroidsDir = join(cwd, '.steroids');
+      if (existsSync(steroidsDir)) {
+        // Resolve through symlinks to get the canonical path
+        const realSteroidsDir = realpathSync(steroidsDir);
+        const persistentHome = join(realSteroidsDir, 'provider-homes', 'codex');
+        mkdirSync(persistentHome, { recursive: true });
+
+        // Set up auth files if not already done
+        this.setupIsolatedHome('.codex', ['auth.json', 'config.yaml', 'state.json'], persistentHome);
+        return { home: persistentHome, isPersistent: true };
+      }
+    } catch {
+      // Fall through to temp dir
+    }
+
+    // Fallback: use temp dir (non-persistent, will be cleaned up)
+    return {
+      home: this.setupIsolatedHome('.codex', ['auth.json', 'config.yaml', 'state.json']),
+      isPersistent: false,
+    };
+  }
+
+  /**
    * Invoke Codex CLI with a prompt file using the invocation template
    */
   private invokeWithFile(
@@ -189,8 +219,8 @@ export class CodexProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
-    // Set up isolated HOME
-    const isolatedHome = this.setupIsolatedHome('.codex', ['auth.json', 'config.yaml', 'state.json']);
+    // Use persistent home to preserve session/thread state across invocations
+    const { home: isolatedHome, isPersistent } = this.getPersistentHome(cwd);
 
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -332,11 +362,13 @@ export class CodexProvider extends BaseAIProvider {
           }
         }
 
-        // Cleanup isolated home
-        try {
-          rmSync(isolatedHome, { recursive: true, force: true });
-        } catch {
-          // Ignore cleanup errors
+        // Only cleanup temp-dir homes, not persistent ones
+        if (!isPersistent) {
+          try {
+            rmSync(isolatedHome, { recursive: true, force: true });
+          } catch {
+            // Ignore cleanup errors
+          }
         }
 
         resolve({
@@ -355,11 +387,13 @@ export class CodexProvider extends BaseAIProvider {
         clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
 
-        // Cleanup isolated home
-        try {
-          rmSync(isolatedHome, { recursive: true, force: true });
-        } catch {
-          // Ignore cleanup errors
+        // Only cleanup temp-dir homes, not persistent ones
+        if (!isPersistent) {
+          try {
+            rmSync(isolatedHome, { recursive: true, force: true });
+          } catch {
+            // Ignore cleanup errors
+          }
         }
 
         resolve({
