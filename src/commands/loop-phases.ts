@@ -743,6 +743,29 @@ export async function runReviewerPhase(
       const orchestratorOutput = await invokeReviewerOrchestrator(context, projectPath);
       const handler = new OrchestrationFallbackHandler();
       decision = handler.parseReviewerOutput(orchestratorOutput);
+
+      // If orchestrator returned unclear, check reviewer stdout for explicit decision token
+      if (decision.decision === 'unclear') {
+        const reviewerStdout = reviewerResult?.stdout ?? '';
+        const explicitDecision = handler.extractExplicitReviewerDecision(reviewerStdout);
+        if (explicitDecision) {
+          decision = {
+            decision: explicitDecision,
+            reasoning: `FALLBACK: Orchestrator unclear but reviewer explicitly signaled ${explicitDecision.toUpperCase()}`,
+            notes: reviewerStdout,
+            next_status: explicitDecision === 'approve' ? 'completed' :
+                         explicitDecision === 'reject' ? 'in_progress' :
+                         explicitDecision === 'dispute' ? 'disputed' :
+                         explicitDecision === 'skip' ? 'skipped' : 'review',
+            metadata: {
+              rejection_count: task.rejection_count,
+              confidence: 'medium',
+              push_to_remote: ['approve', 'dispute', 'skip'].includes(explicitDecision),
+              repeated_issue: false,
+            }
+          };
+        }
+      }
     } catch (error) {
       console.error('Orchestrator invocation failed:', error);
       
