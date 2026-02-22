@@ -163,6 +163,8 @@ async function checkCreditExhaustion(
 }
 
 const MAX_ORCHESTRATOR_PARSE_RETRIES = 3;
+const CODER_PARSE_FALLBACK_MARKER = '[retry] FALLBACK: Orchestrator failed, defaulting to retry';
+const REVIEWER_PARSE_FALLBACK_MARKER = '[unclear] FALLBACK: Orchestrator failed, retrying review';
 
 function countConsecutiveOrchestratorFallbackEntries(
   db: ReturnType<typeof openDatabase>['db'],
@@ -327,7 +329,7 @@ export async function runCoderPhase(
     
     // Check if coder seems finished even if orchestrator failed
     const coderStdout = coderResult.stdout.toLowerCase();
-    const isTaskComplete = coderStdout.includes('task complete') || coderStdout.includes('implementation complete');
+    const isTaskComplete = /complete|finished|done|ready/.test(coderStdout);
     // Only count as having work if there are actual uncommitted changes or very recent session commits
     const hasWork = has_uncommitted || commits.length > 0;
 
@@ -367,7 +369,7 @@ export async function runCoderPhase(
 
   if (decision.action === 'retry' && decision.reasoning.includes('FALLBACK: Orchestrator failed')) {
     const consecutiveParseFallbackRetries =
-      countConsecutiveOrchestratorFallbackEntries(db, task.id, 'FALLBACK: Orchestrator failed') + 1;
+      countConsecutiveOrchestratorFallbackEntries(db, task.id, CODER_PARSE_FALLBACK_MARKER) + 1;
 
     if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
       decision = {
@@ -572,31 +574,73 @@ export async function runReviewerPhase(
         decision = handler.parseReviewerOutput(orchestratorOutput);
       } catch (error) {
         console.error('Multi-reviewer orchestrator failed:', error);
+        decision = {
+          decision: 'unclear',
+          reasoning: 'FALLBACK: Multi-reviewer orchestrator failed',
+          notes: 'Review unclear, retrying',
+          next_status: 'review',
+          metadata: {
+            rejection_count: task.rejection_count,
+            confidence: 'low',
+            push_to_remote: false,
+            repeated_issue: false,
+          }
+        };
+      }
+    } else {
+      // No merge needed (decision is Approve, Dispute, or Skip)
+      const multiContext: MultiReviewerContext = {
+        task: {
+          id: task.id,
+          title: task.title,
+          rejection_count: task.rejection_count,
+        },
+        reviewer_results: reviewerResults.map(r => ({
+          provider: r.provider || 'unknown',
+          model: r.model || 'unknown',
+          decision: r.decision || 'unclear',
+          stdout: r.stdout,
+          stderr: r.stderr,
+          duration_ms: r.duration,
+        })),
+        git_context: gitContext,
+      };
+
+      try {
+        const orchestratorOutput = await invokeMultiReviewerOrchestrator(multiContext, projectPath);
+        const handler = new OrchestrationFallbackHandler();
+        decision = handler.parseReviewerOutput(orchestratorOutput);
+      } catch (error) {
+        console.error('Multi-reviewer orchestrator failed (consensus path):', error);
         
         const handler = new OrchestrationFallbackHandler();
-        // REQUIRE UNANIMOUS APPROVAL for auto-complete fallback
-        const isUnanimousApprove = reviewerResults.every(r => {
-          if (r.decision === 'approve') return true;
-          return handler.extractExplicitReviewerDecision(r.stdout) === 'approve';
+        // REQUIRE UNANIMOUS CONSENSUS for the non-reject finalDecision
+        const isUnanimousConsensus = reviewerResults.length > 0 && reviewerResults.every(r => {
+          if (r.decision === finalDecision) return true;
+          return handler.extractExplicitReviewerDecision(r.stdout) === finalDecision;
         });
-        
-        if (isUnanimousApprove) {
+
+        if (isUnanimousConsensus) {
+          const primaryResult = reviewerResults.find(r => r.decision === finalDecision) || reviewerResults[0];
           decision = {
-            decision: 'approve',
-            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed but all reviewers signaled approval',
-            notes: reviewerResults.map(r => `[${r.provider}] ${r.stdout}`).join('\n---\n'),
-            next_status: 'completed',
+            decision: (finalDecision === 'unclear' ? 'unclear' : finalDecision) as any,
+            reasoning: `FALLBACK: Multi-reviewer orchestrator failed but all reviewers reached consensus: ${finalDecision}`,
+            notes: primaryResult?.notes || primaryResult?.stdout || 'No notes provided',
+            next_status: finalDecision === 'approve' ? 'completed' : 
+                         finalDecision === 'reject' ? 'in_progress' : 
+                         finalDecision === 'dispute' ? 'disputed' :
+                         finalDecision === 'skip' ? 'skipped' : 'review',
             metadata: {
               rejection_count: task.rejection_count,
               confidence: 'low',
-              push_to_remote: true,
+              push_to_remote: ['approve', 'dispute', 'skip'].includes(finalDecision),
               repeated_issue: false,
             }
           };
         } else {
           decision = {
             decision: 'unclear',
-            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed and no consensus approval',
+            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed and no unanimous consensus',
             notes: 'Review unclear, retrying',
             next_status: 'review',
             metadata: {
@@ -608,25 +652,6 @@ export async function runReviewerPhase(
           };
         }
       }
-    } else {
-      // No merge needed - find the primary result for notes
-      const primaryResult = reviewerResults.find(r => r.decision === finalDecision) || reviewerResults[0];
-      
-      decision = {
-        decision: (finalDecision === 'unclear' ? 'unclear' : finalDecision) as any,
-        reasoning: `Multi-review consolidated decision: ${finalDecision}`,
-        notes: primaryResult?.notes || primaryResult?.stdout || 'No notes provided',
-        next_status: finalDecision === 'approve' ? 'completed' : 
-                     finalDecision === 'reject' ? 'in_progress' : 
-                     finalDecision === 'dispute' ? 'disputed' :
-                     finalDecision === 'skip' ? 'skipped' : 'review',
-        metadata: {
-          rejection_count: task.rejection_count,
-          confidence: 'high',
-          push_to_remote: ['approve', 'dispute', 'skip'].includes(finalDecision),
-          repeated_issue: false,
-        }
-      };
     }
   } else {
     // Single reviewer flow
@@ -657,16 +682,19 @@ export async function runReviewerPhase(
       const reviewerStdout = reviewerResult?.stdout ?? '';
       const explicitDecision = handler.extractExplicitReviewerDecision(reviewerStdout);
       
-      if (explicitDecision === 'approve') {
+      if (explicitDecision) {
         decision = {
-          decision: 'approve',
-          reasoning: 'FALLBACK: Orchestrator failed but reviewer explicitly approved',
+          decision: explicitDecision,
+          reasoning: `FALLBACK: Orchestrator failed but reviewer explicitly signaled ${explicitDecision.toUpperCase()}`,
           notes: reviewerStdout,
-          next_status: 'completed',
+          next_status: explicitDecision === 'approve' ? 'completed' : 
+                       explicitDecision === 'reject' ? 'in_progress' : 
+                       explicitDecision === 'dispute' ? 'disputed' :
+                       explicitDecision === 'skip' ? 'skipped' : 'review',
           metadata: {
             rejection_count: task.rejection_count,
             confidence: 'low',
-            push_to_remote: true,
+            push_to_remote: ['approve', 'dispute', 'skip'].includes(explicitDecision),
             repeated_issue: false,
           }
         };
@@ -690,7 +718,7 @@ export async function runReviewerPhase(
   // STEP 4: Fallback for unclear decisions
   if (decision.decision === 'unclear' && decision.reasoning.includes('FALLBACK: Orchestrator failed')) {
     const consecutiveParseFallbackRetries =
-      countConsecutiveOrchestratorFallbackEntries(db, task.id, 'FALLBACK: Orchestrator failed') + 1;
+      countConsecutiveOrchestratorFallbackEntries(db, task.id, REVIEWER_PARSE_FALLBACK_MARKER) + 1;
 
     if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
       decision = {

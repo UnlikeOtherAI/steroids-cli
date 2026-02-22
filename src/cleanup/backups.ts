@@ -33,25 +33,28 @@ export interface CleanupBackupsOptions {
  */
 function parseBackupTimestamp(name: string): number | null {
   // Try migration backup file format: pre-migrate-2024-01-15T10-30-00-000Z.db
-  const migrateMatch = /^pre-migrate-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z)/.exec(name);
+  const migrateMatch = /^pre-migrate-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d+)Z/.exec(name);
   if (migrateMatch) {
-    const ts = migrateMatch[1].replace(/-/g, (m, i) => i < 10 ? m : i < 13 ? ':' : i < 16 ? ':' : '.');
-    const d = new Date(ts);
-    return isNaN(d.getTime()) ? null : d.getTime();
+    const [_, y, m, d, hh, mm, ss, ms] = migrateMatch.map(Number);
+    const date = new Date(Date.UTC(y, m - 1, d, hh, mm, ss, ms));
+    return isNaN(date.getTime()) ? null : date.getTime();
   }
 
   // Try ISO-like format: 2024-01-15T10-30-00
   const isoMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/.exec(name);
   if (isoMatch) {
     const [_, y, m, d, hh, mm, ss] = isoMatch.map(Number);
-    return new Date(y, m - 1, d, hh, mm, ss).getTime();
+    // Use UTC consistently to match migration backups
+    const date = new Date(Date.UTC(y, m - 1, d, hh, mm, ss));
+    return isNaN(date.getTime()) ? null : date.getTime();
   }
 
   // Try date-only format: 2024-01-15
   const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(name);
   if (dateMatch) {
     const [_, y, m, d] = dateMatch.map(Number);
-    return new Date(y, m - 1, d).getTime();
+    const date = new Date(Date.UTC(y, m - 1, d));
+    return isNaN(date.getTime()) ? null : date.getTime();
   }
 
   return null;
@@ -101,7 +104,18 @@ export function cleanupBackups(
       if (entry.isDirectory()) {
         size = getDirectorySize(fullPath);
       } else {
-        try { size = statSync(fullPath).size; } catch { continue; }
+        try {
+          const st = statSync(fullPath);
+          size = st.size;
+          
+          // Also include size of associated WAL/SHM files if we're going to delete them
+          if (entry.name.endsWith('.db')) {
+            try { size += statSync(`${fullPath}-wal`).size; } catch {}
+            try { size += statSync(`${fullPath}-shm`).size; } catch {}
+          }
+        } catch {
+          continue; // File may have disappeared
+        }
       }
       
       deletedFiles++;

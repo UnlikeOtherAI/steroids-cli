@@ -54,12 +54,16 @@ export async function validateProjectPath(
 /**
  * Get detailed storage breakdown with 60s cache.
  */
-export async function getCachedStorageBreakdown(projectPath: string): Promise<StorageBreakdown> {
+export async function getCachedStorageBreakdown(
+  projectPath: string, 
+  retentionDays: number = 7,
+  backupRetentionDays: number = 30
+): Promise<StorageBreakdown> {
   const entry = detailCache.get(projectPath);
   if (entry && Date.now() < entry.expiresAt) return entry.data;
 
   const steroidsDir = join(projectPath, '.steroids');
-  const data = await getStorageBreakdown(steroidsDir);
+  const data = await getStorageBreakdown(steroidsDir, retentionDays, backupRetentionDays);
   detailCache.set(projectPath, { data, expiresAt: Date.now() + DETAIL_TTL_MS });
   return data;
 }

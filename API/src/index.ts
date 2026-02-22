@@ -5,8 +5,8 @@
 
 import express from 'express';
 import cors from 'cors';
-import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { realpathSync, readFileSync } from 'node:fs';
+import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import projectsRouter from './routes/projects.js';
 import storageRouter from './routes/storage.js';
@@ -20,6 +20,13 @@ import { creditAlertRoutes } from './routes/credit-alerts.js';
 
 const PORT = process.env.PORT || 3501;
 const HOST = process.env.HOST || '0.0.0.0';
+
+// Get version from package.json
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const packageJsonPath = join(__dirname, '..', '..', 'package.json');
+const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+const version = pkg.version;
 
 export function createApp(): express.Express {
   const app = express();
@@ -55,7 +62,7 @@ export function createApp(): express.Express {
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
-      version: '0.2.6',
+      version,
     });
   });
 
@@ -63,7 +70,7 @@ export function createApp(): express.Express {
   app.get('/', (req, res) => {
     res.json({
       name: 'Steroids API',
-      version: '0.2.6',
+      version,
       endpoints: [
         'GET /health',
         'GET /api/projects',

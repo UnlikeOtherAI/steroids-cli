@@ -28,7 +28,18 @@ router.get('/projects/storage', async (req: Request, res: Response) => {
       res.status(result.status).json({ success: false, error: result.error });
       return;
     }
-    const breakdown = await getCachedStorageBreakdown(result.realPath);
+
+    const retention = parseRetentionDays(req.query.retention_days);
+    if (!retention.valid) {
+      res.status(400).json({ success: false, error: retention.error });
+      return;
+    }
+
+    const breakdown = await getCachedStorageBreakdown(
+      result.realPath, 
+      retention.days,
+      Math.max(retention.days, 30) // Match cleanupBackups floor
+    );
     res.json(breakdown);
   } catch (error) {
     console.error('Error getting project storage:', error);

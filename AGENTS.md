@@ -24,13 +24,13 @@ This applies to:
    - **Logic Gaps**: Does `isAvailable` actually mean the service is ready for the specific task?
 4. **Non-Interactive Mode (CRITICAL):** Reviews MUST be run in non-interactive mode (e.g., using `--print` or `--exec` flags) to ensure that output is captured correctly and the automated workflow is not blocked by interactive prompts.
 5. **The review is advisory, NOT the source of truth.** The reviewing model may be wrong, may miss context, or may over-engineer. Treat its output as additional data points, not mandates.
-5. **Assess each finding independently.** For each point the reviewer raises:
+6. **Assess each finding independently.** For each point the reviewer raises:
    - Is it valid given the actual codebase? (Check the code, don't assume)
    - Is it relevant to the current scope?
    - Is it actionable now, or a future concern?
    - Does it conflict with existing patterns?
-6. **Document both perspectives.** Append a "Cross-Provider Review" section to your design doc showing: the finding, your assessment, and the decision (adopt/defer/reject with reasoning).
-7. **Commit the combined document.** The review trail is valuable for future reference.
+7. **Document both perspectives.** Append a "Cross-Provider Review" section to your design doc showing: the finding, your assessment, and the decision (adopt/defer/reject with reasoning).
+8. **Commit the combined document.** The review trail is valuable for future reference.
 
 ### What NOT to Do
 
