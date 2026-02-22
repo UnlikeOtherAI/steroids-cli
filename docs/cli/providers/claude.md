@@ -17,7 +17,7 @@
 
 **Default Steroids template:**
 ```
-{cli} -p "$(cat {prompt_file})" --model {model} --output-format stream-json --verbose
+{cli} -p "$(cat {prompt_file})" --model {model} --output-format stream-json --verbose --dangerously-skip-permissions
 ```
 
 **Key flags:**
@@ -25,6 +25,7 @@
 - `--model <alias>` — Model selection (accepts aliases: `opus`, `sonnet`, `haiku`)
 - `--output-format stream-json` — JSONL output with structured events
 - `--verbose` — Include token usage and cost in output
+- `--dangerously-skip-permissions` — Bypass all permission checks (required for automated sessions; without this, Write/Edit/Bash tools require interactive approval that can't be granted)
 - `--resume <session_id>` — Resume a previous session
 - `--max-turns <N>` — Limit agentic turns
 
@@ -114,6 +115,8 @@ output_tokens: 342
 - **Buffer cap:** stdout/stderr capped at 2MB to prevent memory issues.
 - **Env sanitization:** `ANTHROPIC_API_KEY` stripped from child env to force OAuth.
 - **Stream-json parsing:** Extracts text content from assistant events, tool names from tool_use blocks, final result from result event.
+- **Permission bypass:** `--dangerously-skip-permissions` required for automated sessions. Without it, Write/Edit/Bash tools require interactive approval.
+- **Settings symlink:** `settings.json` is symlinked to the isolated HOME alongside `config.json` and `.credentials.json`, preserving user's tool allow-lists and permission mode.
 
 ### Improvement Backlog
 

@@ -58,7 +58,7 @@ const DEFAULT_TIMEOUT = 900_000;
  * Default invocation template for Claude CLI
  * Uses -p flag for print mode with stream-json for realtime output
  */
-const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" {session_id} --model {model} --output-format stream-json --verbose';
+const DEFAULT_INVOCATION_TEMPLATE = '{cli} -p "$(cat {prompt_file})" {session_id} --model {model} --output-format stream-json --verbose --dangerously-skip-permissions';
 
 /**
  * Claude AI Provider implementation
@@ -199,7 +199,7 @@ export class ClaudeProvider extends BaseAIProvider {
     resumeSessionId?: string
   ): Promise<InvokeResult> {
     // Set up isolated HOME
-    const isolatedHome = this.setupIsolatedHome('.claude', ['config.json', '.credentials.json']);
+    const isolatedHome = this.setupIsolatedHome('.claude', ['config.json', '.credentials.json', 'settings.json']);
 
     return new Promise((resolve) => {
       const startTime = Date.now();
