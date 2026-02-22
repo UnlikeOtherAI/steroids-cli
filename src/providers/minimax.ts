@@ -55,11 +55,63 @@ export class MiniMaxProvider extends BaseAIProvider {
 
   private apiKey: string | undefined;
   private groupId: string | undefined;
+  private dynamicModels: ModelInfo[] = [];
 
   constructor() {
     super();
     this.apiKey = process.env.STEROIDS_MINIMAX_API_KEY || process.env.MINIMAX_API_KEY;
     this.groupId = process.env.STEROIDS_MINIMAX_GROUP_ID || process.env.MINIMAX_GROUP_ID;
+  }
+
+  /**
+   * Fetch available models from MiniMax API
+   */
+  async initialize(): Promise<void> {
+    if (!this.apiKey) return;
+
+    return new Promise((resolve) => {
+      const requestOptions = {
+        hostname: 'api.minimax.chat',
+        port: 443,
+        path: '/v1/models', // Standard models endpoint
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+      };
+
+      const req = request(requestOptions, (res) => {
+        let body = '';
+        res.on('data', (chunk) => body += chunk);
+        res.on('end', () => {
+          try {
+            if (res.statusCode === 200) {
+              const data = JSON.parse(body);
+              if (data.data && Array.isArray(data.data)) {
+                this.dynamicModels = data.data.map((m: any) => ({
+                  id: m.id,
+                  name: m.id,
+                  recommendedFor: m.id.includes('chat') ? ['coder', 'reviewer'] : [],
+                  supportsStreaming: true,
+                }));
+              }
+            }
+            resolve();
+          } catch {
+            resolve();
+          }
+        });
+      });
+
+      req.on('error', () => resolve());
+      req.end();
+
+      // Timeout for initialization
+      setTimeout(() => {
+        req.destroy();
+        resolve();
+      }, 5000);
+    });
   }
 
   /**
@@ -187,14 +239,15 @@ Raw response: ${responseBody}`,
    * List models
    */
   listModels(): string[] {
-    return MINIMAX_MODELS.map((m) => m.id);
+    const models = this.dynamicModels.length > 0 ? this.dynamicModels : MINIMAX_MODELS;
+    return models.map((m) => m.id);
   }
 
   /**
    * Get model info
    */
   getModelInfo(): ModelInfo[] {
-    return [...MINIMAX_MODELS];
+    return this.dynamicModels.length > 0 ? [...this.dynamicModels] : [...MINIMAX_MODELS];
   }
 
   /**

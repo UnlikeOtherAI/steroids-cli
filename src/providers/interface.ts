@@ -242,6 +242,14 @@ export abstract class BaseAIProvider implements IAIProvider {
   abstract isAvailable(): Promise<boolean>;
 
   /**
+   * Initialize the provider (e.g., fetch dynamic models).
+   * Default implementation does nothing.
+   */
+  async initialize(): Promise<void> {
+    // No-op by default
+  }
+
+  /**
    * Default implementation of resume calls invoke with resumeSessionId in options
    */
   async resume(sessionId: string, prompt: string, options: InvokeOptions): Promise<InvokeResult> {

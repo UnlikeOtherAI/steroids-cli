@@ -17,7 +17,11 @@ This applies to:
 
 1. **Write the design/spec first.** Complete your thinking before seeking review.
 2. **Send to a different provider.** If Claude wrote it, send to Codex or Gemini. If Codex wrote it, send to Claude or Gemini.
-3. **Ask for specific, actionable feedback.** Not "is this good?" but "review for architecture issues, race conditions, missing edge cases, and implementation risks."
+3. **Strict Adversarial Persona (MANDATORY):** You must instruct the reviewer to be **adversarial**. It is not enough to check if it "works." The reviewer must explicitly look for:
+   - **Technical Debt**: Are we taking shortcuts that will hurt us later?
+   - **Architectural Regression**: Are we losing features (like streaming or isolation) that other providers have?
+   - **Type Safety**: Are we using `any` or bypassing the type system?
+   - **Logic Gaps**: Does `isAvailable` actually mean the service is ready for the specific task?
 4. **The review is advisory, NOT the source of truth.** The reviewing model may be wrong, may miss context, or may over-engineer. Treat its output as additional data points, not mandates.
 5. **Assess each finding independently.** For each point the reviewer raises:
    - Is it valid given the actual codebase? (Check the code, don't assume)

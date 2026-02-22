@@ -97,7 +97,7 @@ export class OllamaProvider extends BaseAIProvider {
   /**
    * Fetch available models from local Ollama service
    */
-  async fetchModels(): Promise<void> {
+  async initialize(): Promise<void> {
     return new Promise((resolve) => {
       const options = {
         hostname: this.host,
@@ -116,7 +116,7 @@ export class OllamaProvider extends BaseAIProvider {
               this.dynamicModels = data.models.map((m: any) => ({
                 id: m.name,
                 name: m.name,
-                recommendedFor: m.name.includes('coder') ? ['coder'] : [],
+                recommendedFor: m.name.toLowerCase().includes('coder') ? ['coder'] : [],
                 supportsStreaming: true,
               }));
             }
@@ -129,6 +129,12 @@ export class OllamaProvider extends BaseAIProvider {
 
       req.on('error', () => resolve());
       req.end();
+
+      // Timeout for initialization
+      setTimeout(() => {
+        req.destroy();
+        resolve();
+      }, 5000);
     });
   }
 

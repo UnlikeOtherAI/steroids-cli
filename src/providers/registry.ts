@@ -192,13 +192,10 @@ export async function createDefaultRegistry(): Promise<ProviderRegistry> {
   ];
 
   for (const provider of providers) {
-    const anyProvider = provider as any;
-    if (anyProvider.initialize) {
-      try {
-        await anyProvider.initialize();
-      } catch (error) {
-        console.warn(`Warning: Failed to initialize provider '${provider.name}': ${error}`);
-      }
+    try {
+      await provider.initialize();
+    } catch (error) {
+      console.warn(`Warning: Failed to initialize provider '${provider.name}': ${error}`);
     }
     registry.register(provider);
   }
