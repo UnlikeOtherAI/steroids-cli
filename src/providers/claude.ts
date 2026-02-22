@@ -199,7 +199,7 @@ export class ClaudeProvider extends BaseAIProvider {
     resumeSessionId?: string
   ): Promise<InvokeResult> {
     // Set up isolated HOME
-    const isolatedHome = this.setupIsolatedHome('.claude', ['config.json']);
+    const isolatedHome = this.setupIsolatedHome('.claude', ['config.json', '.credentials.json']);
 
     return new Promise((resolve) => {
       const startTime = Date.now();
