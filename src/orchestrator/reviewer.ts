@@ -27,7 +27,7 @@ import type { SectionTask } from '../prompts/prompt-helpers.js';
 import { loadConfig, type ReviewerConfig, type SteroidsConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
-import { isCommitReachable } from '../git/status.js';
+import { isCommitReachableWithFetch } from '../git/status.js';
 
 export interface ReviewerResult {
   success: boolean;
@@ -112,7 +112,7 @@ function resolveLatestReachableSubmissionCommitSha(
   const candidateShas = getSubmissionCommitShas(db, taskId);
 
   for (const sha of candidateShas) {
-    if (isCommitReachable(projectPath, sha)) {
+    if (isCommitReachableWithFetch(projectPath, sha, { forceFetch: true })) {
       return sha;
     }
   }

@@ -8,6 +8,23 @@ interface GitStatusOptions {
   ignoreWorkspaceNoise?: boolean;
 }
 
+function getGitRemotes(projectPath: string): string[] {
+  try {
+    const output = execSync('git remote', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    return output
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 const DEFAULT_GIT_STATUS_OPTIONS: GitStatusOptions = {
   ignoreWorkspaceNoise: true,
 };
@@ -61,6 +78,43 @@ export function getCurrentCommitSha(projectPath: string = process.cwd()): string
   } catch {
     return null;
   }
+}
+
+/**
+ * Ensure a commit hash is reachable by checking local objects and fetching remotes if needed.
+ */
+export function isCommitReachableWithFetch(
+  projectPath: string,
+  commitSha: string,
+  options: { forceFetch?: boolean } = {}
+): boolean {
+  if (!commitSha) {
+    return false;
+  }
+
+  if (isCommitReachable(projectPath, commitSha)) {
+    return true;
+  }
+
+  if (!options.forceFetch) {
+    return false;
+  }
+
+  const remotes = getGitRemotes(projectPath);
+  for (const remote of remotes) {
+    try {
+      execSync(`git fetch ${remote}`, {
+        cwd: projectPath,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 120_000,
+      });
+    } catch {
+      // Ignore fetch failures and try other remotes.
+    }
+  }
+
+  return isCommitReachable(projectPath, commitSha);
 }
 
 /**

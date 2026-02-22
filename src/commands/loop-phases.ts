@@ -40,6 +40,7 @@ import {
   getDiffSummary,
   getDiffStats,
   isCommitReachable,
+  isCommitReachableWithFetch,
 } from '../git/status.js';
 import {
   invokeCoderOrchestrator,
@@ -240,7 +241,7 @@ function resolveLatestReachableSubmissionCommitSha(
 ): string | null {
   const candidateShas = getSubmissionCommitShas(db, taskId);
   for (const sha of candidateShas) {
-    if (isCommitReachable(projectPath, sha)) {
+    if (isCommitReachableWithFetch(projectPath, sha, { forceFetch: true })) {
       return sha;
     }
   }
@@ -416,7 +417,8 @@ export async function runCoderPhase(
   jsonMode = false,
   coordinatorCache?: Map<string, CoordinatorResult>,
   coordinatorThresholds?: number[],
-  leaseFence?: LeaseFenceContext
+  leaseFence?: LeaseFenceContext,
+  branchName = 'main'
 ): Promise<CreditExhaustionResult | void> {
   if (!task) return;
   refreshParallelWorkstreamLease(projectPath, leaseFence);
@@ -826,6 +828,22 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
           }
           break;
         }
+        if (leaseFence?.parallelSessionId) {
+          const pushResult = pushToRemote(projectPath, 'origin', branchName);
+          if (!pushResult.success) {
+            updateTaskStatus(
+              db,
+              task.id,
+              'failed',
+              'orchestrator',
+              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`
+            );
+            if (!jsonMode) {
+              console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
+            }
+            break;
+          }
+        }
         updateTaskStatus(db, task.id, 'review', 'orchestrator', decision.reasoning, submissionCommitSha);
       }
       if (!jsonMode) {
@@ -848,6 +866,22 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
             console.log('\n✗ Task failed (submission commit missing or not in workspace)');
           }
           break;
+        }
+        if (leaseFence?.parallelSessionId) {
+          const pushResult = pushToRemote(projectPath, 'origin', branchName);
+          if (!pushResult.success) {
+            updateTaskStatus(
+              db,
+              task.id,
+              'failed',
+              'orchestrator',
+              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`
+            );
+            if (!jsonMode) {
+              console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
+            }
+            break;
+          }
         }
         updateTaskStatus(
           db,
@@ -885,6 +919,22 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
             console.log('\n✗ Task failed (auto-commit hash not in workspace)');
           }
           break;
+        }
+        if (leaseFence?.parallelSessionId) {
+          const pushResult = pushToRemote(projectPath, 'origin', branchName);
+          if (!pushResult.success) {
+            updateTaskStatus(
+              db,
+              task.id,
+              'failed',
+              'orchestrator',
+              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`
+            );
+            if (!jsonMode) {
+              console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
+            }
+            break;
+          }
         }
         updateTaskStatus(
           db,

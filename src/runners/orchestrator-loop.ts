@@ -363,7 +363,8 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           {
             parallelSessionId: options.parallelSessionId,
             runnerId: options.runnerId,
-          }
+          },
+          branchName
         );
       } else if (action === 'resume') {
         phaseResult = await runCoderPhase(
@@ -377,7 +378,8 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           {
             parallelSessionId: options.parallelSessionId,
             runnerId: options.runnerId,
-          }
+          },
+          branchName
         );
       } else if (action === 'review') {
         phaseResult = await runReviewerPhase(
