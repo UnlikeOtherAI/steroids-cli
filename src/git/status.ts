@@ -272,10 +272,12 @@ export function getFileContentHash(
  */
 export function getRecentCommits(
   projectPath: string = process.cwd(),
-  count: number = 5
+  count: number = 5,
+  sinceSha?: string
 ): Array<{ sha: string; message: string }> {
   try {
-    const log = execSync(`git log -${count} --format=%H||%s`, {
+    const range = sinceSha ? `${sinceSha}..HEAD` : `-${count}`;
+    const log = execSync(`git log ${range} --format=%H||%s`, {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],

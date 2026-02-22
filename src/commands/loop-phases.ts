@@ -163,8 +163,6 @@ async function checkCreditExhaustion(
 }
 
 const MAX_ORCHESTRATOR_PARSE_RETRIES = 3;
-const CODER_PARSE_FALLBACK_MARKER = '[retry] FALLBACK: Orchestrator failed, defaulting to retry';
-const REVIEWER_PARSE_FALLBACK_MARKER = '[unclear] FALLBACK: Orchestrator failed, retrying review';
 
 function countConsecutiveOrchestratorFallbackEntries(
   db: ReturnType<typeof openDatabase>['db'],
@@ -269,6 +267,7 @@ export async function runCoderPhase(
     console.log('\n>>> Invoking CODER...\n');
   }
 
+  const initialSha = getCurrentCommitSha(projectPath) || '';
   const coderResult: CoderResult = await invokeCoder(task, projectPath, action, coordinatorGuidance);
 
   if (coderResult.timedOut) {
@@ -283,7 +282,7 @@ export async function runCoderPhase(
   }
 
   // STEP 2: Gather git state
-  const commits = getRecentCommits(projectPath, 5);
+  const commits = getRecentCommits(projectPath, 5, initialSha);
   const files_changed = getChangedFiles(projectPath);
   const has_uncommitted = hasUncommittedChanges(projectPath);
   const diff_summary = getDiffSummary(projectPath);
@@ -329,7 +328,8 @@ export async function runCoderPhase(
     // Check if coder seems finished even if orchestrator failed
     const coderStdout = coderResult.stdout.toLowerCase();
     const isTaskComplete = coderStdout.includes('task complete') || coderStdout.includes('implementation complete');
-    const hasWork = commits.length > 0 || has_uncommitted;
+    // Only count as having work if there are actual uncommitted changes or very recent session commits
+    const hasWork = has_uncommitted || commits.length > 0;
 
     if (isTaskComplete && hasWork) {
       orchestratorOutput = JSON.stringify({
@@ -574,15 +574,16 @@ export async function runReviewerPhase(
         console.error('Multi-reviewer orchestrator failed:', error);
         
         const handler = new OrchestrationFallbackHandler();
-        const anyApprove = reviewerResults.some(r => {
+        // REQUIRE UNANIMOUS APPROVAL for auto-complete fallback
+        const isUnanimousApprove = reviewerResults.every(r => {
           if (r.decision === 'approve') return true;
           return handler.extractExplicitReviewerDecision(r.stdout) === 'approve';
         });
         
-        if (anyApprove) {
+        if (isUnanimousApprove) {
           decision = {
             decision: 'approve',
-            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed but reviewer signaled approval',
+            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed but all reviewers signaled approval',
             notes: reviewerResults.map(r => `[${r.provider}] ${r.stdout}`).join('\n---\n'),
             next_status: 'completed',
             metadata: {
@@ -595,7 +596,7 @@ export async function runReviewerPhase(
         } else {
           decision = {
             decision: 'unclear',
-            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed',
+            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed and no consensus approval',
             notes: 'Review unclear, retrying',
             next_status: 'review',
             metadata: {
@@ -653,13 +654,14 @@ export async function runReviewerPhase(
       console.error('Orchestrator invocation failed:', error);
       
       const handler = new OrchestrationFallbackHandler();
-      const explicitDecision = handler.extractExplicitReviewerDecision(reviewerResult!.stdout);
+      const reviewerStdout = reviewerResult?.stdout ?? '';
+      const explicitDecision = handler.extractExplicitReviewerDecision(reviewerStdout);
       
       if (explicitDecision === 'approve') {
         decision = {
           decision: 'approve',
           reasoning: 'FALLBACK: Orchestrator failed but reviewer explicitly approved',
-          notes: reviewerResult!.stdout,
+          notes: reviewerStdout,
           next_status: 'completed',
           metadata: {
             rejection_count: task.rejection_count,

@@ -3,6 +3,8 @@
  *
  * These are stored in directories at:
  *   .steroids/backup/YYYY-MM-DDTHH-mm-ss/
+ * Or as pre-migration files:
+ *   .steroids/backup/pre-migrate-YYYY-MM-DDTHH-mm-ss-SSSZ.db
  */
 
 import { existsSync, readdirSync, statSync, rmSync } from 'node:fs';
@@ -26,10 +28,18 @@ export interface CleanupBackupsOptions {
 }
 
 /**
- * Parse a backup directory name to a timestamp.
- * Format: 2024-01-15T10-30-00 or YYYY-MM-DD
+ * Parse a backup directory or file name to a timestamp.
+ * Format: 2024-01-15T10-30-00 or YYYY-MM-DD or pre-migrate-YYYY-MM-DDTHH-mm-ss-SSSZ.db
  */
 function parseBackupTimestamp(name: string): number | null {
+  // Try migration backup file format: pre-migrate-2024-01-15T10-30-00-000Z.db
+  const migrateMatch = /^pre-migrate-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z)/.exec(name);
+  if (migrateMatch) {
+    const ts = migrateMatch[1].replace(/-/g, (m, i) => i < 10 ? m : i < 13 ? ':' : i < 16 ? ':' : '.');
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+
   // Try ISO-like format: 2024-01-15T10-30-00
   const isoMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/.exec(name);
   if (isoMatch) {
@@ -48,13 +58,13 @@ function parseBackupTimestamp(name: string): number | null {
 }
 
 /**
- * Delete old `.steroids/backup/` directories based on date in name.
+ * Delete old `.steroids/backup/` directories and pre-migrate files based on date in name.
  */
 export function cleanupBackups(
   projectPath: string,
   options: CleanupBackupsOptions = {}
 ): CleanupBackupsResult {
-  const retentionDays = options.retentionDays ?? 30; // Default 30 days for backups
+  const retentionDays = options.retentionDays ?? 30;
   const nowMs = options.nowMs ?? Date.now();
   const cutoffMs = nowMs - (retentionDays * DAY_MS);
 
@@ -74,10 +84,12 @@ export function cleanupBackups(
   try {
     const entries = readdirSync(backupDir, { withFileTypes: true });
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      if (!entry.isDirectory() && !entry.isFile()) continue;
 
       const backupTime = parseBackupTimestamp(entry.name);
       if (backupTime === null) continue;
+
+      scannedFiles++;
 
       // Check if backup is older than retention
       if (backupTime >= cutoffMs) continue;
@@ -85,15 +97,29 @@ export function cleanupBackups(
       const fullPath = join(backupDir, entry.name);
       
       // Calculate size before deleting
-      const size = getDirectorySize(fullPath);
+      let size = 0;
+      if (entry.isDirectory()) {
+        size = getDirectorySize(fullPath);
+      } else {
+        try { size = statSync(fullPath).size; } catch { continue; }
+      }
       
-      scannedFiles++;
       deletedFiles++;
       freedBytes += size;
 
       if (!options.dryRun) {
         try {
-          rmSync(fullPath, { recursive: true, force: true });
+          if (entry.isDirectory()) {
+            rmSync(fullPath, { recursive: true, force: true });
+          } else {
+            rmSync(fullPath, { force: true });
+            
+            // Also try to delete associated WAL/SHM if it's a .db file
+            if (entry.name.endsWith('.db')) {
+              try { rmSync(`${fullPath}-wal`, { force: true }); } catch {}
+              try { rmSync(`${fullPath}-shm`, { force: true }); } catch {}
+            }
+          }
         } catch {
           // If deletion fails, decrement counts to reflect actual work
           deletedFiles--;

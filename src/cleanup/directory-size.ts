@@ -22,7 +22,7 @@ export interface StorageBreakdown {
 }
 
 const MB = 1024 * 1024;
-const THRESHOLD_ORANGE = 10 * MB;
+const THRESHOLD_ORANGE = 50 * MB;
 const THRESHOLD_RED = 100 * MB;
 const DB_FILES = ['steroids.db', 'steroids.db-wal', 'steroids.db-shm'];
 const KNOWN_PATHS = new Set([...DB_FILES, 'invocations', 'logs', 'backup']);
@@ -86,9 +86,19 @@ export async function getStorageBreakdown(steroidsDir: string): Promise<StorageB
   ]);
 
   let backupCount = 0;
+  let clearableBackups = 0;
   try {
-    const be = await fs.readdir(join(steroidsDir, 'backup'), { withFileTypes: true });
+    const backupDir = join(steroidsDir, 'backup');
+    const be = await fs.readdir(backupDir, { withFileTypes: true });
     backupCount = be.filter(e => e.isDirectory()).length;
+
+    // Only count timestamped directories as clearable (match backups.ts logic)
+    const timestampRegex = /^(\d{4})-(\d{2})-(\d{2})(T\d{2}-\d{2}-\d{2})?/;
+    for (const entry of be) {
+      if (entry.isDirectory() && timestampRegex.test(entry.name)) {
+        clearableBackups += (await sumDirectorySize(join(backupDir, entry.name), true)).bytes;
+      }
+    }
   } catch { /* no backup dir */ }
 
   let otherBytes = 0;
@@ -103,7 +113,7 @@ export async function getStorageBreakdown(steroidsDir: string): Promise<StorageB
   } catch { /* tolerate */ }
 
   const totalBytes = dbBytes + invocations.bytes + logs.bytes + backups.bytes + otherBytes;
-  const clearableBytes = invocations.bytes + logs.bytes + backups.bytes;
+  const clearableBytes = invocations.bytes + logs.bytes + clearableBackups;
   let warning: StorageBreakdown['threshold_warning'] = null;
   if (clearableBytes >= THRESHOLD_RED) warning = 'red';
   else if (clearableBytes >= THRESHOLD_ORANGE) warning = 'orange';

@@ -51,7 +51,8 @@ function parseRetentionDays(raw: unknown): { valid: true; days: number } | { val
 function runCleanup(projectPath: string, retentionDays: number) {
   const invResult = cleanupInvocationLogs(projectPath, { retentionDays });
   const textResult = cleanupTextLogs(projectPath, { retentionDays });
-  const backupResult = cleanupBackups(projectPath, { retentionDays: 30 }); // Keep backups longer
+  // Respect user retention but keep backups for at least 30 days by default
+  const backupResult = cleanupBackups(projectPath, { retentionDays: Math.max(retentionDays, 30) });
   bustStorageCache(projectPath);
   return {
     ok: true as const,
