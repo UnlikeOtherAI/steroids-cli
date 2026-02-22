@@ -213,6 +213,25 @@ This means Vibe sessions have more context than Steroids provides — some dupli
 - **Env sanitization:** `MISTRAL_API_KEY` stripped from child env to force CLI's own auth.
 - **No stream-json equivalent yet** — Using `--output text` means no structured monitoring. Switching to `--output streaming` would enable real-time NDJSON events.
 
+### VIBE_HOME Isolation (CRITICAL)
+
+Steroids uses `setupIsolatedHome('.vibe', [...])` to create an isolated VIBE_HOME per invocation. **Three files must be symlinked** or Vibe shows the onboarding TUI:
+
+| File | Why Required |
+|------|-------------|
+| `.env` | **Critical** — contains Mistral API key. Without it, `VibeConfig.load()` raises `MissingAPIKeyError` → triggers `run_onboarding()` → animated TUI loops indefinitely |
+| `config.toml` | Model definitions and settings |
+| `trusted_folders.toml` | Folder trust allowlist |
+
+**Path alignment:** `setupIsolatedHome('.vibe', ...)` places files at `isolatedHome/.vibe/`. Set `VIBE_HOME = isolatedHome + '/.vibe'` (not `isolatedHome`). The `.vibe` subdirectory IS the VIBE_HOME, not the parent.
+
+```typescript
+const isolatedHome = this.setupIsolatedHome('.vibe', ['.env', 'config.toml', 'trusted_folders.toml']);
+const vibeHome = join(isolatedHome, '.vibe');  // VIBE_HOME points here
+env.VIBE_HOME = vibeHome;
+// Session logs at vibeHome/logs/session/ (not isolatedHome/logs/session/)
+```
+
 ### Improvement Backlog
 
 - [ ] Add resettable activity-based timeout (like Claude/Codex/Gemini providers)
