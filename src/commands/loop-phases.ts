@@ -471,14 +471,14 @@ export async function runCoderPhase(
       }
 
       const coordResult = await invokeCoordinator(task, rejectionHistory, projectPath, coordExtra);
-      const mustKeepOverride =
-        activeMustImplement &&
-        task.rejection_count > activeMustImplement.rejection_count_watermark;
-      const normalizedGuidance = mustKeepOverride && !coordResult.guidance.includes('MUST_IMPLEMENT:')
-        ? `${activeMustImplement.guidance}\n\nAdditional coordinator guidance:\n${coordResult.guidance}`
-        : coordResult.guidance;
-
       if (coordResult) {
+        const mustKeepOverride =
+          activeMustImplement &&
+          task.rejection_count > activeMustImplement.rejection_count_watermark;
+        const normalizedGuidance = mustKeepOverride && !coordResult.guidance.includes('MUST_IMPLEMENT:')
+          ? `${activeMustImplement.guidance}\n\nAdditional coordinator guidance:\n${coordResult.guidance}`
+          : coordResult.guidance;
+
         coordinatorGuidance = normalizedGuidance;
         coordinatorCache?.set(task.id, {
           ...coordResult,
