@@ -24,27 +24,21 @@ export function getAgentsMd(projectPath: string): string {
 }
 
 /**
- * Read source file content if specified
+ * Return a prompt instruction pointing the agent at the spec file.
+ * Agents have file-reading tools and read the spec on demand.
  */
-export function getSourceFileContent(
+export function getSourceFileReference(
   projectPath: string,
   sourceFile?: string | null
 ): string {
   if (!sourceFile) {
     return 'No specification file linked.';
   }
-
   const fullPath = join(projectPath, sourceFile);
   if (!existsSync(fullPath)) {
     return `Specification file not found: ${sourceFile}`;
   }
-
-  const content = readFileSync(fullPath, 'utf-8');
-  // Truncate if too long (max 10000 chars per spec)
-  if (content.length > 10000) {
-    return content.substring(0, 10000) + `\n\n[Content truncated. Full file at: ${sourceFile}]`;
-  }
-  return content;
+  return `Read the full specification before starting: \`${sourceFile}\``;
 }
 
 /**
@@ -139,8 +133,8 @@ steroids dispute create <task-id> --reason "Cannot resolve: <explain why>" --typ
  * Extract file paths mentioned in text (task title, spec content)
  * Language-agnostic: matches any path-like pattern with directory separators and file extensions
  */
-export function extractFileHints(title: string, specContent: string): string[] {
-  const combined = `${title}\n${specContent}`;
+export function extractFileHints(title: string): string[] {
+  const combined = title;
   // Match any path with at least one directory separator and a file extension (1-10 chars)
   // Examples: src/foo.ts, lib/utils/helpers.py, app/models/user.rb, pkg/api/handler.go
   const filePattern = /(?:^|\s|`|"|'|\()([\w][\w.-]*(?:\/[\w.-]+)+\.\w{1,10})/gm;
@@ -160,8 +154,8 @@ export function extractFileHints(title: string, specContent: string): string[] {
 /**
  * Build a file scope section for the prompt
  */
-export function buildFileScopeSection(task: Task, specContent: string): string {
-  const fileHints = extractFileHints(task.title, specContent);
+export function buildFileScopeSection(task: Task): string {
+  const fileHints = extractFileHints(task.title);
   if (fileHints.length === 0) return '';
 
   return `

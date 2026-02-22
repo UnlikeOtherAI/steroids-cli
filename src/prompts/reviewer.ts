@@ -5,7 +5,7 @@
 
 import type { Task, RejectionEntry } from '../database/queries.js';
 import type { SteroidsConfig } from '../config/loader.js';
-import { getSourceFileContent, buildFileAnchorSection, formatSectionTasks } from './prompt-helpers.js';
+import { getSourceFileReference, buildFileAnchorSection, formatSectionTasks } from './prompt-helpers.js';
 import type { SectionTask } from './prompt-helpers.js';
 
 export interface ReviewerPromptContext {
@@ -250,7 +250,7 @@ The coder included these notes when submitting for review:
 `
     : '';
 
-  const sourceContent = getSourceFileContent(projectPath, task.source_file);
+  const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const fileAnchorSection = buildFileAnchorSection(task);
 
   // Truncate diff if too long (max 20000 chars per spec)
@@ -279,11 +279,9 @@ You are a REVIEWER in an automated task execution system. Your job is to verify 
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
 ${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}${formatCoordinatorGuidance(coordinatorGuidance, coordinatorDecision)}
-## Original Specification
+## Specification
 
-From ${task.source_file ?? '(not specified)'}:
-
-${sourceContent}
+${sourceRef}
 
 ---
 
@@ -461,13 +459,12 @@ export function generateBatchReviewerPrompt(context: BatchReviewerPromptContext)
 
   // Build task specs for each task
   const taskSpecs = tasks.map((task, index) => {
-    const sourceContent = getSourceFileContent(projectPath, task.source_file);
+    const specRef = getSourceFileReference(projectPath, task.source_file);
     return `
 ### Task ${index + 1}: ${task.title}
 **Task ID:** ${task.id}
-**Spec File:** ${task.source_file ?? '(not specified)'}
 
-${sourceContent}
+${specRef}
 `;
   }).join('\n---\n');
 

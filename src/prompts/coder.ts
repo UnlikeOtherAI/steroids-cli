@@ -6,7 +6,7 @@
 import type { Task, RejectionEntry } from '../database/queries.js';
 import {
   getAgentsMd,
-  getSourceFileContent,
+  getSourceFileReference,
   buildFileScopeSection,
   buildFileAnchorSection,
   formatRejectionHistoryForCoder,
@@ -78,13 +78,13 @@ export function generateCoderPrompt(context: CoderPromptContext): string {
   const { task, projectPath, previousStatus, rejectionNotes, rejectionHistory, coordinatorGuidance } = context;
 
   const agentsMd = getAgentsMd(projectPath);
-  const sourceContent = getSourceFileContent(projectPath, task.source_file);
+  const sourceRef = getSourceFileReference(projectPath, task.source_file);
 
   // Build rejection section with full history and coordinator guidance
   const rejectionSection = formatRejectionHistoryForCoder(task.id, rejectionHistory, rejectionNotes, coordinatorGuidance);
 
   // Build file scope section
-  const fileScopeSection = buildFileScopeSection(task, sourceContent);
+  const fileScopeSection = buildFileScopeSection(task);
   const fileAnchorSection = buildFileAnchorSection(task);
 
   return `# TASK: ${task.id.substring(0, 8)} - ${task.title}
@@ -107,9 +107,7 @@ ${fileScopeSection}${fileAnchorSection}
 
 ## Specification
 
-The full specification is in: ${task.source_file ?? '(not specified)'}
-
-${sourceContent}
+${sourceRef}
 
 ---
 
@@ -243,13 +241,12 @@ export function generateBatchCoderPrompt(context: BatchCoderPromptContext): stri
 
   // Build task specs for each task
   const taskSpecs = tasks.map((task, index) => {
-    const sourceContent = getSourceFileContent(projectPath, task.source_file);
+    const specRef = getSourceFileReference(projectPath, task.source_file);
     return `
 ### Task ${index + 1}: ${task.title}
 **Task ID:** ${task.id}
-**Spec File:** ${task.source_file ?? '(not specified)'}
 
-${sourceContent}
+${specRef}
 `;
   }).join('\n---\n');
 
@@ -320,7 +317,7 @@ Begin with Task 1 and work through each task in order.
 export function generateResumingCoderPrompt(context: CoderPromptContext): string {
   const { task, projectPath, gitStatus, gitDiff, rejectionHistory, coordinatorGuidance } = context;
 
-  const sourceContent = getSourceFileContent(projectPath, task.source_file);
+  const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const fileAnchorSection = buildFileAnchorSection(task);
 
   // Build rejection section with full history and coordinator guidance (same as normal prompt)
@@ -372,7 +369,7 @@ ${rejectionSection}
 
 ## Specification
 
-${sourceContent}
+${sourceRef}
 
 ---
 
