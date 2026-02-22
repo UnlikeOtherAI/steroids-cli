@@ -46,7 +46,9 @@ function setupProjectDb(): Database.Database {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       task_id TEXT NOT NULL,
       role TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      status TEXT,
+      created_at TEXT NOT NULL,
+      last_activity_at_ms INTEGER
     );
 
     CREATE TABLE incidents (
@@ -164,6 +166,10 @@ describe('recoverStuckTasks', () => {
     projectDb
       .prepare(`INSERT INTO tasks (id, title, status, updated_at) VALUES (?, ?, ?, ?)`)
       .run('t1', 'Task 1', 'in_progress', dt(new Date(now.getTime() - 1900 * 1000)));
+
+    projectDb
+      .prepare(`INSERT INTO task_invocations (task_id, role, status, created_at) VALUES (?, ?, ?, ?)`)
+      .run('t1', 'coder', 'running', dt(new Date(now.getTime() - 1900 * 1000)));
 
     globalDb
       .prepare(

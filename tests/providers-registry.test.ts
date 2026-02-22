@@ -151,7 +151,7 @@ describe('ProviderRegistry', () => {
   describe('default registry', () => {
     it('should have all built-in providers', async () => {
       const { createDefaultRegistry } = await import('../src/providers/registry.js');
-      const defaultRegistry = createDefaultRegistry();
+      const defaultRegistry = await createDefaultRegistry();
 
       expect(defaultRegistry.has('claude')).toBe(true);
       expect(defaultRegistry.has('codex')).toBe(true);

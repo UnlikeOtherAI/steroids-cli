@@ -5,7 +5,7 @@
 
 import express from 'express';
 import cors from 'cors';
-import { realpathSync, readFileSync } from 'node:fs';
+import { realpathSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import projectsRouter from './routes/projects.js';
@@ -24,9 +24,23 @@ const HOST = process.env.HOST || '0.0.0.0';
 // Get version from package.json
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const packageJsonPath = join(__dirname, '..', '..', 'package.json');
-const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-const version = pkg.version;
+
+function getVersion(): string {
+  const paths = [
+    join(__dirname, '..', 'package.json'),       // From src/
+    join(__dirname, '..', '..', 'package.json'), // From dist/
+  ];
+  for (const p of paths) {
+    try {
+      if (existsSync(p)) {
+        return JSON.parse(readFileSync(p, 'utf-8')).version;
+      }
+    } catch { /* continue */ }
+  }
+  return 'unknown';
+}
+
+const version = getVersion();
 
 export function createApp(): express.Express {
   const app = express();

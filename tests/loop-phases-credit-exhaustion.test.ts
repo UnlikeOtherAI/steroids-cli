@@ -49,11 +49,16 @@ jest.unstable_mockModule('../src/orchestrator/coder.js', () => ({
 
 jest.unstable_mockModule('../src/orchestrator/reviewer.js', () => ({
   invokeReviewer: mockInvokeReviewer,
+  invokeReviewers: jest.fn().mockResolvedValue([]),
+  getReviewerConfigs: jest.fn().mockReturnValue([]),
+  isMultiReviewEnabled: jest.fn().mockReturnValue(false),
+  resolveDecision: jest.fn().mockReturnValue({ decision: 'approve', needsMerge: false }),
 }));
 
 jest.unstable_mockModule('../src/orchestrator/invoke.js', () => ({
   invokeCoderOrchestrator: mockInvokeCoderOrchestrator,
   invokeReviewerOrchestrator: mockInvokeReviewerOrchestrator,
+  invokeMultiReviewerOrchestrator: jest.fn().mockResolvedValue('{}'),
 }));
 
 jest.unstable_mockModule('../src/config/loader.js', () => ({
@@ -74,6 +79,8 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   getLatestSubmissionNotes: mockGetLatestSubmissionNotes,
   listTasks: mockListTasks,
   addAuditEntry: mockAddAuditEntry,
+  getFollowUpDepth: jest.fn().mockReturnValue(0),
+  createFollowUpTask: jest.fn().mockReturnValue('follow-up-1'),
 }));
 
 jest.unstable_mockModule('../src/git/status.js', () => ({
@@ -306,9 +313,17 @@ describe('Loop Phases — Credit Exhaustion', () => {
 
       const result = await runCoderPhase(db, makeTask(), projectPath, 'start', true);
 
-      // Non-credit errors should still proceed to orchestrator
-      expect(result).toBeUndefined();
-      expect(mockInvokeCoderOrchestrator).toHaveBeenCalledTimes(1);
+      // Non-credit errors (like rate limits) should be returned, not swallowed
+      expect(result).toEqual({
+        action: 'rate_limit',
+        provider: 'claude',
+        model: 'claude-sonnet-4',
+        role: 'coder',
+        message: 'Rate limited',
+        retryAfterMs: undefined,
+      });
+      // Orchestrator should NOT be called for rate limits (same as credit exhaustion)
+      expect(mockInvokeCoderOrchestrator).toHaveBeenCalledTimes(0);
     });
   });
 

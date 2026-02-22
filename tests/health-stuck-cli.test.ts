@@ -7,18 +7,39 @@ import Database from 'better-sqlite3';
 import { getDefaultFlags, type GlobalFlags } from '../src/cli/flags.js';
 import { initDatabase, openDatabase } from '../src/database/connection.js';
 
+// Module-level mock DB for runners (shared across tests, cleared in beforeEach).
+const mockGlobalDb = new Database(':memory:');
+mockGlobalDb.exec(`
+  CREATE TABLE runners (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'idle',
+    pid INTEGER,
+    project_path TEXT,
+    current_task_id TEXT,
+    started_at TEXT,
+    heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// Module-level mocks — must be registered BEFORE the dynamic import.
+jest.unstable_mockModule('../src/runners/global-db.js', () => ({
+  openGlobalDatabase: () => ({ db: mockGlobalDb, close: () => {} }),
+}));
+
+jest.unstable_mockModule('../src/config/loader.js', () => ({
+  loadConfig: () => ({}),
+}));
+
+const { healthCommand } = await import('../src/commands/health.js');
+
 describe('steroids health check|incidents (stuck-task health)', () => {
   let tmpDir: string;
   let originalCwd: string;
-  let globalDb: Database.Database;
-
-  // Dynamically imported after module mocks are set.
-  let healthCommand: (args: string[], flags: GlobalFlags) => Promise<void>;
 
   let consoleLogSpy: ReturnType<typeof jest.spyOn>;
   let processKillSpy: ReturnType<typeof jest.spyOn>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     // Keep tests safe: simulate PID liveness + killing without touching real processes.
@@ -44,43 +65,13 @@ describe('steroids health check|incidents (stuck-task health)', () => {
     // Create an initialized project DB in the temp directory.
     initDatabase(tmpDir).close();
 
-    // Create an in-memory global DB for runners.
-    globalDb = new Database(':memory:');
-    globalDb.exec(`
-      CREATE TABLE runners (
-        id TEXT PRIMARY KEY,
-        status TEXT NOT NULL DEFAULT 'idle',
-        pid INTEGER,
-        project_path TEXT,
-        current_task_id TEXT,
-        started_at TEXT,
-        heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-    `);
-
-    // Ensure mocks apply to the dynamic import below.
-    jest.resetModules();
-
-    jest.unstable_mockModule('../src/runners/global-db.js', () => ({
-      openGlobalDatabase: () => ({ db: globalDb, close: () => {} }),
-    }));
-
-    jest.unstable_mockModule('../src/config/loader.js', () => ({
-      // Keep tests hermetic: don't read ~/.steroids/config.yaml.
-      loadConfig: () => ({}),
-    }));
-
-    ({ healthCommand } = await import('../src/commands/health.js'));
+    // Clear the shared global DB between tests.
+    mockGlobalDb.exec('DELETE FROM runners');
   });
 
   afterEach(() => {
     consoleLogSpy.mockRestore();
     processKillSpy.mockRestore();
-    try {
-      globalDb.close();
-    } catch {
-      // ignore
-    }
     process.chdir(originalCwd);
     rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -144,12 +135,16 @@ describe('steroids health check|incidents (stuck-task health)', () => {
         `INSERT INTO tasks (id, title, status, updated_at)
          VALUES ('t1', 'Task 1', 'in_progress', datetime('now', '-2 hours'))`
       ).run();
+      db.prepare(
+        `INSERT INTO task_invocations (task_id, role, provider, model, prompt, status, created_at)
+         VALUES ('t1', 'coder', 'claude', 'sonnet', 'test prompt', 'running', datetime('now', '-2 hours'))`
+      ).run();
       db.prepare(`INSERT INTO task_locks (task_id, runner_id, expires_at) VALUES ('t1', 'r1', datetime('now', '+1 hour'))`).run();
     } finally {
       close();
     }
 
-    globalDb
+    mockGlobalDb
       .prepare(
         `INSERT INTO runners (id, status, pid, project_path, current_task_id, heartbeat_at)
          VALUES ('r1', 'running', 123, ?, 't1', datetime('now'))`
@@ -163,7 +158,7 @@ describe('steroids health check|incidents (stuck-task health)', () => {
     expect(payload.data.counts.hangingInvocations).toBe(1);
     expect(payload.data.actions.some((a: any) => a.failureMode === 'hanging_invocation')).toBe(true);
 
-    const runner = globalDb.prepare(`SELECT * FROM runners WHERE id = 'r1'`).get();
+    const runner = mockGlobalDb.prepare(`SELECT * FROM runners WHERE id = 'r1'`).get();
     expect(runner).toBeUndefined();
 
     const verify = openDatabase(tmpDir);
@@ -190,7 +185,7 @@ describe('steroids health check|incidents (stuck-task health)', () => {
       close();
     }
 
-    globalDb
+    mockGlobalDb
       .prepare(
         `INSERT INTO runners (id, status, pid, project_path, current_task_id, heartbeat_at)
          VALUES ('r1', 'running', 555, ?, 't1', datetime('now', '-10 minutes'))`
@@ -204,7 +199,7 @@ describe('steroids health check|incidents (stuck-task health)', () => {
     expect(payload.data.counts.zombieRunners).toBe(1);
     expect(payload.data.actions.some((a: any) => a.failureMode === 'zombie_runner')).toBe(true);
 
-    const runner = globalDb.prepare(`SELECT * FROM runners WHERE id = 'r1'`).get();
+    const runner = mockGlobalDb.prepare(`SELECT * FROM runners WHERE id = 'r1'`).get();
     expect(runner).toBeUndefined();
 
     const verify = openDatabase(tmpDir);
@@ -231,7 +226,7 @@ describe('steroids health check|incidents (stuck-task health)', () => {
       close();
     }
 
-    globalDb
+    mockGlobalDb
       .prepare(
         `INSERT INTO runners (id, status, pid, project_path, current_task_id, heartbeat_at)
          VALUES ('r1', 'running', NULL, ?, 't1', datetime('now'))`
@@ -245,7 +240,7 @@ describe('steroids health check|incidents (stuck-task health)', () => {
     expect(payload.data.counts.deadRunners).toBe(1);
     expect(payload.data.actions.some((a: any) => a.failureMode === 'dead_runner')).toBe(true);
 
-    const runner = globalDb.prepare(`SELECT * FROM runners WHERE id = 'r1'`).get();
+    const runner = mockGlobalDb.prepare(`SELECT * FROM runners WHERE id = 'r1'`).get();
     expect(runner).toBeUndefined();
   });
 

@@ -108,10 +108,13 @@ describe('Providers emit onActivity events', () => {
     expect(activities.some((a) => a.type === 'output')).toBe(true);
   });
 
-  it('CodexProvider emits tool activity when exec markers are present', async () => {
+  it('CodexProvider emits tool activity when JSON events are present', async () => {
     mockSpawn.mockReturnValue(
       createMockChildProcess({
-        stdoutChunks: ['exec\n', "rg -n 'verified email' src/\n", 'Found 15 matches\n'],
+        stdoutChunks: [
+          JSON.stringify({ type: 'item.started', item: { type: 'tool_call', name: 'rg -n "verified email" src/' } }) + '\n',
+          JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Found 15 matches' } }) + '\n'
+        ],
         closeCode: 0,
       })
     );

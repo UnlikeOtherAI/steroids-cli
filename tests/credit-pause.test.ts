@@ -290,7 +290,7 @@ describe('checkBatchCreditExhaustion', () => {
     jest.clearAllMocks();
   });
 
-  it('returns CreditExhaustionResult when provider classifies as credit_exhaustion', () => {
+  it('returns CreditExhaustionResult when provider classifies as credit_exhaustion', async () => {
     mockLoadConfig.mockReturnValue({
       ai: { coder: { provider: 'claude', model: 'claude-sonnet-4' } },
     });
@@ -306,7 +306,7 @@ describe('checkBatchCreditExhaustion', () => {
       tryGet: jest.fn().mockReturnValue(mockProvider),
     });
 
-    const result = checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
+    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
 
     expect(result).toEqual({
       action: 'pause_credit_exhaustion',
@@ -317,8 +317,8 @@ describe('checkBatchCreditExhaustion', () => {
     });
   });
 
-  it('returns null when the result is successful', () => {
-    const result = checkBatchCreditExhaustion(
+  it('returns null when the result is successful', async () => {
+    const result = await checkBatchCreditExhaustion(
       makeBatchResult({ success: true }),
       'coder',
       '/tmp/test'
@@ -326,7 +326,7 @@ describe('checkBatchCreditExhaustion', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null when classifyResult returns null', () => {
+  it('returns null when classifyResult returns null', async () => {
     mockLoadConfig.mockReturnValue({
       ai: { coder: { provider: 'claude', model: 'claude-sonnet-4' } },
     });
@@ -336,11 +336,11 @@ describe('checkBatchCreditExhaustion', () => {
       tryGet: jest.fn().mockReturnValue(mockProvider),
     });
 
-    const result = checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
+    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
     expect(result).toBeNull();
   });
 
-  it('returns null when classifyResult returns a non-credit error type', () => {
+  it('returns null when classifyResult returns a non-credit error type', async () => {
     mockLoadConfig.mockReturnValue({
       ai: { coder: { provider: 'claude', model: 'claude-sonnet-4' } },
     });
@@ -354,11 +354,11 @@ describe('checkBatchCreditExhaustion', () => {
       tryGet: jest.fn().mockReturnValue(mockProvider),
     });
 
-    const result = checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
+    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
     expect(result).toBeNull();
   });
 
-  it('returns null when provider is not found in registry', () => {
+  it('returns null when provider is not found in registry', async () => {
     mockLoadConfig.mockReturnValue({
       ai: { coder: { provider: 'unknown-provider', model: 'some-model' } },
     });
@@ -366,17 +366,17 @@ describe('checkBatchCreditExhaustion', () => {
       tryGet: jest.fn().mockReturnValue(null),
     });
 
-    const result = checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
+    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
     expect(result).toBeNull();
   });
 
-  it('returns null when config has no provider/model for the role', () => {
+  it('returns null when config has no provider/model for the role', async () => {
     mockLoadConfig.mockReturnValue({ ai: {} });
-    const result = checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
+    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
     expect(result).toBeNull();
   });
 
-  it('works correctly for the reviewer role', () => {
+  it('works correctly for the reviewer role', async () => {
     mockLoadConfig.mockReturnValue({
       ai: { reviewer: { provider: 'openai', model: 'gpt-4' } },
     });
@@ -390,7 +390,7 @@ describe('checkBatchCreditExhaustion', () => {
       tryGet: jest.fn().mockReturnValue(mockProvider),
     });
 
-    const result = checkBatchCreditExhaustion(makeBatchResult(), 'reviewer', '/tmp/test');
+    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'reviewer', '/tmp/test');
     expect(result).toEqual({
       action: 'pause_credit_exhaustion',
       provider: 'openai',

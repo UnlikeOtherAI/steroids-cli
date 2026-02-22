@@ -43,7 +43,11 @@ function setupProjectDb(projectPath: string): void {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         task_id TEXT NOT NULL,
         role TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        status TEXT,
+        created_at TEXT NOT NULL,
+        last_activity_at_ms INTEGER
       );
 
       CREATE TABLE incidents (
@@ -66,6 +70,10 @@ function setupProjectDb(projectPath: string): void {
     // t2: hanging (in_progress, old updated_at, active runner will be inserted in global DB)
     db.prepare(`INSERT INTO tasks (id, title, status, updated_at) VALUES (?, ?, ?, datetime('now', '-2 hours'))`)
       .run('t2', 'Hanging task', 'in_progress');
+
+    // running invocation for t2
+    db.prepare(`INSERT INTO task_invocations (task_id, role, provider, model, status, created_at) VALUES (?, ?, ?, ?, 'running', datetime('now', '-2 hours'))`)
+      .run('t2', 'coder', 'claude', 'sonnet');
 
     // Incidents: one unresolved, one resolved
     db.prepare(
@@ -201,4 +209,3 @@ describe('API health + incidents endpoints', () => {
     }
   });
 });
-
