@@ -189,6 +189,32 @@ function countConsecutiveOrchestratorFallbackEntries(
   return count;
 }
 
+/**
+ * Count consecutive unclear orchestrator entries (regardless of specific marker).
+ * This catches ALL unclear decisions — orchestrator parse failures, missing decision tokens, etc.
+ */
+function countConsecutiveUnclearEntries(
+  db: ReturnType<typeof openDatabase>['db'],
+  taskId: string
+): number {
+  const audit = getTaskAudit(db, taskId);
+  let count = 0;
+
+  for (let i = audit.length - 1; i >= 0; i--) {
+    const entry = audit[i];
+    if (entry.actor !== 'orchestrator') break;
+
+    if ((entry.notes ?? '').startsWith('[unclear]')) {
+      count += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return count;
+}
+
 export async function runCoderPhase(
   db: ReturnType<typeof openDatabase>['db'],
   task: ReturnType<typeof getTask>,
@@ -563,6 +589,14 @@ export async function runReviewerPhase(
     if (creditCheck) {
       return creditCheck;
     }
+
+    // Early bail: reviewer returned no output at all (provider crash/rate limit not caught above)
+    if (!reviewerResult.success && reviewerResult.stdout.trim().length === 0 && reviewerResult.stderr.trim().length === 0) {
+      if (!jsonMode) {
+        console.log('\n⟳ Reviewer returned no output (provider failure), will retry');
+      }
+      return;
+    }
   }
 
   // STEP 2: Gather git context
@@ -749,10 +783,10 @@ export async function runReviewerPhase(
     }
   }
 
-  // STEP 4: Fallback for unclear decisions
-  if (decision.decision === 'unclear' && decision.reasoning.includes('FALLBACK: Orchestrator failed')) {
+  // STEP 4: Fallback for unclear decisions (catches ALL unclear, not just orchestrator parse failures)
+  if (decision.decision === 'unclear') {
     const consecutiveParseFallbackRetries =
-      countConsecutiveOrchestratorFallbackEntries(db, task.id, REVIEWER_PARSE_FALLBACK_MARKER) + 1;
+      countConsecutiveUnclearEntries(db, task.id) + 1;
 
     if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
       decision = {

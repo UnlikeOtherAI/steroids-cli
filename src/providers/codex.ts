@@ -141,6 +141,7 @@ export class CodexProvider extends BaseAIProvider {
     tool?: string;
     sessionId?: string;
     tokenUsage?: TokenUsage;
+    error?: string;
   } {
     try {
       const event = JSON.parse(line);
@@ -148,6 +149,16 @@ export class CodexProvider extends BaseAIProvider {
       // Thread started — capture thread_id as session ID
       if (event.type === 'thread.started' && event.thread_id) {
         return { sessionId: event.thread_id };
+      }
+
+      // Error event — capture error message (rate limits, credit exhaustion, etc.)
+      if (event.type === 'error' && event.message) {
+        return { error: event.message };
+      }
+
+      // Turn failed — capture error message
+      if (event.type === 'turn.failed' && event.error?.message) {
+        return { error: event.error.message };
       }
 
       // Item completed — extract text content if it's an agent message
@@ -326,6 +337,13 @@ export class CodexProvider extends BaseAIProvider {
 
           if (parsed.sessionId) sessionId = parsed.sessionId;
           if (parsed.tokenUsage) tokenUsage = { ...tokenUsage, ...parsed.tokenUsage };
+
+          // Capture JSONL error events (rate limits, credit exhaustion) into stderr
+          if (parsed.error) {
+            if (stderr.length < MAX_BUFFER) stderr += parsed.error + '\n';
+            onActivity?.({ type: 'output', stream: 'stderr', msg: parsed.error });
+            if (streamOutput) process.stderr.write(`[codex error] ${parsed.error}\n`);
+          }
 
           if (parsed.text) {
             if (stdout.length < MAX_BUFFER) stdout += parsed.text;

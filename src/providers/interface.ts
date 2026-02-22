@@ -307,7 +307,7 @@ export abstract class BaseAIProvider implements IAIProvider {
     }
 
     // 3. Regex fallback for credit/quota patterns
-    if (/insufficient.?(credit|fund|balance|quota)|quota.?exceed|billing|payment.?(required|failed)|out of (credits|tokens)|usage.?limit.?(reached|exceeded)|plan.?limit|subscription.?(expired|inactive)|exceeded your current quota/i.test(stderr)) {
+    if (/insufficient.?(credit|fund|balance|quota)|quota.?exceed|billing|payment.?(required|failed)|out of (credits|tokens)|usage.?limit|hit.+usage.?limit|plan.?limit|subscription.?(expired|inactive)|exceeded your current quota|purchase more credits/i.test(stderr)) {
       return {
         type: 'credit_exhaustion',
         message: stderr.slice(0, 500) || 'Credit/quota exhausted',
