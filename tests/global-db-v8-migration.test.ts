@@ -261,7 +261,7 @@ describe('global db schema v8 migration', () => {
     const { db, close } = openGlobalDatabase();
 
     try {
-      expect(getGlobalSchemaVersion(db)).toBe('15');
+      expect(getGlobalSchemaVersion(db)).toBe('16');
       const sessionCount = db.prepare('SELECT COUNT(*) as count FROM parallel_sessions').get() as {
         count: number;
       };
@@ -280,7 +280,7 @@ describe('global db schema v8 migration', () => {
     const { db, close } = openGlobalDatabase();
 
     try {
-      expect(getGlobalSchemaVersion(db)).toBe('15');
+      expect(getGlobalSchemaVersion(db)).toBe('16');
       const parallelSessionsColumns = getColumns(db, 'parallel_sessions');
       expect(parallelSessionsColumns.length).toBeGreaterThan(0);
       const runnersColumns = getColumns(db, 'runners');

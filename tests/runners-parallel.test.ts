@@ -26,6 +26,9 @@ jest.unstable_mockModule('../src/parallel/clone.js', () => ({
 
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
   openGlobalDatabase: mockOpenGlobalDatabase,
+  recordProviderBackoff: jest.fn(),
+  getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
+  clearProviderBackoff: jest.fn(),
   getGlobalSteroidsDir: () => '/tmp/.steroids',
   getGlobalDbPath: () => '/tmp/.steroids/steroids.db',
   isGlobalDbInitialized: () => true,

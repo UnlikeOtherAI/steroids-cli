@@ -22,6 +22,12 @@ import { hasActiveRunnerForProject } from '../runners/wakeup.js';
 import { getRegisteredProject } from '../runners/projects.js';
 import { runCoderPhase, runReviewerPhase, type CoordinatorResult } from './loop-phases.js';
 import { handleCreditExhaustion } from '../runners/credit-pause.js';
+import { loadConfig } from '../config/loader.js';
+import {
+  recordProviderBackoff,
+  getProviderBackoffRemainingMs,
+  clearProviderBackoff,
+} from '../runners/global-db.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
@@ -323,6 +329,7 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
     // Cache coordinator results so they can flow from coder phase to reviewer phase
     // Key: task ID, Value: coordinator result
     const coordinatorCache = new Map<string, CoordinatorResult>();
+    const providerRateLimitCounts = new Map<string, number>();
 
     // Coordinator only runs at specific rejection thresholds to avoid redundant LLM calls
     const COORDINATOR_THRESHOLDS = [2, 5, 9];
@@ -369,6 +376,18 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
         action,
         status: task.status,
       });
+      const config = loadConfig(projectPath);
+      const providerName = action === 'review'
+        ? (config.ai?.reviewer?.provider ?? 'claude')
+        : (config.ai?.coder?.provider ?? 'claude');
+      const globalBackoffMs = getProviderBackoffRemainingMs(providerName);
+      if (globalBackoffMs > 0) {
+        const waitSec = (globalBackoffMs / 1000).toFixed(0);
+        if (!flags.json) {
+          console.log(`[RATE LIMIT] Global backoff active for ${providerName}. Waiting ${waitSec}s...`);
+        }
+        await sleep(globalBackoffMs);
+      }
 
       let phaseResult;
       if (action === 'start') {
@@ -407,18 +426,25 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
           break;
         }
       } else if (phaseResult?.action === 'rate_limit') {
-        const delayMs = phaseResult.retryAfterMs ?? 60000;
-        const delayMin = (delayMs / 60000).toFixed(1);
-        
+        const rateLimitedProvider = phaseResult.provider;
+        const count = (providerRateLimitCounts.get(rateLimitedProvider) ?? 0) + 1;
+        providerRateLimitCounts.set(rateLimitedProvider, count);
+        const baseDelayMs = Math.min(60_000 * 2 ** (count - 1), 600_000);
+        const delayMs = Math.round(baseDelayMs * (0.7 + Math.random() * 0.6));
+        const waitSec = (delayMs / 1000).toFixed(0);
+
         if (!flags.json) {
-          console.log(`\n[RATE LIMIT] ${phaseResult.message}`);
-          console.log(`  Provider: ${phaseResult.provider} (${phaseResult.model})`);
-          console.log(`  Waiting ${delayMin}m before retrying...`);
+          console.log(`[RATE LIMIT] Provider: ${rateLimitedProvider}, attempt #${count}, waiting ${waitSec}s`);
         }
-        
+
+        const backoffUntilMs = Date.now() + delayMs;
+        recordProviderBackoff(rateLimitedProvider, backoffUntilMs, phaseResult.message);
         await sleep(delayMs);
         continue; // Retry the same task
       }
+      const successfulProvider = phaseResult?.provider ?? providerName;
+      providerRateLimitCounts.delete(successfulProvider);
+      clearProviderBackoff(successfulProvider);
 
       // Check if we should continue
       if (values.once) {

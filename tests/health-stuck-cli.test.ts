@@ -24,6 +24,9 @@ mockGlobalDb.exec(`
 // Module-level mocks — must be registered BEFORE the dynamic import.
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
   openGlobalDatabase: () => ({ db: mockGlobalDb, close: () => {} }),
+  recordProviderBackoff: jest.fn(),
+  getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
+  clearProviderBackoff: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/config/loader.js', () => ({

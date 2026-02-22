@@ -22,7 +22,12 @@ import { execSync } from 'node:child_process';
 import { runCoderPhase, runReviewerPhase } from '../commands/loop-phases.js';
 import { handleCreditExhaustion, checkBatchCreditExhaustion } from './credit-pause.js';
 import { pushToRemote } from '../git/push.js';
-import { openGlobalDatabase } from './global-db.js';
+import {
+  openGlobalDatabase,
+  recordProviderBackoff,
+  getProviderBackoffRemainingMs,
+  clearProviderBackoff,
+} from './global-db.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -130,6 +135,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
   const config = loadConfig(projectPath);
   const batchMode = config.sections?.batchMode ?? false;
   const maxBatchSize = config.sections?.maxBatchSize ?? 10;
+  const providerRateLimitCounts = new Map<string, number>();
 
   try {
     let iteration = 0;
@@ -332,6 +338,15 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       console.log(`Status: ${task.status}`);
 
       options.onTaskStart?.(task.id, action);
+      const providerName = action === 'review'
+        ? (config.ai?.reviewer?.provider ?? 'claude')
+        : (config.ai?.coder?.provider ?? 'claude');
+      const globalBackoffMs = getProviderBackoffRemainingMs(providerName);
+      if (globalBackoffMs > 0) {
+        const waitSec = (globalBackoffMs / 1000).toFixed(0);
+        console.log(`[RATE LIMIT] Global backoff active for ${providerName}. Waiting ${waitSec}s...`);
+        await sleep(globalBackoffMs);
+      }
 
       let phaseResult;
       if (action === 'start') {
@@ -400,12 +415,22 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       // runCoderPhase/runReviewerPhase when the provider returns a 429 or similar. Without
       // this handler the loop would fall through to sleep(1000) and hammer the API every ~4s.
       if (phaseResult?.action === 'rate_limit') {
-        const delayMs = phaseResult.retryAfterMs ?? 60_000;
-        const delayMin = (delayMs / 60_000).toFixed(1);
-        console.log(`\n[RATE LIMIT] ${phaseResult.provider} rate-limited. Waiting ${delayMin}m before retry...`);
+        const rateLimitedProvider = phaseResult.provider || providerName;
+        const count = (providerRateLimitCounts.get(rateLimitedProvider) ?? 0) + 1;
+        providerRateLimitCounts.set(rateLimitedProvider, count);
+        const baseDelayMs = Math.min(60_000 * 2 ** (count - 1), 600_000);
+        const delayMs = Math.round(baseDelayMs * (0.7 + Math.random() * 0.6));
+        const waitSec = (delayMs / 1000).toFixed(0);
+        console.log(`[RATE LIMIT] Provider: ${rateLimitedProvider}, attempt #${count}, waiting ${waitSec}s`);
+        const backoffUntilMs = Date.now() + delayMs;
+        recordProviderBackoff(rateLimitedProvider, backoffUntilMs, phaseResult.message);
         await sleep(delayMs);
         continue;
       }
+
+      const successfulProvider = phaseResult?.provider ?? providerName;
+      providerRateLimitCounts.delete(successfulProvider);
+      clearProviderBackoff(successfulProvider);
 
       // Log activity if task reached terminal status
       if (options.runnerId) {

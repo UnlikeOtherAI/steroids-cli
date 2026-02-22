@@ -283,7 +283,20 @@ CREATE INDEX IF NOT EXISTS idx_validation_escalations_project
 ON validation_escalations(project_path, status, created_at DESC);
 `;
 
-const GLOBAL_SCHEMA_VERSION = '15';
+/**
+ * Schema upgrade from version 15 to version 16: add provider backoff coordination.
+ */
+const GLOBAL_SCHEMA_V16_SQL = `
+  CREATE TABLE IF NOT EXISTS provider_backoffs (
+    provider TEXT PRIMARY KEY,
+    backoff_until_ms INTEGER NOT NULL,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    updated_at INTEGER NOT NULL
+  );
+`;
+
+const GLOBAL_SCHEMA_VERSION = '16';
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
   const columns = db
@@ -459,6 +472,10 @@ function applyGlobalSchemaV14(db: Database.Database): void {
 
 function applyGlobalSchemaV15(db: Database.Database): void {
   db.exec(GLOBAL_SCHEMA_V15_SQL);
+}
+
+function applyGlobalSchemaV16(db: Database.Database): void {
+  db.exec(GLOBAL_SCHEMA_V16_SQL);
 }
 
 /**
@@ -664,6 +681,12 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
       GLOBAL_SCHEMA_VERSION,
       'version'
     );
+  } else if (currentVersion === '15') {
+    applyGlobalSchemaV16(db);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
   }
   // Future upgrades would be handled here with additional conditions
   applyGlobalSchemaV9(db);
@@ -673,6 +696,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   applyGlobalSchemaV13(db);
   applyGlobalSchemaV14(db);
   applyGlobalSchemaV15(db);
+  applyGlobalSchemaV16(db);
   db.prepare(
     `INSERT INTO _global_schema (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
@@ -813,6 +837,55 @@ export function resolveValidationEscalationsForSession(sessionId: string): numbe
     ).run(sessionId);
 
     return result.changes;
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Record a provider rate limit backoff in the global DB.
+ * Uses MAX so existing longer backoffs are never shortened.
+ */
+export function recordProviderBackoff(provider: string, backoffUntilMs: number, reason?: string): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare(`
+      INSERT INTO provider_backoffs (provider, backoff_until_ms, retry_count, reason, updated_at)
+      VALUES (?, ?, 1, ?, ?)
+      ON CONFLICT(provider) DO UPDATE SET
+        backoff_until_ms = MAX(backoff_until_ms, excluded.backoff_until_ms),
+        retry_count = retry_count + 1,
+        reason = excluded.reason,
+        updated_at = excluded.updated_at
+    `).run(provider, backoffUntilMs, reason ?? null, Date.now());
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Get how many ms until the provider's global backoff expires (0 if not backed off).
+ */
+export function getProviderBackoffRemainingMs(provider: string): number {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db
+      .prepare('SELECT backoff_until_ms FROM provider_backoffs WHERE provider = ?')
+      .get(provider) as { backoff_until_ms: number } | undefined;
+    if (!row) return 0;
+    return Math.max(0, row.backoff_until_ms - Date.now());
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Clear a provider's backoff record (called after a successful invocation).
+ */
+export function clearProviderBackoff(provider: string): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare('DELETE FROM provider_backoffs WHERE provider = ?').run(provider);
   } finally {
     close();
   }

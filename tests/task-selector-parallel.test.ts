@@ -257,6 +257,9 @@ describe('orchestrator loop and runner wiring', () => {
     }));
     jest.unstable_mockModule('../src/runners/global-db.js', () => ({
       openGlobalDatabase: mockOpenGlobalDatabase,
+      recordProviderBackoff: jest.fn(),
+      getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
+      clearProviderBackoff: jest.fn(),
       updateParallelSessionStatus: jest.fn(),
       revokeWorkstreamLeasesForSession: jest.fn(),
       listParallelSessionRunners: jest.fn().mockReturnValue([]),
