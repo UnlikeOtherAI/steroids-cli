@@ -352,14 +352,17 @@ function detectTaskSignalsInternal(
          t.status,
          t.updated_at,
          COUNT(i.id) as invocation_count,
-         MAX(i.created_at) as last_invocation_at
+         MAX(i.created_at) as last_invocation_at,
+         COALESCE(SUM(CASE WHEN i.status = 'running' THEN 1 ELSE 0 END), 0) as running_invocation_count
        FROM tasks t
        LEFT JOIN task_invocations i ON i.task_id = t.id AND i.role = 'coder'
        WHERE t.status = 'in_progress'
          AND t.updated_at < ?
        GROUP BY t.id
-       HAVING COUNT(i.id) = 0
-           OR MAX(i.created_at) < ?`
+       HAVING (
+         (COUNT(i.id) = 0 OR MAX(i.created_at) < ?)
+         AND running_invocation_count = 0
+       )`
     ).all(taskCutoff, invocationCutoff) as Array<{
       id: string;
       title: string;
@@ -367,6 +370,7 @@ function detectTaskSignalsInternal(
       updated_at: string;
       invocation_count: number;
       last_invocation_at: string | null;
+      running_invocation_count: number;
     }>;
 
     for (const row of rows) {

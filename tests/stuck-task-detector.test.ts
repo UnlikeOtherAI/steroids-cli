@@ -107,6 +107,29 @@ describe('detectStuckTasks', () => {
     expect(report.orphanedTasks).toHaveLength(0);
   });
 
+  it('does not flag orphaned when a running coder invocation exists (even without an active runner)', () => {
+    const projectPath = '/tmp/project-a';
+    const now = new Date('2026-02-10T00:00:00.000Z');
+
+    projectDb
+      .prepare(`INSERT INTO tasks (id, title, status, updated_at) VALUES (?, ?, ?, ?)`)
+      .run('t1', 'Task 1', 'in_progress', dt(new Date(now.getTime() - 700 * 1000)));
+
+    projectDb
+      .prepare(`INSERT INTO task_invocations (task_id, role, status, created_at) VALUES (?, ?, ?, ?)`)
+      .run('t1', 'coder', 'running', dt(new Date(now.getTime() - 1900 * 1000)));
+
+    const report = detectStuckTasks({
+      projectPath,
+      projectDb,
+      globalDb,
+      now,
+      isPidAlive: () => false,
+    });
+
+    expect(report.orphanedTasks).toHaveLength(0);
+  });
+
   it('detects hanging_invocation for coder (stale in_progress with active runner executing task)', () => {
     const projectPath = '/tmp/project-a';
     const now = new Date('2026-02-10T00:00:00.000Z');
@@ -240,4 +263,3 @@ describe('detectStuckTasks', () => {
     expect(report.zombieRunners).toHaveLength(0);
   });
 });
-
