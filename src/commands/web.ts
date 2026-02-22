@@ -100,10 +100,17 @@ function ensureRepo(out: ReturnType<typeof createOutput>): boolean {
     mkdirSync(parentDir, { recursive: true });
   }
 
-  // hardcoded command, no user input - clone specific version tag
+  // hardcoded command, no user input - clone specific version tag with main fallback
   const tag = `v${CLI_VERSION}`;
-  execSync(`git clone --depth 1 --branch ${tag} ${REPO_URL} "${WEB_DIR}"`, { stdio: 'inherit' });
-  out.log(`Repository cloned (${tag}).`);
+  try {
+    execSync(`git clone --depth 1 --branch ${tag} ${REPO_URL} "${WEB_DIR}"`, { stdio: 'inherit' });
+    out.log(`Repository cloned (${tag}).`);
+  } catch {
+    // Tag not yet published — fall back to main branch
+    out.log(`Tag ${tag} not found on remote, cloning latest main branch...`);
+    execSync(`git clone --depth 1 ${REPO_URL} "${WEB_DIR}"`, { stdio: 'inherit' });
+    out.log('Repository cloned (main branch).');
+  }
   return true;
 }
 
@@ -212,8 +219,16 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
             out.log(`Already on ${expectedTag}.`);
           } else {
             out.log(`Updating from ${currentTag} to ${expectedTag}...`);
-            execSync(`git fetch --depth 1 origin tag ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
-            execSync(`git checkout ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
+            try {
+              execSync(`git fetch --depth 1 origin tag ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
+              execSync(`git checkout ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
+            } catch {
+              // Tag not yet published — pull latest main instead
+              out.log(`Tag ${expectedTag} not found on remote, pulling latest main...`);
+              execSync(`git fetch origin`, { cwd: WEB_DIR, stdio: 'inherit' });
+              execSync(`git checkout main`, { cwd: WEB_DIR, stdio: 'inherit' });
+              execSync(`git pull origin main`, { cwd: WEB_DIR, stdio: 'inherit' });
+            }
             installAndBuild(out);
           }
         } catch {
