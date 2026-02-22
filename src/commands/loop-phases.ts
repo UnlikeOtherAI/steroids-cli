@@ -283,6 +283,14 @@ export async function runCoderPhase(
     return creditCheck;
   }
 
+  // Early bail: if coder returned empty output and failed, skip orchestrator and retry
+  if (!coderResult.success && coderResult.stdout.trim().length === 0) {
+    if (!jsonMode) {
+      console.log('\n⟳ Coder returned empty output (provider failure), will retry');
+    }
+    return;
+  }
+
   // STEP 2: Gather git state
   const commits = getRecentCommits(projectPath, 5, initialSha);
   const files_changed = getChangedFiles(projectPath);
@@ -367,27 +375,53 @@ export async function runCoderPhase(
   const handler = new OrchestrationFallbackHandler();
   let decision = handler.parseCoderOutput(orchestratorOutput);
 
+  // When orchestrator parse falls back to retry, check coder output + git state
+  // for completion signals before giving up (same logic as the catch block above)
   if (decision.action === 'retry' && decision.reasoning.includes('FALLBACK: Orchestrator failed')) {
-    const consecutiveParseFallbackRetries =
-      countConsecutiveOrchestratorFallbackEntries(db, task.id, CODER_PARSE_FALLBACK_MARKER) + 1;
+    const coderStdout = coderResult.stdout.toLowerCase();
+    const isTaskComplete = /task complete|complete|finished|done|ready for review/.test(coderStdout);
+    const hasWork = has_uncommitted || commits.length > 0;
 
-    if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
+    if (isTaskComplete && hasWork) {
+      if (!jsonMode) {
+        console.log('[Orchestrator] Parse failed but coder signaled completion with work present - submitting');
+      }
       decision = {
-        ...decision,
-        action: 'error',
-        reasoning: `Orchestrator parse failed ${consecutiveParseFallbackRetries} times; escalating to failed to stop retry loop`,
-        next_status: 'failed',
+        action: has_uncommitted ? 'stage_commit_submit' : 'submit',
+        reasoning: 'FALLBACK: Orchestrator parse failed but coder signaled completion with commits/changes',
+        commits: commits.map(c => c.sha),
+        commit_message: has_uncommitted ? 'feat: implement task specification' : undefined,
+        next_status: 'review',
         metadata: {
-          ...decision.metadata,
+          files_changed: files_changed.length,
           confidence: 'low',
-          exit_clean: false,
-        },
+          exit_clean: true,
+          has_commits: commits.length > 0,
+        }
       };
     } else {
-      decision = {
-        ...decision,
-        reasoning: `${decision.reasoning} (parse_retry ${consecutiveParseFallbackRetries}/${MAX_ORCHESTRATOR_PARSE_RETRIES})`,
-      };
+      // No completion signal - apply the parse retry counter
+      const consecutiveParseFallbackRetries =
+        countConsecutiveOrchestratorFallbackEntries(db, task.id, CODER_PARSE_FALLBACK_MARKER) + 1;
+
+      if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
+        decision = {
+          ...decision,
+          action: 'error',
+          reasoning: `Orchestrator parse failed ${consecutiveParseFallbackRetries} times; escalating to failed to stop retry loop`,
+          next_status: 'failed',
+          metadata: {
+            ...decision.metadata,
+            confidence: 'low',
+            exit_clean: false,
+          },
+        };
+      } else {
+        decision = {
+          ...decision,
+          reasoning: `${decision.reasoning} (parse_retry ${consecutiveParseFallbackRetries}/${MAX_ORCHESTRATOR_PARSE_RETRIES})`,
+        };
+      }
     }
   }
 
