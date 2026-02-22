@@ -22,7 +22,8 @@ This applies to:
    - **Architectural Regression**: Are we losing features (like streaming or isolation) that other providers have?
    - **Type Safety**: Are we using `any` or bypassing the type system?
    - **Logic Gaps**: Does `isAvailable` actually mean the service is ready for the specific task?
-4. **The review is advisory, NOT the source of truth.** The reviewing model may be wrong, may miss context, or may over-engineer. Treat its output as additional data points, not mandates.
+4. **Non-Interactive Mode (CRITICAL):** Reviews MUST be run in non-interactive mode (e.g., using `--print` or `--exec` flags) to ensure that output is captured correctly and the automated workflow is not blocked by interactive prompts.
+5. **The review is advisory, NOT the source of truth.** The reviewing model may be wrong, may miss context, or may over-engineer. Treat its output as additional data points, not mandates.
 5. **Assess each finding independently.** For each point the reviewer raises:
    - Is it valid given the actual codebase? (Check the code, don't assume)
    - Is it relevant to the current scope?

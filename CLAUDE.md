@@ -8,6 +8,7 @@
 
 Key rules:
 - The reviewing model is **advisory, not the source of truth** — assess each finding independently
+- **Run reviews in non-interactive mode** (e.g., `claude -p`, `codex exec`) to ensure results are captured
 - Document both perspectives in the design doc (finding + your assessment + decision)
 - Don't blindly implement reviewer suggestions; don't skip review on big changes
 - Skip review only for: typo fixes, single-file bug fixes under 50 lines, urgent hotfixes
