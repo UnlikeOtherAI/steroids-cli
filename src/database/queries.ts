@@ -81,6 +81,12 @@ export interface RejectionEntry {
   created_at: string;
 }
 
+export interface MustImplementGuidance {
+  guidance: string;
+  rejection_count_watermark: number;
+  created_at: string;
+}
+
 // ============ Section Operations ============
 
 export function createSection(
@@ -812,6 +818,66 @@ export function getLatestSubmissionNotes(
     .get(taskId) as { notes: string | null } | undefined;
 
   return entry?.notes ?? null;
+}
+
+/**
+ * Get the latest commit hash associated with a submission to review.
+ * This is the canonical commit reference for reviewer prompts.
+ */
+export function getLatestSubmissionCommitSha(
+  db: Database.Database,
+  taskId: string
+): string | null {
+  const entry = db
+    .prepare(
+      `SELECT commit_sha FROM audit
+       WHERE task_id = ?
+       AND to_status = 'review'
+       AND commit_sha IS NOT NULL
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`
+    )
+    .get(taskId) as { commit_sha: string | null } | undefined;
+
+  return entry?.commit_sha ?? null;
+}
+
+/**
+ * Get the latest persisted MUST_IMPLEMENT guidance for a task.
+ * Guidance is stored as coordinator audit notes with marker:
+ * [must_implement][rc=<rejection_count>] <guidance text>
+ */
+export function getLatestMustImplementGuidance(
+  db: Database.Database,
+  taskId: string
+): MustImplementGuidance | null {
+  const entry = db
+    .prepare(
+      `SELECT notes, created_at
+       FROM audit
+       WHERE task_id = ?
+       AND actor = 'coordinator'
+       AND notes LIKE '[must_implement]%'
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`
+    )
+    .get(taskId) as { notes: string | null; created_at: string } | undefined;
+
+  if (!entry?.notes) return null;
+
+  const rcMatch = entry.notes.match(/\[rc=(\d+)\]/);
+  const rejectionCountWatermark = rcMatch ? Number.parseInt(rcMatch[1], 10) : 0;
+  const guidance = entry.notes
+    .replace(/^\[must_implement\](?:\[rc=\d+\])?\s*/i, '')
+    .trim();
+
+  if (!guidance) return null;
+
+  return {
+    guidance,
+    rejection_count_watermark: Number.isFinite(rejectionCountWatermark) ? rejectionCountWatermark : 0,
+    created_at: entry.created_at,
+  };
 }
 
 // ============ Dispute Operations ============

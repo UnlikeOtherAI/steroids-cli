@@ -5,6 +5,22 @@
 
 import { CoderContext } from './types.js';
 
+const CONTEXT_TAIL_CHARS = 6000;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractMarkdownSection(output: string, heading: string): string | null {
+  const pattern = new RegExp(
+    `(^|\\n)##\\s*${escapeRegExp(heading)}\\s*[\\r\\n]+([\\s\\S]*?)(?=\\n##\\s|$)`,
+    'i'
+  );
+  const match = output.match(pattern);
+  if (!match) return null;
+  return `## ${heading}\n${match[2].trim()}`.trim();
+}
+
 /**
  * Generate post-coder orchestrator prompt
  */
@@ -16,14 +32,17 @@ export function buildPostCoderPrompt(context: CoderContext): string {
   } = context;
 
   const duration_seconds = (duration_ms / 1000).toFixed(1);
-  const stdout_tail = stdout.slice(-2000);
-  const stderr_tail = stderr.slice(-2000);
+  const stdout_tail = stdout.length > CONTEXT_TAIL_CHARS ? stdout.slice(-CONTEXT_TAIL_CHARS) : stdout;
+  const stderr_tail = stderr.length > CONTEXT_TAIL_CHARS ? stderr.slice(-CONTEXT_TAIL_CHARS) : stderr;
+  const selfReviewChecklist = extractMarkdownSection(stdout, 'SELF_REVIEW_CHECKLIST');
+  const rejectionResponse = extractMarkdownSection(stdout, 'REJECTION_RESPONSE');
 
   let rejectionSection = '';
   if (task.rejection_notes) {
     rejectionSection = `
 **Previous Rejection:** ${task.rejection_notes}
 **Rejection Count:** ${task.rejection_count || 0}
+**Open Rejection Items (latest):** ${task.rejection_item_count ?? 0}
 `;
   }
 
@@ -40,12 +59,30 @@ export function buildPostCoderPrompt(context: CoderContext): string {
   let stderrSection = '';
   if (stderr) {
     stderrSection = `
-**Errors:**
+**Errors (tail ${CONTEXT_TAIL_CHARS} chars):**
 \`\`\`
 ${stderr_tail}
 \`\`\`
 `;
   }
+
+  const extractedBlocks: string[] = [];
+  if (selfReviewChecklist) {
+    extractedBlocks.push(`### Extracted SELF_REVIEW_CHECKLIST\n\`\`\`\n${selfReviewChecklist}\n\`\`\``);
+  }
+  if (rejectionResponse) {
+    extractedBlocks.push(`### Extracted REJECTION_RESPONSE\n\`\`\`\n${rejectionResponse}\n\`\`\``);
+  }
+
+  const extractedBlocksSection = extractedBlocks.length > 0
+    ? `
+---
+
+## Extracted Required Blocks (from full output)
+
+${extractedBlocks.join('\n\n')}
+`
+    : '';
 
   return `# POST-CODER ORCHESTRATOR
 
@@ -69,11 +106,12 @@ ${rejectionSection}
 **Timed Out:** ${timed_out}
 **Duration:** ${duration_seconds}s
 
-**Output (last 2000 chars):**
+**Output (tail ${CONTEXT_TAIL_CHARS} chars):**
 \`\`\`
 ${stdout_tail}
 \`\`\`
 ${stderrSection}
+${extractedBlocksSection}
 ---
 
 ## Git State
@@ -108,7 +146,42 @@ ${filesSection}
 - Exit 0 + commits exist → \`submit\`
 - Most common happy path
 
-### 5. Uncertainty Default
+### 5. First-Submission Self-Checklist
+- If \`Rejection Count\` is 0, require a \`SELF_REVIEW_CHECKLIST\` block in coder output
+- Checklist must include a final self-review confirmation item
+- If missing, return:
+  - \`action: "retry"\`
+  - \`next_status: "in_progress"\`
+  - \`reasoning\` starting with \`CHECKLIST_REQUIRED:\` (short)
+  - \`contract_violation: "checklist_required"\`
+
+### 6. Rejection Response Contract (Required on Resubmissions)
+- If \`Rejection Count\` is > 0, require a \`REJECTION_RESPONSE\` block
+- The block must contain one line per rejection item using:
+  - \`ITEM-<n> | IMPLEMENTED | ...\`
+  - or \`ITEM-<n> | WONT_FIX | ...\`
+- If missing or clearly incomplete, return:
+  - \`action: "retry"\`
+  - \`next_status: "in_progress"\`
+  - \`reasoning\` starting with \`REJECTION_RESPONSE_REQUIRED:\` (short)
+  - \`contract_violation: "rejection_response_required"\`
+- \`REJECTION_RESPONSE\` completeness check must use \`Open Rejection Items (latest)\` from task context
+- Require sequential responses: \`ITEM-1\` through \`ITEM-N\`
+
+### 7. WONT_FIX Claims (High Priority on Rejected Tasks)
+- If task has prior rejections and coder output includes \`WONT_FIX\`, apply strict scrutiny
+- A \`WONT_FIX\` is acceptable ONLY when all are present:
+  - Clear technical reason (impossible/unsafe/out-of-scope conflict)
+  - Concrete evidence the task still works without that item
+  - No conflict with any mandatory override guidance
+- If any of the above is missing, return:
+  - \`action: "retry"\`
+  - \`next_status: "in_progress"\`
+  - \`reasoning\` that starts with \`WONT_FIX_OVERRIDE:\` (short)
+  - \`wont_fix_override_items\` containing specific mandatory fixes
+- If evidence is strong and functionality is complete, \`submit\` is allowed
+
+### 8. Uncertainty Default
 - When signals conflict → \`retry\` (safer than error)
 
 ---
@@ -121,6 +194,8 @@ ${filesSection}
   "reasoning": "One sentence why (max 100 chars)",
   "commits": ["sha1", "sha2"],
   "commit_message": "Only if stage_commit_submit",
+  "contract_violation": "checklist_required" | "rejection_response_required" | null,
+  "wont_fix_override_items": ["specific required fix", "another required fix"],
   "next_status": "review" | "in_progress" | "failed",
   "metadata": {
     "files_changed": 0,
@@ -138,6 +213,15 @@ ${filesSection}
 - \`retry\` → Incomplete or unclear, run coder again
 - \`stage_commit_submit\` → Work complete but not committed
 - \`error\` → Fatal issue, needs human intervention
+
+**contract_violation:**
+- \`checklist_required\` when first submission missing required self-checklist
+- \`rejection_response_required\` when resubmission misses required ITEM responses
+- \`null\` when no contract violation
+
+**wont_fix_override_items:**
+- Optional list of mandatory fixes when WONT_FIX is rejected by orchestrator
+- Use this field for detailed override items (do NOT put long detail in reasoning)
 
 **next_status:**
 - \`review\` for submit and stage_commit_submit

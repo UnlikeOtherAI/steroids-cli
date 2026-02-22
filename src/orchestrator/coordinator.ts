@@ -19,6 +19,8 @@ export interface CoordinatorContext {
   submissionNotes?: string | null;
   gitDiffSummary?: string;
   previousGuidance?: string;  // Previous coordinator guidance to avoid repeating itself
+  lockedMustImplementGuidance?: string;  // Non-negotiable override guidance from orchestrator
+  lockedMustImplementWatermark?: number; // Rejection count where override was created
 }
 
 export interface CoordinatorResult {
@@ -97,6 +99,22 @@ You previously provided this guidance for this task:
 `
     : '';
 
+  const lockedMustImplementSection = extra?.lockedMustImplementGuidance
+    ? `
+---
+
+## NON-NEGOTIABLE MUST_IMPLEMENT OVERRIDE
+
+This guidance was set by the orchestrator after rejecting a weak WONT_FIX claim.
+You MUST preserve these mandatory items in your guidance and you MAY add clarifications,
+but you must NOT weaken, contradict, or remove them.
+
+**Override watermark (rejection count):** ${extra.lockedMustImplementWatermark ?? 'unknown'}
+
+${extra.lockedMustImplementGuidance}
+`
+    : '';
+
   return `# COORDINATOR INTERVENTION
 
 You are a COORDINATOR in a fully automated task system with NO human in the loop.
@@ -134,7 +152,7 @@ ${agentsMd}
 ## Full Rejection History
 
 ${rejectionSummary}
-${sectionTasksSection}${submissionNotesSection}${diffSection}${previousGuidanceSection}
+${sectionTasksSection}${submissionNotesSection}${diffSection}${previousGuidanceSection}${lockedMustImplementSection}
 ---
 
 ## Your Decision Framework
@@ -184,6 +202,7 @@ GUIDANCE:
 - If there's a design disagreement, PICK the approach that matches the project's architecture and tell the coder to follow it
 - If the same feedback appeared 3+ times unchanged, the coder needs a fundamentally different approach - describe it
 - Always ask: "Will this be usable for the end user?" - if the current approach works for users, don't block on technicalities
+- If NON-NEGOTIABLE MUST_IMPLEMENT override is present, you must keep those items mandatory
 - Never tell the reviewer to auto-approve based on a fixed checklist (e.g., "these are the only items required for approval")
 - Never claim reviewer guidance is binding over security, correctness, or specification requirements
 - Keep guidance under 500 words

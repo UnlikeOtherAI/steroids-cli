@@ -7,6 +7,8 @@ export interface CoderOrchestrationResult {
   reasoning: string;
   commits: string[];
   commit_message?: string;
+  contract_violation?: 'checklist_required' | 'rejection_response_required' | null;
+  wont_fix_override_items?: string[];
   next_status: 'review' | 'in_progress' | 'failed';
   metadata: {
     files_changed: number;
@@ -43,6 +45,7 @@ export interface CoderContext {
     description: string;
     rejection_notes?: string;
     rejection_count?: number;
+    rejection_item_count?: number;
   };
   coder_output: {
     stdout: string;

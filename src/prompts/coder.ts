@@ -59,13 +59,27 @@ Review your previous progress and complete the task.
 "${coordinatorGuidance}"\n\n`;
   }
 
+  if (coordinatorGuidance?.includes('MUST_IMPLEMENT:')) {
+    prompt += `**MANDATORY OVERRIDE:** Items listed under MUST_IMPLEMENT are required before resubmission.
+Do not mark those items as WONT_FIX unless you provide hard new evidence and the orchestrator explicitly clears them.\n\n`;
+  }
+
   prompt += `Fix these issues and resubmit. All previous context and code is still in your session.
 
 **REMINDER:**
 1. Address ALL reviewer feedback
 2. BUILD MUST PASS before submitting
 3. COMMIT YOUR WORK with a descriptive message
-4. Output "TASK COMPLETE" when finished
+4. Include this exact contract block:
+   \`\`\`
+   ## REJECTION_RESPONSE
+   ITEM-1 | IMPLEMENTED | <file:line> | <what changed>
+   ITEM-2 | WONT_FIX | <exceptional reason + proof solution still works>
+   \`\`\`
+   - Every reviewer checkbox item must have one matching \`ITEM-<n>\` response.
+   - \`WONT_FIX\` is a high bar and requires an exceptional, concrete explanation.
+   - If coordinator guidance includes \`MUST_IMPLEMENT:\`, those items are mandatory and should not be marked \`WONT_FIX\`.
+5. Output "TASK COMPLETE" when finished
 `;
 
   return prompt;
@@ -208,11 +222,39 @@ git commit -m "<type>: <descriptive message>"
 The orchestrator will automatically detect your completion and submit the task for review. Do NOT run any \`steroids tasks\` commands - the orchestrator handles all status updates.
 
 ---
-${task.rejection_count > 0 ? `
+${task.rejection_count === 0 ? `
+## FIRST SUBMISSION SELF-CHECKLIST (REQUIRED)
+
+Before "TASK COMPLETE", include:
+
+\`\`\`
+## SELF_REVIEW_CHECKLIST
+- [x] <requirement 1 from the task spec>
+- [x] <requirement 2 from the task spec>
+- [x] <tests/build evidence for this task>
+- [x] Self-review complete: I verified all requested behavior works.
+\`\`\`
+
+This checklist must reflect the actual specification, not generic boilerplate.
+
+` : ''}${task.rejection_count > 0 ? `
 ## THIS TASK HAS BEEN REJECTED ${task.rejection_count} TIME(S)
 
 **You MUST address the reviewer's feedback before submitting again.**
 Extract every test case from the rejection notes, run each one, fix issues at the source, then test again.
+
+**REQUIRED OUTPUT CONTRACT FOR RESUBMISSION:**
+
+\`\`\`
+## REJECTION_RESPONSE
+ITEM-1 | IMPLEMENTED | src/file.ts:42 | fixed null-check and added guard
+ITEM-2 | WONT_FIX | exceptional reason + proof solution still works
+\`\`\`
+
+Rules:
+- Every reviewer checkbox item must have one matching \`ITEM-<n>\` response.
+- \`WONT_FIX\` is a high bar and requires an exceptional, concrete explanation.
+- If coordinator guidance includes \`MUST_IMPLEMENT:\`, those items are mandatory and should not be marked \`WONT_FIX\`.
 
 ` : ''}---
 
@@ -364,8 +406,30 @@ ${gitDiff ?? 'No changes'}
 2. If the work looks good, complete it
 3. If the work looks wrong, you may start fresh
 4. Commit all changes when done
+5. If this task has rejections, include a \`## REJECTION_RESPONSE\` block with one line per reviewer item (\`IMPLEMENTED\` or \`WONT_FIX\` with strong justification)
 ${rejectionSection}
 ---
+
+${task.rejection_count > 0 ? `## REQUIRED OUTPUT CONTRACT FOR RESUBMISSION
+
+\`\`\`
+## REJECTION_RESPONSE
+ITEM-1 | IMPLEMENTED | src/file.ts:42 | fixed null-check and added guard
+ITEM-2 | WONT_FIX | exceptional reason + proof solution still works
+\`\`\`
+
+Rules:
+- Every reviewer checkbox item must have one matching \`ITEM-<n>\` response.
+- \`WONT_FIX\` is a high bar and requires an exceptional, concrete explanation.
+- If coordinator guidance includes \`MUST_IMPLEMENT:\`, those items are mandatory and should not be marked \`WONT_FIX\`.
+
+---
+` : ''}${coordinatorGuidance?.includes('MUST_IMPLEMENT:') ? `## MANDATORY OVERRIDE
+
+You MUST implement the items listed under \`MUST_IMPLEMENT:\` before resubmitting.
+
+---
+` : ''} 
 
 ## Specification
 

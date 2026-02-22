@@ -12,8 +12,7 @@ export interface ReviewerPromptContext {
   task: Task;
   projectPath: string;
   reviewerModel: string;
-  submissionCommitHash?: string | null;
-  fallbackCommitHash?: string;
+  submissionCommitHash: string;
   sectionTasks?: SectionTask[];  // Other tasks in the same section
   rejectionHistory?: RejectionEntry[];  // Past rejections with commit hashes
   submissionNotes?: string | null;  // Notes from coder when submitting for review
@@ -26,8 +25,8 @@ export interface ReviewerPromptContext {
  * Generate a minimal delta prompt for a resumed reviewer session
  */
 export function generateResumingReviewerDeltaPrompt(context: ReviewerPromptContext): string {
-  const { task, submissionCommitHash, submissionNotes, rejectionHistory, fallbackCommitHash, projectPath } = context;
-  const submissionCommit = submissionCommitHash || fallbackCommitHash || 'HEAD~1';
+  const { task, submissionCommitHash, submissionNotes, rejectionHistory, projectPath } = context;
+  const submissionCommit = submissionCommitHash;
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
 
   // Find the last rejection notes the reviewer gave
@@ -236,11 +235,10 @@ export function generateReviewerPrompt(context: ReviewerPromptContext): string {
     config,
     coordinatorGuidance,
     coordinatorDecision,
-    submissionCommitHash,
-    fallbackCommitHash
+    submissionCommitHash
   } = context;
 
-  const submissionCommit = submissionCommitHash || fallbackCommitHash || 'HEAD~1';
+  const submissionCommit = submissionCommitHash;
 
   // Format coder's submission notes if present
   const submissionNotesSection = submissionNotes
@@ -444,7 +442,7 @@ export interface BatchReviewerPromptContext {
   tasks: Task[];
   projectPath: string;
   sectionName: string;
-  taskCommits?: Array<{ taskId: string; commitHash: string | null }>;
+  taskCommits?: Array<{ taskId: string; commitHash: string }>;
   config: SteroidsConfig;
 }
 
@@ -456,9 +454,13 @@ export function generateBatchReviewerPrompt(context: BatchReviewerPromptContext)
 
   // Build task specs for each task
   const commitMap = new Map(taskCommits?.map(item => [item.taskId, item.commitHash]) ?? []);
+  const tasksMissingCommits = tasks.filter(task => !commitMap.get(task.id)).map(task => task.id);
+  if (tasksMissingCommits.length > 0) {
+    throw new Error(`Missing submission commit hash for batch review tasks: ${tasksMissingCommits.join(', ')}`);
+  }
   const taskSpecs = tasks.map((task, index) => {
     const specRef = getSourceFileReference(projectPath, task.source_file);
-    const commitRef = commitMap.get(task.id) || 'HEAD~1';
+    const commitRef = commitMap.get(task.id)!;
     return `
 ### Task ${index + 1}: ${task.title}
 **Task ID:** ${task.id}

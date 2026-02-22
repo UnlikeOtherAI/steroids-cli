@@ -212,6 +212,7 @@ ${r.notes || '(no detailed notes)'}
   );
 
   // Coordinator guidance section (injected after 2nd rejection)
+  const hasMandatoryOverride = coordinatorGuidance?.includes('MUST_IMPLEMENT:') ?? false;
   const coordinatorSection = coordinatorGuidance ? `
 ---
 
@@ -221,10 +222,13 @@ A coordinator has reviewed the rejection history and provides this guidance:
 
 ${coordinatorGuidance}
 
-**Use the coordinator guidance as additional context, not as an override of reviewer correctness checks.**
+${hasMandatoryOverride
+  ? `**MANDATORY OVERRIDE:** Items listed under \`MUST_IMPLEMENT\` are required for your next submission.
+Do not mark those items as \`WONT_FIX\` unless you provide new hard evidence and the orchestrator explicitly clears them.`
+  : `**Use the coordinator guidance as additional context, not as an override of reviewer correctness checks.**
 
 If coordinator guidance says a reviewer demand is likely out of scope, you may skip that demand.
-If the reviewer rejects again for the same disputed demand, DISPUTE instead of repeating the same fix cycle.
+If the reviewer rejects again for the same disputed demand, DISPUTE instead of repeating the same fix cycle.`}
 
 ` : '';
 
@@ -255,11 +259,18 @@ ${coordinatorSection}---
    - Make the exact change requested
    - Verify the fix works
 
-2. Run the build and tests:
+2. Output a structured response for every rejection item:
+   - Add a \`## REJECTION_RESPONSE\` block in your final output
+   - One line per reviewer checkbox item, in order:
+     - \`ITEM-<n> | IMPLEMENTED | <file:line> | <what changed>\`
+     - OR \`ITEM-<n> | WONT_FIX | <exceptional reason + why solution still works>\`
+   - \`WONT_FIX\` is a high bar and requires a concrete explanation, not a preference
+
+3. Run the build and tests:
    - The project must build successfully
    - Tests must pass (if the project has tests)
 
-3. Commit your changes and output "TASK COMPLETE" - the orchestrator will submit for review
+4. Commit your changes and output "TASK COMPLETE" - the orchestrator will submit for review
 
 **DO NOT submit until you have addressed EVERY checkbox in the rejection notes.**
 **DO NOT run any CLI commands - the orchestrator handles all status updates.**

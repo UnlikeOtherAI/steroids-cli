@@ -7,7 +7,14 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../database/queries.js';
-import { listTasks, getTaskRejections, getLatestSubmissionNotes, findResumableSession, invalidateSession } from '../database/queries.js';
+import {
+  listTasks,
+  getTaskRejections,
+  getLatestSubmissionNotes,
+  getLatestSubmissionCommitSha,
+  findResumableSession,
+  invalidateSession,
+} from '../database/queries.js';
 import { openDatabase } from '../database/connection.js';
 import {
   generateReviewerPrompt,
@@ -17,9 +24,6 @@ import {
   type BatchReviewerPromptContext,
 } from '../prompts/reviewer.js';
 import type { SectionTask } from '../prompts/prompt-helpers.js';
-import {
-  findTaskCommit,
-} from '../git/status.js';
 import { loadConfig, type ReviewerConfig, type SteroidsConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
@@ -296,63 +300,63 @@ export async function invokeReviewer(
   console.log(`Model: ${effectiveReviewerConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  const submissionCommitHash = findTaskCommit(projectPath, task.title);
-  const fallbackCommitHash = 'HEAD~1';
-
-  if (submissionCommitHash) {
-    console.log(`Found task commit: ${submissionCommitHash}`);
-  } else {
-    console.log(`No matching commit found for task title. Reviewer will use fallback commit: ${fallbackCommitHash}`);
-  }
-
   // Fetch other tasks in the same section for context
   let sectionTasks: SectionTask[] = [];
   let rejectionHistory: ReturnType<typeof getTaskRejections> = [];
   let submissionNotes: string | null = null;
   let resumeSessionId: string | null = null;
+  let submissionCommitHash: string | null = null;
 
   try {
     const { db, close } = openDatabase(projectPath);
-
-    // Get section tasks
-    if (task.section_id) {
-      const allSectionTasks = listTasks(db, { sectionId: task.section_id });
-      sectionTasks = allSectionTasks.map(t => ({
-        id: t.id,
-        title: t.title,
-        status: t.status,
-      }));
-    }
-
-    // Get rejection history - ALWAYS fetch this so reviewer can see past attempts
-    rejectionHistory = getTaskRejections(db, task.id);
-    if (rejectionHistory.length > 0) {
-      console.log(`Found ${rejectionHistory.length} previous rejection(s) for this task`);
-    }
-
-    // Get coder's submission notes (if any)
-    submissionNotes = getLatestSubmissionNotes(db, task.id);
-    if (submissionNotes) {
-      console.log(`Coder included notes with submission`);
-    }
-
-    // Check for resumable session (same provider/model/role)
-    if (effectiveReviewerConfig?.provider && effectiveReviewerConfig?.model) {
-      resumeSessionId = findResumableSession(
-        db,
-        task.id,
-        'reviewer',
-        effectiveReviewerConfig.provider,
-        effectiveReviewerConfig.model
-      );
-      if (resumeSessionId) {
-        console.log(`Found resumable session: ${resumeSessionId.substring(0, 8)}... (resuming with delta prompt)`);
+    try {
+      // Get section tasks
+      if (task.section_id) {
+        const allSectionTasks = listTasks(db, { sectionId: task.section_id });
+        sectionTasks = allSectionTasks.map(t => ({
+          id: t.id,
+          title: t.title,
+          status: t.status,
+        }));
       }
-    }
 
-    close();
+      // Get rejection history - ALWAYS fetch this so reviewer can see past attempts
+      rejectionHistory = getTaskRejections(db, task.id);
+      if (rejectionHistory.length > 0) {
+        console.log(`Found ${rejectionHistory.length} previous rejection(s) for this task`);
+      }
+
+      // Get coder's submission notes (if any)
+      submissionNotes = getLatestSubmissionNotes(db, task.id);
+      if (submissionNotes) {
+        console.log(`Coder included notes with submission`);
+      }
+      
+      submissionCommitHash = getLatestSubmissionCommitSha(db, task.id);
+      if (!submissionCommitHash) {
+        throw new Error(`Submission commit hash not found for task ${task.id}`);
+      }
+      console.log(`Using submission commit: ${submissionCommitHash}`);
+
+      // Check for resumable session (same provider/model/role)
+      if (effectiveReviewerConfig?.provider && effectiveReviewerConfig?.model) {
+        resumeSessionId = findResumableSession(
+          db,
+          task.id,
+          'reviewer',
+          effectiveReviewerConfig.provider,
+          effectiveReviewerConfig.model
+        );
+        if (resumeSessionId) {
+          console.log(`Found resumable session: ${resumeSessionId.substring(0, 8)}... (resuming with delta prompt)`);
+        }
+      }
+    } finally {
+      close();
+    }
   } catch (error) {
-    console.warn('Could not fetch task context:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not fetch reviewer context: ${message}`);
   }
 
   // Reuse config loaded earlier, get reviewer model
@@ -362,8 +366,7 @@ export async function invokeReviewer(
     task,
     projectPath,
     reviewerModel,
-    submissionCommitHash,
-    fallbackCommitHash,
+    submissionCommitHash: submissionCommitHash!,
     sectionTasks,
     rejectionHistory,
     submissionNotes,
@@ -457,10 +460,25 @@ export async function invokeReviewerBatch(
   console.log(`Model: ${effectiveReviewerConfig?.model ?? 'not configured'}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  const taskCommits = tasks.map(task => ({
-    taskId: task.id,
-    commitHash: findTaskCommit(projectPath, task.title),
-  }));
+  const { db, close } = openDatabase(projectPath);
+  let taskCommits: Array<{ taskId: string; commitHash: string }> = [];
+  try {
+    const unresolved = tasks
+      .map(task => ({ taskId: task.id, commitHash: getLatestSubmissionCommitSha(db, task.id) }))
+      .filter(item => !item.commitHash)
+      .map(item => item.taskId);
+
+    if (unresolved.length > 0) {
+      throw new Error(`Missing submission commit hash for batch review tasks: ${unresolved.join(', ')}`);
+    }
+
+    taskCommits = tasks.map(task => ({
+      taskId: task.id,
+      commitHash: getLatestSubmissionCommitSha(db, task.id)!,
+    }));
+  } finally {
+    close();
+  }
 
   const context: BatchReviewerPromptContext = {
     tasks,

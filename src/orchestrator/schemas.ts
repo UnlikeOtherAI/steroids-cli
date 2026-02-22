@@ -25,6 +25,18 @@ const coderSchema = {
         { type: 'null' }
       ]
     },
+    contract_violation: {
+      oneOf: [
+        { type: 'string', enum: ['checklist_required', 'rejection_response_required'] },
+        { type: 'null' }
+      ]
+    },
+    wont_fix_override_items: {
+      oneOf: [
+        { type: 'array', items: { type: 'string', minLength: 1, maxLength: 500 } },
+        { type: 'null' }
+      ]
+    },
     next_status: {
       type: 'string',
       enum: ['review', 'in_progress', 'failed']

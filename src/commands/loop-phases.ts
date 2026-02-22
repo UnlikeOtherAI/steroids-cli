@@ -12,6 +12,8 @@ import {
   getTaskRejections,
   getTaskAudit,
   getLatestSubmissionNotes,
+  getLatestSubmissionCommitSha,
+  getLatestMustImplementGuidance,
   listTasks,
   addAuditEntry,
   getFollowUpDepth,
@@ -283,8 +285,12 @@ async function classifyOrchestratorFailure(
 }
 
 const MAX_ORCHESTRATOR_PARSE_RETRIES = 3;
+const MAX_CONTRACT_VIOLATION_RETRIES = 3;
 const CODER_PARSE_FALLBACK_MARKER = '[retry] FALLBACK: Orchestrator failed, defaulting to retry';
 const REVIEWER_PARSE_FALLBACK_MARKER = '[unclear] FALLBACK: Orchestrator failed, retrying review';
+const CONTRACT_CHECKLIST_MARKER = '[contract:checklist]';
+const CONTRACT_REJECTION_RESPONSE_MARKER = '[contract:rejection_response]';
+const MUST_IMPLEMENT_MARKER = '[must_implement]';
 
 function countConsecutiveOrchestratorFallbackEntries(
   db: ReturnType<typeof openDatabase>['db'],
@@ -335,6 +341,45 @@ function countConsecutiveUnclearEntries(
   return count;
 }
 
+function countConsecutiveTaggedOrchestratorEntries(
+  db: ReturnType<typeof openDatabase>['db'],
+  taskId: string,
+  requiredTag: string,
+  tagFamilyPrefix?: string
+): number {
+  const audit = getTaskAudit(db, taskId);
+  let count = 0;
+
+  for (let i = audit.length - 1; i >= 0; i--) {
+    const entry = audit[i];
+    if (entry.actor !== 'orchestrator') {
+      continue; // tolerate non-orchestrator audit noise
+    }
+
+    const notes = entry.notes ?? '';
+    if (notes.includes(requiredTag)) {
+      count += 1;
+      continue;
+    }
+
+    if (tagFamilyPrefix && notes.includes(tagFamilyPrefix)) {
+      break; // same family, different category = sequence ended
+    }
+
+    break;
+  }
+
+  return count;
+}
+
+function countLatestOpenRejectionItems(notes?: string): number {
+  if (!notes) return 0;
+  return notes
+    .split('\n')
+    .filter(line => /^\s*[-*]\s*\[\s\]\s+/.test(line))
+    .length;
+}
+
 function hasCoderCompletionSignal(output: string): boolean {
   const lower = output.toLowerCase();
 
@@ -362,12 +407,39 @@ export async function runCoderPhase(
 
   let coordinatorGuidance: string | undefined;
   const thresholds = coordinatorThresholds || [2, 5, 9];
+  const persistedMustImplement = getLatestMustImplementGuidance(db, task.id);
+  const activeMustImplement =
+    persistedMustImplement &&
+    task.status === 'in_progress' &&
+    task.rejection_count >= persistedMustImplement.rejection_count_watermark
+      ? persistedMustImplement
+      : null;
 
   // Run coordinator at rejection thresholds (same as before)
   const shouldInvokeCoordinator = thresholds.includes(task.rejection_count);
   const cachedResult = coordinatorCache?.get(task.id);
 
+  if (activeMustImplement) {
+    coordinatorGuidance = activeMustImplement.guidance;
+    coordinatorCache?.set(task.id, {
+      success: true,
+      decision: 'guide_coder',
+      guidance: activeMustImplement.guidance,
+    });
+    if (!jsonMode) {
+      console.log(`\nActive MUST_IMPLEMENT override detected (rc=${activeMustImplement.rejection_count_watermark})`);
+    }
+  }
+
   if (shouldInvokeCoordinator) {
+    if (
+      activeMustImplement &&
+      task.rejection_count === activeMustImplement.rejection_count_watermark
+    ) {
+      if (!jsonMode) {
+        console.log('\nSkipping coordinator reinvocation in same rejection cycle due to active MUST_IMPLEMENT override');
+      }
+    } else {
     if (!jsonMode) {
       console.log(`\n>>> Task has ${task.rejection_count} rejections (threshold hit) - invoking COORDINATOR...\n`);
     }
@@ -393,16 +465,29 @@ export async function runCoderPhase(
       if (cachedResult) {
         coordExtra.previousGuidance = cachedResult.guidance;
       }
+      if (activeMustImplement) {
+        coordExtra.lockedMustImplementGuidance = activeMustImplement.guidance;
+        coordExtra.lockedMustImplementWatermark = activeMustImplement.rejection_count_watermark;
+      }
 
       const coordResult = await invokeCoordinator(task, rejectionHistory, projectPath, coordExtra);
+      const mustKeepOverride =
+        activeMustImplement &&
+        task.rejection_count > activeMustImplement.rejection_count_watermark;
+      const normalizedGuidance = mustKeepOverride && !coordResult.guidance.includes('MUST_IMPLEMENT:')
+        ? `${activeMustImplement.guidance}\n\nAdditional coordinator guidance:\n${coordResult.guidance}`
+        : coordResult.guidance;
 
       if (coordResult) {
-        coordinatorGuidance = coordResult.guidance;
-        coordinatorCache?.set(task.id, coordResult);
+        coordinatorGuidance = normalizedGuidance;
+        coordinatorCache?.set(task.id, {
+          ...coordResult,
+          guidance: normalizedGuidance,
+        });
 
         addAuditEntry(db, task.id, task.status, task.status, 'coordinator', {
           actorType: 'orchestrator',
-          notes: `[${coordResult.decision}] ${coordResult.guidance}`,
+          notes: `[${coordResult.decision}] ${normalizedGuidance}`,
         });
 
         if (!jsonMode) {
@@ -415,7 +500,8 @@ export async function runCoderPhase(
         console.warn('Coordinator invocation failed, continuing without guidance:', error);
       }
     }
-  } else if (cachedResult) {
+    }
+  } else if (cachedResult && !activeMustImplement) {
     coordinatorGuidance = cachedResult.guidance;
     if (!jsonMode && task.rejection_count >= 2) {
       console.log(`\nReusing cached coordinator guidance (decision: ${cachedResult.decision})`);
@@ -475,6 +561,7 @@ export async function runCoderPhase(
   const lastRejectionNotes = task.rejection_count > 0
     ? getTaskRejections(db, task.id).slice(-1)[0]?.notes ?? undefined
     : undefined;
+  const rejectionItemCount = countLatestOpenRejectionItems(lastRejectionNotes);
 
   const context: CoderContext = {
     task: {
@@ -483,6 +570,7 @@ export async function runCoderPhase(
       description: task.title, // Use title as description for now
       rejection_notes: lastRejectionNotes,
       rejection_count: task.rejection_count,
+      rejection_item_count: rejectionItemCount,
     },
     coder_output: {
       stdout: coderResult.stdout,
@@ -606,6 +694,98 @@ export async function runCoderPhase(
     }
   }
 
+  // Contract-violation handling (structured-first, legacy-prefix fallback).
+  const legacyChecklistViolation = /^CHECKLIST_REQUIRED:/i.test(decision.reasoning || '');
+  const legacyRejectionResponseViolation = /^REJECTION_RESPONSE_REQUIRED:/i.test(decision.reasoning || '');
+  const contractViolation = decision.contract_violation
+    ?? (legacyChecklistViolation ? 'checklist_required' : null)
+    ?? (legacyRejectionResponseViolation ? 'rejection_response_required' : null);
+
+  if (contractViolation) {
+    const marker = contractViolation === 'checklist_required'
+      ? CONTRACT_CHECKLIST_MARKER
+      : CONTRACT_REJECTION_RESPONSE_MARKER;
+    const reasonText = (decision.reasoning || '')
+      .replace(/^CHECKLIST_REQUIRED:\s*/i, '')
+      .replace(/^REJECTION_RESPONSE_REQUIRED:\s*/i, '')
+      .trim();
+    const cleanReason = reasonText || 'Required output contract not satisfied';
+    const consecutiveContractViolations =
+      countConsecutiveTaggedOrchestratorEntries(db, task.id, marker, '[contract:') + 1;
+
+    if (consecutiveContractViolations >= MAX_CONTRACT_VIOLATION_RETRIES) {
+      decision = {
+        ...decision,
+        action: 'error',
+        next_status: 'failed',
+        contract_violation: contractViolation,
+        reasoning: `${marker} ${cleanReason} (retry_limit ${consecutiveContractViolations}/${MAX_CONTRACT_VIOLATION_RETRIES})`,
+        metadata: {
+          ...decision.metadata,
+          confidence: 'low',
+          exit_clean: false,
+        },
+      };
+    } else {
+      decision = {
+        ...decision,
+        action: 'retry',
+        next_status: 'in_progress',
+        contract_violation: contractViolation,
+        reasoning: `${marker} ${cleanReason} (retry ${consecutiveContractViolations}/${MAX_CONTRACT_VIOLATION_RETRIES})`,
+        metadata: {
+          ...decision.metadata,
+          confidence: 'medium',
+        },
+      };
+    }
+  }
+
+  // Enforce orchestrator authority over weak/unsupported WONT_FIX claims.
+  const structuredOverrideItems = Array.isArray(decision.wont_fix_override_items)
+    ? decision.wont_fix_override_items.filter(item => typeof item === 'string' && item.trim().length > 0)
+    : [];
+  const legacyWontFixOverrideMatch = (decision.reasoning || '').match(/WONT_FIX_OVERRIDE:\s*([\s\S]+)/i);
+  const fallbackLegacyItems = legacyWontFixOverrideMatch?.[1]
+    ? legacyWontFixOverrideMatch[1]
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+    : [];
+  const overrideItems = structuredOverrideItems.length > 0 ? structuredOverrideItems : fallbackLegacyItems;
+
+  if (overrideItems.length > 0) {
+    const mandatoryLines = overrideItems.map((item, idx) => `${idx + 1}. ${item}`);
+    const mandatoryGuidance = `MUST_IMPLEMENT:
+${mandatoryLines.join('\n')}
+
+This is a mandatory orchestrator override. Implement these changes before resubmitting.
+Only use WONT_FIX if you provide exceptional technical evidence and the orchestrator explicitly accepts it.`;
+    const persistedNote = `${MUST_IMPLEMENT_MARKER}[rc=${task.rejection_count}] ${mandatoryGuidance}`;
+
+    addAuditEntry(db, task.id, task.status, task.status, 'coordinator', {
+      actorType: 'orchestrator',
+      notes: persistedNote,
+    });
+
+    coordinatorCache?.set(task.id, {
+      success: true,
+      decision: 'guide_coder',
+      guidance: mandatoryGuidance,
+    });
+
+    decision = {
+      ...decision,
+      action: 'retry',
+      next_status: 'in_progress',
+      reasoning: `${MUST_IMPLEMENT_MARKER} WONT_FIX override applied`,
+      metadata: {
+        ...decision.metadata,
+        confidence: 'medium',
+      },
+    };
+  }
+
   // STEP 6: Log orchestrator decision for audit trail
   addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
     actorType: 'orchestrator',
@@ -615,7 +795,23 @@ export async function runCoderPhase(
   // STEP 7: Execute the decision
   switch (decision.action) {
     case 'submit':
-      updateTaskStatus(db, task.id, 'review', 'orchestrator', decision.reasoning);
+      {
+        const submissionCommitSha = getCurrentCommitSha(projectPath) || undefined;
+        if (!submissionCommitSha) {
+          updateTaskStatus(
+            db,
+            task.id,
+            'failed',
+            'orchestrator',
+            'Task failed: cannot submit to review without a commit hash'
+          );
+          if (!jsonMode) {
+            console.log('\n✗ Task failed (missing commit hash on submit)');
+          }
+          break;
+        }
+        updateTaskStatus(db, task.id, 'review', 'orchestrator', decision.reasoning, submissionCommitSha);
+      }
       if (!jsonMode) {
         console.log(`\n✓ Coder complete, submitted to review (confidence: ${decision.metadata.confidence})`);
       }
@@ -623,7 +819,28 @@ export async function runCoderPhase(
 
     case 'stage_commit_submit':
       if (!has_uncommitted) {
-        updateTaskStatus(db, task.id, 'review', 'orchestrator', 'Auto-commit skipped: no uncommitted changes');
+        const submissionCommitSha = getCurrentCommitSha(projectPath) || undefined;
+        if (!submissionCommitSha) {
+          updateTaskStatus(
+            db,
+            task.id,
+            'failed',
+            'orchestrator',
+            'Task failed: cannot submit to review without a commit hash'
+          );
+          if (!jsonMode) {
+            console.log('\n✗ Task failed (missing commit hash on auto-commit skip path)');
+          }
+          break;
+        }
+        updateTaskStatus(
+          db,
+          task.id,
+          'review',
+          'orchestrator',
+          'Auto-commit skipped: no uncommitted changes',
+          submissionCommitSha
+        );
         if (!jsonMode) {
           console.log('\n✓ Auto-commit skipped (no uncommitted files) and submitted to review');
         }
@@ -639,8 +856,28 @@ export async function runCoderPhase(
           cwd: projectPath,
           stdio: 'pipe'
         });
-        updateTaskStatus(db, task.id, 'review', 'orchestrator',
-          `Auto-committed and submitted (${decision.reasoning})`);
+        const submissionCommitSha = getCurrentCommitSha(projectPath) || undefined;
+        if (!submissionCommitSha) {
+          updateTaskStatus(
+            db,
+            task.id,
+            'failed',
+            'orchestrator',
+            'Task failed: auto-commit succeeded but commit hash could not be resolved'
+          );
+          if (!jsonMode) {
+            console.log('\n✗ Task failed (auto-commit hash could not be resolved)');
+          }
+          break;
+        }
+        updateTaskStatus(
+          db,
+          task.id,
+          'review',
+          'orchestrator',
+          `Auto-committed and submitted (${decision.reasoning})`,
+          submissionCommitSha
+        );
         if (!jsonMode) {
           console.log(`\n✓ Auto-committed and submitted to review (confidence: ${decision.metadata.confidence})`);
         }
@@ -685,6 +922,20 @@ export async function runReviewerPhase(
   const config = loadConfig(projectPath);
   const multiReviewEnabled = isMultiReviewEnabled(config);
   const strict = config.ai?.review?.strict ?? true;
+  const submissionCommitSha = getLatestSubmissionCommitSha(db, task.id);
+  if (!submissionCommitSha) {
+    updateTaskStatus(
+      db,
+      task.id,
+      'failed',
+      'orchestrator',
+      'Task failed: submission commit hash missing for review phase'
+    );
+    if (!jsonMode) {
+      console.log('\n✗ Task failed (missing submission commit hash before review)');
+    }
+    return;
+  }
 
   let reviewerResult: ReviewerResult | undefined;
   let reviewerResults: ReviewerResult[] = [];
@@ -1043,7 +1294,7 @@ export async function runReviewerPhase(
             description: followUp.description,
             sectionId: task.section_id,
             referenceTaskId: task.id,
-            referenceCommit: commit_sha || undefined,
+            referenceCommit: submissionCommitSha,
             requiresPromotion,
             depth: nextDepth,
           });
@@ -1062,7 +1313,7 @@ export async function runReviewerPhase(
   }
 
   // STEP 6: Execute the decision
-  const commitSha = commit_sha || undefined;
+  const commitSha = submissionCommitSha;
 
   switch (decision.decision) {
     case 'approve':
