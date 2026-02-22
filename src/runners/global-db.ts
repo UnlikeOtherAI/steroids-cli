@@ -322,14 +322,17 @@ function applyGlobalSchemaV10(db: Database.Database): void {
     db.exec('ALTER TABLE workstreams ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0');
   }
 
-  if (!hasColumn(db, 'workstreams', 'lease_expires_at')) {
+  const leaseColumnMissing = !hasColumn(db, 'workstreams', 'lease_expires_at');
+  if (leaseColumnMissing) {
     db.exec('ALTER TABLE workstreams ADD COLUMN lease_expires_at TEXT');
+    // Backfill only during the one-time schema upgrade that introduces lease_expires_at.
+    // Do NOT run this on every startup, or wakeup reconciliation cannot observe
+    // intentionally NULL/expired leases for stale workstreams.
+    db.exec(
+      "UPDATE workstreams SET lease_expires_at = datetime('now', '+120 seconds') " +
+      "WHERE lease_expires_at IS NULL AND status = 'running'"
+    );
   }
-
-  db.exec(
-    "UPDATE workstreams SET lease_expires_at = datetime('now', '+120 seconds') " +
-    "WHERE lease_expires_at IS NULL AND status = 'running'"
-  );
   db.exec(GLOBAL_SCHEMA_V10_SQL);
 }
 
