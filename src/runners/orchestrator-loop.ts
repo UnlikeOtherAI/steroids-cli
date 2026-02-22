@@ -396,6 +396,17 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
         continue; // Retry iteration after config change
       }
 
+      // Rate limit: back off before retrying. The 'rate_limit' action is returned by
+      // runCoderPhase/runReviewerPhase when the provider returns a 429 or similar. Without
+      // this handler the loop would fall through to sleep(1000) and hammer the API every ~4s.
+      if (phaseResult?.action === 'rate_limit') {
+        const delayMs = phaseResult.retryAfterMs ?? 60_000;
+        const delayMin = (delayMs / 60_000).toFixed(1);
+        console.log(`\n[RATE LIMIT] ${phaseResult.provider} rate-limited. Waiting ${delayMin}m before retry...`);
+        await sleep(delayMs);
+        continue;
+      }
+
       // Log activity if task reached terminal status
       if (options.runnerId) {
         const updatedTask = getTask(db, task.id);
