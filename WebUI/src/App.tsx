@@ -4,7 +4,6 @@ import { ProjectsPage } from './pages/ProjectsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ActivityListPage } from './pages/ActivityListPage';
 import { RunnersPage } from './pages/RunnersPage';
-import { RunningTasksPage } from './pages/RunningTasksPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectTasksPage } from './pages/ProjectTasksPage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
@@ -75,7 +74,6 @@ function App() {
       case '/': return 'Dashboard';
       case '/projects': return 'Projects';
       case '/runners': return 'Runners';
-      case '/tasks': return 'Running Tasks';
       case '/settings': return 'Settings';
       default: return 'Dashboard';
     }
@@ -129,7 +127,6 @@ function App() {
             <Route path="/activity" element={<ActivityListPage />} />
             <Route path="/task/:taskId" element={<TaskDetailPage />} />
             <Route path="/runners" element={<RunnersPage />} />
-            <Route path="/tasks" element={<RunningTasksPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </AppShell>

@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   HomeIcon,
-  ClipboardDocumentListIcon,
   Cog6ToothIcon,
   FolderIcon,
   PlayIcon,
@@ -43,7 +42,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   const navItems = [
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
     { to: '/runners', icon: PlayIcon, label: 'Runners' },
-    { to: '/tasks', icon: ClipboardDocumentListIcon, label: 'Tasks' },
     { to: '/projects', icon: FolderIcon, label: 'Projects' },
     { to: '/settings', icon: Cog6ToothIcon, label: 'Settings' },
   ];
