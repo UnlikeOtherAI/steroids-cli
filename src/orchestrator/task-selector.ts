@@ -64,7 +64,7 @@ export function hasPendingOrInProgressWork(
       `SELECT COUNT(*) as count FROM tasks
        WHERE section_id = ?
        AND status IN ('pending', 'in_progress', 'review')
-       AND (requires_promotion = 0 OR is_follow_up = 0)`
+       AND is_follow_up = 0`
     )
     .get(sectionId) as { count: number };
 
@@ -364,6 +364,16 @@ function findNextTaskSkippingLocked(
   // Build WHERE clause for section filtering
   const sectionFilter = sectionId ? 'AND t.section_id = ?' : '';
   const sectionParams = sectionId ? [sectionId] : [];
+  const followUpEligibilityFilter =
+    `AND (
+      t.is_follow_up = 0
+      OR NOT EXISTS (
+        SELECT 1 FROM tasks t2
+        WHERE ((t2.section_id = t.section_id) OR (t2.section_id IS NULL AND t.section_id IS NULL))
+          AND t2.status IN ('pending', 'in_progress', 'review')
+          AND t2.is_follow_up = 0
+      )
+    )`;
 
   // Priority 1: Tasks in 'review' status
   const reviewTasks = db
@@ -371,7 +381,7 @@ function findNextTaskSkippingLocked(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'review' ${sectionFilter}
-         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
+         ${followUpEligibilityFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -388,7 +398,7 @@ function findNextTaskSkippingLocked(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'in_progress' ${sectionFilter}
-         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
+         ${followUpEligibilityFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -408,7 +418,7 @@ function findNextTaskSkippingLocked(
       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'pending' ${sectionFilter}
-         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
+         ${followUpEligibilityFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];

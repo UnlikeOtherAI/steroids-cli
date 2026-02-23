@@ -947,6 +947,16 @@ export function findNextTask(
   // Build WHERE clause for section filtering
   const sectionFilter = sectionId ? 'AND t.section_id = ?' : '';
   const sectionParams = sectionId ? [sectionId] : [];
+  const followUpEligibilityFilter =
+    `AND (
+      t.is_follow_up = 0
+      OR NOT EXISTS (
+        SELECT 1 FROM tasks t2
+        WHERE ((t2.section_id = t.section_id) OR (t2.section_id IS NULL AND t.section_id IS NULL))
+          AND t2.status IN ('pending', 'in_progress', 'review')
+          AND t2.is_follow_up = 0
+      )
+    )`;
 
   // Exclude tasks in skipped sections unless a specific section was requested
   const skipFilter = sectionId ? '' : 'AND (s.skipped IS NULL OR s.skipped = 0)';
@@ -954,10 +964,10 @@ export function findNextTask(
   // Priority 1: Tasks ready for review
   const reviewTasks = db
     .prepare(
-      `SELECT t.* FROM tasks t
+       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'review' ${sectionFilter} ${skipFilter}
-         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
+         ${followUpEligibilityFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -970,10 +980,10 @@ export function findNextTask(
   // Priority 2: Tasks in progress
   const inProgressTasks = db
     .prepare(
-      `SELECT t.* FROM tasks t
+       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'in_progress' ${sectionFilter} ${skipFilter}
-         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
+         ${followUpEligibilityFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
@@ -986,10 +996,10 @@ export function findNextTask(
   // Priority 3: Pending tasks
   const pendingTasks = db
     .prepare(
-      `SELECT t.* FROM tasks t
+       `SELECT t.* FROM tasks t
        LEFT JOIN sections s ON t.section_id = s.id
        WHERE t.status = 'pending' ${sectionFilter} ${skipFilter}
-         AND (t.requires_promotion = 0 OR t.is_follow_up = 0)
+         ${followUpEligibilityFilter}
        ORDER BY COALESCE(s.position, 999999), t.created_at`
     )
     .all(...sectionParams) as Task[];
