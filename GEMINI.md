@@ -19,3 +19,12 @@ The following files are the **absolute source of truth** for architectural stand
 - Always verify the "Help" strings in `src/commands/` after adding new flags or subcommands.
 ### 3. Interactive Commands
 - **NEVER** run commands in interactive mode. If you need to launch a command line utility (like codex, vibe, or any other agent), ALWAYS use non-interactive mode (e.g. passing flags like `--yes`, `exec`, `-p`, etc.).
+
+### 4. Architectural & Code Quality Practices
+- **File Limits:** No file should be more than 500 lines of code. If a file is getting too large, break it down into modular, logical components.
+- **Pattern Reuse:** Do not introduce new architectural models or external patterns to solve a problem if an existing, proven pattern is already used elsewhere in the codebase. You may only introduce new patterns if the problem is completely novel.
+- **Testing Mandate:** Everything you do must be tested. Any new logic or bug fix must include corresponding unit or integration tests, and the test suite must pass completely.
+
+### 5. Workflow & Backups
+- **Continuous Commits:** After each isolated task or logical chunk of work is finished and tested, you must commit the changes.
+- **Pushing for Backup:** Immediately push the committed changes to the remote repository to ensure there is a safe backup of your progress before starting the next chunk of work.
