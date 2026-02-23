@@ -86,6 +86,19 @@ function run(cmd: string, cwd: string): void {
   execSync(cmd, { cwd, stdio: 'inherit' });
 }
 
+function hasRemoteTag(tag: string, cwd?: string): boolean {
+  try {
+    const output = execSync(`git ls-remote --tags ${REPO_URL} refs/tags/${tag}`, {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return output.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ensure the web repo is cloned
  */
@@ -102,13 +115,13 @@ function ensureRepo(out: ReturnType<typeof createOutput>): boolean {
 
   // hardcoded command, no user input - clone specific version tag with main fallback
   const tag = `v${CLI_VERSION}`;
-  try {
+  if (hasRemoteTag(tag)) {
     execSync(`git clone --depth 1 --branch ${tag} ${REPO_URL} "${WEB_DIR}"`, { stdio: 'inherit' });
     out.log(`Repository cloned (${tag}).`);
-  } catch {
+  } else {
     // Tag not yet published — fall back to main branch
     out.log(`Tag ${tag} not found on remote, cloning latest main branch...`);
-    execSync(`git clone --depth 1 ${REPO_URL} "${WEB_DIR}"`, { stdio: 'inherit' });
+    execSync(`git clone --depth 1 --branch main ${REPO_URL} "${WEB_DIR}"`, { stdio: 'inherit' });
     out.log('Repository cloned (main branch).');
   }
   return true;
@@ -219,15 +232,15 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
             out.log(`Already on ${expectedTag}.`);
           } else {
             out.log(`Updating from ${currentTag} to ${expectedTag}...`);
-            try {
+            if (hasRemoteTag(expectedTag, WEB_DIR)) {
               execSync(`git fetch --depth 1 origin tag ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
               execSync(`git checkout ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
-            } catch {
+            } else {
               // Tag not yet published — pull latest main instead
               out.log(`Tag ${expectedTag} not found on remote, pulling latest main...`);
-              execSync(`git fetch origin`, { cwd: WEB_DIR, stdio: 'inherit' });
-              execSync(`git checkout main`, { cwd: WEB_DIR, stdio: 'inherit' });
-              execSync(`git pull origin main`, { cwd: WEB_DIR, stdio: 'inherit' });
+              execSync(`git fetch origin main`, { cwd: WEB_DIR, stdio: 'inherit' });
+              execSync(`git checkout -B main origin/main`, { cwd: WEB_DIR, stdio: 'inherit' });
+              execSync(`git pull --ff-only origin main`, { cwd: WEB_DIR, stdio: 'inherit' });
             }
             installAndBuild(out);
           }
