@@ -116,6 +116,15 @@ export function reconcileParallelSessionRecovery(
                completed_at = COALESCE(completed_at, datetime('now'))
            WHERE id = ?`
         ).run(session.id);
+      } else {
+        // Corrupt/stale session row with no workstreams attached: fail it so wakeup
+        // can start a clean new session instead of skipping forever.
+        db.prepare(
+          `UPDATE parallel_sessions
+           SET status = 'failed',
+               completed_at = COALESCE(completed_at, datetime('now'))
+           WHERE id = ?`
+        ).run(session.id);
       }
     }
   }

@@ -60,12 +60,29 @@ export function hasActiveRunnerForProject(projectPath: string): boolean {
 export function hasActiveParallelSessionForProject(projectPath: string): boolean {
   const { db, close } = openGlobalDatabase();
   try {
-    // Primary check: session record in non-terminal state.
+    // Session is considered active only when it still has non-terminal workstream
+    // state or an actively heartbeating runner bound to it.
     const sessionRow = db
       .prepare(
-        `SELECT 1 FROM parallel_sessions
-         WHERE project_path = ?
-           AND status NOT IN ('completed', 'failed', 'aborted')
+        `SELECT 1
+         FROM parallel_sessions ps
+         WHERE ps.project_path = ?
+           AND ps.status NOT IN ('completed', 'failed', 'aborted')
+           AND (
+             EXISTS (
+               SELECT 1
+               FROM workstreams ws
+               WHERE ws.session_id = ps.id
+                 AND ws.status NOT IN ('completed', 'failed', 'aborted')
+             )
+             OR EXISTS (
+               SELECT 1
+               FROM runners r
+               WHERE r.parallel_session_id = ps.id
+                 AND r.status != 'stopped'
+                 AND r.heartbeat_at > datetime('now', '-5 minutes')
+             )
+           )
          LIMIT 1`
       )
       .get(projectPath) as { 1: number } | undefined;

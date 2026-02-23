@@ -240,6 +240,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
       // This prevents parallel runners from being interfered with by a cron-managed runner.
       if (hasActiveParallelSessionForProject(project.path)) {
         let retrySummary = '';
+        let skipForParallelSession = true;
         let scaledDown = 0;
         let resumed = 0;
         let wouldScaleDown = 0;
@@ -345,6 +346,17 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
           if (resumed > 0) {
             retrySummary += `, resumed ${resumed} throttled workstream(s)`;
           }
+
+          // Re-check activity after recovery. If reconciliation cleared stale
+          // session state for this project, continue to normal startup logic.
+          if (!hasActiveParallelSessionForProject(project.path)) {
+            skipForParallelSession = false;
+            if (retrySummary.length > 0) {
+              retrySummary += ', session state reconciled';
+            } else {
+              retrySummary = ', session state reconciled';
+            }
+          }
         } else {
           if (wouldScaleDown > 0) {
             retrySummary += `, would scale down ${wouldScaleDown} idle runner(s) to maxClones=${configuredMaxClones}`;
@@ -354,6 +366,9 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
           }
         }
 
+        if (!skipForParallelSession) {
+          log(`Reconciled stale parallel session for ${project.path}; proceeding with startup`);
+        } else {
         log(`Skipping ${project.path}: active parallel session in progress${retrySummary}`);
         results.push({
           action: 'none',
@@ -362,6 +377,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
           deletedInvocationLogs,
         });
         continue;
+        }
       }
 
       // Config-aware mode reconciliation:
