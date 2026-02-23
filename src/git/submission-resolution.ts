@@ -29,6 +29,14 @@ export type SubmissionHashResolution =
     attempts: string[];
   };
 
+export interface SubmissionCommitHistoryResolution {
+  latestReachableSha: string | null;
+  reachableShasOldestFirst: string[];
+  unreachableShas: string[];
+  attempts: string[];
+  reason?: ResolutionReason;
+}
+
 function getProjectRepoId(projectPath: string): string {
   try {
     return realpathSync(projectPath);
@@ -151,6 +159,27 @@ export function resolveSubmissionCommitWithRecovery(
   projectPath: string,
   candidateShas: string[]
 ): SubmissionHashResolution {
+  const history = resolveSubmissionCommitHistoryWithRecovery(projectPath, candidateShas);
+  if (history.latestReachableSha) {
+    return {
+      status: 'resolved',
+      sha: history.latestReachableSha,
+      strategy: history.unreachableShas.length > 0 ? 'workstream_fetch' : 'local_or_remote',
+      attempts: history.attempts,
+    };
+  }
+
+  return {
+    status: 'unresolved',
+    reason: history.reason ?? 'not_reachable',
+    attempts: history.attempts,
+  };
+}
+
+export function resolveSubmissionCommitHistoryWithRecovery(
+  projectPath: string,
+  candidateShas: string[]
+): SubmissionCommitHistoryResolution {
   const normalizedShas = Array.from(new Set(
     candidateShas
       .map(sha => sha.trim())
@@ -160,22 +189,33 @@ export function resolveSubmissionCommitWithRecovery(
 
   if (normalizedShas.length === 0) {
     return {
-      status: 'unresolved',
-      reason: 'no_candidates',
+      latestReachableSha: null,
+      reachableShasOldestFirst: [],
+      unreachableShas: [],
       attempts,
+      reason: 'no_candidates',
     };
   }
+
+  const reachableSet = new Set<string>();
+  let unreachableShas = [...normalizedShas];
 
   for (const sha of normalizedShas) {
     attempts.push(`local_or_remote_check:${sha}`);
     if (isCommitReachableWithFetch(projectPath, sha, { forceFetch: true })) {
-      return {
-        status: 'resolved',
-        sha,
-        strategy: 'local_or_remote',
-        attempts,
-      };
+      reachableSet.add(sha);
     }
+  }
+
+  unreachableShas = normalizedShas.filter(sha => !reachableSet.has(sha));
+  if (unreachableShas.length === 0) {
+    const reachableShasOldestFirst = [...normalizedShas].reverse();
+    return {
+      latestReachableSha: normalizedShas[0],
+      reachableShasOldestFirst,
+      unreachableShas: [],
+      attempts,
+    };
   }
 
   let sources: WorkstreamSource[] = [];
@@ -183,17 +223,21 @@ export function resolveSubmissionCommitWithRecovery(
     sources = getParallelWorkstreamSources(projectPath);
   } catch {
     return {
-      status: 'unresolved',
-      reason: 'workstream_discovery_failed',
+      latestReachableSha: normalizedShas.find(sha => reachableSet.has(sha)) ?? null,
+      reachableShasOldestFirst: [...normalizedShas].reverse().filter(sha => reachableSet.has(sha)),
+      unreachableShas,
       attempts,
+      reason: reachableSet.size > 0 ? undefined : 'workstream_discovery_failed',
     };
   }
 
   if (sources.length === 0) {
     return {
-      status: 'unresolved',
-      reason: 'not_reachable',
+      latestReachableSha: normalizedShas.find(sha => reachableSet.has(sha)) ?? null,
+      reachableShasOldestFirst: [...normalizedShas].reverse().filter(sha => reachableSet.has(sha)),
+      unreachableShas,
       attempts,
+      reason: reachableSet.size > 0 ? undefined : 'not_reachable',
     };
   }
 
@@ -206,24 +250,23 @@ export function resolveSubmissionCommitWithRecovery(
     }
   }
 
-  for (const sha of normalizedShas) {
+  for (const sha of unreachableShas) {
     attempts.push(`post_workstream_check:${sha}`);
     if (isCommitReachable(projectPath, sha)) {
-      cleanupRecoveryRefs(projectPath, createdRecoveryRefs);
-      return {
-        status: 'resolved',
-        sha,
-        strategy: 'workstream_fetch',
-        attempts,
-      };
+      reachableSet.add(sha);
     }
   }
 
   cleanupRecoveryRefs(projectPath, createdRecoveryRefs);
+  unreachableShas = normalizedShas.filter(sha => !reachableSet.has(sha));
+  const reachableShasOldestFirst = [...normalizedShas].reverse().filter(sha => reachableSet.has(sha));
+  const latestReachableSha = normalizedShas.find(sha => reachableSet.has(sha)) ?? null;
 
   return {
-    status: 'unresolved',
-    reason: 'not_reachable',
+    latestReachableSha,
+    reachableShasOldestFirst,
+    unreachableShas,
     attempts,
+    reason: latestReachableSha ? undefined : 'not_reachable',
   };
 }

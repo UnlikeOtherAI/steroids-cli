@@ -13,6 +13,8 @@ export interface ReviewerPromptContext {
   projectPath: string;
   reviewerModel: string;
   submissionCommitHash: string;
+  submissionCommitHashes?: string[]; // Ordered oldest -> newest
+  unresolvedSubmissionCommits?: string[]; // Submission hashes not currently reachable
   sectionTasks?: SectionTask[];  // Other tasks in the same section
   rejectionHistory?: RejectionEntry[];  // Past rejections with commit hashes
   submissionNotes?: string | null;  // Notes from coder when submitting for review
@@ -25,8 +27,23 @@ export interface ReviewerPromptContext {
  * Generate a minimal delta prompt for a resumed reviewer session
  */
 export function generateResumingReviewerDeltaPrompt(context: ReviewerPromptContext): string {
-  const { task, submissionCommitHash, submissionNotes, rejectionHistory, projectPath } = context;
-  const submissionCommit = submissionCommitHash;
+  const {
+    task,
+    submissionCommitHash,
+    submissionCommitHashes,
+    unresolvedSubmissionCommits,
+    submissionNotes,
+    rejectionHistory,
+    projectPath,
+  } = context;
+  const submissionChain = submissionCommitHashes && submissionCommitHashes.length > 0
+    ? submissionCommitHashes
+    : [submissionCommitHash];
+  const latestSubmissionCommit = submissionCommitHash;
+  const oldestSubmissionCommit = submissionChain[0];
+  const cumulativeRange = oldestSubmissionCommit === latestSubmissionCommit
+    ? latestSubmissionCommit
+    : `${oldestSubmissionCommit}^..${latestSubmissionCommit}`;
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
 
   // Find the last rejection notes the reviewer gave
@@ -45,18 +62,38 @@ All previous context and your past review notes are still in your session histor
 
 ${sourceRef}
 
-## Submission Commit
+## Submission Commit Chain (Oldest -> Newest)
 
-\`${submissionCommit}\`
+${submissionChain.map((sha, idx) => `${idx + 1}. \`${sha}\``).join('\n')}
 
-Inspect with: \`git show ${submissionCommit}\`
+Latest submission commit:
+\`${latestSubmissionCommit}\`
+
+Cumulative range across this task:
+\`git diff --stat ${cumulativeRange}\`
+\`git diff ${cumulativeRange}\`
+
+Inspect each attempt:
+\`git show <sha>\`
 
 ---
 
-## Files touched in commit
+## Files touched in latest commit
 
-Use: \`git show ${submissionCommit} --name-only\`
+Use: \`git show ${latestSubmissionCommit} --name-only\`
 `;
+
+  if (unresolvedSubmissionCommits && unresolvedSubmissionCommits.length > 0) {
+    prompt += `\n---
+
+## Unresolved Historical Submission Hashes
+
+The following historical submission hashes are currently unreachable in this workspace:
+${unresolvedSubmissionCommits.map(sha => `- \`${sha}\``).join('\n')}
+
+Continue review using the reachable commit chain above and note any uncertainty caused by missing history.
+`;
+  }
 
   if (submissionNotes) {
     prompt += `\n---
@@ -82,6 +119,9 @@ Use: \`git show ${submissionCommit} --name-only\`
 
 Review this new submission. Has the coder addressed your previous feedback? Are there any new issues?
 All previous context is still in your session.
+
+You MUST review cumulatively across the entire reachable submission chain for this task, not only the latest commit.
+If a previously rejected item is still unresolved in the cumulative diff, mark it as [UNRESOLVED].
 
 **REMINDER:**
 1. Your first non-empty line MUST be an explicit decision token: \`DECISION: APPROVE|REJECT|DISPUTE|SKIP\`
@@ -235,10 +275,18 @@ export function generateReviewerPrompt(context: ReviewerPromptContext): string {
     config,
     coordinatorGuidance,
     coordinatorDecision,
-    submissionCommitHash
+    submissionCommitHash,
+    submissionCommitHashes,
+    unresolvedSubmissionCommits,
   } = context;
-
-  const submissionCommit = submissionCommitHash;
+  const submissionChain = submissionCommitHashes && submissionCommitHashes.length > 0
+    ? submissionCommitHashes
+    : [submissionCommitHash];
+  const latestSubmissionCommit = submissionCommitHash;
+  const oldestSubmissionCommit = submissionChain[0];
+  const cumulativeRange = oldestSubmissionCommit === latestSubmissionCommit
+    ? latestSubmissionCommit
+    : `${oldestSubmissionCommit}^..${latestSubmissionCommit}`;
 
   // Format coder's submission notes if present
   const submissionNotesSection = submissionNotes
@@ -263,7 +311,19 @@ The coder included these notes when submitting for review:
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const fileAnchorSection = buildFileAnchorSection(task);
 
-  const reviewerCommands = `git show --stat ${submissionCommit}`;
+  const reviewerCommands = `git show --stat ${latestSubmissionCommit}`;
+  const unresolvedHistorySection =
+    unresolvedSubmissionCommits && unresolvedSubmissionCommits.length > 0
+      ? `
+
+## Historical Hash Gaps
+
+Some older submission hashes are unreachable:
+${unresolvedSubmissionCommits.map(sha => `- \`${sha}\``).join('\n')}
+
+Continue with the reachable chain and explicitly mention any uncertainty from missing history.
+`
+      : '';
 
   return `# TASK: ${task.id.substring(0, 8)} - ${task.title}
 # Status: review | Rejections: ${task.rejection_count}/15
@@ -289,9 +349,17 @@ ${sourceRef}
 
 ## Review Target
 
-Inspect this submission directly:
+Inspect the full task evolution (oldest -> newest reachable submissions):
+${submissionChain.map((sha, idx) => `${idx + 1}. \`${sha}\``).join('\n')}
+
+Latest submission anchor:
 \`${reviewerCommands}\`
-\`git show --name-only ${submissionCommit}\`
+\`git show --name-only ${latestSubmissionCommit}\`
+
+Cumulative task diff:
+\`git diff --stat ${cumulativeRange}\`
+\`git diff ${cumulativeRange}\`
+${unresolvedHistorySection}
 
 ---
 
@@ -303,12 +371,13 @@ Answer these questions:
 3. Are tests present and adequate?
 4. Does code follow AGENTS.md guidelines?
 5. Are all files under 500 lines?
+6. Are previously rejected checklist items now resolved across the cumulative task diff?
 
 ## Security Review
 
 **Check the coder's NEW or CHANGED code for security vulnerabilities.**
 
-**Scope rule:** Only evaluate code in the submission commit. Pre-existing patterns in unchanged code are NOT the coder's responsibility — note them as advisory but do NOT reject for them. If the coder follows an existing pattern already in the codebase, that is acceptable even if the pattern is imperfect.
+**Scope rule:** Evaluate the cumulative submission chain for this task (not just latest commit). Pre-existing patterns outside this task's cumulative diff are NOT the coder's responsibility — note them as advisory but do NOT reject for them. If the coder follows an existing pattern already in the codebase, that is acceptable even if the pattern is imperfect.
 
 Check for:
 - **Injection attacks**: User input concatenated directly into SQL strings (instead of parameterized queries), or user input interpolated into shell command strings. String interpolation of hardcoded constants or internal config values is NOT injection.
@@ -411,6 +480,7 @@ Use sparingly. Most issues should be resolved via reject/fix cycle.
 7. **SKIP requests are valid** - if spec says SKIP/manual, approve the skip to unblock the pipeline
 8. **Don't reject skips for infrastructure tasks** - Cloud SQL, GKE, etc. truly need human action
 9. **DO NOT run any \`steroids tasks\` commands** - the orchestrator handles all status updates
+10. **Review cumulative task history** - ensure prior rejection checklist items are either fixed or clearly marked unresolved with evidence
 
 ---
 

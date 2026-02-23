@@ -27,7 +27,7 @@ import type { SectionTask } from '../prompts/prompt-helpers.js';
 import { loadConfig, type ReviewerConfig, type SteroidsConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
-import { resolveSubmissionCommitWithRecovery } from '../git/submission-resolution.js';
+import { resolveSubmissionCommitHistoryWithRecovery, resolveSubmissionCommitWithRecovery } from '../git/submission-resolution.js';
 
 export interface ReviewerResult {
   success: boolean;
@@ -307,6 +307,8 @@ export async function invokeReviewer(
   let submissionNotes: string | null = null;
   let resumeSessionId: string | null = null;
   let submissionCommitHash: string | null = null;
+  let submissionCommitHashes: string[] = [];
+  let unresolvedSubmissionCommits: string[] = [];
 
   try {
     const { db, close } = openDatabase(projectPath);
@@ -333,18 +335,23 @@ export async function invokeReviewer(
         console.log(`Coder included notes with submission`);
       }
       
-      const submissionResolution = resolveSubmissionCommitWithRecovery(
+      const submissionHistory = resolveSubmissionCommitHistoryWithRecovery(
         projectPath,
         getSubmissionCommitShas(db, task.id)
       );
-      if (submissionResolution.status !== 'resolved') {
-        const attemptsText = submissionResolution.attempts.join(' | ') || 'none';
+      if (!submissionHistory.latestReachableSha) {
+        const attemptsText = submissionHistory.attempts.join(' | ') || 'none';
         throw new Error(
-          `No reachable submission commit hash found for task ${task.id} (${submissionResolution.reason}; attempts: ${attemptsText})`
+          `No reachable submission commit hash found for task ${task.id} (${submissionHistory.reason ?? 'not_reachable'}; attempts: ${attemptsText})`
         );
       }
-      submissionCommitHash = submissionResolution.sha;
-      console.log(`Using submission commit: ${submissionCommitHash}`);
+      submissionCommitHash = submissionHistory.latestReachableSha;
+      submissionCommitHashes = submissionHistory.reachableShasOldestFirst;
+      unresolvedSubmissionCommits = submissionHistory.unreachableShas;
+      console.log(`Using submission commit chain (${submissionCommitHashes.length} reachable), latest: ${submissionCommitHash}`);
+      if (unresolvedSubmissionCommits.length > 0) {
+        console.log(`Warning: ${unresolvedSubmissionCommits.length} historical submission commit(s) unresolved`);
+      }
 
       // Check for resumable session (same provider/model/role)
       if (effectiveReviewerConfig?.provider && effectiveReviewerConfig?.model) {
@@ -375,6 +382,8 @@ export async function invokeReviewer(
     projectPath,
     reviewerModel,
     submissionCommitHash: submissionCommitHash!,
+    submissionCommitHashes,
+    unresolvedSubmissionCommits,
     sectionTasks,
     rejectionHistory,
     submissionNotes,
