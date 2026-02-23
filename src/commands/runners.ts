@@ -53,7 +53,7 @@ Runners can be started manually or managed automatically via cron.`,
     { long: 'detach', description: 'Run in background (daemonize) - start subcommand' },
     { long: 'project', description: 'Project path to work on', values: '<path>' },
     { long: 'section', description: 'Focus on specific section only', values: '<id|name>' },
-    { long: 'parallel', description: 'Run independent sections across multiple clones' },
+    { long: 'parallel', description: '(deprecated) Parallel mode is now config-driven via runners.parallel.enabled' },
     { long: 'max', description: 'Limit number of concurrent workstreams', values: '<n>' },
     { long: 'dry-run', description: 'Analyze plan and exit without cloning or spawning' },
     { long: 'id', description: 'Stop specific runner by ID - stop subcommand', values: '<id>' },
@@ -66,9 +66,8 @@ Runners can be started manually or managed automatically via cron.`,
   examples: [
     { command: 'steroids runners start', description: 'Start in foreground' },
     { command: 'steroids runners start --detach', description: 'Start in background' },
-    { command: 'steroids runners start --parallel', description: 'Analyze and run independent workstreams in parallel clones' },
-    { command: 'steroids runners start --parallel --max 2', description: 'Run up to 2 workstreams concurrently' },
-    { command: 'steroids runners start --parallel --dry-run', description: 'Show planned parallel workstreams and exit' },
+    { command: 'steroids runners start --max 2', description: 'When parallel is enabled in config, limit concurrent workstreams' },
+    { command: 'steroids runners start --dry-run', description: 'Show startup plan and exit' },
     { command: 'steroids runners start --section "Phase 2"', description: 'Focus on specific section' },
     { command: 'steroids runners stop', description: 'Stop runner for current project' },
     { command: 'steroids runners stop --all', description: 'Stop all runners' },
@@ -144,6 +143,7 @@ async function runStart(args: string[], flags: GlobalFlags): Promise<void> {
       detach: { type: 'boolean', short: 'd', default: false },
       project: { type: 'string', short: 'p' },
       section: { type: 'string' },
+      // Deprecated: retained for backward compatibility but ignored.
       parallel: { type: 'boolean', default: false },
       max: { type: 'string' },
       'section-ids': { type: 'string' },
@@ -164,8 +164,8 @@ USAGE:
   --detach            Run in background
   --project <path>    Project path
   --section <id|name> Focus on a specific section only
-  --parallel          Analyze dependency graph and run independent workstreams in parallel clones
-  --max <n>           Limit number of parallel workstreams (overrides runners.parallel.maxClones)
+  --parallel          Deprecated (parallel mode is config-driven)
+  --max <n>           When parallel is enabled in config, limit parallel workstreams
   -j, --json          Output as JSON
   -h, --help          Show help
   --dry-run           Print analysis plan and exit
@@ -176,16 +176,6 @@ USAGE:
   const sectionIdsOption = values['section-ids'] as string | undefined;
   const parallelSessionId = values['parallel-session-id'] as string | undefined;
   const asJson = values.json || flags.json;
-
-  if (values.parallel && values.section) {
-    const errorMsg = '--parallel cannot be combined with --section';
-    if (asJson) {
-      console.log(JSON.stringify({ success: false, error: errorMsg }));
-    } else {
-      console.error(errorMsg);
-    }
-    process.exit(1);
-  }
 
   // Check if we can start
   // Default to cwd if --project not specified, to ensure proper per-project tracking
@@ -210,18 +200,13 @@ USAGE:
     process.exit(6);
   }
 
-  const runFromDetachedParent = values.detach && !values.parallel && !parallelSessionId && !sectionIdsOption;
+  const runFromDetachedParent = values.detach && !parallelSessionId && !sectionIdsOption;
   const sectionIdsFromSpawn = typeof sectionIdsOption === 'string'
     ? parseSectionIds(sectionIdsOption)
     : [];
 
   // Internal parallel runner invocation used by this command when spawning workspace runners.
-  if (
-    values.parallel
-    && sectionIdsOption !== undefined
-    && parallelSessionId
-    && values.branch
-  ) {
+  if (sectionIdsOption !== undefined && parallelSessionId && values.branch) {
     if (sectionIdsFromSpawn.length === 0) {
       const errorMsg = 'Internal parallel runner received empty section ids';
       if (asJson) {
@@ -244,7 +229,7 @@ USAGE:
   // Resolve section if --section flag is provided
   let focusedSectionId: string | undefined;
 
-  if (!values.parallel && values.section) {
+  if (values.section) {
     const sectionInput = values.section as string;
     const { db, close } = openDatabase(projectPath);
 
@@ -354,7 +339,13 @@ USAGE:
     return;
   }
 
-  if (values.parallel) {
+  // Config-driven mode selection: CLI --parallel is deprecated and does not
+  // control behavior. The effective mode always comes from project config.
+  const config = loadConfig(projectPath);
+  const parallelEnabled = config.runners?.parallel?.enabled === true;
+  const shouldUseParallel = parallelEnabled && !focusedSectionId;
+
+  if (shouldUseParallel) {
     const maxFromCli = typeof values.max === 'string' ? values.max.trim() : undefined;
     let maxClones: number | undefined;
     if (maxFromCli !== undefined) {
@@ -406,7 +397,7 @@ USAGE:
     return;
   }
 
-  // Start in foreground
+  // Start in foreground (single-runner mode, including explicit section focus)
   await startDaemon({ projectPath, sectionId: focusedSectionId });
 }
 

@@ -25,16 +25,14 @@ export function killProcess(pid: number): boolean {
  * Start a new runner daemon
  * Uses 'steroids runners start --detach' so the runner registers in the global DB
  * and updates heartbeat, allowing hasActiveRunnerForProject() to detect it.
- * When runners.parallel.enabled is true, launches a parallel session instead.
+ * Mode (single vs parallel) is resolved by runners start from project config.
  */
 export function startRunner(projectPath: string): { pid: number; parallel?: boolean } | null {
   try {
     const config = loadConfig(projectPath);
     const parallelEnabled = config.runners?.parallel?.enabled === true;
 
-    const args = parallelEnabled
-      ? ['runners', 'start', '--parallel', '--project', projectPath]
-      : ['runners', 'start', '--detach', '--project', projectPath];
+    const args = ['runners', 'start', '--detach', '--project', projectPath];
 
     const child = spawn('steroids', args, {
       cwd: projectPath,
@@ -67,7 +65,6 @@ export function restartWorkstreamRunner(ws: WorkstreamToRestart): number | null 
         'runners',
         'start',
         '--project', ws.clonePath,
-        '--parallel',
         '--section-ids', ws.sectionIds,
         '--branch', ws.branchName,
         '--parallel-session-id', ws.sessionId,

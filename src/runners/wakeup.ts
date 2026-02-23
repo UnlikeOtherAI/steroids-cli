@@ -254,6 +254,87 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
           )
           .all(project.path) as Array<{ id: string }>;
 
+        // Config-aware mode reconciliation (parallel -> single):
+        // if parallel is disabled, convert only when the active parallel runners
+        // are idle to avoid interrupting in-flight tasks.
+        if (!parallelEnabled && activeSessions.length > 0) {
+          type SessionRunner = {
+            id: string;
+            pid: number | null;
+            status: string | null;
+            current_task_id: string | null;
+          };
+          const sessionRunners = activeSessions.flatMap((session) =>
+            global.db
+              .prepare(
+                `SELECT id, pid, status, current_task_id
+                 FROM runners
+                 WHERE parallel_session_id = ?
+                   AND status != 'stopped'
+                   AND heartbeat_at > datetime('now', '-5 minutes')`
+              )
+              .all(session.id) as SessionRunner[]
+          );
+
+          const hasBusyRunner = sessionRunners.some(
+            (runner) => (runner.status ?? '').toLowerCase() !== 'idle' || !!runner.current_task_id
+          );
+
+          if (hasBusyRunner) {
+            const reason = 'Parallel->single mode switch pending (active workstream runner busy)';
+            log(`Skipping ${project.path}: ${reason.toLowerCase()}`);
+            results.push({
+              action: dryRun ? 'would_start' : 'none',
+              reason,
+              projectPath: project.path,
+              deletedInvocationLogs,
+            });
+            continue;
+          }
+
+          if (dryRun) {
+            const reason = 'Would recycle idle parallel session to apply single-runner mode';
+            log(`Would reconcile ${project.path}: ${reason.toLowerCase()}`);
+            results.push({
+              action: 'would_start',
+              reason,
+              projectPath: project.path,
+              deletedInvocationLogs,
+            });
+            continue;
+          }
+
+          for (const runner of sessionRunners) {
+            if (runner.pid) killProcess(runner.pid);
+            global.db.prepare('DELETE FROM runners WHERE id = ?').run(runner.id);
+          }
+
+          for (const session of activeSessions) {
+            global.db.prepare(
+              `UPDATE workstreams
+               SET status = 'aborted',
+                   runner_id = NULL,
+                   lease_expires_at = NULL,
+                   next_retry_at = NULL,
+                   last_reconcile_action = 'mode_switch_to_single',
+                   last_reconciled_at = datetime('now'),
+                   completed_at = COALESCE(completed_at, datetime('now'))
+               WHERE session_id = ?
+                 AND status NOT IN ('completed', 'failed', 'aborted')`
+            ).run(session.id);
+
+            global.db.prepare(
+              `UPDATE parallel_sessions
+               SET status = 'aborted',
+                   completed_at = COALESCE(completed_at, datetime('now'))
+               WHERE id = ?`
+            ).run(session.id);
+          }
+
+          skipForParallelSession = false;
+          retrySummary = ', recycled idle parallel session to apply single-runner mode';
+        }
+
         for (const session of activeSessions) {
           const sessionRunners = global.db
             .prepare(
