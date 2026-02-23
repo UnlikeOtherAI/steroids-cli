@@ -34,7 +34,7 @@ export function startRunner(projectPath: string): { pid: number; parallel?: bool
 
     const args = ['runners', 'start', '--detach', '--project', projectPath];
 
-    const child = spawn('steroids', args, {
+    const child = spawn(process.execPath, [process.argv[1], ...args], {
       cwd: projectPath,
       detached: true,
       stdio: 'ignore',
