@@ -5,6 +5,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { openGlobalDatabase } from './global-db.js';
+import { openDatabase } from '../database/connection.js';
+import { selectNextTask } from '../orchestrator/task-selector.js';
 
 /**
  * Check if a project has pending work
@@ -16,19 +18,14 @@ export async function projectHasPendingWork(projectPath: string): Promise<boolea
   }
 
   try {
-    // Use dynamic import for ESM compatibility
-    const { default: Database } = await import('better-sqlite3');
-    const db = new Database(dbPath, { readonly: true });
-
-    const result = db
-      .prepare(
-        `SELECT COUNT(*) as count FROM tasks
-         WHERE status IN ('pending', 'in_progress', 'review')`
-      )
-      .get() as { count: number };
-
-    db.close();
-    return result.count > 0;
+    // Mirror orchestrator selection logic so wakeup only starts runners
+    // when there is actually an eligible task to execute.
+    const { db, close } = openDatabase(projectPath);
+    try {
+      return selectNextTask(db) !== null;
+    } finally {
+      close();
+    }
   } catch {
     return false;
   }
