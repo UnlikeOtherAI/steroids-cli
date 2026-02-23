@@ -223,7 +223,14 @@ export class GeminiProvider extends BaseAIProvider {
     resumeSessionId?: string
   ): Promise<InvokeResult> {
     // Set up isolated HOME
-    const isolatedHome = this.setupIsolatedHome('.gemini', ['settings.json']);
+    const isolatedHome = this.setupIsolatedHome('.gemini', [
+      'settings.json',
+      'oauth_creds.json',
+      'google_accounts.json',
+      'state.json',
+      'projects.json',
+      'trustedFolders.json',
+    ]);
     // Also isolate gcloud config if present in the same isolated home
     this.setupIsolatedHome('.config/gcloud', ['active_config', 'credentials.db', 'configurations/config_default'], isolatedHome);
 
