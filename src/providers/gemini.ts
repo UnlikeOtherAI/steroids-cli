@@ -255,6 +255,7 @@ export class GeminiProvider extends BaseAIProvider {
         cwd,
         env: this.getSanitizedCliEnv({
           HOME: isolatedHome,
+          GEMINI_FORCE_FILE_STORAGE: 'true',
         }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
