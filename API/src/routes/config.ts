@@ -324,7 +324,7 @@ const CLI_CONFIG_PATHS = {
  */
 function getClaudeApiKey(): string | null {
   // Check environment variable first (real API key)
-  const envKey = process.env.ANTHROPIC_API_KEY;
+  const envKey = process.env.STEROIDS_ANTHROPIC;
   if (envKey && envKey.startsWith('sk-ant-api')) {
     return envKey;
   }
@@ -338,14 +338,14 @@ function getClaudeApiKey(): string | null {
  */
 function getGeminiApiKey(): string | null {
   // Check environment variables (real API key)
-  return process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || null;
+  return process.env.STEROIDS_GOOGLE || null;
 }
 
 /**
  * Get Mistral API key
  */
 function getMistralApiKey(): string | null {
-  return process.env.MISTRAL_API_KEY || null;
+  return process.env.STEROIDS_MISTRAL || null;
 }
 
 /**

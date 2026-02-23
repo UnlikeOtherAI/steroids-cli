@@ -621,10 +621,10 @@ EXAMPLES:
   steroids config ai reviewer --add -p gemini -m gemini-2.5-pro
 
 ENVIRONMENT VARIABLES:
-  STEROIDS_ANTHROPIC_API_KEY   Required for Claude models
-  STEROIDS_OPENAI_API_KEY      Required for OpenAI/Codex models
-  STEROIDS_GOOGLE_API_KEY      Required for Gemini models (or STEROIDS_GEMINI_API_KEY)
-  STEROIDS_MISTRAL_API_KEY     Optional for Mistral (Vibe) models
+  STEROIDS_ANTHROPIC           Required for Claude models
+  STEROIDS_OPENAI              Required for OpenAI/Codex models
+  STEROIDS_GOOGLE              Required for Gemini models
+  STEROIDS_MISTRAL             Optional for Mistral (Vibe) models
 `);
     return;
   }
@@ -763,10 +763,10 @@ EXAMPLES:
   steroids config models mistral          # List Mistral models
 
 ENVIRONMENT VARIABLES:
-  STEROIDS_ANTHROPIC_API_KEY   Required for Claude
-  STEROIDS_OPENAI_API_KEY      Required for OpenAI
-  STEROIDS_GOOGLE_API_KEY      Required for Gemini (or STEROIDS_GEMINI_API_KEY)
-  STEROIDS_MISTRAL_API_KEY     Optional for Mistral (Vibe) model listing
+  STEROIDS_ANTHROPIC           Required for Claude
+  STEROIDS_OPENAI              Required for OpenAI
+  STEROIDS_GOOGLE              Required for Gemini
+  STEROIDS_MISTRAL             Optional for Mistral (Vibe) model listing
 `);
     return;
   }

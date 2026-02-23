@@ -59,7 +59,7 @@ export class MiniMaxProvider extends BaseAIProvider {
 
   constructor() {
     super();
-    this.apiKey = process.env.STEROIDS_MINIMAX_API_KEY || process.env.MINIMAX_API_KEY;
+    this.apiKey = process.env.STEROIDS_MINIMAX;
     this.groupId = process.env.STEROIDS_MINIMAX_GROUP_ID || process.env.MINIMAX_GROUP_ID;
   }
 
@@ -126,7 +126,7 @@ export class MiniMaxProvider extends BaseAIProvider {
    */
   async invoke(prompt: string, options: InvokeOptions): Promise<InvokeResult> {
     if (!this.apiKey) {
-      throw new Error('MiniMax API key not found. Set STEROIDS_MINIMAX_API_KEY environment variable.');
+      throw new Error('MiniMax API key not found. Set STEROIDS_MINIMAX environment variable.');
     }
 
     const startTime = Date.now();

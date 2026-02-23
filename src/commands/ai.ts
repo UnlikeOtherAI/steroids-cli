@@ -180,10 +180,10 @@ EXAMPLES:
   steroids ai models mistral --api       # Fetch Mistral models from API
 
 ENVIRONMENT VARIABLES:
-  STEROIDS_ANTHROPIC_API_KEY   Required for Claude API access
-  STEROIDS_OPENAI_API_KEY      Required for OpenAI API access
-  STEROIDS_GOOGLE_API_KEY      Required for Gemini API access
-  STEROIDS_MISTRAL_API_KEY     Optional for Mistral (Vibe) model access
+  STEROIDS_ANTHROPIC           Required for Claude API access
+  STEROIDS_OPENAI              Required for OpenAI API access
+  STEROIDS_GOOGLE              Required for Gemini API access
+  STEROIDS_MISTRAL             Optional for Mistral (Vibe) model access
 `);
     return;
   }

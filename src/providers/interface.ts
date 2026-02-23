@@ -454,7 +454,7 @@ export abstract class BaseAIProvider implements IAIProvider {
    * Strips known provider API-key env vars so the spawned CLI
    * falls back to its own OAuth / login credentials instead of
    * accidentally using Steroids' internal keys (e.g.
-   * STEROIDS_ANTHROPIC_API_KEY leaking as ANTHROPIC_API_KEY).
+   * STEROIDS_ANTHROPIC leaking as ANTHROPIC_API_KEY).
    */
   protected getSanitizedCliEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     const env = { ...process.env };

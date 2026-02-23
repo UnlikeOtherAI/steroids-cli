@@ -33,10 +33,10 @@ const INSTALL_COMMANDS: Record<string, { command: string; description: string }>
 
 // API key environment variable names
 const API_KEY_ENV_VARS: Record<string, string> = {
-  claude: 'ANTHROPIC_API_KEY',
-  gemini: 'GOOGLE_API_KEY',
-  codex: 'OPENAI_API_KEY',
-  mistral: 'MISTRAL_API_KEY',
+  claude: 'STEROIDS_ANTHROPIC',
+  gemini: 'STEROIDS_GOOGLE',
+  codex: 'STEROIDS_OPENAI',
+  mistral: 'STEROIDS_MISTRAL',
 };
 
 export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose }) => {

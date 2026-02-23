@@ -93,16 +93,16 @@ export interface FetchModelsResult {
 
 /**
  * Fetch models from Anthropic API
- * Uses STEROIDS_ANTHROPIC_API_KEY environment variable
+ * Uses STEROIDS_ANTHROPIC environment variable
  */
 export async function fetchClaudeModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.STEROIDS_ANTHROPIC_API_KEY;
+  const apiKey = process.env.STEROIDS_ANTHROPIC;
 
   if (!apiKey) {
     return {
       success: false,
       models: [],
-      error: 'STEROIDS_ANTHROPIC_API_KEY not set',
+      error: 'STEROIDS_ANTHROPIC not set',
     };
   }
 
@@ -159,16 +159,16 @@ export async function fetchClaudeModels(): Promise<FetchModelsResult> {
 
 /**
  * Fetch models from OpenAI API
- * Uses STEROIDS_OPENAI_API_KEY environment variable
+ * Uses STEROIDS_OPENAI environment variable
  */
 export async function fetchOpenAIModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.STEROIDS_OPENAI_API_KEY;
+  const apiKey = process.env.STEROIDS_OPENAI;
 
   if (!apiKey) {
     return {
       success: false,
       models: [],
-      error: 'STEROIDS_OPENAI_API_KEY not set',
+      error: 'STEROIDS_OPENAI not set',
     };
   }
 
@@ -253,16 +253,16 @@ function getOpenAIModelScore(id: string): number {
 
 /**
  * Fetch models from Google AI (Gemini) API
- * Uses STEROIDS_GOOGLE_API_KEY or STEROIDS_GEMINI_API_KEY environment variable
+ * Uses STEROIDS_GOOGLE environment variable
  */
 export async function fetchGeminiModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.STEROIDS_GOOGLE_API_KEY ?? process.env.STEROIDS_GEMINI_API_KEY;
+  const apiKey = process.env.STEROIDS_GOOGLE;
 
   if (!apiKey) {
     return {
       success: false,
       models: [],
-      error: 'STEROIDS_GOOGLE_API_KEY or STEROIDS_GEMINI_API_KEY not set',
+      error: 'STEROIDS_GOOGLE not set',
     };
   }
 
@@ -341,10 +341,10 @@ function getGeminiModelScore(id: string): number {
 
 /**
  * Fetch models from Mistral API
- * Uses STEROIDS_MISTRAL_API_KEY environment variable
+ * Uses STEROIDS_MISTRAL environment variable
  */
 export async function fetchMistralModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.STEROIDS_MISTRAL_API_KEY;
+  const apiKey = process.env.STEROIDS_MISTRAL;
 
   if (!apiKey) {
     const fallbackModels = (await getModelsForProvider('mistral')).map((m) => ({
@@ -519,13 +519,13 @@ export async function fetchModelsForProvider(
  * Fetch models from MiniMax API
  */
 export async function fetchMiniMaxModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.STEROIDS_MINIMAX_API_KEY || process.env.MINIMAX_API_KEY;
+  const apiKey = process.env.STEROIDS_MINIMAX;
 
   if (!apiKey) {
     return {
       success: false,
       models: [],
-      error: 'STEROIDS_MINIMAX_API_KEY not set',
+      error: 'STEROIDS_MINIMAX not set',
     };
   }
 
@@ -576,17 +576,17 @@ export async function fetchOllamaModels(): Promise<FetchModelsResult> {
 export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex' | 'minimax' | 'ollama'): string {
   switch (provider) {
     case 'claude':
-      return 'STEROIDS_ANTHROPIC_API_KEY';
+      return 'STEROIDS_ANTHROPIC';
     case 'openai':
-      return 'STEROIDS_OPENAI_API_KEY';
+      return 'STEROIDS_OPENAI';
     case 'gemini':
-      return 'STEROIDS_GOOGLE_API_KEY';
+      return 'STEROIDS_GOOGLE';
     case 'mistral':
-      return 'STEROIDS_MISTRAL_API_KEY';
+      return 'STEROIDS_MISTRAL';
     case 'codex':
-      return 'STEROIDS_OPENAI_API_KEY';
+      return 'STEROIDS_OPENAI';
     case 'minimax':
-      return 'STEROIDS_MINIMAX_API_KEY';
+      return 'STEROIDS_MINIMAX';
     case 'ollama':
       return ''; // No API key for local Ollama
   }
@@ -601,13 +601,13 @@ export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral' |
   if (provider === 'mistral') return true; // Vibe CLI can operate with local auth and does not require API key
   switch (provider) {
     case 'claude':
-      return !!process.env.STEROIDS_ANTHROPIC_API_KEY;
+      return !!process.env.STEROIDS_ANTHROPIC;
     case 'openai':
-      return !!process.env.STEROIDS_OPENAI_API_KEY;
+      return !!process.env.STEROIDS_OPENAI;
     case 'gemini':
-      return !!(process.env.STEROIDS_GOOGLE_API_KEY ?? process.env.STEROIDS_GEMINI_API_KEY);
+      return !!process.env.STEROIDS_GOOGLE;
     case 'minimax':
-      return !!(process.env.STEROIDS_MINIMAX_API_KEY || process.env.MINIMAX_API_KEY);
+      return !!process.env.STEROIDS_MINIMAX;
     default:
       return false;
   }
