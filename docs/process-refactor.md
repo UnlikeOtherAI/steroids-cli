@@ -102,8 +102,8 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 
 ### 4.2. Hard Failures (Safety & Policy Violations)
 *   **Orchestrator Intervention:** Errors explicitly identified as "Safety Violations", "Policy Violations", or "Invalid Prompts" by the provider (e.g., OpenAI/Codex flagging the prompt) must **not** enter the hibernation loop. Instead, the system must first pass the error and context back to the orchestrator.
-*   **Attempt Resolution:** The orchestrator will attempt to analyze the violation and suggest a resolution (e.g., automatically rephrasing the prompt or adjusting the specification to comply with provider policies).
-*   **Full Stop & User Notification:** If the orchestrator cannot resolve the violation, or determines that the task fundamentally conflicts with impassable provider policies, the system must put a "full stop" to the task. It will immediately fail the task (or open a `steroids dispute`) and explicitly inform the user of the hard block.
+*   **Attempt Resolution (Bounded):** The orchestrator will attempt to analyze the violation and suggest a resolution (e.g., automatically rephrasing the prompt or adjusting the specification to comply with provider policies). This loop must be strictly bounded to a maximum of 2 rewrite attempts to prevent an infinite cycle of violating prompts.
+*   **Full Stop & User Notification:** If the orchestrator cannot resolve the violation after the maximum attempts, or determines that the task fundamentally conflicts with impassable provider policies, the system must put a "full stop" to the task. It will immediately fail the task (or open a `steroids dispute`) and explicitly inform the user of the hard block.
 
 ### Acceptance Criteria (Section 4)
 - [ ] A project-level hibernation state is established to track the backoff schedule.
@@ -137,6 +137,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 
 ### 6.2. Project & Log Selection
 *   **Data Fetching:** Create a new backend endpoint (e.g., `GET /api/projects/:path/logs`) that reads the file system of the selected project's `.steroids/logs/` and `.steroids/invocations/` directories.
+*   **Security (Path Traversal Guard):** The endpoint MUST strictly canonicalize the requested path and verify that the target directory starts exactly with the registered project's root path to prevent arbitrary cross-project or system file reading.
 *   **UI Layout:** Build a split-pane or dropdown-based layout where the user first selects the target project, and then selects the specific log file from a populated list.
 
 ### 6.3. Log Viewing & Actions
@@ -168,6 +169,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 ### 7.2. New "Wake Up Runners" Button
 *   **UI Placement:** Add a prominent "Wake Up Runners" button in the `Sidebar.tsx`, positioned immediately above the Stop/Start toggle.
 *   **Manual Trigger:** Create a new API endpoint (e.g., `POST /api/runners/wakeup/now`). When clicked, this endpoint signals the running daemon to bypass its 1-minute sleep interval and execute an immediate wakeup cycle, providing instant feedback to the user.
+*   **Single-Flight Mutex:** To prevent race conditions, the daemon must implement an in-memory lock or mutex around the wakeup cycle. If the user clicks the manual wakeup button while the background 1-minute tick is already executing a wakeup, the manual trigger must immediately return a `429 Too Many Requests` or gracefully wait without spawning duplicate runner processes.
 
 ### Acceptance Criteria (Section 7)
 - [ ] Toggling "Stop Steroids" sets an internal `is_active = false` flag in the global database's `_global_schema` table rather than uninstalling the cron job or killing the process outright.
@@ -188,8 +190,9 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 ### 8.2. Token Guard (Lost Session Fallback)
 *   **Monolithic Prompt Validation:** When rebuilding a lost session as a "fresh" monolithic prompt, the accumulated context (especially after many tool calls/rejections) poses a high risk of exceeding provider token limits (e.g., HTTP 413 Payload Too Large).
 *   **Token Calculation & Model Lookup:** The orchestrator must accurately figure out the actual payload size. This involves taking the selected model identifier and dynamically looking up its maximum context window limits.
+*   **Reserved Output Headroom:** The calculation must explicitly reserve a mandatory token budget (e.g., 4000-8000 tokens depending on the model) for the provider's *response* and tool executions. The input prompt cannot consume 100% of the context window.
 *   **Guaranteed Preservation:** Truncation logic must **prioritize preserving the System Prompt and Task Specification** above all else to ensure AI performance is not degraded (a "bad fallback").
-*   **Truncation/Guard Logic:** The orchestrator must implement a "Token Guard" prior to fallback. If the reconstructed history exceeds the calculated safe context limits for that specific model, it must selectively prune older tool execution outputs or intermediate thought blocks, or explicitly fail with a "Context Too Large" error.
+*   **Truncation/Guard Logic:** The orchestrator must implement a "Token Guard" prior to fallback. If the reconstructed history plus the required response headroom exceeds the safe context limits for that specific model, it must selectively prune older tool execution outputs or intermediate thought blocks. If the required context (System Prompt + Task Spec) *alone* exceeds the limit, it must deterministically hard-fail with a "Context Too Large" error.
 
 ### 8.3. O(N) Querying Timeouts & UI Disabling
 *   **Connection Resilience:** The shift to dynamic, real-time querying of child databases for statistics/wakeup checks (Section 3.1) introduces risk if a single project's drive is slow or disconnected.
