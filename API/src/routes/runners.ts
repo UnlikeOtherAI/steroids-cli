@@ -6,8 +6,8 @@
 import { Router, Request, Response } from 'express';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 import { cronStatus, cronInstall, cronUninstall } from '../../../dist/runners/cron.js';
-import { getLastWakeupTime } from '../../../dist/runners/wakeup.js';
-import { listRunners } from '../../../dist/runners/daemon.js';
+import { getLastWakeupTime, wakeup } from '../../../dist/runners/wakeup.js';
+import { listRunners, unregisterRunner } from '../../../dist/runners/daemon.js';
 
 const router = Router();
 
@@ -22,6 +22,25 @@ interface RunnerInfo {
   started_at: string | null;
   heartbeat_at: string;
   section_id: string | null;
+}
+
+function stopAllRunnersNow(): number {
+  const runners = listRunners();
+  let stopped = 0;
+
+  for (const runner of runners) {
+    if (runner.pid) {
+      try {
+        process.kill(runner.pid, 'SIGTERM');
+        stopped += 1;
+      } catch {
+        // Runner already dead; still remove stale DB row.
+      }
+    }
+    unregisterRunner(runner.id);
+  }
+
+  return stopped;
 }
 
 /**
@@ -177,14 +196,21 @@ router.get('/runners/cron', (_req: Request, res: Response) => {
  * POST /api/runners/cron/start
  * Install cron job
  */
-router.post('/runners/cron/start', (_req: Request, res: Response) => {
+router.post('/runners/cron/start', async (_req: Request, res: Response) => {
   try {
     const result = cronInstall();
 
     if (result.success) {
+      // Make "Start Steroids" feel immediate: run one wakeup cycle now.
+      const wakeupResults = await wakeup({ quiet: true });
+      const activated = wakeupResults.filter(
+        (item) => item.action === 'started' || item.action === 'restarted'
+      ).length;
+
       res.json({
         success: true,
-        message: result.message,
+        message: `${result.message} Immediate wakeup started/restarted ${activated} runner(s).`,
+        wakeup: wakeupResults,
       });
     } else {
       res.status(400).json({
@@ -212,9 +238,11 @@ router.post('/runners/cron/stop', (_req: Request, res: Response) => {
     const result = cronUninstall();
 
     if (result.success) {
+      const stopped = stopAllRunnersNow();
       res.json({
         success: true,
-        message: result.message,
+        message: `${result.message} Stopped ${stopped} active runner(s).`,
+        stopped,
       });
     } else {
       res.status(400).json({
