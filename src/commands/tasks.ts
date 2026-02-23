@@ -47,6 +47,7 @@ import {
   triggerProjectCompleted,
   triggerHooksSafely,
 } from '../hooks/integration.js';
+import { resetTaskCmd } from './tasks-reset.js';
 import {
   isFileTracked,
   isFileDirty,
@@ -75,6 +76,7 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { name: 'skip', args: '<id|title>', description: 'Skip a task (external/manual work)' },
     { name: 'audit', args: '<id|title>', description: 'View task audit trail' },
     { name: 'promote', args: '<id>', description: 'Enable auto-implementation for a deferred follow-up' },
+    { name: 'reset', args: '[<id|title>]', description: 'Reset failed/disputed tasks to pending' },
   ],
   options: [
     { short: 's', long: 'status', description: 'Filter by status', values: 'pending | in_progress | review | completed | disputed | failed | skipped | partial | active | all', default: 'pending' },
@@ -92,6 +94,9 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { long: 'line', description: 'Line number in anchored file (requires --file)', values: '<number>' },
     { long: 'feedback', description: 'Add to "Needs User Input" section (skipped, for human review)' },
     { long: 'partial', description: 'Mark as partial when skipping' },
+    { long: 'failed', description: 'Target all failed tasks (reset subcommand)' },
+    { long: 'disputed', description: 'Target all disputed tasks (reset subcommand)' },
+    { long: 'all', description: 'Target all failed and disputed tasks (reset subcommand)' },
     { long: 'no-hooks', description: 'Skip hook execution (global flag)' },
   ],
   examples: [
@@ -186,6 +191,9 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
       break;
     case 'promote':
       await promoteTaskCmd(subArgs, flags);
+      break;
+    case 'reset':
+      await resetTaskCmd(subArgs, flags);
       break;
     case 'list':
       await listAllTasks(subArgs, flags);

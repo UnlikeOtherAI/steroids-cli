@@ -59,7 +59,8 @@ async function invokeProvider(
   timeoutMs: number = 900_000, // 15 minutes default
   taskId?: string,
   projectPath?: string,
-  resumeSessionId?: string
+  resumeSessionId?: string,
+  runnerId?: string
 ): Promise<CoderResult> {
   // Load configuration to get coder provider settings
   // Project config overrides global config
@@ -111,6 +112,7 @@ async function invokeProvider(
       projectPath,
       resumedFromSessionId: resumeSessionId ?? undefined,
       invocationMode: resumeSessionId ? 'resume' : 'fresh',
+      runnerId,
     }
   );
 
@@ -132,7 +134,8 @@ export async function invokeCoder(
   task: Task,
   projectPath: string,
   action: 'start' | 'resume',
-  coordinatorGuidance?: string
+  coordinatorGuidance?: string,
+  runnerId?: string
 ): Promise<CoderResult> {
   // Load config to show provider/model being used
   const config = loadConfig(projectPath);
@@ -206,7 +209,7 @@ export async function invokeCoder(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    let result = await invokeProvider(promptFile, 900_000, task.id, projectPath, resumeSessionId ?? undefined);
+    let result = await invokeProvider(promptFile, 900_000, task.id, projectPath, resumeSessionId ?? undefined, runnerId);
 
     // If session resume returned empty output, invalidate session and retry fresh
     if (resumeSessionId && result.stdout.trim().length === 0) {
@@ -221,7 +224,7 @@ export async function invokeCoder(
       const freshPrompt = generateCoderPrompt(context);
       const freshPromptFile = writePromptToTempFile(freshPrompt);
       try {
-        result = await invokeProvider(freshPromptFile, 900_000, task.id, projectPath);
+        result = await invokeProvider(freshPromptFile, 900_000, task.id, projectPath, undefined, runnerId);
       } finally {
         if (existsSync(freshPromptFile)) unlinkSync(freshPromptFile);
       }

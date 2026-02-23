@@ -549,7 +549,7 @@ export async function runCoderPhase(
 
   const initialSha = getCurrentCommitSha(projectPath) || '';
   const coderConfigSnapshot = loadConfig(projectPath).ai?.coder as ReviewerConfig | undefined;
-  const coderResult: CoderResult = await invokeCoder(task, projectPath, action, coordinatorGuidance);
+  const coderResult: CoderResult = await invokeCoder(task, projectPath, action, coordinatorGuidance, leaseFence?.runnerId);
 
   if (coderResult.timedOut) {
     console.warn('Coder timed out. Will retry next iteration.');
@@ -1082,7 +1082,8 @@ export async function runReviewerPhase(
       projectPath,
       reviewerConfigs,
       coordinatorResult?.guidance,
-      coordinatorResult?.decision
+      coordinatorResult?.decision,
+      leaseFence?.runnerId
     );
 
     // Check for hard failures and classify all results
@@ -1187,7 +1188,9 @@ export async function runReviewerPhase(
       task,
       projectPath,
       coordinatorResult?.guidance,
-      coordinatorResult?.decision
+      coordinatorResult?.decision,
+      undefined,
+      leaseFence?.runnerId
     );
 
     if (reviewerResult.timedOut) {

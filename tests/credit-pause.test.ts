@@ -90,7 +90,10 @@ function makeBatchResult(overrides = {}) {
 // ── Tests ───────────────────────────────────────────────────────────────
 
 describe('Credit Pause Handler', () => {
+  let originalSetTimeout: any;
   beforeEach(() => {
+    originalSetTimeout = global.setTimeout;
+    (global as any).setTimeout = (cb: any) => originalSetTimeout(cb, 0);
     jest.clearAllMocks();
     mockRecordCreditIncident.mockReturnValue('test-incident-id');
     jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -98,6 +101,7 @@ describe('Credit Pause Handler', () => {
   });
 
   afterEach(() => {
+    global.setTimeout = originalSetTimeout;
     jest.restoreAllMocks();
   });
 
@@ -140,7 +144,7 @@ describe('Credit Pause Handler', () => {
       const result = await handleCreditExhaustion(makeOptions());
 
       expect(result).toEqual({ resolved: true, resolution: 'config_changed' });
-    }, 120000);
+    });
 
     it('resumes when config model changes', async () => {
       mockLoadConfig.mockReturnValue({
@@ -152,7 +156,7 @@ describe('Credit Pause Handler', () => {
       );
 
       expect(result).toEqual({ resolved: true, resolution: 'config_changed' });
-    }, 120000);
+    });
 
     it('records an incident on pause entry and resolves it on resume', async () => {
       const opts = makeOptions();
@@ -170,7 +174,7 @@ describe('Credit Pause Handler', () => {
       expect(mockResolveCreditIncident).toHaveBeenCalledWith(
         opts.db, 'test-incident-id', 'config_changed',
       );
-    }, 120000);
+    });
   });
 
   // ── 3. shouldStop interruption ──────────────────────────────────────
@@ -207,7 +211,7 @@ describe('Credit Pause Handler', () => {
       await handleCreditExhaustion(makeOptions({ onHeartbeat }));
 
       expect(onHeartbeat).toHaveBeenCalled();
-    }, 120000);
+    });
   });
 
   // ── 5. Message sanitization ──────────────────────────────────────────
@@ -279,14 +283,17 @@ describe('Credit Pause Handler', () => {
         'config_changed',
         { projectPath: '/tmp/test' },
       );
-    }, 120000);
+    });
   });
 });
 
 // ── checkBatchCreditExhaustion ────────────────────────────────────────
 
 describe('checkBatchCreditExhaustion', () => {
+  let originalSetTimeout: any;
   beforeEach(() => {
+    originalSetTimeout = global.setTimeout;
+    (global as any).setTimeout = (cb: any) => originalSetTimeout(cb, 0);
     jest.clearAllMocks();
   });
 

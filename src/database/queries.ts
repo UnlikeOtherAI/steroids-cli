@@ -42,6 +42,9 @@ export interface Task {
   rejection_count: number;
   failure_count?: number;
   last_failure_at?: string | null;
+  reference_task_id?: string | null;
+  reference_commit?: string | null;
+  reference_commit_message?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1106,6 +1109,7 @@ export interface CreateInvocationParams {
   resumedFromSessionId?: string;
   invocationMode?: 'fresh' | 'resume';
   tokenUsage?: TokenUsage;
+  runnerId?: string;
 }
 
 /**
@@ -1120,8 +1124,8 @@ export function createTaskInvocation(
     `INSERT INTO task_invocations (
       task_id, role, provider, model, prompt, response, error,
       exit_code, duration_ms, success, timed_out, rejection_number,
-      session_id, resumed_from_session_id, invocation_mode, token_usage_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      session_id, resumed_from_session_id, invocation_mode, token_usage_json, runner_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     params.taskId,
     params.role,
@@ -1138,7 +1142,8 @@ export function createTaskInvocation(
     params.sessionId ?? null,
     params.resumedFromSessionId ?? null,
     params.invocationMode ?? 'fresh',
-    params.tokenUsage ? JSON.stringify(params.tokenUsage) : null
+    params.tokenUsage ? JSON.stringify(params.tokenUsage) : null,
+    params.runnerId ?? null
   );
 
   return result.lastInsertRowid as number;

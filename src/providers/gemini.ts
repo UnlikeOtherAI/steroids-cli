@@ -20,6 +20,12 @@ import {
  */
 const GEMINI_MODELS: ModelInfo[] = [
   {
+    id: 'gemini-3.1-pro-preview',
+    name: 'Gemini 3.1 Pro Preview',
+    recommendedFor: ['orchestrator', 'coder', 'reviewer'],
+    supportsStreaming: true,
+  },
+  {
     id: 'gemini-2.5-pro',
     name: 'Gemini 2.5 Pro',
     recommendedFor: ['orchestrator', 'coder', 'reviewer'],
@@ -43,9 +49,9 @@ const GEMINI_MODELS: ModelInfo[] = [
  * Default models per role
  */
 const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string> = {
-  orchestrator: 'gemini-2.5-pro',
-  coder: 'gemini-2.5-pro',
-  reviewer: 'gemini-2.5-pro',
+  orchestrator: 'gemini-3.1-pro-preview',
+  coder: 'gemini-3.1-pro-preview',
+  reviewer: 'gemini-3.1-pro-preview',
 };
 
 /**

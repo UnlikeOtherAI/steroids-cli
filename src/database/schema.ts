@@ -159,6 +159,7 @@ CREATE TABLE IF NOT EXISTS task_invocations (
     invocation_mode TEXT DEFAULT 'fresh',
     token_usage_json TEXT,
     last_activity_at_ms INTEGER,
+    runner_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -243,4 +244,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (13, '013_add_merg
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (14, '014_add_session_context', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (15, '015_add_follow_up_fields', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (16, '016_add_invocation_activity_timestamp', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (17, '017_add_invocation_runner_id', 'builtin');
 `;

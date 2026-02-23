@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 16,
+  "latestDbVersion": 17,
   "migrations": [
     {
       "id": 1,
@@ -129,6 +129,14 @@
       "description": "Add last_activity_at_ms to task_invocations for smart hanging detection",
       "checksum": "",
       "cliVersion": "0.8.46"
+    },
+    {
+      "id": 17,
+      "name": "017_add_invocation_runner_id",
+      "file": "017_add_invocation_runner_id.sql",
+      "description": "Add runner_id to task_invocations to support deterministic workstream resets",
+      "checksum": "",
+      "cliVersion": "0.9.43"
     }
   ]
 }

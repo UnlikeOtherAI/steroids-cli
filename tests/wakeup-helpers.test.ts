@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { openDatabase, initDatabase } from '../src/database/connection.js';
 
 interface TestProject {
   path: string;
@@ -23,16 +24,7 @@ function createTestProject(name: string, taskCounts: {
   mkdirSync(projectPath, { recursive: true });
   const steroidsDir = join(projectPath, '.steroids');
   mkdirSync(steroidsDir, { recursive: true });
-  const dbPath = join(steroidsDir, 'steroids.db');
-  const db = new Database(dbPath);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
+  const { db, close } = initDatabase(projectPath);
   const { pending = 0, in_progress = 0, review = 0, completed = 0 } = taskCounts;
   for (let i = 0; i < pending; i++) {
     db.prepare(`INSERT INTO tasks (id, title, status) VALUES (?, ?, ?)`).run(
@@ -54,7 +46,7 @@ function createTestProject(name: string, taskCounts: {
       `completed-${i}`, `Completed Task ${i}`, 'completed'
     );
   }
-  db.close();
+  close();
   return {
     path: projectPath,
     name,
@@ -221,7 +213,7 @@ describe('hasActiveParallelSessionForProject()', () => {
 
     expect(result).toBe(true);
     expect(mockPrepare).toHaveBeenCalledWith(
-      expect.stringContaining('SELECT 1 FROM parallel_sessions')
+      expect.stringContaining('FROM parallel_sessions ps')
     );
     expect(mockPrepare).toHaveBeenCalledWith(
       expect.stringContaining('status NOT IN')

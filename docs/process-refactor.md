@@ -37,6 +37,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 - [ ] The project card displays a single combined task count element formatted exactly as `[In Progress] / [In Review]`.
 - [ ] The "In Progress" number in the combined element is styled with a green color class.
 - [ ] The "In Review" number in the combined element is styled with an orange/amber color class.
+- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 
@@ -56,13 +57,14 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 *   **Untracked Dependency Validation:** The pre-flight check must also account for untracked but necessary files left in the workspace from recent uncommitted upstream tasks, ensuring the runner has a functionally complete environment.
 
 ### Acceptance Criteria (Section 2)
-- [ ] A new CLI command `steroids tasks reset` is available and accepts `--failed`, `--disputed`, `--all`, or a positional `<taskId>` argument. It operates on the current working directory's project.
-- [ ] Running the reset command executes an atomic transaction that sets targeted task `status` to `pending` and resets both `rejection_count` and `failure_count` to 0.
-- [ ] The reset command automatically resolves any open disputes attached to the targeted tasks with the resolution text "Bulk reset via CLI".
-- [ ] The reset command clears any existing `task_locks` for the targeted tasks.
-- [ ] A detailed audit log entry is successfully recorded documenting the manual bulk reset.
-- [ ] The backend/orchestrator performs a pre-flight `git ls-tree` (or equivalent) check on the task's assigned `reference_commit` to verify the existence of upstream dependency files before a runner begins work.
-- [ ] The pre-flight check correctly accounts for and validates the presence of untracked files required by the task dependencies.
+- [x] A new CLI command `steroids tasks reset` is available and accepts `--failed`, `--disputed`, `--all`, or a positional `<taskId>` argument. It operates on the current working directory's project.
+- [x] Running the reset command executes an atomic transaction that sets targeted task `status` to `pending` and resets both `rejection_count` and `failure_count` to 0.
+- [x] The reset command automatically resolves any open disputes attached to the targeted tasks with the resolution text "Bulk reset via CLI".
+- [x] The reset command clears any existing `task_locks` for the targeted tasks.
+- [x] A detailed audit log entry is successfully recorded documenting the manual bulk reset.
+- [x] The backend/orchestrator performs a pre-flight `git ls-tree` (or equivalent) check on the task's assigned `reference_commit` to verify the existence of upstream dependency files before a runner begins work.
+- [x] The pre-flight check correctly accounts for and validates the presence of untracked files required by the task dependencies.
+- [x] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 
@@ -85,6 +87,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 - [ ] The API response payload accurately includes counts for `failed` and `disputed` tasks.
 - [ ] The Web UI loads project statistics strictly on demand (page load/refresh) without relying on background interval polling (`setInterval`).
 - [ ] The backend API accurately returns an `isBlocked` boolean property (true when `failed` > 0 or `disputed` > 0) to drive the frontend UI highlighting.
+- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 
@@ -114,6 +117,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 - [ ] Explicit Safety/Policy violation errors bypass the hibernation loop.
 - [ ] Upon a Safety/Policy violation, the orchestrator is invoked to attempt an automatic resolution of the prompt/specification.
 - [ ] If the orchestrator cannot resolve the violation, the task immediately enters a failed/disputed state and surfaces a clear notification to the user.
+- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 
@@ -129,6 +133,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 - [ ] Provider wrappers explicitly throw a classified `SessionNotFoundError` when a provider CLI refuses to resume a session.
 - [ ] The orchestrating runners (`coder.ts`, `reviewer.ts`) catch `SessionNotFoundError`.
 - [ ] Upon catching the error, the orchestrating runner automatically reconstructs the full prompt history from the database and retries the API call using `invocation_mode: 'fresh'` instead of failing the task.
+- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ## 6. System Logs UI Page
 
@@ -154,6 +159,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 - [ ] Clicking the "Copy to Clipboard" button successfully places the entire log contents into the system clipboard.
 - [ ] Clicking the top scroll button smoothly or instantly scrolls the log container fully to the bottom.
 - [ ] Clicking the bottom scroll button smoothly or instantly scrolls the log container fully back to the top.
+- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 
@@ -177,6 +183,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 - [ ] Toggling "Start Steroids" resets `is_active = true` in the global DB, causing the daemon to resume its normal runner wakeup operations on the next tick.
 - [ ] A "Wake Up Runners" manual trigger button is visibly placed above the Stop/Start toggle in the left menu.
 - [ ] Clicking the "Wake Up Runners" button hits a backend endpoint that forces an immediate execution of the wakeup cycle, bypassing the standard 1-minute waiting period.
+- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 
@@ -214,7 +221,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 *   **Daemon Resurrection:** Because the session is now `running` and the workstream has no active lease, the background daemon's normal `wakeup` loop will automatically spawn a new runner with `--project <existing_clone_path>`. The new runner will boot up, find the `pending` task, and immediately resume work in the exact same directory, preserving all uncommitted changes.
 
 ### Acceptance Criteria (Section 8)
-- [ ] The `steroids tasks reset` command successfully queries the global registry, identifies the active runner PID (if any), and validates it before terminating the process.
+- [x] The `steroids tasks reset` command successfully queries the global registry, identifies the active runner PID (if any), and validates it before terminating the process.
 - [ ] The fallback orchestrator logic calculates the exact prompt size and dynamically looks up the target model's maximum token limit.
 - [ ] The fallback orchestrator prioritizes the System Prompt and Task Specification, strictly pruning only older tool results/thoughts during context truncation.
 - [ ] The fallback orchestrator safely truncates history or blocks execution if the "fresh" monolithic prompt exceeds the calculated token limits for that model.
@@ -223,4 +230,5 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 - [ ] Projects that fail the database connection timeout are visually greyed out and rendered unclickable on the Web UI Projects Dashboard.
 - [ ] The "Tasks" navigation link is completely removed from the `Sidebar.tsx`.
 - [ ] The `/tasks` route and the `RunningTasksPage` component are fully removed from the WebUI source code.
-- [ ] The `steroids tasks reset` command revokes leases and unblocks sessions in the global `parallel_sessions`/`workstreams` tables to guarantee runners resume in their existing workspace clones.
+- [x] The `steroids tasks reset` command revokes leases and unblocks sessions in the global `parallel_sessions`/`workstreams` tables to guarantee runners resume in their existing workspace clones.
+- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.

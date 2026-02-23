@@ -24,6 +24,7 @@ function createTestProjectWithPendingWork(name: string): TestProject {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       status TEXT NOT NULL,
+      section_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);

@@ -31,6 +31,7 @@ export interface InvocationLogEntry {
   prompt: string;
   response: string;
   error?: string;
+  runnerId?: string;
 }
 
 /**
@@ -343,6 +344,7 @@ export async function logInvocation(
     sessionId?: string;
     resumedFromSessionId?: string;
     invocationMode?: 'fresh' | 'resume';
+    runnerId?: string;
   }
 ): Promise<InvokeResult> {
   const logger = getInvocationLogger();
@@ -383,8 +385,8 @@ export async function logInvocation(
       const insert = conn.db.prepare(
         `INSERT INTO task_invocations (
           task_id, role, provider, model, prompt, started_at_ms, status,
-          rejection_number, session_id, resumed_from_session_id, invocation_mode
-        ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)`
+          rejection_number, session_id, resumed_from_session_id, invocation_mode, runner_id
+        ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)`
       );
 
       const info = insert.run(
@@ -397,7 +399,8 @@ export async function logInvocation(
         metadata.rejectionNumber ?? null,
         metadata.sessionId ?? null,
         metadata.resumedFromSessionId ?? null,
-        metadata.invocationMode ?? 'fresh'
+        metadata.invocationMode ?? 'fresh',
+        metadata.runnerId ?? null
       );
 
       invocationId = Number(info.lastInsertRowid);

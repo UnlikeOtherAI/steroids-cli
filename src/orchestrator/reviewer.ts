@@ -112,11 +112,12 @@ export async function invokeReviewers(
   projectPath: string,
   reviewerConfigs: ReviewerConfig[],
   coordinatorGuidance?: string,
-  coordinatorDecision?: string
+  coordinatorDecision?: string,
+  runnerId?: string
 ): Promise<ReviewerResult[]> {
   const results = await Promise.allSettled(
     reviewerConfigs.map(config =>
-      invokeReviewer(task, projectPath, coordinatorGuidance, coordinatorDecision, config)
+      invokeReviewer(task, projectPath, coordinatorGuidance, coordinatorDecision, config, runnerId)
     )
   );
 
@@ -202,7 +203,8 @@ async function invokeProvider(
   taskId?: string,
   projectPath?: string,
   reviewerConfig?: ReviewerConfig,
-  resumeSessionId?: string
+  resumeSessionId?: string,
+  runnerId?: string
 ): Promise<ReviewerResult> {
   // Load configuration to get reviewer provider settings if not provided
   // Project config overrides global config
@@ -248,16 +250,16 @@ async function invokeProvider(
         onActivity: ctx?.onActivity,
         resumeSessionId,
       }),
-    {
-      role: 'reviewer',
-      provider: providerName,
-      model: modelName,
-      taskId,
-      projectPath,
-      resumedFromSessionId: resumeSessionId ?? undefined,
-      invocationMode: resumeSessionId ? 'resume' : 'fresh',
-    }
-  );
+          {
+            role: 'reviewer',
+            provider: providerName,
+            model: modelName,
+            taskId,
+            projectPath,
+            resumedFromSessionId: resumeSessionId ?? undefined,
+            invocationMode: resumeSessionId ? 'resume' : 'fresh',
+            runnerId,
+          }  );
 
   // Parse the decision from output
   const { decision, notes } = parseReviewerDecision(result.stdout);
@@ -287,7 +289,8 @@ export async function invokeReviewer(
   projectPath: string,
   coordinatorGuidance?: string,
   coordinatorDecision?: string,
-  reviewerConfig?: ReviewerConfig
+  reviewerConfig?: ReviewerConfig,
+  runnerId?: string
 ): Promise<ReviewerResult> {
   // Load config to show provider/model being used
   const config = loadConfig(projectPath);
@@ -409,7 +412,8 @@ export async function invokeReviewer(
       task.id,
       projectPath,
       effectiveReviewerConfig,
-      resumeSessionId ?? undefined
+      resumeSessionId ?? undefined,
+      runnerId
     );
 
     // If session resume returned empty output, invalidate session and retry fresh
@@ -430,7 +434,9 @@ export async function invokeReviewer(
           600_000,
           task.id,
           projectPath,
-          effectiveReviewerConfig
+          effectiveReviewerConfig,
+          undefined,
+          runnerId
         );
       } finally {
         if (existsSync(freshPromptFile)) unlinkSync(freshPromptFile);
