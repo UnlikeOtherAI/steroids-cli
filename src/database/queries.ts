@@ -734,7 +734,7 @@ export function addAuditEntry(
   commitSha?: string
 ): void {
   // Support legacy signature: addAuditEntry(db, taskId, from, to, actor, notes, commitSha)
-  if (typeof options === 'string' || options === undefined) {
+  if (typeof options === 'string' || options == null) {
     const notes = options as string | undefined;
     db.prepare(
       `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, model, notes, commit_sha)
