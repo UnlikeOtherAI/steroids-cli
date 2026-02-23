@@ -1028,6 +1028,7 @@ export async function runReviewerPhase(
 
   const config = loadConfig(projectPath);
   const multiReviewEnabled = isMultiReviewEnabled(config);
+  let effectiveMultiReviewEnabled = multiReviewEnabled;
   const strict = config.ai?.review?.strict ?? true;
   const submissionResolution = resolveSubmissionCommitWithRecovery(
     projectPath,
@@ -1071,10 +1072,20 @@ export async function runReviewerPhase(
       coordinatorResult?.decision
     );
 
-    // Check for credit exhaustion in any reviewer
+    // Check for hard failures and classify all results
+    const classifications = await Promise.all(
+      reviewerResults.map((res, i) => classifyProviderResult(res, 'reviewer', projectPath, reviewerConfigs[i]))
+    );
+
+    let creditExhaustionSignal: CreditExhaustionResult | undefined;
+    let rateLimitSignal: CreditExhaustionResult | undefined;
+    const failedRateLimitIndices = new Set<number>();
+    const failedOtherIndices = new Set<number>();
+
     for (let i = 0; i < reviewerResults.length; i++) {
       const res = reviewerResults[i];
-      const classification = await classifyProviderResult(res, 'reviewer', projectPath, reviewerConfigs[i]);
+      const classification = classifications[i];
+
       const hardFailure = await checkNonRetryableProviderFailure(res, 'reviewer', projectPath, reviewerConfigs[i], classification);
       if (hardFailure) {
         const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during reviewer phase: ${hardFailure.message}`;
@@ -1084,17 +1095,71 @@ export async function runReviewerPhase(
 
       const creditCheck = await checkCreditExhaustion(res as any, 'reviewer', projectPath, reviewerConfigs[i], classification);
       if (creditCheck) {
-        return creditCheck;
+        if (creditCheck.action === 'pause_credit_exhaustion' && !creditExhaustionSignal) {
+          creditExhaustionSignal = creditCheck;
+        }
+        if (creditCheck.action === 'rate_limit' && !rateLimitSignal) {
+          rateLimitSignal = creditCheck;
+        }
+      }
+
+      if (!res.success) {
+        if (classification?.type === 'rate_limit') {
+          failedRateLimitIndices.add(i);
+        } else {
+          failedOtherIndices.add(i);
+        }
       }
     }
 
-    // Handle failures in strict mode
-    const failures = reviewerResults.filter(r => !r.success);
-    if (strict && failures.length > 0) {
+    const successfulReviewers = reviewerResults.filter((res) => res.success);
+    const failedCount = reviewerResults.length - successfulReviewers.length;
+    const canDegradeToAvailableReviewers =
+      successfulReviewers.length > 0 &&
+      failedCount > 0 &&
+      failedOtherIndices.size === 0 &&
+      failedRateLimitIndices.size === failedCount &&
+      !creditExhaustionSignal;
+
+    if (canDegradeToAvailableReviewers) {
+      const rateLimitedProviders = Array.from(failedRateLimitIndices)
+        .map((i) => reviewerConfigs[i])
+        .filter((cfg): cfg is ReviewerConfig => !!cfg)
+        .map((cfg) => `${cfg.provider}/${cfg.model}`)
+        .join(', ');
+      const strictLabel = strict ? ' (strict override)' : '';
+      const auditNote =
+        `[reviewer_degraded] Falling back to ${successfulReviewers.length}/${reviewerResults.length} reviewer(s)` +
+        `${strictLabel}; rate-limited reviewers: ${rateLimitedProviders || 'unknown'}`;
+
+      addAuditEntry(db, task.id, task.status, task.status, 'orchestrator', {
+        actorType: 'orchestrator',
+        notes: auditNote,
+      });
+
       if (!jsonMode) {
-        console.warn(`${failures.length} reviewer(s) failed in strict mode. Will retry.`);
+        console.warn(`! ${auditNote}`);
       }
-      return;
+
+      reviewerResults = successfulReviewers;
+      reviewerResult = reviewerResults[0];
+      effectiveMultiReviewEnabled = reviewerResults.length > 1;
+    } else {
+      if (creditExhaustionSignal) {
+        return creditExhaustionSignal;
+      }
+      if (rateLimitSignal) {
+        return rateLimitSignal;
+      }
+
+      // Handle failures in strict mode or other unrecoverable failures
+      const failures = reviewerResults.filter(r => !r.success);
+      if (strict && failures.length > 0) {
+        if (!jsonMode) {
+          console.warn(`${failures.length} reviewer(s) failed in strict mode. Will retry.`);
+        }
+        return;
+      }
     }
     // If not strict, we continue with the successful ones (resolveDecision handles empty/unclear)
   } else {
@@ -1157,7 +1222,7 @@ export async function runReviewerPhase(
   // STEP 3: Resolve decision and merge notes if needed
   let decision: ReviewerOrchestrationResult;
 
-  if (multiReviewEnabled) {
+  if (effectiveMultiReviewEnabled) {
     const { decision: finalDecision, needsMerge } = resolveDecision(reviewerResults);
 
     if (needsMerge) {

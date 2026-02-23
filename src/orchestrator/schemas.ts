@@ -62,10 +62,10 @@ const reviewerSchema = {
       type: 'string',
       enum: ['approve', 'reject', 'dispute', 'skip', 'unclear']
     },
-    reasoning: { type: 'string', minLength: 5, maxLength: 1000 },
+    reasoning: { type: 'string', minLength: 5 },
     notes: {
       oneOf: [
-        { type: 'string', maxLength: 1000 },
+        { type: 'string' },
         { type: 'null' }
       ]
     },
