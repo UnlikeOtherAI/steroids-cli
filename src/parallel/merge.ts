@@ -147,9 +147,21 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     ensureMergeWorkingTree(mergePath);
     assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
 
+    const availableWorkstreams: MergeWorkstreamSpec[] = [];
     for (const stream of workstreams) {
       assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
-      safeRunMergeCommand(mergePath, remote, stream.branchName);
+      try {
+        safeRunMergeCommand(mergePath, remote, stream.branchName);
+        availableWorkstreams.push(stream);
+      } catch (error) {
+        if (error instanceof ParallelMergeError && error.code === 'REMOTE_BRANCH_MISSING') {
+          // Branch may already be deleted by a previous successful merge attempt.
+          // Treat as non-fatal to avoid failing the whole session recovery.
+          summary.skipped += 1;
+          continue;
+        }
+        throw error;
+      }
     }
     sealWorkstreamsForMerge(
       db,
@@ -159,7 +171,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       mergePath,
       remote,
       mainBranch,
-      workstreams
+      availableWorkstreams
     );
 
     if (!recoveringFromCherryPick) {
@@ -185,7 +197,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     }
 
     const progressRows = listMergeProgress(db, sessionId);
-    for (const workstream of workstreams) {
+    for (const workstream of availableWorkstreams) {
       const stats = await processWorkstream(
         db,
         mergePath,

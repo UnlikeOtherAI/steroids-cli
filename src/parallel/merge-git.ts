@@ -60,7 +60,10 @@ export function hasUnmergedFiles(projectPath: string): boolean {
 }
 
 export function gitStatusLines(projectPath: string): string[] {
-  const status = runGitCommand(projectPath, ['status', '--porcelain']);
+  // Merge preflight only needs to block on tracked changes/conflicts.
+  // Untracked files (for example runtime metadata folders) should not block
+  // cherry-pick merge execution in integration workspaces.
+  const status = runGitCommand(projectPath, ['status', '--porcelain', '--untracked-files=no']);
   return status.split('\n').filter(Boolean);
 }
 

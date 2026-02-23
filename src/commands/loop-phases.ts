@@ -548,6 +548,7 @@ export async function runCoderPhase(
   }
 
   const initialSha = getCurrentCommitSha(projectPath) || '';
+  const coderConfigSnapshot = loadConfig(projectPath).ai?.coder as ReviewerConfig | undefined;
   const coderResult: CoderResult = await invokeCoder(task, projectPath, action, coordinatorGuidance);
 
   if (coderResult.timedOut) {
@@ -555,10 +556,22 @@ export async function runCoderPhase(
     return;
   }
 
-  const classification = await classifyProviderResult(coderResult, 'coder', projectPath);
-  const hardFailureFromKnownTypes = await checkNonRetryableProviderFailure(coderResult, 'coder', projectPath, undefined, classification);
+  const classification = await classifyProviderResult(coderResult, 'coder', projectPath, coderConfigSnapshot);
+  const hardFailureFromKnownTypes = await checkNonRetryableProviderFailure(
+    coderResult,
+    'coder',
+    projectPath,
+    coderConfigSnapshot,
+    classification
+  );
   // Check for credit/rate-limit classification (once).
-  const creditCheck = await checkCreditExhaustion(coderResult, 'coder', projectPath, undefined, classification);
+  const creditCheck = await checkCreditExhaustion(
+    coderResult,
+    'coder',
+    projectPath,
+    coderConfigSnapshot,
+    classification
+  );
   if (hardFailureFromKnownTypes) {
     const reason = `Task failed: provider ${hardFailureFromKnownTypes.provider}/${hardFailureFromKnownTypes.model} returned non-recoverable error (${hardFailureFromKnownTypes.type}) during coder phase: ${hardFailureFromKnownTypes.message}`;
     updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
@@ -1026,10 +1039,6 @@ export async function runReviewerPhase(
   if (!task) return;
   refreshParallelWorkstreamLease(projectPath, leaseFence);
 
-  const config = loadConfig(projectPath);
-  const multiReviewEnabled = isMultiReviewEnabled(config);
-  let effectiveMultiReviewEnabled = multiReviewEnabled;
-  const strict = config.ai?.review?.strict ?? true;
   const submissionResolution = resolveSubmissionCommitWithRecovery(
     projectPath,
     getSubmissionCommitShas(db, task.id)
@@ -1050,13 +1059,17 @@ export async function runReviewerPhase(
     return;
   }
   const submissionCommitSha = submissionResolution.sha;
+  const phaseConfig = loadConfig(projectPath);
+  const multiReviewEnabled = isMultiReviewEnabled(phaseConfig);
+  let effectiveMultiReviewEnabled = multiReviewEnabled;
+  const strict = phaseConfig.ai?.review?.strict ?? true;
 
   let reviewerResult: ReviewerResult | undefined;
   let reviewerResults: ReviewerResult[] = [];
 
   // STEP 1: Invoke reviewer(s)
   if (multiReviewEnabled) {
-    const reviewerConfigs = getReviewerConfigs(config);
+    const reviewerConfigs = getReviewerConfigs(phaseConfig);
     if (!jsonMode) {
       console.log(`\n>>> Invoking ${reviewerConfigs.length} REVIEWERS in parallel...\n`);
       if (coordinatorResult) {
@@ -1452,8 +1465,9 @@ export async function runReviewerPhase(
 
   // STEP 5.5: Create follow-up tasks if any (ONLY on approval)
   if (decision.decision === 'approve' && decision.follow_up_tasks && decision.follow_up_tasks.length > 0) {
+    const followUpConfig = loadConfig(projectPath);
     const depth = getFollowUpDepth(db, task.id);
-    const maxDepth = config.followUpTasks?.maxDepth ?? 2;
+    const maxDepth = followUpConfig.followUpTasks?.maxDepth ?? 2;
 
     if (depth < maxDepth) {
       for (const followUp of decision.follow_up_tasks) {
@@ -1463,7 +1477,7 @@ export async function runReviewerPhase(
           // Policy: Auto-implement depth 1 if configured. 
           // Depth 2+ always requires human promotion (approval).
           let requiresPromotion = true;
-          if (nextDepth === 1 && config.followUpTasks?.autoImplementDepth1) {
+          if (nextDepth === 1 && followUpConfig.followUpTasks?.autoImplementDepth1) {
             requiresPromotion = false;
           }
 
