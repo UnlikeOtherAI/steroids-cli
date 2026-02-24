@@ -5,7 +5,7 @@
 import { existsSync } from 'node:fs';
 import { checkLockStatus, removeLock } from './lock.js';
 import { openGlobalDatabase,
-  withGlobalDatabase, getDaemonActiveStatus } from './global-db.js';
+  withGlobalDatabase, getDaemonActiveStatus, getProviderBackoffRemainingMs } from './global-db.js';
 import { findStaleRunners } from './heartbeat.js';
 import { getRegisteredProjects } from './projects.js';
 import { openDatabase } from '../database/connection.js';
@@ -27,7 +27,6 @@ import {
 } from './wakeup-checks.js';
 import { startRunner, killProcess, restartWorkstreamRunner } from './wakeup-runner.js';
 import { recordWakeupTime, getLastWakeupTime } from './wakeup-timing.js';
-import { clearProjectHibernation } from './projects.js';
 import { pingProvider } from '../providers/ping.js';
 
 export interface WakeupOptions {
@@ -249,54 +248,33 @@ const global = { db: globalDb };
 
       const projectConfig = loadConfig(project.path);
       
-      // Check if project is hibernating
-      if (project.hibernating_until) {
-        const untilMs = new Date(project.hibernating_until).getTime();
-        if (Date.now() < untilMs) {
-          log(`Skipping ${project.path}: Project is hibernating (tier ${project.hibernation_tier}) until ${project.hibernating_until}`);
-          results.push({
-            action: 'skipped',
-            reason: `Hibernating until ${project.hibernating_until}`,
-            projectPath: project.path,
-          });
-          continue;
-        }
+      // Check global provider backoffs
+      const coderProvider = projectConfig.ai?.coder?.provider;
+      const reviewerProvider = projectConfig.ai?.reviewer?.provider;
+      const providersToCheck = [coderProvider, reviewerProvider].filter(Boolean) as string[];
+      let isBackedOff = false;
+      let backedOffProvider = '';
+      let remainingMs = 0;
 
-        // Hibernation timer expired, execute lightweight ping
-        log(`Hibernation timer expired for ${project.path}. Executing lightweight ping...`);
-        let pingSuccess = false;
-        if (!dryRun) {
-           // We use the orchestrator provider to ping, as it's the general "health" proxy
-           const orchestratorProvider = projectConfig.ai?.orchestrator?.provider;
-           const orchestratorModel = projectConfig.ai?.orchestrator?.model;
-           if (orchestratorProvider && orchestratorModel) {
-              pingSuccess = await pingProvider(orchestratorProvider, orchestratorModel);
-           }
-        } else {
-           pingSuccess = true;
+      for (const provider of providersToCheck) {
+        const ms = getProviderBackoffRemainingMs(provider);
+        if (ms > 0) {
+          isBackedOff = true;
+          backedOffProvider = provider;
+          remainingMs = ms;
+          break;
         }
+      }
 
-        if (pingSuccess) {
-           log(`Ping successful for ${project.path}. Clearing hibernation state.`);
-           if (!dryRun) clearProjectHibernation(project.path);
-        } else {
-           // Ping failed, extend hibernation
-           const nextTier = (project.hibernation_tier ?? 1) + 1;
-           const backoffMinutes = 30; // 30 minutes for tier 2+
-           const newUntilISO = new Date(Date.now() + (backoffMinutes * 60 * 1000)).toISOString();
-           log(`Ping failed for ${project.path}. Extending hibernation to tier ${nextTier} until ${newUntilISO}.`);
-           
-           if (!dryRun) {
-             const { setProjectHibernation } = await import('./projects.js');
-             setProjectHibernation(project.path, nextTier, newUntilISO);
-           }
-           results.push({
-             action: 'skipped',
-             reason: `Ping failed, extended hibernation until ${newUntilISO}`,
-             projectPath: project.path,
-           });
-           continue;
-        }
+      if (isBackedOff) {
+        const remainingMinutes = Math.ceil(remainingMs / 60000);
+        log(`Skipping ${project.path}: Provider '${backedOffProvider}' is in backoff for ${remainingMinutes}m`);
+        results.push({
+          action: 'skipped',
+          reason: `Provider '${backedOffProvider}' backed off for ${remainingMinutes}m`,
+          projectPath: project.path,
+        });
+        continue;
       }
 
       const parallelEnabled = projectConfig.runners?.parallel?.enabled === true;

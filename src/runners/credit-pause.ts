@@ -18,7 +18,7 @@ import {
   triggerCreditResolved,
   triggerHooksSafely,
 } from '../hooks/integration.js';
-import { getRegisteredProject, setProjectHibernation } from './projects.js';
+import { getProviderBackoffRemainingMs, recordProviderBackoff } from './global-db.js';
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 const MAX_MESSAGE_LENGTH = 200;
@@ -80,14 +80,10 @@ export async function handleCreditExhaustion(
   );
 
   // Calculate backoff schedule
-  const projectInfo = getRegisteredProject(projectPath);
-  const currentTier = projectInfo?.hibernation_tier ?? 0;
-  const newTier = currentTier + 1;
-  
+  const currentBackoff = getProviderBackoffRemainingMs(provider);
   // Attempt 1: 5 minutes. Attempt 2+: 30 minutes.
-  const backoffMinutes = newTier === 1 ? 5 : 30;
+  const backoffMinutes = currentBackoff > 0 ? 30 : 5;
   const backoffUntilMs = Date.now() + (backoffMinutes * 60 * 1000);
-  const backoffUntilISO = new Date(backoffUntilMs).toISOString();
 
   // Print CLI output
   console.log('');
@@ -99,13 +95,13 @@ export async function handleCreditExhaustion(
   console.log(`  Role:     ${role}`);
   console.log(`  Message:  ${safeMessage}`);
   console.log('');
-  console.log(`  The project is entering hibernation (Tier ${newTier}).`);
-  console.log(`  Will sleep for ${backoffMinutes} minutes and ping the provider.`);
+  console.log(`  The provider is entering global backoff.`);
+  console.log(`  Will sleep for ${backoffMinutes} minutes before retrying.`);
   console.log('  The runner will now exit to conserve resources.');
   console.log('============================================================');
 
-  // Put project into hibernation state
-  setProjectHibernation(projectPath, newTier, backoffUntilISO);
+  // Put provider into backoff state
+  recordProviderBackoff(provider, backoffUntilMs, safeMessage, 'capacity_exhaustion');
 
   // Return immediately so runner exits
   return { resolved: false, resolution: 'hibernating' };

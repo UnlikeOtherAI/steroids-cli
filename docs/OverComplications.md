@@ -87,13 +87,13 @@ The system makes architectural decisions by parsing strings in `audit.notes` (e.
 The system has two separate "pause" mechanisms: global rate limits and project-level hibernation.
 
 ### Tasks
-- [ ] **TASK: Delete Project Hibernation**: Remove `hibernating_until` and `hibernation_tier` from the `projects` table.
-- [ ] **TASK: Unified Backoff Table**: Use `provider_backoffs` in the Global DB for all delays. Add a `reason_type` column.
-- [ ] **TASK: Provider-Aware Wakeup**: The `wakeup` daemon will query the project's configured providers and skip the runner if any required provider is currently backed off.
+- [x] **TASK: Delete Project Hibernation**: Remove `hibernating_until` and `hibernation_tier` from the `projects` table.
+- [x] **TASK: Unified Backoff Table**: Use `provider_backoffs` in the Global DB for all delays. Add a `reason_type` column.
+- [x] **TASK: Provider-Aware Wakeup**: The `wakeup` daemon will query the project's configured providers and skip the runner if any required provider is currently backed off.
 
 ### Acceptance Criteria
-- [ ] AC: The daemon must not start a runner for a project if its primary `coder` or `reviewer` provider is in a backoff state.
-- [ ] AC: Integration test must verify that a 429 error correctly sets a global backoff that pauses all projects using that provider.
+- [x] AC: The daemon must not start a runner for a project if its primary `coder` or `reviewer` provider is in a backoff state.
+- [x] AC: Integration test must verify that a 429 error correctly sets a global backoff that pauses all projects using that provider.
 
 ---
 

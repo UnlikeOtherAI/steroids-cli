@@ -15,8 +15,6 @@ export interface RegisteredProject {
   registered_at: string;
   last_seen_at: string;
   enabled: boolean;
-  hibernating_until?: string | null;
-  hibernation_tier?: number;
 }
 
 /**
@@ -182,8 +180,6 @@ export function getRegisteredProjects(includeDisabled = false): RegisteredProjec
       registered_at: string;
       last_seen_at: string;
       enabled: number;
-      hibernating_until?: string | null;
-      hibernation_tier?: number;
     }>;
 
     return rows.map((row) => ({
@@ -192,8 +188,6 @@ export function getRegisteredProjects(includeDisabled = false): RegisteredProjec
       registered_at: row.registered_at,
       last_seen_at: row.last_seen_at,
       enabled: row.enabled === 1,
-      hibernating_until: row.hibernating_until,
-      hibernation_tier: row.hibernation_tier,
     }));
   });
 }
@@ -215,8 +209,6 @@ export function getRegisteredProject(path: string): RegisteredProject | null {
         registered_at: string;
         last_seen_at: string;
         enabled: number;
-        hibernating_until?: string | null;
-        hibernation_tier?: number;
       } | undefined;
 
     if (!row) {
@@ -229,8 +221,6 @@ export function getRegisteredProject(path: string): RegisteredProject | null {
       registered_at: row.registered_at,
       last_seen_at: row.last_seen_at,
       enabled: row.enabled === 1,
-      hibernating_until: row.hibernating_until,
-      hibernation_tier: row.hibernation_tier,
     };
   });
 }
@@ -272,51 +262,7 @@ export function enableProject(path: string): void {
   });
 }
 
-/**
- * Set hibernation state for a project
- */
-export function setProjectHibernation(path: string, tier: number, untilISO: string): void {
-  const normalizedPath = normalizePath(path);
-  withGlobalDatabase((db) => {
-    db.prepare('UPDATE projects SET hibernating_until = ?, hibernation_tier = ? WHERE path = ?')
-      .run(untilISO, tier, normalizedPath);
-  });
-}
-
-/**
- * Clear hibernation state for a project
- */
-export function clearProjectHibernation(path: string): void {
-  const normalizedPath = normalizePath(path);
-  withGlobalDatabase((db) => {
-    db.prepare('UPDATE projects SET hibernating_until = NULL, hibernation_tier = 0 WHERE path = ?')
-      .run(normalizedPath);
-  });
-}
-
-/**
- * Remove projects that no longer exist on disk
- * Returns the number of projects removed
- *
- * @returns Number of projects pruned
- */
-export function pruneProjects(): number {
-  return withGlobalDatabase((db) => {
-    const projects = db.prepare('SELECT path FROM projects').all() as Array<{ path: string }>;
-    let removed = 0;
-
-    for (const project of projects) {
-      const steroidsDir = join(project.path, '.steroids');
-      const steroidsDb = join(steroidsDir, 'steroids.db');
-
-      // Remove if project directory or .steroids directory doesn't exist
-      if (!existsSync(project.path) || !existsSync(steroidsDir) || !existsSync(steroidsDb)) {
-        db.prepare('DELETE FROM projects WHERE path = ?').run(project.path);
-        removed++;
-      }
-    }
-
-    return removed;
+return removed;
   });
 }
 

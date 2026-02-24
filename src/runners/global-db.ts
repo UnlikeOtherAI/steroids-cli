@@ -298,11 +298,19 @@ const GLOBAL_SCHEMA_V16_SQL = `
 
 const GLOBAL_SCHEMA_V17_SQL = `
 -- Add hibernation fields to projects table
+-- Note: These columns are deprecated in V18 but kept here for schema history.
 ALTER TABLE projects ADD COLUMN hibernating_until TEXT;
 ALTER TABLE projects ADD COLUMN hibernation_tier INTEGER DEFAULT 0;
 `;
 
-const GLOBAL_SCHEMA_VERSION = '17';
+const GLOBAL_SCHEMA_V18_SQL = `
+-- Drop project hibernation fields and add provider backoff reason_type
+ALTER TABLE projects DROP COLUMN hibernating_until;
+ALTER TABLE projects DROP COLUMN hibernation_tier;
+ALTER TABLE provider_backoffs ADD COLUMN reason_type TEXT;
+`;
+
+const GLOBAL_SCHEMA_VERSION = '18';
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
   const columns = db
@@ -493,6 +501,16 @@ function applyGlobalSchemaV17(db: Database.Database): void {
   }
 }
 
+function applyGlobalSchemaV18(db: Database.Database): void {
+  if (!hasColumn(db, 'provider_backoffs', 'reason_type')) {
+    try { db.exec(GLOBAL_SCHEMA_V18_SQL); } catch (e) {
+      // Ignore DROP COLUMN errors if sqlite version is too old
+      console.warn('V18 schema partial application (sqlite may not support DROP COLUMN). Adding reason_type only.');
+      db.exec('ALTER TABLE provider_backoffs ADD COLUMN reason_type TEXT;');
+    }
+  }
+}
+
 /**
  * Get the path to the global steroids directory.
  * Respects STEROIDS_HOME env var for test isolation (Jest's ESM VM context
@@ -556,13 +574,13 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     db.exec(GLOBAL_SCHEMA_V7_SQL);
     db.exec(GLOBAL_SCHEMA_V8_SQL);
     applyGlobalSchemaV9(db);
-    applyGlobalSchemaV10(db);
-    applyGlobalSchemaV11(db);
-    applyGlobalSchemaV12(db);
-    db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
-      'version',
-      GLOBAL_SCHEMA_VERSION
-    );
+    applyGlobalSchemaV15(db);
+    applyGlobalSchemaV16(db);
+    applyGlobalSchemaV17(db);
+    applyGlobalSchemaV18(db);
+
+    db.prepare('INSERT OR REPLACE INTO _global_schema (key, value) VALUES (?, ?)')
+      .run('version', GLOBAL_SCHEMA_VERSION);
     db.prepare('INSERT INTO _global_schema (key, value) VALUES (?, ?)').run(
       'created_at',
       new Date().toISOString()
@@ -877,17 +895,31 @@ export function resolveValidationEscalationsForSession(sessionId: string): numbe
  * Record a provider rate limit backoff in the global DB.
  * Uses MAX so existing longer backoffs are never shortened.
  */
-export function recordProviderBackoff(provider: string, backoffUntilMs: number, reason?: string): void {
+export function recordProviderBackoff(provider: string, backoffUntilMs: number, reason?: string, reasonType?: string): void {
   withGlobalDatabase((db) => {
-    db.prepare(`
-      INSERT INTO provider_backoffs (provider, backoff_until_ms, retry_count, reason, updated_at)
-      VALUES (?, ?, 1, ?, ?)
-      ON CONFLICT(provider) DO UPDATE SET
-        backoff_until_ms = MAX(backoff_until_ms, excluded.backoff_until_ms),
-        retry_count = retry_count + 1,
-        reason = excluded.reason,
-        updated_at = excluded.updated_at
-    `).run(provider, backoffUntilMs, reason ?? null, Date.now());
+    // We only update reason_type if the schema has it (V18+)
+    if (hasColumn(db, 'provider_backoffs', 'reason_type')) {
+      db.prepare(`
+        INSERT INTO provider_backoffs (provider, backoff_until_ms, retry_count, reason, reason_type, updated_at)
+        VALUES (?, ?, 1, ?, ?, ?)
+        ON CONFLICT(provider) DO UPDATE SET
+          backoff_until_ms = MAX(backoff_until_ms, excluded.backoff_until_ms),
+          retry_count = retry_count + 1,
+          reason = excluded.reason,
+          reason_type = excluded.reason_type,
+          updated_at = excluded.updated_at
+      `).run(provider, backoffUntilMs, reason ?? null, reasonType ?? null, Date.now());
+    } else {
+      db.prepare(`
+        INSERT INTO provider_backoffs (provider, backoff_until_ms, retry_count, reason, updated_at)
+        VALUES (?, ?, 1, ?, ?)
+        ON CONFLICT(provider) DO UPDATE SET
+          backoff_until_ms = MAX(backoff_until_ms, excluded.backoff_until_ms),
+          retry_count = retry_count + 1,
+          reason = excluded.reason,
+          updated_at = excluded.updated_at
+      `).run(provider, backoffUntilMs, reason ?? null, Date.now());
+    }
   });
 }
 

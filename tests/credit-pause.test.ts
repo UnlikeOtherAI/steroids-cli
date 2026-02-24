@@ -50,13 +50,12 @@ jest.unstable_mockModule('../src/hooks/integration.js', () => ({
   triggerHooksSafely: mockTriggerHooksSafely,
 }));
 
-const mockGetRegisteredProject = jest.fn();
-const mockSetProjectHibernation = jest.fn();
+const mockRecordProviderBackoff = jest.fn();
+const mockGetProviderBackoffRemainingMs = jest.fn().mockReturnValue(0);
 
-jest.unstable_mockModule('../src/runners/projects.js', () => ({
-  getRegisteredProject: mockGetRegisteredProject,
-  setProjectHibernation: mockSetProjectHibernation,
-  clearProjectHibernation: jest.fn(),
+jest.unstable_mockModule('../src/runners/global-db.js', () => ({
+  recordProviderBackoff: mockRecordProviderBackoff,
+  getProviderBackoffRemainingMs: mockGetProviderBackoffRemainingMs,
 }));
 
 // ── Import module under test (after mocks) ──────────────────────────────
@@ -109,33 +108,35 @@ describe('Credit Pause Handler', () => {
   });
 
   describe('handleCreditExhaustion', () => {
-    it('sets project hibernation to tier 1 (5 minutes) initially', async () => {
-      mockGetRegisteredProject.mockReturnValue({ hibernation_tier: 0 });
+    it('sets provider backoff to 5 minutes initially', async () => {
+      mockGetProviderBackoffRemainingMs.mockReturnValue(0);
       const now = Date.now();
       jest.spyOn(Date, 'now').mockReturnValue(now);
 
       const result = await handleCreditExhaustion(makeOptions());
 
       expect(result).toEqual({ resolved: false, resolution: 'hibernating' });
-      expect(mockSetProjectHibernation).toHaveBeenCalledWith(
-        '/tmp/test',
-        1,
-        new Date(now + 5 * 60 * 1000).toISOString()
+      expect(mockRecordProviderBackoff).toHaveBeenCalledWith(
+        'claude',
+        now + 5 * 60 * 1000,
+        expect.any(String),
+        'capacity_exhaustion'
       );
     });
 
-    it('sets project hibernation to tier 2+ (30 minutes) on subsequent failures', async () => {
-      mockGetRegisteredProject.mockReturnValue({ hibernation_tier: 1 });
+    it('sets provider backoff to 30 minutes on subsequent failures', async () => {
+      mockGetProviderBackoffRemainingMs.mockReturnValue(1);
       const now = Date.now();
       jest.spyOn(Date, 'now').mockReturnValue(now);
 
       const result = await handleCreditExhaustion(makeOptions());
 
       expect(result).toEqual({ resolved: false, resolution: 'hibernating' });
-      expect(mockSetProjectHibernation).toHaveBeenCalledWith(
-        '/tmp/test',
-        2,
-        new Date(now + 30 * 60 * 1000).toISOString()
+      expect(mockRecordProviderBackoff).toHaveBeenCalledWith(
+        'claude',
+        now + 30 * 60 * 1000,
+        expect.any(String),
+        'capacity_exhaustion'
       );
     });
 

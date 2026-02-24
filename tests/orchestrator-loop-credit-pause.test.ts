@@ -37,6 +37,14 @@ const mockExecSync = jest.fn();
 
 // ── Module mocks ────────────────────────────────────────────────────────
 
+jest.unstable_mockModule('../src/runners/global-db.js', () => ({
+  withGlobalDatabase: async (cb: any) => cb({ prepare: () => ({ get: () => ({}), all: () => [], run: () => ({}) }), close: () => {}, exec: () => {} } as any),
+  openGlobalDatabase: () => ({ db: {}, close: () => {} }),
+  recordProviderBackoff: jest.fn(),
+  getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
+  clearProviderBackoff: jest.fn(),
+}));
+
 jest.unstable_mockModule('../src/database/connection.js', () => ({
   withDatabase: async (path: any, cb: any) => cb(mockOpenDatabase(path).db),
   openDatabase: mockOpenDatabase,
