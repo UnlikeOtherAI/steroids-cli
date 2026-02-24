@@ -205,7 +205,7 @@ OPTIONS:
     process.exit(2);
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     // Find task by ID or title
     let task = getTask(db, taskIdentifier);
     if (!task) {
@@ -281,7 +281,7 @@ OPTIONS:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     if (values.stale) {
       // Show stale disputes
       const summary = getStaleDisputeSummary(db, DEFAULT_TIMEOUT_DAYS);
@@ -352,7 +352,7 @@ OPTIONS:
 
   const disputeId = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const dispute = getDispute(db, disputeId);
 
     if (!dispute) {
@@ -459,7 +459,7 @@ EXAMPLES:
 
   const disputeId = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const result = resolve(db, {
       disputeId,
       decision: values.decision,
@@ -526,7 +526,7 @@ EXAMPLES:
 
   const taskIdentifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     // Find task by ID or title
     let task = getTask(db, taskIdentifier);
     if (!task) {

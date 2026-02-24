@@ -110,12 +110,12 @@ Under the new model:
   - Create a robust Regex `SignalParser` utility to extract `STATUS: REVIEW` and `DECISION: APPROVE|REJECT|DISPUTE|SKIP`.
   - Ensure it ignores signals inside Markdown code blocks (\`\`\`).
   - Delete `ajv` schema validation from orchestrator logic.
-- [ ] **TASK 3: Update LLM Prompts**
-  - Strip all ````json` formatting requirements from `coder.ts` and `reviewer.ts`.
+- [x] **TASK 3: Update LLM Prompts**
+  - Strip all \`\`\`json\` formatting requirements from `coder.ts` and `reviewer.ts`.
   - Instruct the Coder to output `STATUS: REVIEW` and nothing else for routing.
   - Instruct the Reviewer to output `DECISION: [STATUS]` and use `### Follow Up Tasks` bullet points.
   - Add the "Hard Override" constraint preventing LLMs from running `git commit`/`git push`.
-- [ ] **TASK 4: Shallow Clones**
+- [x] **TASK 4: Shallow Clones**
   - Update `src/parallel/clone.ts` to use `git clone --depth 1 --no-tags --single-branch`.
 - [ ] **TASK 5: Coder Phase (Shadow Commits)**
   - Modify `src/commands/loop-phases.ts` (`runCoderPhase`).

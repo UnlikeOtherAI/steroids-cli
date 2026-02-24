@@ -157,7 +157,7 @@ OPTIONS:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const sections = listSections(db);
 
     if (flags.json) {
@@ -282,7 +282,7 @@ EXAMPLES:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     // Filter sections if --section specified
     let sections = listSections(db);
     if (values.section) {

@@ -227,7 +227,7 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
   mkdirSync(resolve(workspacePath, '..'), { recursive: true });
 
   let usedLocalClone = isSameFileSystem(projectPath, workspaceRoot);
-  const cloneArgs = ['clone', ...(usedLocalClone ? ['--local'] : []), projectPath, workspacePath];
+  const cloneArgs = ['clone', '--depth', '1', '--no-tags', '--single-branch', ...(usedLocalClone ? ['--local'] : []), projectPath, workspacePath];
 
   try {
     // hardcoded command, no user input
@@ -238,7 +238,7 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
       rmSync(workspacePath, { recursive: true, force: true });
       usedLocalClone = false;
       try {
-        execFileSync('git', ['clone', projectPath, workspacePath], { cwd: process.cwd(), stdio: 'inherit' });
+        execFileSync('git', ['clone', '--depth', '1', '--no-tags', '--single-branch', projectPath, workspacePath], { cwd: process.cwd(), stdio: 'inherit' });
       } catch (retryError: unknown) {
         rmSync(workspacePath, { recursive: true, force: true });
         throw new WorkspaceCloneError('Git clone failed', retryError);

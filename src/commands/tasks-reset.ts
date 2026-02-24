@@ -48,7 +48,7 @@ DESCRIPTION:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let tasksToReset: Task[] = [];
 
     if (positionals.length > 0) {

@@ -338,7 +338,7 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
   }
 
   // Non-global query: use current project only
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let sectionId: string | undefined;
 
     if (values.section) {
@@ -442,7 +442,7 @@ EXAMPLE:
 
   const outputJson = values.json || globalFlags?.json;
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const statuses: TaskStatus[] = [
       'pending',
       'in_progress',
@@ -527,7 +527,7 @@ EXAMPLES:
   const showFullLogs = values['logs-full'];
   const limit = parseInt(values.limit as string, 10) || 5;
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -770,7 +770,7 @@ EXAMPLES:
 
   const title = positionals.join(' ');
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let section;
     if (values.feedback) {
       section = getOrCreateFeedbackSection(db);
@@ -892,7 +892,7 @@ EXAMPLES:
 
   const identifier = positionals.join(' ');
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let task = getTask(db, identifier);
     if (!task) task = getTaskByTitle(db, identifier);
 
@@ -1092,7 +1092,7 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1165,7 +1165,7 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1255,7 +1255,7 @@ EXAMPLES:
   const identifier = positionals[0];
   const newStatus = values.partial ? 'partial' : 'skipped';
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1332,7 +1332,7 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1403,7 +1403,7 @@ EXAMPLES:
   const identifier = positionals[0];
   const actor = values.actor ?? 'human:cli';
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     let task = getTask(db, identifier);
     if (!task) task = getTaskByTitle(db, identifier);
 

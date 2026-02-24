@@ -58,7 +58,7 @@ GLOBAL OPTIONS:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const section = createSection(db, name, position);
 
     if (flags.json) {
@@ -137,7 +137,7 @@ EXAMPLES:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const section = getSection(db, sectionIdInput);
     if (!section) {
       throw sectionNotFoundError(sectionIdInput);
@@ -200,7 +200,7 @@ EXAMPLES:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const section = getSection(db, sectionIdInput);
     if (!section) {
       throw sectionNotFoundError(sectionIdInput);
@@ -269,7 +269,7 @@ EXAMPLES:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const section = getSection(db, sectionIdInput);
     if (!section) {
       throw sectionNotFoundError(sectionIdInput);

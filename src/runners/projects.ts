@@ -251,18 +251,25 @@ export function disableProject(path: string): void {
 }
 
 /**
- * Enable a project (include in wakeup)
- *
- * @param path - Project path to enable
+ * Remove deleted projects from the database
  */
-export function enableProject(path: string): void {
-  const normalizedPath = normalizePath(path);
-  withGlobalDatabase((db) => {
-    db.prepare('UPDATE projects SET enabled = 1 WHERE path = ?').run(normalizedPath);
-  });
-}
+export function pruneProjects(): number {
+  return withGlobalDatabase((db) => {
+    const projects = db.prepare('SELECT path FROM projects').all() as Array<{ path: string }>;
+    let removed = 0;
 
-return removed;
+    for (const project of projects) {
+      const steroidsDir = join(project.path, '.steroids');
+      const steroidsDb = join(steroidsDir, 'steroids.db');
+
+      // Remove if project directory or .steroids directory doesn't exist
+      if (!existsSync(project.path) || !existsSync(steroidsDir) || !existsSync(steroidsDb)) {
+        db.prepare('DELETE FROM projects WHERE path = ?').run(project.path);
+        removed++;
+      }
+    }
+
+    return removed;
   });
 }
 

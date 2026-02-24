@@ -123,7 +123,7 @@ async function listLocks(args: string[], flags: GlobalFlags): Promise<void> {
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const taskLocks = values.type === 'section' ? [] : listTaskLocks(db);
     const sectionLocks = values.type === 'task' ? [] : listSectionLocks(db);
 
@@ -219,7 +219,7 @@ OPTIONS:
 
   const id = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     // Try task lock first, then section lock
     const taskLock = getTaskLock(db, id);
     const sectionLock = taskLock ? null : getSectionLock(db, id);
@@ -328,7 +328,7 @@ NOTE:
 
   const id = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     // Try task lock first, then section lock
     const taskLock = getTaskLock(db, id);
     const sectionLock = taskLock ? null : getSectionLock(db, id);
@@ -403,7 +403,7 @@ OPTIONS:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const result = cleanupAllExpiredLocks(db, { dryRun: values['dry-run'] });
 
     if (values.json) {

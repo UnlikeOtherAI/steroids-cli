@@ -114,7 +114,7 @@ class CoderRunner extends BaseRunner {
         );
       } catch (err: any) {
         if (err instanceof SessionNotFoundError) {
-          console.warn(`Session not found for resume (${resumeSessionId?.substring(0, 8)}) — invalidating session and retrying fresh`);
+          console.warn(`Session not found for resume (${(resumeSessionId as string | null)?.substring(0, 8)}) — invalidating session and retrying fresh`);
           sessionNotFound = true;
           result = { success: false, exitCode: 1, stdout: '', stderr: '', duration: 0, timedOut: false };
         } else {
