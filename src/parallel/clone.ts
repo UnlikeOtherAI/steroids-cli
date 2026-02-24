@@ -3,6 +3,10 @@
  */
 
 import { createHash } from 'node:crypto';
+
+import { loadConfigFile, type SteroidsConfig } from '../config/loader.js';
+import { getSkillContent } from '../commands/skills.js';
+
 import { execFileSync } from 'node:child_process';
 import {
   accessSync,
@@ -14,6 +18,7 @@ import {
   rmSync,
   statfsSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -269,7 +274,31 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
     throw new WorkspaceCloneError('Failed to create .steroids symlink', error);
   }
 
+
   enforceWorkspaceDependencyIsolation(workspacePath);
+
+  // Copy assigned skills to the workspace clone
+  try {
+    const configPath = resolve(projectPath, 'steroids.config.yaml');
+    if (existsSync(configPath)) {
+      const config = loadConfigFile(configPath) as SteroidsConfig;
+      if (config.skills && config.skills.length > 0) {
+        const skillsDir = resolve(workspacePath, '.steroids', 'skills');
+        if (!existsSync(skillsDir)) {
+          mkdirSync(skillsDir, { recursive: true });
+        }
+        for (const skill of config.skills) {
+          const skillContent = getSkillContent(skill);
+          if (skillContent) {
+            writeFileSync(resolve(skillsDir, `${skill}.md`), skillContent, 'utf-8');
+          }
+        }
+      }
+    }
+  } catch (error) {
+    // Non-fatal, just log it or ignore
+    console.error('Failed to copy skills to workspace clone:', error);
+  }
 
   return {
     projectPath,

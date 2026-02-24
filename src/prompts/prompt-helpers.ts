@@ -5,6 +5,10 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { loadConfigFile, type SteroidsConfig } from '../config/loader.js';
+import { getSkillContent } from '../commands/skills.js';
+
 import type { Task, RejectionEntry } from '../database/queries.js';
 
 /**
@@ -357,4 +361,41 @@ Focus ONLY on whether THIS task's scope is correctly implemented.
 ${lines.join('\n')}
 
 `;
+}
+
+
+/**
+ * Load assigned skills and return them as a formatted section
+ */
+export function buildSkillsSection(projectPath: string): string {
+  try {
+    const configPath = join(projectPath, 'steroids.config.yaml');
+    if (!existsSync(configPath)) return '';
+    
+    const config = loadConfigFile(configPath) as SteroidsConfig;
+    if (!config.skills || config.skills.length === 0) return '';
+    
+    const loadedSkills: string[] = [];
+    for (const skill of config.skills) {
+      const content = getSkillContent(skill);
+      if (content) {
+        loadedSkills.push(`### Skill: ${skill}\n\n${content}`);
+      }
+    }
+    
+    if (loadedSkills.length === 0) return '';
+    
+    return `\n---
+
+## Assigned Project Skills
+
+The following skills and guidelines have been explicitly assigned to this project. 
+You MUST adhere to them strictly during this task.
+
+${loadedSkills.join('\n\n')}
+
+`;
+  } catch {
+    return '';
+  }
 }

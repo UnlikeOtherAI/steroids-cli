@@ -35,6 +35,7 @@ import { aiCommand } from './commands/ai.js';
 import { webCommand } from './commands/web.js';
 import { mergeCommand } from './commands/merge.js';
 import { workspacesCommand } from './commands/workspaces.js';
+import { skillsCommand } from './commands/skills.js';
 import { checkForNewVersion } from './cli/version-check.js';
 
 // Read version from package.json - search up from dist folder
@@ -91,6 +92,7 @@ COMMANDS:
   merge             Merge completed parallel workstreams
   workspaces        Manage parallel workspace clones
   locks             Manage task and section locks
+  skills            Manage custom AI skills and assignments
 
 GLOBAL OPTIONS:
   -h, --help        Show help
@@ -242,6 +244,9 @@ async function main(): Promise<void> {
         break;
       case 'workspaces':
         await workspacesCommand(commandArgs, flags);
+        break;
+      case 'skills':
+        await skillsCommand(commandArgs, flags);
         break;
       default:
         if (flags.json) {

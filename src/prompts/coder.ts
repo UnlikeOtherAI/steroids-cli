@@ -9,6 +9,7 @@ import {
   buildFileScopeSection,
   buildFileAnchorSection,
   formatRejectionHistoryForCoder,
+  buildSkillsSection,
 } from './prompt-helpers.js';
 import { getRecentCommits } from '../git/status.js';
 
@@ -120,7 +121,7 @@ You are a CODER in an automated task execution system. Your job is to autonomous
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
 **CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
-${fileScopeSection}${fileAnchorSection}
+${fileScopeSection}${fileAnchorSection}${buildSkillsSection(projectPath)}
 ---
 
 ## Specification

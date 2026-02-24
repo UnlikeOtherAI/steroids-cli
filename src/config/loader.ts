@@ -24,6 +24,7 @@ export interface ReviewPolicy {
 }
 
 export interface SteroidsConfig {
+  skills?: string[];
   ai?: {
     orchestrator?: {
       provider?: ProviderName;
