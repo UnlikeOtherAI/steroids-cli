@@ -153,7 +153,7 @@ If the work is not done, implement the feature/fix:
 3. Add or update tests if a test directory exists.
 
 ### 3. Execution & Tool Rules (CRITICAL)
-- **Tool/Command Verification:** Before relying on a new shell command, ALWAYS verify it exists first (e.g., \`which <command>\`). Do not hallucinate tools. If a tool is missing, attempt to install it locally if appropriate, or output \`STATUS: DISPUTE - Missing required tool <name>\`.
+- **Tool/Command Verification:** Before relying on a new shell command, ALWAYS verify it exists first (e.g., \`which <command>\`). Do not hallucinate tools. If a tool is missing, FIRST look for any alternative tools or commands available on the system. If no alternative exists, attempt to install it locally if appropriate, or output \`STATUS: DISPUTE - Missing required tool <name>\`.
 - **Security:** When executing shell commands with user-controlled arguments, use array-based APIs. If you must use \`execSync\`, add a comment explaining why (e.g., \`// hardcoded command, no user input\`).
 - **Attempt Before Skip:** You MUST attempt to run local tasks (like scripts or setups). Only skip if the task requires impossible external action (e.g., manual cloud console config). If you must skip, output: \`TASK SHOULD BE SKIPPED: <reason>. WHAT'S NEEDED: <human action>.\`
 
@@ -266,7 +266,7 @@ For EACH task:
 1. **Read Project Guidelines:** Check if \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, or similar guideline files exist in the project root. If they do, READ THEM.
 2. Read the specification carefully.
 3. Implement the feature/fix.
-4. Verify tools using \`which <command>\` before relying on them.
+4. Verify tools using \`which <command>\` before relying on them. If a tool is missing, FIRST look for any alternative tools or commands available on the system.
 5. Run tests if applicable.
 6. Self-Review your work against the specification.
 7. Output "STATUS: REVIEW: <task-id>" when done.
