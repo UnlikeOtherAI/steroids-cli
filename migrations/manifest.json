@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 18,
+  "latestDbVersion": 19,
   "migrations": [
     {
       "id": 1,
@@ -143,6 +143,14 @@
       "name": "018_expand_audit_columns",
       "file": "018_expand_audit_columns.sql",
       "description": "Add explicit columns to audit table to replace string parsing of notes",
+      "checksum": "",
+      "cliVersion": "0.9.43"
+    },
+    {
+      "id": 19,
+      "name": "019_add_task_start_sha",
+      "file": "019_add_task_start_sha.sql",
+      "description": "Add start_commit_sha to tasks table to support End-State Squashing",
       "checksum": "",
       "cliVersion": "0.9.43"
     }

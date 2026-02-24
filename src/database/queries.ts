@@ -39,6 +39,7 @@ export interface Task {
   file_line: number | null;
   file_commit_sha: string | null;
   file_content_hash: string | null;
+  start_commit_sha: string | null;
   rejection_count: number;
   failure_count?: number;
   last_failure_at?: string | null;
@@ -424,13 +425,13 @@ export function createTask(
   const status = options.status ?? 'pending';
 
   db.prepare(
-    `INSERT INTO tasks (id, title, status, section_id, source_file, file_path, file_line, file_commit_sha, file_content_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO tasks (id, title, status, section_id, source_file, file_path, file_line, file_commit_sha, file_content_hash, start_commit_sha)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, title, status,
     options.sectionId ?? null, options.sourceFile ?? null,
     options.filePath ?? null, options.fileLine ?? null,
-    options.fileCommitSha ?? null, options.fileContentHash ?? null
+    options.fileCommitSha ?? null, options.fileContentHash ?? null, null
   );
 
   // Add audit entry for creation
@@ -446,6 +447,7 @@ export function createTask(
     file_line: options.fileLine ?? null,
     file_commit_sha: options.fileCommitSha ?? null,
     file_content_hash: options.fileContentHash ?? null,
+    start_commit_sha: null,
     rejection_count: 0,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -534,6 +536,14 @@ export function listTasks(
     t.created_at`;
 
   return db.prepare(sql).all(...params) as Task[];
+}
+
+export function updateTaskStartSha(
+  db: Database.Database,
+  taskId: string,
+  startCommitSha: string
+): void {
+  db.prepare('UPDATE tasks SET start_commit_sha = ?, updated_at = datetime("now") WHERE id = ?').run(startCommitSha, taskId);
 }
 
 export function updateTaskStatus(

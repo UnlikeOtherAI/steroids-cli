@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     file_line INTEGER,
     file_commit_sha TEXT,
     file_content_hash TEXT,
+    start_commit_sha TEXT,
     rejection_count INTEGER NOT NULL DEFAULT 0,
     failure_count INTEGER NOT NULL DEFAULT 0,
     last_failure_at TEXT,
@@ -249,4 +250,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (15, '015_add_foll
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (16, '016_add_invocation_activity_timestamp', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (17, '017_add_invocation_runner_id', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (18, '018_expand_audit_columns', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (19, '019_add_task_start_sha', 'builtin');
 `;
