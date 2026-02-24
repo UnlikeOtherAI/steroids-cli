@@ -103,6 +103,11 @@ When a workflow fails, do **not** patch around it with additional fallbacks befo
 - Avoid layering retries/fallbacks that mask defects and create loops
 - Use fallback behavior only as a temporary containment strategy with an explicit follow-up root-cause fix task
 
+### Determinism First (CRITICAL)
+
+**Keep the whole system deterministic without any fragile parsing.** 
+If you must implement anything that is non-deterministic (such as regex parsing of LLM string outputs, fuzzy matching, or complex nested fallback layers), you MUST put deep architectural thought into it. **Any non-deterministic architectural additions must usually be explicitly approved by the user** before implementation.
+
 ### File References
 - Always read CLAUDE.md and AGENTS.md before starting work
 - Follow the coding standards in CLAUDE.md strictly

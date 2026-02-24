@@ -22,6 +22,11 @@ When debugging or fixing failures, do **not** stack additional fallbacks before 
 - Avoid fallback layering that masks deterministic bugs and creates retry loops
 - If temporary fallback is unavoidable, mark it as short-term containment and schedule immediate root-cause removal
 
+## Determinism First Policy (CRITICAL)
+
+**Keep the whole system deterministic without any fragile parsing.** 
+If you must implement anything that is non-deterministic (such as regex parsing of LLM string outputs, fuzzy matching, or complex nested fallback layers), you MUST put deep architectural thought into it. **Any non-deterministic architectural additions must usually be explicitly approved by the user** before implementation.
+
 ## AI Providers (CRITICAL)
 
 **OpenAI's development tool CLI is Codex.** There is no separate `openai` CLI.

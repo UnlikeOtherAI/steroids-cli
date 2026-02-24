@@ -20,6 +20,11 @@ The following files are the **absolute source of truth** for architectural stand
 - Fix the deterministic root cause first; use fallback only as temporary containment with a planned removal task.
 - Reject solutions that rely primarily on retries/fallback chains instead of repairing broken session/state invariants.
 
+### 1.2 Determinism First (CRITICAL)
+- **Keep the whole system deterministic without any fragile parsing.**
+- If you must implement anything that is non-deterministic (like regex parsing of LLM string outputs, or complex nested fallback layers), you MUST put deep architectural thought into it.
+- **Any non-deterministic architectural additions must usually be explicitly approved by the user** before implementation.
+
 ### 2. Documentation Alignment
 - Every feature implementation is incomplete until `README.md`, `AGENTS.md`, and the CLI's internal `CONFIG_SCHEMA` are synchronized with the changes.
 - Always verify the "Help" strings in `src/commands/` after adding new flags or subcommands.
