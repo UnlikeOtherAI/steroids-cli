@@ -153,13 +153,13 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
     *   Implement a button pinned to the bottom of the viewer that executes `scrollTo({ top: 0 })` to instantly return to the top.
 
 ### Acceptance Criteria (Section 6)
-- [ ] A dedicated "System Logs" link is visible and functional within the main left-hand Sidebar.
-- [ ] Users can successfully select a project, which then dynamically lists the available log files from `.steroids/logs/` and `.steroids/invocations/`.
-- [ ] The raw text content of the selected log is accurately displayed within a scrolling container that handles large outputs efficiently.
-- [ ] Clicking the "Copy to Clipboard" button successfully places the entire log contents into the system clipboard.
-- [ ] Clicking the top scroll button smoothly or instantly scrolls the log container fully to the bottom.
-- [ ] Clicking the bottom scroll button smoothly or instantly scrolls the log container fully back to the top.
-- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
+- [x] A dedicated "System Logs" link is visible and functional within the main left-hand Sidebar.
+- [x] Users can successfully select a project, which then dynamically lists the available log files from `.steroids/logs/` and `.steroids/invocations/`.
+- [x] The raw text content of the selected log is accurately displayed within a scrolling container that handles large outputs efficiently.
+- [x] Clicking the "Copy to Clipboard" button successfully places the entire log contents into the system clipboard.
+- [x] Clicking the top scroll button smoothly or instantly scrolls the log container fully to the bottom.
+- [x] Clicking the bottom scroll button smoothly or instantly scrolls the log container fully back to the top.
+- [x] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 

@@ -5,6 +5,7 @@ import {
   Cog6ToothIcon,
   FolderIcon,
   PlayIcon,
+  DocumentTextIcon,
   StopIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
@@ -43,6 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
     { to: '/runners', icon: PlayIcon, label: 'Runners' },
     { to: '/projects', icon: FolderIcon, label: 'Projects' },
+    { to: '/logs', icon: DocumentTextIcon, label: 'System Logs' },
     { to: '/settings', icon: Cog6ToothIcon, label: 'Settings' },
   ];
 

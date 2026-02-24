@@ -5,8 +5,8 @@
 
 import { Router, Request, Response } from 'express';
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, statSync, realpathSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
 import {
   getRegisteredProjects,
   registerProject,
@@ -506,6 +506,111 @@ router.post('/projects/open', (req: Request, res: Response) => {
       success: false, error: 'Failed to open project folder',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
+  }
+});
+
+/**
+ * GET /api/projects/logs
+ * List all available log files for a project
+ */
+router.get('/projects/logs', (req: Request, res: Response) => {
+  try {
+    const projectPath = req.query.path as string;
+    if (!projectPath) {
+      res.status(400).json({ success: false, error: 'Path query parameter is required' });
+      return;
+    }
+    
+    if (!isValidProjectPath(projectPath)) {
+      res.status(403).json({ success: false, error: 'Invalid project path' });
+      return;
+    }
+
+    const logsDir = join(projectPath, '.steroids', 'logs');
+    const invocationsDir = join(projectPath, '.steroids', 'invocations');
+    
+    const logs: { name: string; path: string; size: number; mtime: Date; type: 'log' | 'invocation' }[] = [];
+
+    [ { dir: logsDir, type: 'log' as const }, { dir: invocationsDir, type: 'invocation' as const } ].forEach(({ dir, type }) => {
+      if (existsSync(dir)) {
+        const files = readdirSync(dir);
+        for (const file of files) {
+          if (file.endsWith('.log') || file.endsWith('.jsonl') || file.endsWith('.txt')) {
+             const filePath = join(dir, file);
+             const stats = statSync(filePath);
+             if (stats.isFile()) {
+               logs.push({
+                 name: file,
+                 path: relative(projectPath, filePath),
+                 size: stats.size,
+                 mtime: stats.mtime,
+                 type
+               });
+             }
+          }
+        }
+      }
+    });
+
+    // Sort by modified time, newest first
+    logs.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+
+    res.json({ success: true, logs });
+  } catch (error) {
+    console.error('Error listing project logs:', error);
+    res.status(500).json({ success: false, error: 'Failed to list project logs' });
+  }
+});
+
+/**
+ * GET /api/projects/logs/content
+ * Get the content of a specific log file
+ */
+router.get('/projects/logs/content', (req: Request, res: Response) => {
+  try {
+    const projectPath = req.query.path as string;
+    const logFile = req.query.file as string;
+
+    if (!projectPath || !logFile) {
+      res.status(400).json({ success: false, error: 'Path and file query parameters are required' });
+      return;
+    }
+
+    if (!isValidProjectPath(projectPath)) {
+      res.status(403).json({ success: false, error: 'Invalid project path' });
+      return;
+    }
+
+    const realProjectPath = realpathSync(projectPath);
+    let fullLogPath = resolve(realProjectPath, logFile);
+
+    if (!existsSync(fullLogPath)) {
+      res.status(404).json({ success: false, error: 'Log file not found' });
+      return;
+    }
+
+    fullLogPath = realpathSync(fullLogPath);
+
+    // Security (Path Traversal Guard): Strict canonicalization and root path verification
+    if (!fullLogPath.startsWith(realProjectPath + sep)) {
+       res.status(403).json({ success: false, error: 'Access denied: Path traversal detected' });
+       return;
+    }
+    
+    // Only allow access to .steroids/logs and .steroids/invocations
+    const allowedLogsDir = join(realProjectPath, '.steroids', 'logs') + sep;
+    const allowedInvocationsDir = join(realProjectPath, '.steroids', 'invocations') + sep;
+
+    if (!fullLogPath.startsWith(allowedLogsDir) && !fullLogPath.startsWith(allowedInvocationsDir)) {
+       res.status(403).json({ success: false, error: 'Access denied: Only log directories are allowed' });
+       return;
+    }
+
+    // Since files can be large, we use sendFile
+    res.sendFile(fullLogPath);
+  } catch (error) {
+    console.error('Error reading log file:', error);
+    res.status(500).json({ success: false, error: 'Failed to read log file' });
   }
 });
 

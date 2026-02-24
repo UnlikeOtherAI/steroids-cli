@@ -7,6 +7,7 @@ import { RunnersPage } from './pages/RunnersPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectTasksPage } from './pages/ProjectTasksPage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
+import { SystemLogsPage } from './pages/SystemLogsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AppShell } from './components/layouts';
 import { AISetupModal } from './components/onboarding/AISetupModal';
@@ -74,6 +75,7 @@ function App() {
       case '/': return 'Dashboard';
       case '/projects': return 'Projects';
       case '/runners': return 'Runners';
+      case '/logs': return 'System Logs';
       case '/settings': return 'Settings';
       default: return 'Dashboard';
     }
@@ -127,6 +129,7 @@ function App() {
             <Route path="/activity" element={<ActivityListPage />} />
             <Route path="/task/:taskId" element={<TaskDetailPage />} />
             <Route path="/runners" element={<RunnersPage />} />
+            <Route path="/logs" element={<SystemLogsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </AppShell>
