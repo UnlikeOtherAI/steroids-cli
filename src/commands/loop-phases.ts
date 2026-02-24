@@ -218,7 +218,49 @@ async function checkNonRetryableProviderFailure(
     classification === undefined ? await classifyProviderResult(result, role, projectPath, reviewerConfig) : classification;
   if (!resolvedClassification) return null;
 
-  if (resolvedClassification.type === 'model_not_found' || resolvedClassification.type === 'context_exceeded') {
+  if (
+    resolvedClassification.type === 'model_not_found' ||
+    resolvedClassification.type === 'context_exceeded'
+  ) {
+    return {
+      type: resolvedClassification.type,
+      provider: providerName,
+      model: modelName,
+      message: resolvedClassification.message,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Check for policy or safety violations
+ */
+export async function checkSafetyViolation(
+  result: InvokeResult,
+  role: 'coder' | 'reviewer',
+  projectPath: string,
+  reviewerConfig?: ReviewerConfig,
+  classification?: ProviderError | null
+): Promise<{ type: string; provider: string; model: string; message: string } | null> {
+  if (result.success) return null;
+
+  const config = loadConfig(projectPath);
+  const roleConfig = reviewerConfig || config.ai?.[role];
+  const providerName = roleConfig?.provider;
+  const modelName = roleConfig?.model;
+
+  if (!providerName || !modelName) return null;
+
+  const resolvedClassification =
+    classification === undefined ? await classifyProviderResult(result, role, projectPath, reviewerConfig) : classification;
+  if (!resolvedClassification) return null;
+
+  if (
+    resolvedClassification.type === 'safety_violation' ||
+    resolvedClassification.type === 'policy_violation' ||
+    resolvedClassification.type === 'invalid_prompt'
+  ) {
     return {
       type: resolvedClassification.type,
       provider: providerName,
@@ -564,6 +606,15 @@ export async function runCoderPhase(
     coderConfigSnapshot,
     classification
   );
+  
+  const safetyViolation = await checkSafetyViolation(
+    coderResult,
+    'coder',
+    projectPath,
+    coderConfigSnapshot,
+    classification
+  );
+
   // Check for credit/rate-limit classification (once).
   const creditCheck = await checkCreditExhaustion(
     coderResult,
@@ -572,11 +623,35 @@ export async function runCoderPhase(
     coderConfigSnapshot,
     classification
   );
+
   if (hardFailureFromKnownTypes) {
     const reason = `Task failed: provider ${hardFailureFromKnownTypes.provider}/${hardFailureFromKnownTypes.model} returned non-recoverable error (${hardFailureFromKnownTypes.type}) during coder phase: ${hardFailureFromKnownTypes.message}`;
     updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
     return;
   }
+  
+  if (safetyViolation) {
+    // Check if we've exhausted our 2 attempts to resolve safety violations
+    const pastRejections = getTaskRejections(db, task.id);
+    const safetyRejections = pastRejections.filter(r => r.notes?.includes('[safety_violation]')).length;
+    
+    if (safetyRejections >= 2) {
+      const reason = `Task failed: Provider safety/policy violation could not be automatically resolved after 2 attempts. Error: ${safetyViolation.message}`;
+      updateTaskStatus(db, task.id, 'disputed', 'orchestrator', reason);
+      if (!jsonMode) {
+        console.log(`\nTask disputed: Provider safety/policy violation could not be resolved.`);
+      }
+      return;
+    }
+    
+    // Inject the safety violation as a rejection so the orchestrator attempts to resolve it on the next loop
+    rejectTask(db, task.id, `[safety_violation] The provider blocked the request due to a safety/policy violation: ${safetyViolation.message}\n\nPlease analyze the task description and previous outputs, and adjust your approach or prompt to comply with safety policies. You have ${2 - safetyRejections} attempt(s) remaining.`, 'orchestrator', 'coder');
+    if (!jsonMode) {
+      console.log(`\n⟳ Coder hit safety violation. Rejected back to orchestrator for automatic resolution (${safetyRejections + 1}/2 attempts).`);
+    }
+    return;
+  }
+
   if (creditCheck) {
     return creditCheck;
   }
@@ -1106,6 +1181,27 @@ export async function runReviewerPhase(
         updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
         return;
       }
+      
+      const safetyViolation = await checkSafetyViolation(res as any, 'reviewer', projectPath, reviewerConfigs[i], classification);
+      if (safetyViolation) {
+        const pastRejections = getTaskRejections(db, task.id);
+        const safetyRejections = pastRejections.filter(r => r.notes?.includes('[safety_violation]')).length;
+        
+        if (safetyRejections >= 2) {
+          const reason = `Task failed: Provider safety/policy violation could not be automatically resolved after 2 attempts. Error: ${safetyViolation.message}`;
+          updateTaskStatus(db, task.id, 'disputed', 'orchestrator', reason);
+          if (!jsonMode) {
+            console.log(`\nTask disputed: Provider safety/policy violation could not be resolved.`);
+          }
+          return;
+        }
+        
+        rejectTask(db, task.id, `[safety_violation] The provider blocked the request due to a safety/policy violation: ${safetyViolation.message}\n\nPlease analyze the task description and previous outputs, and adjust your approach or prompt to comply with safety policies. You have ${2 - safetyRejections} attempt(s) remaining.`, 'orchestrator', 'reviewer');
+        if (!jsonMode) {
+          console.log(`\n⟳ Reviewer hit safety violation. Rejected back to orchestrator for automatic resolution (${safetyRejections + 1}/2 attempts).`);
+        }
+        return;
+      }
 
       const creditCheck = await checkCreditExhaustion(res as any, 'reviewer', projectPath, reviewerConfigs[i], classification);
       if (creditCheck) {
@@ -1205,6 +1301,27 @@ export async function runReviewerPhase(
     if (hardFailure) {
       const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during reviewer phase: ${hardFailure.message}`;
       updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
+      return;
+    }
+    
+    const safetyViolation = await checkSafetyViolation(reviewerResult as any, 'reviewer', projectPath, undefined, classification);
+    if (safetyViolation) {
+      const pastRejections = getTaskRejections(db, task.id);
+      const safetyRejections = pastRejections.filter(r => r.notes?.includes('[safety_violation]')).length;
+      
+      if (safetyRejections >= 2) {
+        const reason = `Task failed: Provider safety/policy violation could not be automatically resolved after 2 attempts. Error: ${safetyViolation.message}`;
+        updateTaskStatus(db, task.id, 'disputed', 'orchestrator', reason);
+        if (!jsonMode) {
+          console.log(`\nTask disputed: Provider safety/policy violation could not be resolved.`);
+        }
+        return;
+      }
+      
+      rejectTask(db, task.id, `[safety_violation] The provider blocked the request due to a safety/policy violation: ${safetyViolation.message}\n\nPlease analyze the task description and previous outputs, and adjust your approach or prompt to comply with safety policies. You have ${2 - safetyRejections} attempt(s) remaining.`, 'orchestrator', 'reviewer');
+      if (!jsonMode) {
+        console.log(`\n⟳ Reviewer hit safety violation. Rejected back to orchestrator for automatic resolution (${safetyRejections + 1}/2 attempts).`);
+      }
       return;
     }
 

@@ -27,6 +27,9 @@ jest.unstable_mockModule('../src/runners/global-db.js', () => ({
   recordProviderBackoff: jest.fn(),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
   clearProviderBackoff: jest.fn(),
+
+  getDaemonActiveStatus: jest.fn().mockReturnValue(true),
+  setDaemonActiveStatus: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/config/loader.js', () => ({

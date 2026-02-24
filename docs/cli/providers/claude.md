@@ -99,6 +99,14 @@ output_tokens: 342
 3. **API key vs OAuth confusion** — If `ANTHROPIC_API_KEY` is in the environment, Claude uses it instead of OAuth. Steroids strips this via `getSanitizedCliEnv()`.
 4. **Stream-json result event** — The `result` event's `result` field contains the final text. Steroids uses this as the definitive stdout, overriding streamed text.
 
+## Root-Cause Policy (CRITICAL)
+
+Do not stack fallbacks to mask deterministic Claude integration failures.
+
+- Identify and fix the root cause first (auth/session lifecycle, resume contract, prompt/parser mismatch)
+- Treat fallbacks only as short-term containment with explicit follow-up removal
+- Validate the underlying fix directly instead of adding retry/fallback layers
+
 ## Error Patterns
 
 | Pattern | Error Type | Retryable |

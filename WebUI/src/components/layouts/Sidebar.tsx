@@ -8,6 +8,8 @@ import {
   DocumentTextIcon,
   StopIcon,
   XMarkIcon,
+  BoltIcon,
+  PauseIcon,
 } from '@heroicons/react/24/outline';
 import { runnersApi } from '../../services/api';
 
@@ -39,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   const [cronInstalled, setCronInstalled] = useState<boolean | null>(null);
   const [lastWakeup, setLastWakeup] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [wakeupLoading, setWakeupLoading] = useState(false);
 
   const navItems = [
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
@@ -83,6 +86,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     }
   };
 
+  const handleWakeupNow = async () => {
+    if (wakeupLoading) return;
+    setWakeupLoading(true);
+    try {
+      await runnersApi.wakeupNow();
+      await fetchCronStatus();
+    } catch (err: any) {
+      console.error('Failed to trigger wakeup:', err);
+      if (err.message && err.message.includes('Too Many Requests')) {
+         alert('A wakeup cycle is already running.');
+      } else {
+         alert('Failed to trigger wakeup: ' + (err.message || 'Unknown error'));
+      }
+    } finally {
+      setWakeupLoading(false);
+    }
+  };
+
   return (
     <aside className="w-60 bg-sidebar flex flex-col h-full max-h-screen lg:rounded-l-xl">
       <div className="py-4 pr-4 flex items-center justify-between overflow-hidden">
@@ -115,6 +136,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
         ))}
       </nav>
       <div className="flex-shrink-0 px-4 pt-4 pb-[44px]">
+        {cronInstalled === false && (
+           <div className="mb-4 bg-orange-500/20 text-orange-200 text-xs font-bold px-3 py-2 rounded-lg text-center border border-orange-500/30 flex items-center justify-center gap-2">
+             <PauseIcon className="w-4 h-4" />
+             Daemon Paused
+           </div>
+        )}
+        <button
+          onClick={handleWakeupNow}
+          disabled={loading || wakeupLoading}
+          className="w-full flex items-center justify-center gap-2 py-2 px-4 mb-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <BoltIcon className="w-4 h-4" />
+          <span>Wake Up Runners</span>
+        </button>
         <button
           onClick={handleCronToggle}
           disabled={loading || cronInstalled === null}

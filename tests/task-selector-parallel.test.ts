@@ -241,7 +241,10 @@ describe('orchestrator loop and runner wiring', () => {
       getRegisteredProject: mockGetRegisteredProject,
       getRegisteredProjects: jest.fn().mockReturnValue([]),
       updateProjectStats: jest.fn(),
-    }));
+    
+  setProjectHibernation: jest.fn(),
+  clearProjectHibernation: jest.fn(),
+}));
     jest.unstable_mockModule('../src/commands/loop-phases.js', () => ({
       runCoderPhase: mockRunCoderPhase,
       runReviewerPhase: mockRunReviewerPhase,
@@ -269,7 +272,10 @@ describe('orchestrator loop and runner wiring', () => {
       getGlobalSteroidsDir: () => '/tmp/.steroids',
       getGlobalDbPath: () => '/tmp/.steroids/steroids.db',
       isGlobalDbInitialized: () => true,
-    }));
+    
+  getDaemonActiveStatus: jest.fn().mockReturnValue(true),
+  setDaemonActiveStatus: jest.fn(),
+}));
 
     const { runOrchestratorLoop: loadedRunLoop } = await import('../src/runners/orchestrator-loop.js');
     const { registerRunner: loadedRegisterRunner } = await import('../src/runners/daemon.js');

@@ -14,6 +14,12 @@ The following files are the **absolute source of truth** for architectural stand
 - You MUST ensure every CLI provider invocation remains isolated via the `setupIsolatedHome` paradigm to prevent concurrency race conditions.
 - You MUST honor the 5-minute backoff period for Gemini `RESOURCE_EXHAUSTED` (high demand) errors.
 
+### 1.1 Root-Cause First (CRITICAL)
+- Do **NOT** patch issues by piling on fallback logic before understanding the underlying defect.
+- For failures, first produce a root-cause analysis with concrete evidence (logs, code path, state assumptions).
+- Fix the deterministic root cause first; use fallback only as temporary containment with a planned removal task.
+- Reject solutions that rely primarily on retries/fallback chains instead of repairing broken session/state invariants.
+
 ### 2. Documentation Alignment
 - Every feature implementation is incomplete until `README.md`, `AGENTS.md`, and the CLI's internal `CONFIG_SCHEMA` are synchronized with the changes.
 - Always verify the "Help" strings in `src/commands/` after adding new flags or subcommands.

@@ -240,6 +240,13 @@ export const runnersApi = {
   async kill(runnerId: string): Promise<void> {
     await fetchJson(`/api/runners/${encodeURIComponent(runnerId)}/kill`, { method: 'POST' });
   },
+
+  /**
+   * Force an immediate wakeup cycle
+   */
+  async wakeupNow(): Promise<void> {
+    await fetchJson('/api/runners/wakeup/now', { method: 'POST' });
+  },
 };
 
 export const sectionsApi = {

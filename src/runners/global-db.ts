@@ -296,7 +296,13 @@ const GLOBAL_SCHEMA_V16_SQL = `
   );
 `;
 
-const GLOBAL_SCHEMA_VERSION = '16';
+const GLOBAL_SCHEMA_V17_SQL = `
+-- Add hibernation fields to projects table
+ALTER TABLE projects ADD COLUMN hibernating_until TEXT;
+ALTER TABLE projects ADD COLUMN hibernation_tier INTEGER DEFAULT 0;
+`;
+
+const GLOBAL_SCHEMA_VERSION = '17';
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
   const columns = db
@@ -479,6 +485,12 @@ function applyGlobalSchemaV15(db: Database.Database): void {
 
 function applyGlobalSchemaV16(db: Database.Database): void {
   db.exec(GLOBAL_SCHEMA_V16_SQL);
+}
+
+function applyGlobalSchemaV17(db: Database.Database): void {
+  if (!hasColumn(db, 'projects', 'hibernating_until')) {
+    db.exec(GLOBAL_SCHEMA_V17_SQL);
+  }
 }
 
 /**
@@ -686,6 +698,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     );
   } else if (currentVersion === '15') {
     applyGlobalSchemaV16(db);
+    applyGlobalSchemaV17(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -700,6 +713,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   applyGlobalSchemaV14(db);
   applyGlobalSchemaV15(db);
   applyGlobalSchemaV16(db);
+    applyGlobalSchemaV17(db);
   db.prepare(
     `INSERT INTO _global_schema (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
@@ -722,6 +736,41 @@ export function getGlobalSchemaVersion(db: Database.Database): string | null {
     return row?.value ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Get the global daemon active status
+ */
+export function getDaemonActiveStatus(): boolean {
+  try {
+    const { db, close } = openGlobalDatabase();
+    try {
+      const row = db
+        .prepare('SELECT value FROM _global_schema WHERE key = ?')
+        .get('is_active') as { value: string } | undefined;
+      // Default to true if not explicitly set to 'false'
+      return row?.value !== 'false';
+    } finally {
+      close();
+    }
+  } catch {
+    return true; // Default to active on error
+  }
+}
+
+/**
+ * Set the global daemon active status
+ */
+export function setDaemonActiveStatus(isActive: boolean): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare(
+      `INSERT INTO _global_schema (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    ).run('is_active', isActive ? 'true' : 'false');
+  } finally {
+    close();
   }
 }
 

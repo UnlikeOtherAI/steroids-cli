@@ -94,6 +94,15 @@ After a design document is reviewed and finalized:
 
 ## Agent Behavior Rules
 
+### Root-Cause First (CRITICAL)
+
+When a workflow fails, do **not** patch around it with additional fallbacks before understanding the underlying defect.
+
+- Diagnose and document the actual root cause first (with concrete log/code evidence)
+- Prefer fixing the broken invariant/mechanism directly
+- Avoid layering retries/fallbacks that mask defects and create loops
+- Use fallback behavior only as a temporary containment strategy with an explicit follow-up root-cause fix task
+
 ### File References
 - Always read CLAUDE.md and AGENTS.md before starting work
 - Follow the coding standards in CLAUDE.md strictly

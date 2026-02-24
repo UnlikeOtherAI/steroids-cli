@@ -117,6 +117,14 @@ From the `result` event:
 3. **gcloud fallback** — If `gemini` CLI is not found, Steroids checks for `gcloud`. The invocation template may need adjustment for gcloud.
 4. **RESOURCE_EXHAUSTED error** — Can mean either rate limiting OR credit exhaustion. Steroids' error classifier distinguishes between the two.
 
+## Root-Cause Policy (CRITICAL)
+
+Do not treat fallback logic as the primary fix path for Gemini integration issues.
+
+- Identify and fix the root cause first (session handling, auth state, invocation contract, model config)
+- Avoid adding layered fallbacks that hide deterministic bugs
+- If a temporary fallback is unavoidable, record it as short-term containment and schedule a root-cause fix immediately
+
 ## Error Patterns
 
 | Pattern | Error Type | Retryable |

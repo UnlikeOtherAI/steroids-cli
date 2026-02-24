@@ -102,6 +102,9 @@ export type ProviderErrorType =
   | 'context_exceeded'
   | 'credit_exhaustion'
   | 'subprocess_hung'
+  | 'safety_violation'
+  | 'policy_violation'
+  | 'invalid_prompt'
   | 'unknown';
 
 /**

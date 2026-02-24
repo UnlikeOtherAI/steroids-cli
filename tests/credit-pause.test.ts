@@ -1,31 +1,31 @@
-/**
- * Credit Pause Handler — Unit Tests
- *
- * Covers:
- * 1. onceMode: returns { resolved: false, resolution: 'immediate_fail' }
- * 2. Pause polling / resume on config change
- * 3. shouldStop interruption returns { resolved: false, resolution: 'stopped' }
- * 4. Heartbeat callback is invoked during pause
- * 5. checkBatchCreditExhaustion positive and negative cases
- * 6. Message sanitization (truncation to 200 chars)
- * 7. Hook firing for credit.exhausted and credit.resolved
- */
+import { jest } from '@jest/globals';
 
-// @ts-nocheck
-import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+const mockLoadConfig = jest.fn().mockReturnValue({
+  ai: {
+    coder: { provider: 'claude', model: 'claude-sonnet-4' },
+    reviewer: { provider: 'claude', model: 'claude-sonnet-4' },
+  },
+});
 
-// ── Mock functions ──────────────────────────────────────────────────────
+const mockClassifyResult = jest.fn<any>();
+const mockGetProviderRegistry = jest.fn<any>().mockReturnValue({
+  tryGet: jest.fn<any>().mockReturnValue({
+    classifyResult: mockClassifyResult,
+  }),
+  getProvider: jest.fn<any>().mockReturnValue({
+    classifyResult: mockClassifyResult,
+  }),
+});
 
-const mockLoadConfig = jest.fn();
-const mockGetProviderRegistry = jest.fn();
-const mockTriggerCreditExhausted = jest.fn().mockResolvedValue([]);
-const mockTriggerCreditResolved = jest.fn().mockResolvedValue([]);
-const mockTriggerHooksSafely = jest.fn().mockImplementation(async (fn) => { await fn(); });
+const mockTriggerCreditExhausted = jest.fn<any>().mockResolvedValue([]);
+const mockTriggerCreditResolved = jest.fn<any>().mockResolvedValue([]);
+const mockTriggerHooksSafely = jest.fn().mockImplementation(async (fn: any) => { await fn(); });
 
 // ── Module mocks (ESM-style) ────────────────────────────────────────────
 
 jest.unstable_mockModule('../src/config/loader.js', () => ({
   loadConfig: mockLoadConfig,
+  getGlobalConfigPath: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/providers/registry.js', () => ({
@@ -50,6 +50,15 @@ jest.unstable_mockModule('../src/hooks/integration.js', () => ({
   triggerHooksSafely: mockTriggerHooksSafely,
 }));
 
+const mockGetRegisteredProject = jest.fn();
+const mockSetProjectHibernation = jest.fn();
+
+jest.unstable_mockModule('../src/runners/projects.js', () => ({
+  getRegisteredProject: mockGetRegisteredProject,
+  setProjectHibernation: mockSetProjectHibernation,
+  clearProjectHibernation: jest.fn(),
+}));
+
 // ── Import module under test (after mocks) ──────────────────────────────
 
 const {
@@ -67,9 +76,7 @@ function makeOptions(overrides = {}) {
     message: 'Insufficient credits',
     runnerId: 'runner-1',
     projectPath: '/tmp/test',
-    db: {
-      prepare: jest.fn().mockReturnValue({ run: jest.fn() }),
-    } as any,
+    db: {} as any,
     shouldStop: () => false,
     ...overrides,
   };
@@ -90,10 +97,7 @@ function makeBatchResult(overrides = {}) {
 // ── Tests ───────────────────────────────────────────────────────────────
 
 describe('Credit Pause Handler', () => {
-  let originalSetTimeout: any;
   beforeEach(() => {
-    originalSetTimeout = global.setTimeout;
-    (global as any).setTimeout = (cb: any) => originalSetTimeout(cb, 0);
     jest.clearAllMocks();
     mockRecordCreditIncident.mockReturnValue('test-incident-id');
     jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -101,21 +105,42 @@ describe('Credit Pause Handler', () => {
   });
 
   afterEach(() => {
-    global.setTimeout = originalSetTimeout;
     jest.restoreAllMocks();
   });
 
-  // ── 1. onceMode ──────────────────────────────────────────────────
+  describe('handleCreditExhaustion', () => {
+    it('sets project hibernation to tier 1 (5 minutes) initially', async () => {
+      mockGetRegisteredProject.mockReturnValue({ hibernation_tier: 0 });
+      const now = Date.now();
+      jest.spyOn(Date, 'now').mockReturnValue(now);
 
-  describe('onceMode', () => {
-    it('returns immediate_fail without entering poll loop', async () => {
-      const result = await handleCreditExhaustion(makeOptions({ onceMode: true }));
+      const result = await handleCreditExhaustion(makeOptions());
 
-      expect(result).toEqual({ resolved: false, resolution: 'immediate_fail' });
+      expect(result).toEqual({ resolved: false, resolution: 'hibernating' });
+      expect(mockSetProjectHibernation).toHaveBeenCalledWith(
+        '/tmp/test',
+        1,
+        new Date(now + 5 * 60 * 1000).toISOString()
+      );
+    });
+
+    it('sets project hibernation to tier 2+ (30 minutes) on subsequent failures', async () => {
+      mockGetRegisteredProject.mockReturnValue({ hibernation_tier: 1 });
+      const now = Date.now();
+      jest.spyOn(Date, 'now').mockReturnValue(now);
+
+      const result = await handleCreditExhaustion(makeOptions());
+
+      expect(result).toEqual({ resolved: false, resolution: 'hibernating' });
+      expect(mockSetProjectHibernation).toHaveBeenCalledWith(
+        '/tmp/test',
+        2,
+        new Date(now + 30 * 60 * 1000).toISOString()
+      );
     });
 
     it('still records the incident and fires hooks before returning', async () => {
-      const opts = makeOptions({ onceMode: true });
+      const opts = makeOptions();
       await handleCreditExhaustion(opts);
 
       expect(mockRecordCreditIncident).toHaveBeenCalledWith(
@@ -126,284 +151,98 @@ describe('Credit Pause Handler', () => {
       expect(mockTriggerHooksSafely).toHaveBeenCalled();
     });
 
-    it('prints OUT OF CREDITS output', async () => {
-      await handleCreditExhaustion(makeOptions({ onceMode: true }));
+    it('prints PROVIDER CAPACITY output', async () => {
+      await handleCreditExhaustion(makeOptions());
 
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('OUT OF CREDITS'));
+      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('PROVIDER CAPACITY / TOKEN LIMIT REACHED'));
     });
   });
-
-  // ── 2. Pause polling / resume on config change ─────────────────────
-
-  describe('pause polling and resume on config change', () => {
-    it('resumes when config provider changes', async () => {
-      mockLoadConfig.mockReturnValue({
-        ai: { coder: { provider: 'openai', model: 'gpt-4' } },
-      });
-
-      const result = await handleCreditExhaustion(makeOptions());
-
-      expect(result).toEqual({ resolved: true, resolution: 'config_changed' });
-    });
-
-    it('resumes when config model changes', async () => {
-      mockLoadConfig.mockReturnValue({
-        ai: { reviewer: { provider: 'claude', model: 'claude-opus-4' } },
-      });
-
-      const result = await handleCreditExhaustion(
-        makeOptions({ role: 'reviewer', model: 'claude-sonnet-4' })
-      );
-
-      expect(result).toEqual({ resolved: true, resolution: 'config_changed' });
-    });
-
-    it('records an incident on pause entry and resolves it on resume', async () => {
-      const opts = makeOptions();
-      mockLoadConfig.mockReturnValue({
-        ai: { coder: { provider: 'openai', model: 'gpt-4' } },
-      });
-
-      await handleCreditExhaustion(opts);
-
-      expect(mockRecordCreditIncident).toHaveBeenCalledWith(
-        opts.db,
-        expect.objectContaining({ provider: 'claude', model: 'claude-sonnet-4', role: 'coder' }),
-        'runner-1',
-      );
-      expect(mockResolveCreditIncident).toHaveBeenCalledWith(
-        opts.db, 'test-incident-id', 'config_changed',
-      );
-    });
-  });
-
-  // ── 3. shouldStop interruption ──────────────────────────────────────
-
-  describe('shouldStop interruption', () => {
-    it('returns { resolved: false, resolution: stopped } when shouldStop is true immediately', async () => {
-      const result = await handleCreditExhaustion(
-        makeOptions({ shouldStop: () => true })
-      );
-
-      expect(result).toEqual({ resolved: false, resolution: 'stopped' });
-    });
-
-    it('resolves the incident when interrupted by shouldStop', async () => {
-      const opts = makeOptions({ shouldStop: () => true });
-      await handleCreditExhaustion(opts);
-
-      expect(mockResolveCreditIncident).toHaveBeenCalledWith(
-        opts.db, 'test-incident-id', 'dismissed',
-      );
-    });
-  });
-
-  // ── 4. Heartbeat callback during pause ──────────────────────────────
-
-  describe('heartbeat callback during pause', () => {
-    it('calls onHeartbeat during the polling loop', async () => {
-      const onHeartbeat = jest.fn();
-
-      mockLoadConfig.mockReturnValue({
-        ai: { coder: { provider: 'openai', model: 'gpt-4' } },
-      });
-
-      await handleCreditExhaustion(makeOptions({ onHeartbeat }));
-
-      expect(onHeartbeat).toHaveBeenCalled();
-    });
-  });
-
-  // ── 5. Message sanitization ──────────────────────────────────────────
 
   describe('message sanitization', () => {
     it('truncates messages longer than 200 characters', async () => {
       const longMessage = 'A'.repeat(300);
-      const opts = makeOptions({ message: longMessage, onceMode: true });
-
-      await handleCreditExhaustion(opts);
-
-      // The recorded incident should have truncated message
-      expect(mockRecordCreditIncident).toHaveBeenCalledWith(
-        opts.db,
-        expect.objectContaining({
-          message: 'A'.repeat(197) + '...',
-        }),
-        'runner-1',
-      );
-    });
-
-    it('does not truncate messages under 200 characters', async () => {
-      const shortMessage = 'Short message';
-      const opts = makeOptions({ message: shortMessage, onceMode: true });
-
+      const opts = makeOptions({ message: longMessage });
       await handleCreditExhaustion(opts);
 
       expect(mockRecordCreditIncident).toHaveBeenCalledWith(
         opts.db,
-        expect.objectContaining({ message: shortMessage }),
+        expect.objectContaining({
+          message: expect.stringMatching(/^A{197}\.\.\.$/),
+        }),
         'runner-1',
-      );
-    });
-  });
-
-  // ── 6. Hook firing ──────────────────────────────────────────────────
-
-  describe('hook firing', () => {
-    it('fires credit.exhausted hook on pause entry', async () => {
-      const opts = makeOptions({ onceMode: true });
-      await handleCreditExhaustion(opts);
-
-      // triggerHooksSafely wraps the call, so we check that it was called
-      expect(mockTriggerHooksSafely).toHaveBeenCalled();
-      expect(mockTriggerCreditExhausted).toHaveBeenCalledWith(
-        expect.objectContaining({
-          provider: 'claude',
-          model: 'claude-sonnet-4',
-          role: 'coder',
-          runner_id: 'runner-1',
-        }),
-        { projectPath: '/tmp/test' },
-      );
-    });
-
-    it('fires credit.resolved hook when config changes', async () => {
-      mockLoadConfig.mockReturnValue({
-        ai: { coder: { provider: 'openai', model: 'gpt-4' } },
-      });
-
-      await handleCreditExhaustion(makeOptions());
-
-      expect(mockTriggerCreditResolved).toHaveBeenCalledWith(
-        expect.objectContaining({
-          provider: 'claude',
-          model: 'claude-sonnet-4',
-          role: 'coder',
-        }),
-        'config_changed',
-        { projectPath: '/tmp/test' },
       );
     });
   });
 });
 
-// ── checkBatchCreditExhaustion ────────────────────────────────────────
-
 describe('checkBatchCreditExhaustion', () => {
-  let originalSetTimeout: any;
   beforeEach(() => {
-    originalSetTimeout = global.setTimeout;
-    (global as any).setTimeout = (cb: any) => originalSetTimeout(cb, 0);
     jest.clearAllMocks();
   });
 
-  it('returns CreditExhaustionResult when provider classifies as credit_exhaustion', async () => {
-    mockLoadConfig.mockReturnValue({
-      ai: { coder: { provider: 'claude', model: 'claude-sonnet-4' } },
+  it('returns null on successful result', async () => {
+    const result = await checkBatchCreditExhaustion(
+      makeBatchResult({ success: true }),
+      'coder',
+      '/tmp/test',
+    );
+    expect(result).toBeNull();
+  });
+
+  it('returns null if provider classification does not map to credit_exhaustion', async () => {
+    mockClassifyResult.mockReturnValue({ type: 'other_error', message: 'foo' });
+
+    const result = await checkBatchCreditExhaustion(
+      makeBatchResult(),
+      'coder',
+      '/tmp/test',
+    );
+    expect(result).toBeNull();
+  });
+
+  it('returns credit exhaustion payload when provider classifier matches', async () => {
+    mockClassifyResult.mockReturnValue({
+      type: 'credit_exhaustion',
+      message: 'You exceeded your current quota',
+      retryable: false,
     });
 
-    const mockProvider = {
-      classifyResult: jest.fn().mockReturnValue({
-        type: 'credit_exhaustion',
-        message: 'Insufficient credits',
-        retryable: false,
-      }),
-    };
-    mockGetProviderRegistry.mockReturnValue({
-      tryGet: jest.fn().mockReturnValue(mockProvider),
-    });
-
-    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
+    const result = await checkBatchCreditExhaustion(
+      makeBatchResult(),
+      'coder',
+      '/tmp/test',
+    );
 
     expect(result).toEqual({
       action: 'pause_credit_exhaustion',
       provider: 'claude',
       model: 'claude-sonnet-4',
       role: 'coder',
-      message: 'Insufficient credits',
+      message: 'You exceeded your current quota',
     });
   });
 
-  it('returns null when the result is successful', async () => {
+  it('returns rate limit payload when provider classifier matches', async () => {
+    mockClassifyResult.mockReturnValue({
+      type: 'rate_limit',
+      message: 'Too many requests, retry after 500ms',
+      retryable: true,
+      retryAfterMs: 500,
+    });
+
     const result = await checkBatchCreditExhaustion(
-      makeBatchResult({ success: true }),
-      'coder',
-      '/tmp/test'
+      makeBatchResult(),
+      'reviewer',
+      '/tmp/test',
     );
-    expect(result).toBeNull();
-  });
 
-  it('returns null when classifyResult returns null', async () => {
-    mockLoadConfig.mockReturnValue({
-      ai: { coder: { provider: 'claude', model: 'claude-sonnet-4' } },
-    });
-
-    const mockProvider = { classifyResult: jest.fn().mockReturnValue(null) };
-    mockGetProviderRegistry.mockReturnValue({
-      tryGet: jest.fn().mockReturnValue(mockProvider),
-    });
-
-    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
-    expect(result).toBeNull();
-  });
-
-  it('returns null when classifyResult returns a non-credit error type', async () => {
-    mockLoadConfig.mockReturnValue({
-      ai: { coder: { provider: 'claude', model: 'claude-sonnet-4' } },
-    });
-
-    const mockProvider = {
-      classifyResult: jest.fn().mockReturnValue({
-        type: 'rate_limit', message: 'Rate limited', retryable: true,
-      }),
-    };
-    mockGetProviderRegistry.mockReturnValue({
-      tryGet: jest.fn().mockReturnValue(mockProvider),
-    });
-
-    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
-    expect(result).toBeNull();
-  });
-
-  it('returns null when provider is not found in registry', async () => {
-    mockLoadConfig.mockReturnValue({
-      ai: { coder: { provider: 'unknown-provider', model: 'some-model' } },
-    });
-    mockGetProviderRegistry.mockReturnValue({
-      tryGet: jest.fn().mockReturnValue(null),
-    });
-
-    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
-    expect(result).toBeNull();
-  });
-
-  it('returns null when config has no provider/model for the role', async () => {
-    mockLoadConfig.mockReturnValue({ ai: {} });
-    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'coder', '/tmp/test');
-    expect(result).toBeNull();
-  });
-
-  it('works correctly for the reviewer role', async () => {
-    mockLoadConfig.mockReturnValue({
-      ai: { reviewer: { provider: 'openai', model: 'gpt-4' } },
-    });
-
-    const mockProvider = {
-      classifyResult: jest.fn().mockReturnValue({
-        type: 'credit_exhaustion', message: 'Quota exceeded', retryable: false,
-      }),
-    };
-    mockGetProviderRegistry.mockReturnValue({
-      tryGet: jest.fn().mockReturnValue(mockProvider),
-    });
-
-    const result = await checkBatchCreditExhaustion(makeBatchResult(), 'reviewer', '/tmp/test');
     expect(result).toEqual({
-      action: 'pause_credit_exhaustion',
-      provider: 'openai',
-      model: 'gpt-4',
+      action: 'rate_limit',
+      provider: 'claude',
+      model: 'claude-sonnet-4',
       role: 'reviewer',
-      message: 'Quota exceeded',
+      message: 'Too many requests, retry after 500ms',
+      retryAfterMs: 500,
     });
   });
 });

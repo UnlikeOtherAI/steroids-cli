@@ -18,6 +18,7 @@ import {
   triggerCreditResolved,
   triggerHooksSafely,
 } from '../hooks/integration.js';
+import { getRegisteredProject, setProjectHibernation } from './projects.js';
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 const MAX_MESSAGE_LENGTH = 200;
@@ -37,7 +38,7 @@ export interface CreditPauseOptions {
 
 export interface CreditPauseResult {
   resolved: boolean;
-  resolution: 'config_changed' | 'stopped' | 'immediate_fail';
+  resolution: 'config_changed' | 'stopped' | 'immediate_fail' | 'hibernating';
 }
 
 /**
@@ -53,8 +54,7 @@ function sanitizeMessage(message: string): string {
  * Handle a credit exhaustion event.
  *
  * Records the incident, fires hooks, prints CLI output,
- * and polls for config changes every 30 seconds.
- * In onceMode, prints the message and returns immediately.
+ * and sets the project to a hibernating state.
  */
 export async function handleCreditExhaustion(
   options: CreditPauseOptions
@@ -79,65 +79,36 @@ export async function handleCreditExhaustion(
     )
   );
 
+  // Calculate backoff schedule
+  const projectInfo = getRegisteredProject(projectPath);
+  const currentTier = projectInfo?.hibernation_tier ?? 0;
+  const newTier = currentTier + 1;
+  
+  // Attempt 1: 5 minutes. Attempt 2+: 30 minutes.
+  const backoffMinutes = newTier === 1 ? 5 : 30;
+  const backoffUntilMs = Date.now() + (backoffMinutes * 60 * 1000);
+  const backoffUntilISO = new Date(backoffUntilMs).toISOString();
+
   // Print CLI output
   console.log('');
   console.log('============================================================');
-  console.log('  OUT OF CREDITS');
+  console.log('  PROVIDER CAPACITY / TOKEN LIMIT REACHED');
   console.log('============================================================');
   console.log('');
   console.log(`  Provider: ${provider} (model: ${model})`);
   console.log(`  Role:     ${role}`);
   console.log(`  Message:  ${safeMessage}`);
   console.log('');
-  console.log('  The runner is paused. To resume, either:');
-  console.log(`    1. Add credits to your ${provider} account`);
-  console.log(`    2. Change the ${role} provider:`);
-  console.log(`       steroids config set ai.${role}.provider <new-provider>`);
-  console.log('');
-  console.log('  Checking for config changes every 30 seconds...');
+  console.log(`  The project is entering hibernation (Tier ${newTier}).`);
+  console.log(`  Will sleep for ${backoffMinutes} minutes and ping the provider.`);
+  console.log('  The runner will now exit to conserve resources.');
   console.log('============================================================');
 
-  // onceMode: return immediately
-  if (onceMode) {
-    return { resolved: false, resolution: 'immediate_fail' };
-  }
+  // Put project into hibernation state
+  setProjectHibernation(projectPath, newTier, backoffUntilISO);
 
-  const creditData = { provider, model, role, message: safeMessage, runner_id: runnerId };
-
-  // Poll for config change
-  while (true) {
-    if (shouldStop()) {
-      resolveCreditIncident(db, incidentId, 'dismissed');
-      return { resolved: false, resolution: 'stopped' };
-    }
-
-    // Wait, but check shouldStop more frequently than the full interval
-    const waited = await interruptibleSleep(POLL_INTERVAL_MS, shouldStop);
-    if (!waited) {
-      resolveCreditIncident(db, incidentId, 'dismissed');
-      return { resolved: false, resolution: 'stopped' };
-    }
-
-    // Update heartbeat so the wakeup system doesn't kill us
-    onHeartbeat?.();
-
-    // Check if config has changed
-    const config = loadConfig(projectPath);
-    const currentProvider = config.ai?.[role]?.provider;
-    const currentModel = config.ai?.[role]?.model;
-
-    if (currentProvider !== provider || currentModel !== model) {
-      console.log(`\n  Configuration changed (${provider}/${model} → ${currentProvider}/${currentModel}). Resuming...`);
-      resolveCreditIncident(db, incidentId, 'config_changed');
-
-      // Fire credit.resolved hook
-      await triggerHooksSafely(() =>
-        triggerCreditResolved(creditData, 'config_changed', { projectPath })
-      );
-
-      return { resolved: true, resolution: 'config_changed' };
-    }
-  }
+  // Return immediately so runner exits
+  return { resolved: false, resolution: 'hibernating' };
 }
 
 /**
@@ -189,6 +160,17 @@ export async function checkBatchCreditExhaustion(
       model: modelName,
       role,
       message: classification.message,
+    };
+  }
+
+  if (classification?.type === 'rate_limit') {
+    return {
+      action: 'rate_limit',
+      provider: providerName,
+      model: modelName,
+      role,
+      message: classification.message,
+      retryAfterMs: classification.retryAfterMs,
     };
   }
 

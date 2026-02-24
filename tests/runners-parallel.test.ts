@@ -32,6 +32,9 @@ jest.unstable_mockModule('../src/runners/global-db.js', () => ({
   getGlobalSteroidsDir: () => '/tmp/.steroids',
   getGlobalDbPath: () => '/tmp/.steroids/steroids.db',
   isGlobalDbInitialized: () => true,
+
+  getDaemonActiveStatus: jest.fn().mockReturnValue(true),
+  setDaemonActiveStatus: jest.fn(),
 }));
 
 jest.unstable_mockModule('node:child_process', () => ({

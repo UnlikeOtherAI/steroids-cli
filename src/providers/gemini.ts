@@ -1,10 +1,5 @@
-/**
- * Gemini Provider
- * Implementation for Google Gemini CLI
- */
-
 import { spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, existsSync, rmSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync, rmSync, mkdirSync, realpathSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -16,9 +11,6 @@ import {
   SessionNotFoundError,
 } from './interface.js';
 
-/**
- * Available Gemini models
- */
 const GEMINI_MODELS: ModelInfo[] = [
   {
     id: 'gemini-3.1-pro-preview',
@@ -50,38 +42,34 @@ const GEMINI_MODELS: ModelInfo[] = [
   },
 ];
 
-/**
- * Default models per role
- */
 const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string> = {
   orchestrator: 'gemini-3.1-pro-preview',
   coder: 'gemini-3.1-pro-preview',
   reviewer: 'gemini-3.1-pro-preview',
 };
 
-/**
- * Default timeout in milliseconds (15 minutes)
- */
 const DEFAULT_TIMEOUT = 900_000;
+const SESSION_MARKER_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
-/**
- * Default invocation template for Gemini CLI
- * Uses --prompt flag for non-interactive mode with stream-json for realtime output
- * --output-format=stream-json is more stable than space-separated flags
- */
 const DEFAULT_INVOCATION_TEMPLATE = '{cli} --output-format=stream-json -m {model} {session_id} --prompt "$(cat {prompt_file})"';
 
-/**
- * Gemini AI Provider implementation
- */
 export class GeminiProvider extends BaseAIProvider {
   readonly name = 'gemini';
   readonly displayName = 'Google (gemini)';
+  private static readonly GEMINI_AUTH_FILES = [
+    'settings.json',
+    'oauth_creds.json',
+    'google_accounts.json',
+    'state.json',
+    'projects.json',
+    'trustedFolders.json',
+  ];
+  private static readonly GCLOUD_AUTH_FILES = [
+    'active_config',
+    'credentials.db',
+    'configurations/config_default',
+  ];
 
-  /**
-   * Override getSanitizedCliEnv to preserve GEMINI_API_KEY
-   * Gemini CLI needs this for authentication
-   */
   protected getSanitizedCliEnv(overrides: Record<string, string> = {}): Record<string, string> {
     const env = { ...process.env, ...overrides };
 
@@ -110,18 +98,12 @@ export class GeminiProvider extends BaseAIProvider {
     return result;
   }
 
-  /**
-   * Write prompt to a temporary file
-   */
   private writePromptFile(prompt: string): string {
     const tempPath = join(tmpdir(), `steroids-gemini-${Date.now()}.txt`);
     writeFileSync(tempPath, prompt, { mode: 0o600 });
     return tempPath;
   }
 
-  /**
-   * Clean up temporary prompt file
-   */
   private cleanupPromptFile(path: string): void {
     try {
       if (existsSync(path)) {
@@ -132,16 +114,10 @@ export class GeminiProvider extends BaseAIProvider {
     }
   }
 
-  /**
-   * Get the default invocation template
-   */
   getDefaultInvocationTemplate(): string {
     return DEFAULT_INVOCATION_TEMPLATE;
   }
 
-  /**
-   * Invoke Gemini CLI with a prompt
-   */
   async invoke(prompt: string, options: InvokeOptions): Promise<InvokeResult> {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT;
     const cwd = options.cwd ?? process.cwd();
@@ -174,12 +150,6 @@ export class GeminiProvider extends BaseAIProvider {
     }
   }
 
-  /**
-   * Invoke Gemini CLI with a prompt file using the invocation template
-   */
-  /**
-   * Parse a stream-json line from Gemini CLI
-   */
   private parseStreamJsonLine(line: string): {
     text?: string;
     tool?: string;
@@ -190,22 +160,18 @@ export class GeminiProvider extends BaseAIProvider {
     try {
       const event = JSON.parse(line);
 
-      // Session ID is in the 'init' event
       if (event.type === 'init' && event.session_id) {
         return { sessionId: event.session_id };
       }
 
-      // Assistant message with delta text
       if (event.type === 'message' && event.role === 'assistant' && event.content) {
         return { text: event.content };
       }
 
-      // Tool call events
       if (event.type === 'tool_call' || event.type === 'function_call') {
         return { tool: event.name || event.function?.name || 'tool' };
       }
 
-      // Final result includes token usage stats
       if (event.type === 'result') {
         const usage: TokenUsage | undefined = event.stats ? {
           inputTokens: event.stats.input_tokens,
@@ -224,6 +190,74 @@ export class GeminiProvider extends BaseAIProvider {
     return {};
   }
 
+  private getPersistentHome(cwd: string): { home: string; isPersistent: boolean } {
+    try {
+      const steroidsDir = join(cwd, '.steroids');
+      if (existsSync(steroidsDir)) {
+        const realSteroidsDir = realpathSync(steroidsDir);
+        const persistentHome = join(realSteroidsDir, 'provider-homes', 'gemini');
+        mkdirSync(persistentHome, { recursive: true });
+        this.setupIsolatedHome('.gemini', GeminiProvider.GEMINI_AUTH_FILES, persistentHome);
+        this.setupIsolatedHome('.config/gcloud', GeminiProvider.GCLOUD_AUTH_FILES, persistentHome);
+        return { home: persistentHome, isPersistent: true };
+      }
+    } catch {
+      console.warn('Gemini persistent home unavailable, falling back to temporary home');
+    }
+
+    const fallbackHome = this.setupIsolatedHome('.gemini', GeminiProvider.GEMINI_AUTH_FILES);
+    this.setupIsolatedHome('.config/gcloud', GeminiProvider.GCLOUD_AUTH_FILES, fallbackHome);
+    return { home: fallbackHome, isPersistent: false };
+  }
+
+  private getSessionMarkerPath(home: string, sessionId: string): string {
+    const safeSessionId = encodeURIComponent(sessionId);
+    return join(home, '.steroids-gemini-sessions', `${safeSessionId}.marker`);
+  }
+
+  private rememberSession(home: string, sessionId: string): void {
+    if (!sessionId) return;
+    const markerPath = this.getSessionMarkerPath(home, sessionId);
+    mkdirSync(join(home, '.steroids-gemini-sessions'), { recursive: true });
+    writeFileSync(markerPath, `${Date.now()}\n`, { mode: 0o600 });
+  }
+
+  private forgetSession(home: string, sessionId: string): void {
+    if (!sessionId) return;
+    rmSync(this.getSessionMarkerPath(home, sessionId), { force: true });
+  }
+
+  private hasRememberedSession(home: string, sessionId: string): boolean {
+    if (!sessionId) return false;
+    return existsSync(this.getSessionMarkerPath(home, sessionId));
+  }
+
+  private hasNativeSessionArtifact(home: string, sessionId: string): boolean {
+    if (!sessionId) return false;
+    const candidates = [
+      join(home, '.gemini', 'tmp'),
+      join(home, '.gemini', 'chats'),
+      join(home, '.gemini', 'sessions'),
+      join(home, '.vibe', 'logs', 'session'),
+    ];
+    return candidates.some((dir) => existsSync(dir) && readdirSync(dir).some((name) => name.includes(sessionId)));
+  }
+
+  private pruneOldSessionMarkers(home: string): void {
+    const markerDir = join(home, '.steroids-gemini-sessions');
+    if (!existsSync(markerDir)) return;
+    const now = Date.now();
+    for (const entry of readdirSync(markerDir)) {
+      const markerPath = join(markerDir, entry);
+      try {
+        const ageMs = now - statSync(markerPath).mtimeMs;
+        if (ageMs > SESSION_MARKER_MAX_AGE_MS) rmSync(markerPath, { force: true });
+      } catch {
+        // Ignore marker cleanup failures
+      }
+    }
+  }
+
   private invokeWithFile(
     promptFile: string,
     model: string,
@@ -233,17 +267,18 @@ export class GeminiProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
-    // Set up isolated HOME
-    const isolatedHome = this.setupIsolatedHome('.gemini', [
-      'settings.json',
-      'oauth_creds.json',
-      'google_accounts.json',
-      'state.json',
-      'projects.json',
-      'trustedFolders.json',
-    ]);
-    // Also isolate gcloud config if present in the same isolated home
-    this.setupIsolatedHome('.config/gcloud', ['active_config', 'credentials.db', 'configurations/config_default'], isolatedHome);
+    const { home: geminiHome, isPersistent } = this.getPersistentHome(cwd);
+    if (isPersistent) this.pruneOldSessionMarkers(geminiHome);
+
+    if (
+      resumeSessionId &&
+      !this.hasRememberedSession(geminiHome, resumeSessionId) &&
+      !this.hasNativeSessionArtifact(geminiHome, resumeSessionId)
+    ) {
+      return Promise.reject(
+        new SessionNotFoundError(`Gemini session ${resumeSessionId} is not available in local session store`)
+      );
+    }
 
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
@@ -255,26 +290,21 @@ export class GeminiProvider extends BaseAIProvider {
       let tokenUsage: TokenUsage | undefined;
       const isStreamJson = this.getInvocationTemplate().includes('stream-json');
 
-      // Build command from invocation template
       const sessionIdFlag = resumeSessionId ? `--resume ${resumeSessionId}` : '';
       const command = this.buildCommand(promptFile, model, sessionIdFlag);
 
-
-      // Spawn using shell to handle the command template
       const child = spawn(command, {
         shell: true,
         cwd,
         env: this.getSanitizedCliEnv({
-          HOME: isolatedHome,
+          HOME: geminiHome,
           GEMINI_FORCE_FILE_STORAGE: 'true',
         }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      // Close stdin immediately to prevent CLI tools from hanging
       child.stdin?.end();
 
-      // Activity-based timeout: resettable timer that only kills when silent
       const MAX_BUFFER = 2_000_000; // Cap stdout/stderr at ~2MB
       let activityTimer: ReturnType<typeof setTimeout>;
 
@@ -311,7 +341,6 @@ export class GeminiProvider extends BaseAIProvider {
           return;
         }
 
-        // Stream-json mode: parse JSONL events
         stdoutLineBuffer += raw;
         while (true) {
           const nl = stdoutLineBuffer.indexOf('\n');
@@ -352,17 +381,31 @@ export class GeminiProvider extends BaseAIProvider {
         clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
 
-        // Cleanup isolated home
-        try {
-          rmSync(isolatedHome, { recursive: true, force: true });
-        } catch {
-          // Ignore cleanup errors
+        if (!isPersistent) {
+          try {
+            rmSync(geminiHome, { recursive: true, force: true });
+          } catch {
+          }
         }
 
         const outputStr = (stdout + '\n' + stderr).toLowerCase();
-        if (code !== 0 && resumeSessionId && (outputStr.includes('session not found') || outputStr.includes('failed to resume') || outputStr.includes('not found: session'))) {
+        const resumeSessionNotFound =
+          outputStr.includes('session not found') ||
+          outputStr.includes('failed to resume') ||
+          outputStr.includes('not found: session') ||
+          outputStr.includes('error resuming session') ||
+          outputStr.includes('no previous sessions found for this project');
+        if (code !== 0 && resumeSessionId && resumeSessionNotFound) {
+          this.forgetSession(geminiHome, resumeSessionId);
           reject(new SessionNotFoundError(`Failed to resume Gemini session ${resumeSessionId}`));
           return;
+        }
+
+        if (code === 0 && !timedOut) {
+          const effectiveSessionId = sessionId ?? resumeSessionId;
+          if (effectiveSessionId) {
+            this.rememberSession(geminiHome, effectiveSessionId);
+          }
         }
 
         resolve({
@@ -381,11 +424,11 @@ export class GeminiProvider extends BaseAIProvider {
         clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
 
-        // Cleanup isolated home
-        try {
-          rmSync(isolatedHome, { recursive: true, force: true });
-        } catch {
-          // Ignore cleanup errors
+        if (!isPersistent) {
+          try {
+            rmSync(geminiHome, { recursive: true, force: true });
+          } catch {
+          }
         }
 
         resolve({
@@ -402,20 +445,14 @@ export class GeminiProvider extends BaseAIProvider {
     });
   }
 
-  /**
-   * Check if Gemini CLI is available
-   * Checks for both 'gemini' and 'gcloud' CLIs
-   */
   async isAvailable(): Promise<boolean> {
     const cli = this.cliPath ?? 'gemini';
 
-    // First try the specified or default gemini CLI
     const geminiAvailable = await this.checkCliAvailable(cli);
     if (geminiAvailable) {
       return true;
     }
 
-    // Fall back to gcloud if gemini CLI not found
     if (cli === 'gemini') {
       return this.checkCliAvailable('gcloud');
     }
@@ -423,9 +460,6 @@ export class GeminiProvider extends BaseAIProvider {
     return false;
   }
 
-  /**
-   * Check if a specific CLI is available
-   */
   private checkCliAvailable(cli: string): Promise<boolean> {
     return new Promise((resolve) => {
       const child = spawn('which', [cli], {
@@ -441,7 +475,6 @@ export class GeminiProvider extends BaseAIProvider {
         resolve(false);
       });
 
-      // Timeout after 5 seconds
       setTimeout(() => {
         child.kill();
         resolve(false);
@@ -449,31 +482,19 @@ export class GeminiProvider extends BaseAIProvider {
     });
   }
 
-  /**
-   * List available model IDs
-   */
   listModels(): string[] {
     return GEMINI_MODELS.map((m) => m.id);
   }
 
-  /**
-   * Get detailed model information
-   */
   getModelInfo(): ModelInfo[] {
     return [...GEMINI_MODELS];
   }
 
-  /**
-   * Get the default model for a role
-   */
   getDefaultModel(role: 'orchestrator' | 'coder' | 'reviewer'): string {
     return DEFAULT_MODELS[role];
   }
 }
 
-/**
- * Create a Gemini provider instance
- */
 export function createGeminiProvider(): GeminiProvider {
   return new GeminiProvider();
 }

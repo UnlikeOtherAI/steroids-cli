@@ -58,6 +58,9 @@ jest.unstable_mockModule('../src/runners/wakeup.js', () => ({
 
 jest.unstable_mockModule('../src/runners/projects.js', () => ({
   getRegisteredProject: mockGetRegisteredProject,
+
+  setProjectHibernation: jest.fn(),
+  clearProjectHibernation: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/commands/loop-phases.js', () => ({

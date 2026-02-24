@@ -56,6 +56,9 @@ jest.unstable_mockModule('../src/runners/global-db.js', () => ({
   removeParallelSessionRunner: jest.fn(),
   recordValidationEscalation: jest.fn().mockReturnValue({ id: 1 }),
   resolveValidationEscalationsForSession: jest.fn().mockReturnValue(0),
+
+  getDaemonActiveStatus: jest.fn().mockReturnValue(true),
+  setDaemonActiveStatus: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/runners/heartbeat.js', () => ({
@@ -69,6 +72,9 @@ jest.unstable_mockModule('../src/runners/wakeup.js', () => ({
 jest.unstable_mockModule('../src/runners/projects.js', () => ({
   getRegisteredProject: mockGetRegisteredProject,
   updateProjectStats: mockUpdateProjectStats,
+
+  setProjectHibernation: jest.fn(),
+  clearProjectHibernation: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/database/connection.js', () => ({

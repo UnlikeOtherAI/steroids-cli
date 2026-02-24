@@ -13,6 +13,15 @@ Key rules:
 - Don't blindly implement reviewer suggestions; don't skip review on big changes
 - Skip review only for: typo fixes, single-file bug fixes under 50 lines, urgent hotfixes
 
+## Root-Cause First Policy (CRITICAL)
+
+When debugging or fixing failures, do **not** stack additional fallbacks before identifying the underlying defect.
+
+- Find and document the root cause with direct evidence (logs + code path)
+- Fix the broken invariant/mechanism first
+- Avoid fallback layering that masks deterministic bugs and creates retry loops
+- If temporary fallback is unavoidable, mark it as short-term containment and schedule immediate root-cause removal
+
 ## AI Providers (CRITICAL)
 
 **OpenAI's development tool CLI is Codex.** There is no separate `openai` CLI.

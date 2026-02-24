@@ -15,11 +15,8 @@ export interface RegisteredProject {
   registered_at: string;
   last_seen_at: string;
   enabled: boolean;
-  pending_count?: number;
-  in_progress_count?: number;
-  review_count?: number;
-  completed_count?: number;
-  stats_updated_at?: string | null;
+  hibernating_until?: string | null;
+  hibernation_tier?: number;
 }
 
 /**
@@ -191,11 +188,8 @@ export function getRegisteredProjects(includeDisabled = false): RegisteredProjec
       registered_at: string;
       last_seen_at: string;
       enabled: number;
-      pending_count?: number;
-      in_progress_count?: number;
-      review_count?: number;
-      completed_count?: number;
-      stats_updated_at?: string | null;
+      hibernating_until?: string | null;
+      hibernation_tier?: number;
     }>;
 
     return rows.map((row) => ({
@@ -204,11 +198,8 @@ export function getRegisteredProjects(includeDisabled = false): RegisteredProjec
       registered_at: row.registered_at,
       last_seen_at: row.last_seen_at,
       enabled: row.enabled === 1,
-      pending_count: row.pending_count,
-      in_progress_count: row.in_progress_count,
-      review_count: row.review_count,
-      completed_count: row.completed_count,
-      stats_updated_at: row.stats_updated_at,
+      hibernating_until: row.hibernating_until,
+      hibernation_tier: row.hibernation_tier,
     }));
   } finally {
     close();
@@ -234,11 +225,8 @@ export function getRegisteredProject(path: string): RegisteredProject | null {
         registered_at: string;
         last_seen_at: string;
         enabled: number;
-        pending_count?: number;
-        in_progress_count?: number;
-        review_count?: number;
-        completed_count?: number;
-        stats_updated_at?: string | null;
+        hibernating_until?: string | null;
+        hibernation_tier?: number;
       } | undefined;
 
     if (!row) {
@@ -251,11 +239,8 @@ export function getRegisteredProject(path: string): RegisteredProject | null {
       registered_at: row.registered_at,
       last_seen_at: row.last_seen_at,
       enabled: row.enabled === 1,
-      pending_count: row.pending_count,
-      in_progress_count: row.in_progress_count,
-      review_count: row.review_count,
-      completed_count: row.completed_count,
-      stats_updated_at: row.stats_updated_at,
+      hibernating_until: row.hibernating_until,
+      hibernation_tier: row.hibernation_tier,
     };
   } finally {
     close();
@@ -306,6 +291,34 @@ export function enableProject(path: string): void {
 
   try {
     db.prepare('UPDATE projects SET enabled = 1 WHERE path = ?').run(normalizedPath);
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Set hibernation state for a project
+ */
+export function setProjectHibernation(path: string, tier: number, untilISO: string): void {
+  const normalizedPath = normalizePath(path);
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare('UPDATE projects SET hibernating_until = ?, hibernation_tier = ? WHERE path = ?')
+      .run(untilISO, tier, normalizedPath);
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Clear hibernation state for a project
+ */
+export function clearProjectHibernation(path: string): void {
+  const normalizedPath = normalizePath(path);
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare('UPDATE projects SET hibernating_until = NULL, hibernation_tier = 0 WHERE path = ?')
+      .run(normalizedPath);
   } finally {
     close();
   }

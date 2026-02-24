@@ -24,55 +24,21 @@ function createTempDir(prefix: string): string {
   return dir;
 }
 
+import { initDatabase } from '../src/database/connection.js';
+
 function setupProjectDb(projectPath: string): void {
-  const steroidsDir = join(projectPath, '.steroids');
-  mkdirSync(steroidsDir, { recursive: true });
-  const dbPath = join(steroidsDir, 'steroids.db');
-
-  const db = new Database(dbPath);
+  const { db, close } = initDatabase(projectPath);
   try {
-    db.exec(`
-      CREATE TABLE tasks (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        status TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE task_invocations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        task_id TEXT NOT NULL,
-        role TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        model TEXT NOT NULL,
-        status TEXT,
-        created_at TEXT NOT NULL,
-        last_activity_at_ms INTEGER
-      );
-
-      CREATE TABLE incidents (
-        id TEXT PRIMARY KEY,
-        task_id TEXT,
-        runner_id TEXT,
-        failure_mode TEXT NOT NULL,
-        detected_at TEXT NOT NULL,
-        resolved_at TEXT,
-        resolution TEXT,
-        details TEXT,
-        created_at TEXT NOT NULL
-      );
-    `);
-
     // t1: orphaned (in_progress, old updated_at, no runner, no invocations)
-    db.prepare(`INSERT INTO tasks (id, title, status, updated_at) VALUES (?, ?, ?, datetime('now', '-2 hours'))`)
+    db.prepare(`INSERT INTO tasks (id, title, status, updated_at, failure_count) VALUES (?, ?, ?, datetime('now', '-2 hours'), 0)`)
       .run('t1', 'Orphaned task', 'in_progress');
 
     // t2: hanging (in_progress, old updated_at, active runner will be inserted in global DB)
-    db.prepare(`INSERT INTO tasks (id, title, status, updated_at) VALUES (?, ?, ?, datetime('now', '-2 hours'))`)
+    db.prepare(`INSERT INTO tasks (id, title, status, updated_at, failure_count) VALUES (?, ?, ?, datetime('now', '-2 hours'), 0)`)
       .run('t2', 'Hanging task', 'in_progress');
 
     // running invocation for t2
-    db.prepare(`INSERT INTO task_invocations (task_id, role, provider, model, status, created_at) VALUES (?, ?, ?, ?, 'running', datetime('now', '-2 hours'))`)
+    db.prepare(`INSERT INTO task_invocations (task_id, role, provider, model, status, created_at, exit_code, duration_ms, success, timed_out, invocation_mode, prompt) VALUES (?, ?, ?, ?, 'running', datetime('now', '-2 hours'), 0, 0, 0, 0, 'fresh', 'test prompt')`)
       .run('t2', 'coder', 'claude', 'sonnet');
 
     // Incidents: one unresolved, one resolved
@@ -86,36 +52,22 @@ function setupProjectDb(projectPath: string): void {
        VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, datetime('now'))`
     ).run('i2', 't2', 'r1', 'hanging_invocation', 'auto_restart', '{"note":"test"}');
   } finally {
-    db.close();
+    close();
   }
 }
 
+import { openGlobalDatabase } from '../src/runners/global-db.js';
+
 function setupGlobalDb(homeDir: string, projectPath: string): void {
-  const steroidsDir = join(homeDir, '.steroids');
-  mkdirSync(steroidsDir, { recursive: true });
-  const dbPath = join(steroidsDir, 'steroids.db');
-
-  const db = new Database(dbPath);
+  const { db, close } = openGlobalDatabase();
   try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS runners (
-        id TEXT PRIMARY KEY,
-        status TEXT NOT NULL DEFAULT 'idle',
-        pid INTEGER,
-        project_path TEXT,
-        current_task_id TEXT,
-        started_at TEXT,
-        heartbeat_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-    `);
-
     // Runner actively working on t2 with a fresh heartbeat.
     db.prepare(
-      `INSERT INTO runners (id, status, pid, project_path, current_task_id, started_at, heartbeat_at)
+      `INSERT OR REPLACE INTO runners (id, status, pid, project_path, current_task_id, started_at, heartbeat_at)
        VALUES (?, 'running', NULL, ?, ?, datetime('now', '-10 minutes'), datetime('now'))`
     ).run('r1', projectPath, 't2');
   } finally {
-    db.close();
+    close();
   }
 }
 

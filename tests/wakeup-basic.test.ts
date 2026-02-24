@@ -86,11 +86,17 @@ jest.unstable_mockModule('../src/runners/global-db.js', () => ({
   getGlobalDbPath: () => '/mock/.steroids/steroids.db',
   getGlobalSteroidsDir: () => '/mock/.steroids',
   isGlobalDbInitialized: () => true,
+
+  getDaemonActiveStatus: jest.fn().mockReturnValue(true),
+  setDaemonActiveStatus: jest.fn(),
 }));
 
 // Mock projects
 jest.unstable_mockModule('../src/runners/projects.js', () => ({
   getRegisteredProjects: mockGetRegisteredProjects,
+
+  setProjectHibernation: jest.fn(),
+  clearProjectHibernation: jest.fn(),
 }));
 
 // Mock heartbeat

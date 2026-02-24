@@ -32,7 +32,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 ### Acceptance Criteria (Section 1)
 - [x] The global alert bell icon is visible ONLY if at least one project has `failed` tasks, open `disputes`, or tasks with `failure_count >= 3`.
 - [x] Clicking the global alert bell icon navigates the user to the `/projects` page.
-- [ ] A global "Daemon Paused" indicator is clearly visible in the UI when the daemon's `is_active` flag is false.
+- [x] A global "Daemon Paused" indicator is clearly visible in the UI when the daemon's `is_active` flag is false.
 - [x] Projects matching the blocked conditions are visually highlighted with a red border (`border-red-500`) and red title text on the Projects Dashboard.
 - [x] The project card displays a single combined task count element formatted exactly as `[In Progress] / [In Review]`.
 - [x] The "In Progress" number in the combined element is styled with a green color class.
@@ -109,15 +109,15 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 *   **Full Stop & User Notification:** If the orchestrator cannot resolve the violation after the maximum attempts, or determines that the task fundamentally conflicts with impassable provider policies, the system must put a "full stop" to the task. It will immediately fail the task (or open a `steroids dispute`) and explicitly inform the user of the hard block.
 
 ### Acceptance Criteria (Section 4)
-- [ ] A project-level hibernation state is established to track the backoff schedule.
-- [ ] Capacity and token exhaustion errors trigger the progressive backoff schedule (5-10m -> 30m continuous).
-- [ ] During the backoff schedule, the daemon does **not** spawn the AI orchestrator or send full project prompts.
-- [ ] The daemon executes a lightweight, deterministic "ping" (e.g., sending "hello world!") to the provider API when a backoff timer expires.
-- [ ] The full orchestrator is only re-engaged after the lightweight ping returns a successful response.
-- [ ] Explicit Safety/Policy violation errors bypass the hibernation loop.
-- [ ] Upon a Safety/Policy violation, the orchestrator is invoked to attempt an automatic resolution of the prompt/specification.
-- [ ] If the orchestrator cannot resolve the violation, the task immediately enters a failed/disputed state and surfaces a clear notification to the user.
-- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
+- [x] A project-level hibernation state is established to track the backoff schedule.
+- [x] Capacity and token exhaustion errors trigger the progressive backoff schedule (5-10m -> 30m continuous).
+- [x] During the backoff schedule, the daemon does **not** spawn the AI orchestrator or send full project prompts.
+- [x] The daemon executes a lightweight, deterministic "ping" (e.g., sending "hello world!") to the provider API when a backoff timer expires.
+- [x] The full orchestrator is only re-engaged after the lightweight ping returns a successful response.
+- [x] Explicit Safety/Policy violation errors bypass the hibernation loop.
+- [x] Upon a Safety/Policy violation, the orchestrator is invoked to attempt an automatic resolution of the prompt/specification.
+- [x] If the orchestrator cannot resolve the violation, the task immediately enters a failed/disputed state and surfaces a clear notification to the user.
+- [x] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 
@@ -178,12 +178,12 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 *   **Single-Flight Mutex:** To prevent race conditions, the daemon must implement an in-memory lock or mutex around the wakeup cycle. If the user clicks the manual wakeup button while the background 1-minute tick is already executing a wakeup, the manual trigger must immediately return a `429 Too Many Requests` or gracefully wait without spawning duplicate runner processes.
 
 ### Acceptance Criteria (Section 7)
-- [ ] Toggling "Stop Steroids" sets an internal `is_active = false` flag in the global database's `_global_schema` table rather than uninstalling the cron job or killing the process outright.
-- [ ] When `is_active` is false, the daemon continues ticking every minute but completely skips triggering any runner wakeup logic.
-- [ ] Toggling "Start Steroids" resets `is_active = true` in the global DB, causing the daemon to resume its normal runner wakeup operations on the next tick.
-- [ ] A "Wake Up Runners" manual trigger button is visibly placed above the Stop/Start toggle in the left menu.
-- [ ] Clicking the "Wake Up Runners" button hits a backend endpoint that forces an immediate execution of the wakeup cycle, bypassing the standard 1-minute waiting period.
-- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
+- [x] Toggling "Stop Steroids" sets an internal `is_active = false` flag in the global database's `_global_schema` table rather than uninstalling the cron job or killing the process outright.
+- [x] When `is_active` is false, the daemon continues ticking every minute but completely skips triggering any runner wakeup logic.
+- [x] Toggling "Start Steroids" resets `is_active = true` in the global DB, causing the daemon to resume its normal runner wakeup operations on the next tick.
+- [x] A "Wake Up Runners" manual trigger button is visibly placed above the Stop/Start toggle in the left menu.
+- [x] Clicking the "Wake Up Runners" button hits a backend endpoint that forces an immediate execution of the wakeup cycle, bypassing the standard 1-minute waiting period.
+- [x] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 

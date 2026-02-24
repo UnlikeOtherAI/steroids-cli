@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
+import { getDaemonActiveStatus, setDaemonActiveStatus } from '../../../dist/runners/global-db.js';
 import { cronStatus, cronInstall, cronUninstall } from '../../../dist/runners/cron.js';
 import { getLastWakeupTime, wakeup } from '../../../dist/runners/wakeup.js';
 import { listRunners, unregisterRunner } from '../../../dist/runners/daemon.js';
@@ -171,12 +172,13 @@ router.get('/runners/active-tasks', (_req: Request, res: Response) => {
 router.get('/runners/cron', (_req: Request, res: Response) => {
   try {
     const status = cronStatus();
+    const isActive = getDaemonActiveStatus();
     const lastWakeup = getLastWakeupTime();
 
     res.json({
       success: true,
       cron: {
-        installed: status.installed,
+        installed: status.installed && isActive,
         entry: status.entry,
         error: status.error,
       },
@@ -198,27 +200,32 @@ router.get('/runners/cron', (_req: Request, res: Response) => {
  */
 router.post('/runners/cron/start', async (_req: Request, res: Response) => {
   try {
-    const result = cronInstall();
-
-    if (result.success) {
-      // Make "Start Steroids" feel immediate: run one wakeup cycle now.
-      const wakeupResults = await wakeup({ quiet: true });
-      const activated = wakeupResults.filter(
-        (item) => item.action === 'started' || item.action === 'restarted'
-      ).length;
-
-      res.json({
-        success: true,
-        message: `${result.message} Immediate wakeup started/restarted ${activated} runner(s).`,
-        wakeup: wakeupResults,
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: result.message,
-        message: result.error,
-      });
+    const status = cronStatus();
+    if (!status.installed) {
+      const installResult = cronInstall();
+      if (!installResult.success) {
+        res.status(400).json({
+          success: false,
+          error: installResult.message,
+          message: installResult.error,
+        });
+        return;
+      }
     }
+    
+    setDaemonActiveStatus(true);
+
+    // Make "Start Steroids" feel immediate: run one wakeup cycle now.
+    const wakeupResults = await wakeup({ quiet: true });
+    const activated = wakeupResults.filter(
+      (item) => item.action === 'started' || item.action === 'restarted'
+    ).length;
+
+    res.json({
+      success: true,
+      message: `Daemon resumed. Immediate wakeup started/restarted ${activated} runner(s).`,
+      wakeup: wakeupResults,
+    });
   } catch (error) {
     console.error('Error installing cron:', error);
     res.status(500).json({
@@ -235,22 +242,13 @@ router.post('/runners/cron/start', async (_req: Request, res: Response) => {
  */
 router.post('/runners/cron/stop', (_req: Request, res: Response) => {
   try {
-    const result = cronUninstall();
-
-    if (result.success) {
-      const stopped = stopAllRunnersNow();
-      res.json({
-        success: true,
-        message: `${result.message} Stopped ${stopped} active runner(s).`,
-        stopped,
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: result.message,
-        message: result.error,
-      });
-    }
+    setDaemonActiveStatus(false);
+    const stopped = stopAllRunnersNow();
+    res.json({
+      success: true,
+      message: `Daemon paused. Stopped ${stopped} active runner(s).`,
+      stopped,
+    });
   } catch (error) {
     console.error('Error uninstalling cron:', error);
     res.status(500).json({
@@ -305,6 +303,42 @@ router.post('/runners/:runnerId/kill', (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to kill runner',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/runners/wakeup/now
+ * Force immediate execution of the wakeup cycle
+ */
+router.post('/runners/wakeup/now', async (_req: Request, res: Response) => {
+  try {
+    const wakeupResults = await wakeup({ quiet: true });
+    
+    if (wakeupResults.length > 0 && wakeupResults[0].action === 'skipped' && wakeupResults[0].reason === 'Wakeup cycle already running') {
+      res.status(429).json({
+        success: false,
+        error: 'Too Many Requests',
+        message: 'A wakeup cycle is already running.',
+      });
+      return;
+    }
+    
+    const activated = wakeupResults.filter(
+      (item) => item.action === 'started' || item.action === 'restarted'
+    ).length;
+
+    res.json({
+      success: true,
+      message: `Immediate wakeup completed. Started/restarted ${activated} runner(s).`,
+      wakeup: wakeupResults,
+    });
+  } catch (error) {
+    console.error('Error forcing wakeup:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to force wakeup',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
