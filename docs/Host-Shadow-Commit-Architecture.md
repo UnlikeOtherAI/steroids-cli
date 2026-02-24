@@ -106,7 +106,7 @@ Under the new model:
   - Add `019_add_task_start_sha.sql` to add `start_commit_sha` to the `tasks` table.
   - Update `src/database/queries.ts` (`Task` interface, `createTask` or a new `updateTaskStartSha` function).
   - Update `manifest.json`.
-- [ ] **TASK 2: Implement `SignalParser`**
+- [x] **TASK 2: Implement `SignalParser`**
   - Create a robust Regex `SignalParser` utility to extract `STATUS: REVIEW` and `DECISION: APPROVE|REJECT|DISPUTE|SKIP`.
   - Ensure it ignores signals inside Markdown code blocks (\`\`\`).
   - Delete `ajv` schema validation from orchestrator logic.
