@@ -25,6 +25,7 @@ The following files are the **absolute source of truth** for architectural stand
 - Always verify the "Help" strings in `src/commands/` after adding new flags or subcommands.
 ### 3. Interactive Commands
 - **NEVER** run commands in interactive mode. If you need to launch a command line utility (like codex, vibe, or any other agent), ALWAYS use non-interactive mode (e.g. passing flags like `--yes`, `exec`, `-p`, etc.).
+- **CRITICAL**: Every time you call `npx tsx` or any `npx` command, you MUST append the `-y` or `--yes` flag (e.g., `npx -y tsx script.js`) to automatically accept package installations. Otherwise, the process will hang indefinitely waiting for user input.
 
 ### 4. Architectural & Code Quality Practices
 - **File Limits:** No file should be more than 500 lines of code. If a file is getting too large, break it down into modular, logical components.
