@@ -117,12 +117,12 @@ Under the new model:
   - Add the "Hard Override" constraint preventing LLMs from running `git commit`/`git push`.
 - [x] **TASK 4: Shallow Clones**
   - Update `src/parallel/clone.ts` to use `git clone --depth 1 --no-tags --single-branch`.
-- [ ] **TASK 5: Coder Phase (Shadow Commits)**
+- [x] **TASK 5: Coder Phase (Shadow Commits)**
   - Modify `src/commands/loop-phases.ts` (`runCoderPhase`).
   - Read `start_commit_sha` when the task starts.
   - Upon `STATUS: REVIEW`, run `git add .` and `git commit -m "wip: task <id> attempt <n>"`.
   - Record the WIP commit in the `audit` table.
-- [ ] **TASK 6: Reviewer Phase (Incremental Diff & End-State Squash)**
+- [x] **TASK 6: Reviewer Phase (Incremental Diff & End-State Squash)**
   - Modify `src/commands/loop-phases.ts` (`runReviewerPhase`).
   - Pass `git diff HEAD~1..HEAD` (incremental) and `git diff <start_commit_sha>..HEAD` (cumulative) to the Reviewer.
   - Parse the Markdown decision.
