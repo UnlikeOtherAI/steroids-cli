@@ -197,12 +197,10 @@ ${filesSection}
   "contract_violation": "checklist_required" | "rejection_response_required" | null,
   "wont_fix_override_items": ["specific required fix", "another required fix"],
   "next_status": "review" | "in_progress" | "failed",
-  "metadata": {
-    "files_changed": 0,
-    "confidence": "high" | "medium" | "low",
-    "exit_clean": true,
-    "has_commits": false
-  }
+  "files_changed": 0,
+  "confidence": "high" | "medium" | "low",
+  "exit_clean": true,
+  "has_commits": false
 }
 \`\`\`
 
@@ -245,12 +243,10 @@ ${filesSection}
   "commits": ["abc123", "def456"],
   "commit_message": null,
   "next_status": "review",
-  "metadata": {
-    "files_changed": 3,
-    "confidence": "high",
-    "exit_clean": true,
-    "has_commits": true
-  }
+  "files_changed": 3,
+  "confidence": "high",
+  "exit_clean": true,
+  "has_commits": true
 }
 \`\`\`
 
@@ -262,12 +258,10 @@ ${filesSection}
   "commits": [],
   "commit_message": "feat: implement task specification",
   "next_status": "review",
-  "metadata": {
-    "files_changed": 2,
-    "confidence": "high",
-    "exit_clean": true,
-    "has_commits": false
-  }
+  "files_changed": 2,
+  "confidence": "high",
+  "exit_clean": true,
+  "has_commits": false
 }
 \`\`\`
 
@@ -279,12 +273,10 @@ ${filesSection}
   "commits": [],
   "commit_message": null,
   "next_status": "in_progress",
-  "metadata": {
-    "files_changed": 0,
-    "confidence": "high",
-    "exit_clean": false,
-    "has_commits": false
-  }
+  "files_changed": 0,
+  "confidence": "high",
+  "exit_clean": false,
+  "has_commits": false
 }
 \`\`\`
 

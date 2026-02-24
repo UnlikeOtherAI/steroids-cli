@@ -719,12 +719,10 @@ export async function runCoderPhase(
         reasoning: `FALLBACK: Non-retryable orchestrator failure (${orchestratorFailure.type})`,
         commits: [],
         next_status: 'failed',
-        metadata: {
           files_changed: 0,
           confidence: 'low',
           exit_clean: false,
           has_commits: false,
-        }
       });
     } else {
     // Check if coder seems finished even if orchestrator failed
@@ -739,12 +737,10 @@ export async function runCoderPhase(
         reasoning: 'FALLBACK: Orchestrator failed but coder signaled completion',
         commits: commits.map(c => c.sha),
         next_status: 'review',
-        metadata: {
           files_changed: files_changed.length,
           confidence: 'low',
           exit_clean: true,
           has_commits: commits.length > 0,
-        }
       });
     } else {
       // Fallback to safe default: retry
@@ -753,12 +749,10 @@ export async function runCoderPhase(
         reasoning: 'FALLBACK: Orchestrator failed, defaulting to retry',
         commits: [],
         next_status: 'in_progress',
-        metadata: {
           files_changed: 0,
           confidence: 'low',
           exit_clean: true,
           has_commits: false,
-        }
       });
     }
     }
@@ -784,12 +778,10 @@ export async function runCoderPhase(
         commits: commits.map(c => c.sha),
         commit_message: has_uncommitted ? 'feat: implement task specification' : undefined,
         next_status: 'review',
-        metadata: {
           files_changed: files_changed.length,
           confidence: 'low',
           exit_clean: true,
           has_commits: commits.length > 0,
-        }
       };
     } else {
       // No completion signal - apply the parse retry counter
@@ -802,11 +794,8 @@ export async function runCoderPhase(
           action: 'error',
           reasoning: `Orchestrator parse failed ${consecutiveParseFallbackRetries} times; escalating to failed to stop retry loop`,
           next_status: 'failed',
-          metadata: {
-            ...decision.metadata,
-            confidence: 'low',
-            exit_clean: false,
-          },
+          confidence: 'low',
+          exit_clean: false,
         };
       } else {
         decision = {
@@ -843,11 +832,8 @@ export async function runCoderPhase(
         next_status: 'failed',
         contract_violation: contractViolation,
         reasoning: `${marker} ${cleanReason} (retry_limit ${consecutiveContractViolations}/${MAX_CONTRACT_VIOLATION_RETRIES})`,
-        metadata: {
-          ...decision.metadata,
           confidence: 'low',
           exit_clean: false,
-        },
       };
     } else {
       decision = {
@@ -856,10 +842,7 @@ export async function runCoderPhase(
         next_status: 'in_progress',
         contract_violation: contractViolation,
         reasoning: `${marker} ${cleanReason} (retry ${consecutiveContractViolations}/${MAX_CONTRACT_VIOLATION_RETRIES})`,
-        metadata: {
-          ...decision.metadata,
           confidence: 'medium',
-        },
       };
     }
   }
@@ -902,17 +885,14 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
       action: 'retry',
       next_status: 'in_progress',
       reasoning: `${MUST_IMPLEMENT_MARKER} WONT_FIX override applied`,
-      metadata: {
-        ...decision.metadata,
         confidence: 'medium',
-      },
     };
   }
 
   // STEP 6: Log orchestrator decision for audit trail
   addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
     actorType: 'orchestrator',
-    notes: `[${decision.action}] ${decision.reasoning} (confidence: ${decision.metadata.confidence})`,
+    notes: `[${decision.action}] ${decision.reasoning} (confidence: ${decision.confidence})`,
   });
 
   // STEP 7: Execute the decision
@@ -964,7 +944,7 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
         updateTaskStatus(db, task.id, 'review', 'orchestrator', decision.reasoning, submissionCommitSha);
       }
       if (!jsonMode) {
-        console.log(`\n✓ Coder complete, submitted to review (confidence: ${decision.metadata.confidence})`);
+        console.log(`\n✓ Coder complete, submitted to review (confidence: ${decision.confidence})`);
       }
       break;
 
@@ -1074,7 +1054,7 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
           submissionCommitSha
         );
         if (!jsonMode) {
-          console.log(`\n✓ Auto-committed and submitted to review (confidence: ${decision.metadata.confidence})`);
+          console.log(`\n✓ Auto-committed and submitted to review (confidence: ${decision.confidence})`);
         }
       } catch (error) {
         console.error('Failed to stage/commit:', error);
@@ -1087,7 +1067,7 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
 
     case 'retry':
       if (!jsonMode) {
-        console.log(`\n⟳ Retrying coder (${decision.reasoning}, confidence: ${decision.metadata.confidence})`);
+        console.log(`\n⟳ Retrying coder (${decision.reasoning}, confidence: ${decision.confidence})`);
       }
       break;
 
@@ -1388,12 +1368,10 @@ export async function runReviewerPhase(
           reasoning: 'FALLBACK: Multi-reviewer orchestrator failed',
           notes: 'Review unclear, retrying',
           next_status: 'review',
-          metadata: {
             rejection_count: task.rejection_count,
             confidence: 'low',
             push_to_remote: false,
             repeated_issue: false,
-          }
         };
       }
     } else {
@@ -1439,12 +1417,10 @@ export async function runReviewerPhase(
                          finalDecision === 'reject' ? 'in_progress' : 
                          finalDecision === 'dispute' ? 'disputed' :
                          finalDecision === 'skip' ? 'skipped' : 'review',
-            metadata: {
-              rejection_count: task.rejection_count,
-              confidence: 'low',
-              push_to_remote: ['approve', 'dispute', 'skip'].includes(finalDecision),
-              repeated_issue: false,
-            }
+            rejection_count: task.rejection_count,
+            confidence: 'low',
+            push_to_remote: ['approve', 'dispute', 'skip'].includes(finalDecision),
+            repeated_issue: false,
           };
         } else {
           decision = {
@@ -1452,12 +1428,10 @@ export async function runReviewerPhase(
             reasoning: 'FALLBACK: Multi-reviewer orchestrator failed and no unanimous consensus',
             notes: 'Review unclear, retrying',
             next_status: 'review',
-            metadata: {
-              rejection_count: task.rejection_count,
-              confidence: 'low',
-              push_to_remote: false,
-              repeated_issue: false,
-            }
+            rejection_count: task.rejection_count,
+            confidence: 'low',
+            push_to_remote: false,
+            repeated_issue: false,
           };
         }
       }
@@ -1498,12 +1472,10 @@ export async function runReviewerPhase(
                          explicitDecision === 'reject' ? 'in_progress' :
                          explicitDecision === 'dispute' ? 'disputed' :
                          explicitDecision === 'skip' ? 'skipped' : 'review',
-            metadata: {
-              rejection_count: task.rejection_count,
-              confidence: 'medium',
-              push_to_remote: ['approve', 'dispute', 'skip'].includes(explicitDecision),
-              repeated_issue: false,
-            }
+            rejection_count: task.rejection_count,
+            confidence: 'medium',
+            push_to_remote: ['approve', 'dispute', 'skip'].includes(explicitDecision),
+            repeated_issue: false,
           };
         }
       }
@@ -1527,12 +1499,10 @@ export async function runReviewerPhase(
                        explicitDecision === 'reject' ? 'in_progress' : 
                        explicitDecision === 'dispute' ? 'disputed' :
                        explicitDecision === 'skip' ? 'skipped' : 'review',
-          metadata: {
-            rejection_count: task.rejection_count,
-            confidence: 'low',
-            push_to_remote: ['approve', 'dispute', 'skip'].includes(explicitDecision),
-            repeated_issue: false,
-          }
+          rejection_count: task.rejection_count,
+          confidence: 'low',
+          push_to_remote: ['approve', 'dispute', 'skip'].includes(explicitDecision),
+          repeated_issue: false,
         };
       } else {
         decision = {
@@ -1540,12 +1510,10 @@ export async function runReviewerPhase(
           reasoning: `FALLBACK: Orchestrator failed (${failureReason}), retrying review`,
           notes: 'Review unclear, retrying',
           next_status: 'review',
-          metadata: {
             rejection_count: task.rejection_count,
             confidence: 'low',
             push_to_remote: false,
             repeated_issue: false,
-          }
         };
       }
     }
@@ -1563,11 +1531,8 @@ export async function runReviewerPhase(
         reasoning: `Orchestrator parse failed ${consecutiveParseFallbackRetries} times; escalating to dispute`,
         notes: 'Escalated to disputed to prevent endless unclear-review retries',
         next_status: 'disputed',
-        metadata: {
-          ...decision.metadata,
           confidence: 'low',
           push_to_remote: false,
-        },
       };
     } else {
       decision = {
@@ -1580,7 +1545,7 @@ export async function runReviewerPhase(
   // STEP 5: Log orchestrator decision for audit trail
   addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
     actorType: 'orchestrator',
-    notes: `[${decision.decision}] ${decision.reasoning} (confidence: ${decision.metadata.confidence})`,
+    notes: `[${decision.decision}] ${decision.reasoning} (confidence: ${decision.confidence})`,
   });
 
   // STEP 5.5: Create follow-up tasks if any (ONLY on approval)
@@ -1631,7 +1596,7 @@ export async function runReviewerPhase(
     case 'approve':
       approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
       if (!jsonMode) {
-        console.log(`\n✓ Task APPROVED (confidence: ${decision.metadata.confidence})`);
+        console.log(`\n✓ Task APPROVED (confidence: ${decision.confidence})`);
         console.log('Pushing to git...');
       }
       refreshParallelWorkstreamLease(projectPath, leaseFence);
@@ -1646,7 +1611,7 @@ export async function runReviewerPhase(
     case 'reject':
       rejectTask(db, task.id, 'orchestrator', decision.notes, commitSha);
       if (!jsonMode) {
-        console.log(`\n✗ Task REJECTED (${task.rejection_count + 1}/15, confidence: ${decision.metadata.confidence})`);
+        console.log(`\n✗ Task REJECTED (${task.rejection_count + 1}/15, confidence: ${decision.confidence})`);
         console.log('Returning to coder for fixes.');
       }
       break;
@@ -1654,7 +1619,7 @@ export async function runReviewerPhase(
     case 'dispute':
       updateTaskStatus(db, task.id, 'disputed', 'orchestrator', decision.notes, commitSha);
       if (!jsonMode) {
-        console.log(`\n! Task DISPUTED (confidence: ${decision.metadata.confidence})`);
+        console.log(`\n! Task DISPUTED (confidence: ${decision.confidence})`);
         console.log('Pushing current work and moving to next task.');
       }
       refreshParallelWorkstreamLease(projectPath, leaseFence);
@@ -1667,7 +1632,7 @@ export async function runReviewerPhase(
     case 'skip':
       updateTaskStatus(db, task.id, 'skipped', 'orchestrator', decision.notes, commitSha);
       if (!jsonMode) {
-        console.log(`\n⏭ Task SKIPPED (confidence: ${decision.metadata.confidence})`);
+        console.log(`\n⏭ Task SKIPPED (confidence: ${decision.confidence})`);
       }
       break;
 

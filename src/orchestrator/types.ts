@@ -10,12 +10,10 @@ export interface CoderOrchestrationResult {
   contract_violation?: 'checklist_required' | 'rejection_response_required' | null;
   wont_fix_override_items?: string[];
   next_status: 'review' | 'in_progress' | 'failed';
-  metadata: {
-    files_changed: number;
-    confidence: 'high' | 'medium' | 'low';
-    exit_clean: boolean;
-    has_commits: boolean;
-  };
+  files_changed: number;
+  confidence: 'high' | 'medium' | 'low';
+  exit_clean: boolean;
+  has_commits: boolean;
 }
 
 export interface FollowUpTask {
@@ -29,13 +27,11 @@ export interface ReviewerOrchestrationResult {
   notes: string;
   follow_up_tasks?: FollowUpTask[];
   next_status: 'completed' | 'in_progress' | 'disputed' | 'skipped' | 'review';
-  metadata: {
-    rejection_count: number;
-    confidence: 'high' | 'medium' | 'low';
-    push_to_remote: boolean;
-    repeated_issue: boolean;
-    reviewer_count?: number;
-  };
+  rejection_count: number;
+  confidence: 'high' | 'medium' | 'low';
+  push_to_remote: boolean;
+  repeated_issue: boolean;
+  reviewer_count?: number;
 }
 
 export interface CoderContext {

@@ -117,7 +117,7 @@ jest.unstable_mockModule('../src/orchestrator/fallback-handler.js', () => ({
         reasoning: 'test',
         commits: [],
         next_status: 'review',
-        metadata: { files_changed: 0, confidence: 'high', exit_clean: true, has_commits: false },
+        files_changed: 0, confidence: 'high', exit_clean: true, has_commits: false,
       };
     }
     parseReviewerOutput() {
@@ -126,7 +126,7 @@ jest.unstable_mockModule('../src/orchestrator/fallback-handler.js', () => ({
         reasoning: 'test',
         notes: 'test',
         next_status: 'completed',
-        metadata: { rejection_count: 0, confidence: 'high', push_to_remote: false, repeated_issue: false },
+        rejection_count: 0, confidence: 'high', push_to_remote: false, repeated_issue: false,
       };
     }
   },
@@ -286,7 +286,7 @@ describe('Loop Phases — Credit Exhaustion', () => {
         reasoning: 'All good',
         commits: [],
         next_status: 'review',
-        metadata: { files_changed: 0, confidence: 'high', exit_clean: true, has_commits: false },
+        files_changed: 0, confidence: 'high', exit_clean: true, has_commits: false,
       }));
 
       const result = await runCoderPhase(db, makeTask(), projectPath, 'start', true);
@@ -316,7 +316,7 @@ describe('Loop Phases — Credit Exhaustion', () => {
         reasoning: 'Rate limited',
         commits: [],
         next_status: 'in_progress',
-        metadata: { files_changed: 0, confidence: 'low', exit_clean: false, has_commits: false },
+        files_changed: 0, confidence: 'low', exit_clean: false, has_commits: false,
       }));
 
       const result = await runCoderPhase(db, makeTask(), projectPath, 'start', true);
@@ -353,7 +353,7 @@ describe('Loop Phases — Credit Exhaustion', () => {
         reasoning: 'All good',
         notes: 'Looks fine',
         next_status: 'completed',
-        metadata: { rejection_count: 0, confidence: 'high', push_to_remote: false, repeated_issue: false },
+        rejection_count: 0, confidence: 'high', push_to_remote: false, repeated_issue: false,
       }));
 
       const result = await runReviewerPhase(db, makeTask(), projectPath, true);
@@ -382,7 +382,7 @@ describe('Loop Phases — Credit Exhaustion', () => {
         reasoning: 'Auth error',
         notes: 'Could not authenticate',
         next_status: 'review',
-        metadata: { rejection_count: 0, confidence: 'low', push_to_remote: false, repeated_issue: false },
+        rejection_count: 0, confidence: 'low', push_to_remote: false, repeated_issue: false,
       }));
 
       const result = await runReviewerPhase(db, makeTask(), projectPath, true);

@@ -6,7 +6,7 @@ import Ajv from 'ajv';
 
 const coderSchema = {
   type: 'object',
-  required: ['action', 'reasoning', 'next_status', 'metadata'],
+  required: ['action', 'reasoning', 'next_status'],
   properties: {
     action: {
       type: 'string',
@@ -41,22 +41,16 @@ const coderSchema = {
       type: 'string',
       enum: ['review', 'in_progress', 'failed']
     },
-    metadata: {
-      type: 'object',
-      required: ['files_changed', 'confidence', 'exit_clean', 'has_commits'],
-      properties: {
-        files_changed: { type: 'number', minimum: 0 },
-        confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-        exit_clean: { type: 'boolean' },
-        has_commits: { type: 'boolean' }
-      }
-    }
+    files_changed: { type: 'number', minimum: 0 },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    exit_clean: { type: 'boolean' },
+    has_commits: { type: 'boolean' }
   }
 };
 
 const reviewerSchema = {
   type: 'object',
-  required: ['decision', 'reasoning', 'next_status', 'metadata'],
+  required: ['decision', 'reasoning', 'next_status'],
   properties: {
     decision: {
       type: 'string',
@@ -69,24 +63,29 @@ const reviewerSchema = {
         { type: 'null' }
       ]
     },
+    follow_up_tasks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['title', 'description'],
+        properties: {
+          title: { type: 'string' },
+          description: { type: 'string' }
+        }
+      }
+    },
     next_status: {
       type: 'string',
       enum: ['completed', 'in_progress', 'disputed', 'skipped', 'review']
     },
-    metadata: {
-      type: 'object',
-      required: ['rejection_count', 'confidence', 'push_to_remote'],
-      properties: {
-        rejection_count: { type: 'number', minimum: 0 },
-        confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-        push_to_remote: { type: 'boolean' },
-        repeated_issue: {
-          oneOf: [
-            { type: 'boolean' },
-            { type: 'null' }
-          ]
-        }
-      }
+    rejection_count: { type: 'number', minimum: 0 },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    push_to_remote: { type: 'boolean' },
+    repeated_issue: {
+      oneOf: [
+        { type: 'boolean' },
+        { type: 'null' }
+      ]
     }
   }
 };
@@ -97,31 +96,44 @@ export const validateCoderResult = ajv.compile(coderSchema);
 export const validateReviewerResult = ajv.compile(reviewerSchema);
 
 /**
- * Normalize confidence value to lowercase and strict booleans
+ * Normalize confidence value to lowercase and strict booleans, and flatten metadata
  */
 export function normalizeData(data: any): any {
   if (typeof data !== 'object' || data === null) return data;
   
   const result = { ...data };
+  
+  // Flatten legacy metadata object if LLM still generates it
   if (result.metadata && typeof result.metadata === 'object') {
-    result.metadata = { ...result.metadata };
-    
-    // Normalize confidence
-    if (typeof result.metadata.confidence === 'string') {
-      const confidence = result.metadata.confidence.trim().toLowerCase();
-      if (['high', 'medium', 'low'].includes(confidence)) {
-        result.metadata.confidence = confidence;
-      }
+    Object.assign(result, result.metadata);
+    delete result.metadata;
+  }
+  
+  // Safe defaults for required fields if missing
+  if (result.confidence === undefined) result.confidence = 'medium';
+  if (result.files_changed === undefined) result.files_changed = 0;
+  if (result.rejection_count === undefined) result.rejection_count = 0;
+  
+  // Normalize confidence
+  if (typeof result.confidence === 'string') {
+    const confidence = result.confidence.trim().toLowerCase();
+    if (['high', 'medium', 'low'].includes(confidence)) {
+      result.confidence = confidence;
     }
-    
-    // Normalize booleans
-    const boolFields = ['exit_clean', 'has_commits', 'push_to_remote', 'repeated_issue'];
-    for (const field of boolFields) {
-      if (typeof result.metadata[field] === 'string') {
-        const val = result.metadata[field].trim().toLowerCase();
-        if (val === 'true') result.metadata[field] = true;
-        if (val === 'false') result.metadata[field] = false;
-      }
+  }
+  
+  // Normalize booleans
+  const boolFields = ['exit_clean', 'has_commits', 'push_to_remote', 'repeated_issue'];
+  for (const field of boolFields) {
+    if (typeof result[field] === 'string') {
+      const val = result[field].trim().toLowerCase();
+      if (val === 'true') result[field] = true;
+      if (val === 'false') result[field] = false;
+    }
+    // Safe boolean defaults
+    if (result[field] === undefined) {
+      if (field === 'push_to_remote') result[field] = false;
+      if (field === 'repeated_issue') result[field] = false;
     }
   }
   

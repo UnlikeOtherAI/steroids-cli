@@ -7,19 +7,17 @@ describe('schemas edge cases', () => {
         action: 'submit',
         reasoning: 'Clean exit with commits present',
         next_status: 'review',
-        metadata: {
-          files_changed: 1,
-          confidence: 'High',
-          exit_clean: 'true',
-          has_commits: 'false'
-        }
+        files_changed: 1,
+        confidence: 'High',
+        exit_clean: 'true',
+        has_commits: 'false'
       };
       
       const { valid, data } = validateCoderResultWithLogging(payload);
       expect(valid).toBe(true);
-      expect(data.metadata.confidence).toBe('high');
-      expect(data.metadata.exit_clean).toBe(true);
-      expect(data.metadata.has_commits).toBe(false);
+      expect(data.confidence).toBe('high');
+      expect(data.exit_clean).toBe(true);
+      expect(data.has_commits).toBe(false);
     });
   });
 });

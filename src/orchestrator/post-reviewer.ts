@@ -107,12 +107,10 @@ ${stderrSection}
     }
   ],
   "next_status": "completed" | "in_progress" | "disputed" | "skipped" | "review",
-  "metadata": {
-    "rejection_count": 0,
-    "confidence": "high" | "medium" | "low",
-    "push_to_remote": false,
-    "repeated_issue": false
-  }
+  "rejection_count": 0,
+  "confidence": "high" | "medium" | "low",
+  "push_to_remote": false,
+  "repeated_issue": false
 }
 \`\`\`
 
@@ -157,12 +155,10 @@ ${stderrSection}
     }
   ],
   "next_status": "completed",
-  "metadata": {
-    "rejection_count": 0,
-    "confidence": "high",
-    "push_to_remote": true,
-    "repeated_issue": false
-  }
+  "rejection_count": 0,
+  "confidence": "high",
+  "push_to_remote": true,
+  "repeated_issue": false
 }
 \`\`\`
 
@@ -173,12 +169,10 @@ ${stderrSection}
   "reasoning": "Specific issues identified",
   "notes": "1. Add error handling in parseConfig(). 2. Missing test for edge case. 3. Fix type error on line 42.",
   "next_status": "in_progress",
-  "metadata": {
-    "rejection_count": 1,
-    "confidence": "high",
-    "push_to_remote": false,
-    "repeated_issue": false
-  }
+  "rejection_count": 1,
+  "confidence": "high",
+  "push_to_remote": false,
+  "repeated_issue": false
 }
 \`\`\`
 
@@ -189,12 +183,10 @@ ${stderrSection}
   "reasoning": "Same issue repeated 4 times, hitting limit",
   "notes": "Reviewer demanding global test coverage outside task scope. Human decision needed.",
   "next_status": "disputed",
-  "metadata": {
-    "rejection_count": 11,
-    "confidence": "high",
-    "push_to_remote": true,
-    "repeated_issue": true
-  }
+  "rejection_count": 11,
+  "confidence": "high",
+  "push_to_remote": true,
+  "repeated_issue": true
 }
 \`\`\`
 
@@ -205,12 +197,10 @@ ${stderrSection}
   "reasoning": "No decision statement in output",
   "notes": "Reviewer did not complete analysis",
   "next_status": "review",
-  "metadata": {
-    "rejection_count": 2,
-    "confidence": "low",
-    "push_to_remote": false,
-    "repeated_issue": false
-  }
+  "rejection_count": 2,
+  "confidence": "low",
+  "push_to_remote": false,
+  "repeated_issue": false
 }
 \`\`\`
 
@@ -297,13 +287,11 @@ ${reviewers_formatted}
     }
   ],
   "next_status": "in_progress",
-  "metadata": {
-    "rejection_count": ${task.rejection_count},
-    "confidence": "high",
-    "push_to_remote": false,
-    "repeated_issue": false,
-    "reviewer_count": ${reviewer_results.length}
-  }
+  "rejection_count": ${task.rejection_count},
+  "confidence": "high",
+  "push_to_remote": false,
+  "repeated_issue": false,
+  "reviewer_count": ${reviewer_results.length}
 }
 \`\`\`
 
