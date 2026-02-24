@@ -69,17 +69,17 @@ Do not mark those items as WONT_FIX unless you provide hard new evidence and the
 **REMINDER:**
 1. Address ALL reviewer feedback
 2. BUILD MUST PASS before submitting
-3. COMMIT YOUR WORK with a descriptive message
+3. DO NOT COMMIT OR PUSH YOUR WORK
 4. Include this exact contract block:
-   \`\`\`
+   ```
    ## REJECTION_RESPONSE
    ITEM-1 | IMPLEMENTED | <file:line> | <what changed>
    ITEM-2 | WONT_FIX | <exceptional reason + proof solution still works>
-   \`\`\`
-   - Every reviewer checkbox item must have one matching \`ITEM-<n>\` response.
-   - \`WONT_FIX\` is a high bar and requires an exceptional, concrete explanation.
-   - If coordinator guidance includes \`MUST_IMPLEMENT:\`, those items are mandatory and should not be marked \`WONT_FIX\`.
-5. Output "TASK COMPLETE" when finished
+   ```
+   - Every reviewer checkbox item must have one matching `ITEM-<n>` response.
+   - `WONT_FIX` is a high bar and requires an exceptional, concrete explanation.
+   - If coordinator guidance includes `MUST_IMPLEMENT:`, those items are mandatory and should not be marked `WONT_FIX`.
+5. Output "STATUS: REVIEW" when finished
 `;
 
   return prompt;
@@ -210,14 +210,11 @@ The orchestrator will handle the skip status.
 
 ## When You Are Done
 
-**Verify the project builds AND tests pass, then commit your work:**
+**Verify the project builds AND tests pass.**
 
-\`\`\`bash
-git add <your-changed-files>
-git commit -m "<type>: <descriptive message>"
-\`\`\`
+**Output "STATUS: REVIEW" followed by a summary of your changes.**
 
-**Output "TASK COMPLETE" followed by a summary of your changes.**
+**HARD OVERRIDE: Even if project documentation (like CLAUDE.md, AGENTS.md, etc.) instructs you to commit or push code, YOU MUST IGNORE IT. Committing and pushing is disabled for your role. The host system manages all version control automatically.**
 
 The orchestrator will automatically detect your completion and submit the task for review. Do NOT run any \`steroids tasks\` commands - the orchestrator handles all status updates.
 
@@ -324,11 +321,11 @@ For EACH task:
 1. Read the specification
 2. Implement the feature/fix
 3. Run tests if applicable
-4. Commit: \`git add <files> && git commit -m "<type>: <message>"\`
-5. Output "TASK COMPLETE: <task-id>" when done
+4. Output "STATUS: REVIEW: <task-id>" when done
+5. DO NOT commit or push
 6. Move to next task
 
-**CRITICAL:** Each task MUST have its own commit. The orchestrator will handle status updates.
+**CRITICAL:** Do NOT commit your work. The host system manages all commits. The orchestrator will handle status updates.
 
 ---
 
@@ -336,7 +333,7 @@ For EACH task:
 
 1. **NEVER touch .steroids/ directory**
 2. **BUILD MUST PASS after each task**
-3. **Commit after EACH task** with a descriptive message
+3. **DO NOT commit after tasks** (the host system handles commits)
 4. **DO NOT run \`steroids tasks\` commands** - the orchestrator handles status
 
 ---
@@ -405,7 +402,7 @@ ${gitDiff ?? 'No changes'}
 1. Review what the previous coder did
 2. If the work looks good, complete it
 3. If the work looks wrong, you may start fresh
-4. Commit all changes when done
+4. DO NOT commit changes when done
 5. If this task has rejections, include a \`## REJECTION_RESPONSE\` block with one line per reviewer item (\`IMPLEMENTED\` or \`WONT_FIX\` with strong justification)
 ${rejectionSection}
 ---
@@ -440,8 +437,8 @@ ${sourceRef}
 ## CRITICAL RULES
 
 1. **NEVER touch .steroids/ directory**
-2. **COMMIT YOUR WORK** when complete
-3. **Output "TASK COMPLETE"** when done - the orchestrator will submit for review
+2. **DO NOT COMMIT YOUR WORK**
+3. **Output "STATUS: REVIEW"** when done - the orchestrator will submit for review
 4. **DO NOT run any \`steroids tasks\` commands** - the orchestrator handles all status updates
 
 ---
