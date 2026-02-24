@@ -30,14 +30,14 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
     *   Apply an orange/amber CSS class (e.g., `text-orange-500`) to the "In Review" integer.
 
 ### Acceptance Criteria (Section 1)
-- [ ] The global alert bell icon is visible ONLY if at least one project has `failed` tasks, open `disputes`, or tasks with `failure_count >= 3`.
-- [ ] Clicking the global alert bell icon navigates the user to the `/projects` page.
+- [x] The global alert bell icon is visible ONLY if at least one project has `failed` tasks, open `disputes`, or tasks with `failure_count >= 3`.
+- [x] Clicking the global alert bell icon navigates the user to the `/projects` page.
 - [ ] A global "Daemon Paused" indicator is clearly visible in the UI when the daemon's `is_active` flag is false.
-- [ ] Projects matching the blocked conditions are visually highlighted with a red border (`border-red-500`) and red title text on the Projects Dashboard.
-- [ ] The project card displays a single combined task count element formatted exactly as `[In Progress] / [In Review]`.
-- [ ] The "In Progress" number in the combined element is styled with a green color class.
-- [ ] The "In Review" number in the combined element is styled with an orange/amber color class.
-- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
+- [x] Projects matching the blocked conditions are visually highlighted with a red border (`border-red-500`) and red title text on the Projects Dashboard.
+- [x] The project card displays a single combined task count element formatted exactly as `[In Progress] / [In Review]`.
+- [x] The "In Progress" number in the combined element is styled with a green color class.
+- [x] The "In Review" number in the combined element is styled with an orange/amber color class.
+- [x] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 
@@ -81,13 +81,13 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 *   **Blocked State Logic:** The backend should calculate an `isBlocked` boolean (true if `failed > 0` or `disputed > 0`) and pass it to the frontend to drive the Dashboard Highlighting logic (Section 1.2).
 
 ### Acceptance Criteria (Section 3)
-- [ ] The global home database (`~/.steroids/steroids.db`) no longer relies on duplicated `pending_count`, `in_progress_count`, `review_count`, or `completed_count` columns.
-- [ ] The `/api/projects` endpoint successfully fetches and aggregates task statuses dynamically from each individual project's database.
-- [ ] The daemon's 1-minute wakeup loop successfully queries child databases to discover pending work without causing file-lock contention.
-- [ ] The API response payload accurately includes counts for `failed` and `disputed` tasks.
-- [ ] The Web UI loads project statistics strictly on demand (page load/refresh) without relying on background interval polling (`setInterval`).
-- [ ] The backend API accurately returns an `isBlocked` boolean property (true when `failed` > 0 or `disputed` > 0) to drive the frontend UI highlighting.
-- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
+- [x] The global home database (`~/.steroids/steroids.db`) no longer relies on duplicated `pending_count`, `in_progress_count`, `review_count`, or `completed_count` columns.
+- [x] The `/api/projects` endpoint successfully fetches and aggregates task statuses dynamically from each individual project's database.
+- [x] The daemon's 1-minute wakeup loop successfully queries child databases to discover pending work without causing file-lock contention.
+- [x] The API response payload accurately includes counts for `failed` and `disputed` tasks.
+- [x] The Web UI loads project statistics strictly on demand (page load/refresh) without relying on background interval polling (`setInterval`).
+- [x] The backend API accurately returns an `isBlocked` boolean property (true when `failed` > 0 or `disputed` > 0) to drive the frontend UI highlighting.
+- [x] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ---
 
@@ -225,9 +225,9 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 - [ ] The fallback orchestrator logic calculates the exact prompt size and dynamically looks up the target model's maximum token limit.
 - [ ] The fallback orchestrator prioritizes the System Prompt and Task Specification, strictly pruning only older tool results/thoughts during context truncation.
 - [ ] The fallback orchestrator safely truncates history or blocks execution if the "fresh" monolithic prompt exceeds the calculated token limits for that model.
-- [ ] All dynamic O(N) child database queries enforce a strict timeout (e.g., 500ms) to prevent API or daemon freezing.
-- [ ] The daemon explicitly and immediately closes SQLite database connections after each O(N) aggregation query to prevent file descriptor leaks.
-- [ ] Projects that fail the database connection timeout are visually greyed out and rendered unclickable on the Web UI Projects Dashboard.
+- [x] All dynamic O(N) child database queries enforce a strict timeout (e.g., 500ms) to prevent API or daemon freezing.
+- [x] The daemon explicitly and immediately closes SQLite database connections after each O(N) aggregation query to prevent file descriptor leaks.
+- [x] Projects that fail the database connection timeout are visually greyed out and rendered unclickable on the Web UI Projects Dashboard.
 - [ ] The "Tasks" navigation link is completely removed from the `Sidebar.tsx`.
 - [ ] The `/tasks` route and the `RunningTasksPage` component are fully removed from the WebUI source code.
 - [x] The `steroids tasks reset` command revokes leases and unblocks sessions in the global `parallel_sessions`/`workstreams` tables to guarantee runners resume in their existing workspace clones.

@@ -3,6 +3,8 @@ export interface ProjectStats {
   in_progress: number;
   review: number;
   completed: number;
+  failed: number;
+  disputed: number;
 }
 
 export interface ProjectRunner {
@@ -21,6 +23,8 @@ export interface Project {
   last_seen_at: string;
   last_activity_at: string | null;
   last_task_added_at: string | null;
+  isBlocked?: boolean;
+  isUnreachable?: boolean;
   storage_bytes?: number | null;
   storage_human?: string | null;
   storage_warning?: 'orange' | 'red' | null;

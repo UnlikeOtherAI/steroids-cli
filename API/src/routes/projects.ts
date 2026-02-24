@@ -24,8 +24,10 @@ import { getCachedListStorage } from '../utils/storage-cache.js';
 const router = Router();
 
 interface ProjectLiveData {
-  stats: { pending: number; in_progress: number; review: number; completed: number };
+  stats: { pending: number; in_progress: number; review: number; completed: number; failed: number; disputed: number };
   last_task_added_at: string | null;
+  isBlocked: boolean;
+  isUnreachable: boolean;
 }
 
 /**
@@ -33,14 +35,16 @@ interface ProjectLiveData {
  */
 function getProjectLiveData(projectPath: string): ProjectLiveData {
   const empty: ProjectLiveData = {
-    stats: { pending: 0, in_progress: 0, review: 0, completed: 0 },
+    stats: { pending: 0, in_progress: 0, review: 0, completed: 0, failed: 0, disputed: 0 },
     last_task_added_at: null,
+    isBlocked: false,
+    isUnreachable: true,
   };
   const dbPath = join(projectPath, '.steroids', 'steroids.db');
   if (!existsSync(dbPath)) return empty;
 
   try {
-    const projectDb = openSqliteForRead(dbPath);
+    const projectDb = openSqliteForRead(dbPath, { timeoutMs: 500 });
     try {
       const row = projectDb
         .prepare(
@@ -49,10 +53,17 @@ function getProjectLiveData(projectPath: string): ProjectLiveData {
             COALESCE(SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END), 0) as in_progress,
             COALESCE(SUM(CASE WHEN status = 'review' THEN 1 ELSE 0 END), 0) as review,
             COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed,
+            COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed,
+            COALESCE(SUM(CASE WHEN status = 'disputed' THEN 1 ELSE 0 END), 0) as disputed,
+            COALESCE(SUM(CASE WHEN failure_count >= 3 THEN 1 ELSE 0 END), 0) as high_failures,
             MAX(created_at) as last_task_added_at
           FROM tasks`
         )
-        .get() as { pending: number; in_progress: number; review: number; completed: number; last_task_added_at: string | null } | undefined;
+        .get() as { pending: number; in_progress: number; review: number; completed: number; failed: number; disputed: number; high_failures: number; last_task_added_at: string | null } | undefined;
+
+      const failedCount = row?.failed ?? 0;
+      const disputedCount = row?.disputed ?? 0;
+      const highFailuresCount = row?.high_failures ?? 0;
 
       return {
         stats: {
@@ -60,8 +71,12 @@ function getProjectLiveData(projectPath: string): ProjectLiveData {
           in_progress: row?.in_progress ?? 0,
           review: row?.review ?? 0,
           completed: row?.completed ?? 0,
+          failed: failedCount,
+          disputed: disputedCount,
         },
         last_task_added_at: row?.last_task_added_at ?? null,
+        isBlocked: failedCount > 0 || disputedCount > 0 || highFailuresCount > 0,
+        isUnreachable: false,
       };
     } finally {
       projectDb.close();
@@ -79,11 +94,15 @@ interface ProjectResponse {
   last_seen_at: string;
   last_activity_at: string | null;  // Runner heartbeat or null if no active runner
   last_task_added_at: string | null;  // Most recent task created_at
+  isBlocked: boolean;
+  isUnreachable: boolean;
   stats?: {
     pending: number;
     in_progress: number;
     review: number;
     completed: number;
+    failed: number;
+    disputed: number;
   };
   runner?: {
     id: string;
@@ -135,6 +154,8 @@ router.get('/projects', (req: Request, res: Response) => {
           last_seen_at: project.last_seen_at,
           last_activity_at: runner?.heartbeat_at || null,
           last_task_added_at: liveData.last_task_added_at,
+          isBlocked: liveData.isBlocked,
+          isUnreachable: liveData.isUnreachable,
           stats: liveData.stats,
           runner: runner
             ? {
@@ -430,6 +451,9 @@ router.get('/projects/status', (req: Request, res: Response) => {
         last_seen_at: project.last_seen_at,
         last_activity_at: runner?.heartbeat_at || null,
         last_task_added_at: liveData.last_task_added_at,
+        isBlocked: liveData.isBlocked,
+        isUnreachable: liveData.isUnreachable,
+        stats: liveData.stats,
         runner: runner
           ? {
               id: runner.id,

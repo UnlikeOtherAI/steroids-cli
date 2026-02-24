@@ -20,13 +20,15 @@ export async function projectHasPendingWork(projectPath: string): Promise<boolea
   try {
     // Mirror orchestrator selection logic so wakeup only starts runners
     // when there is actually an eligible task to execute.
-    const { db, close } = openDatabase(projectPath);
+    // Use strict 500ms timeout for O(N) querying
+    const { db, close } = openDatabase(projectPath, { timeoutMs: 500 });
     try {
       return selectNextTask(db) !== null;
     } finally {
       close();
     }
-  } catch {
+  } catch (error) {
+    // Treat timeouts or locked DBs as no pending work for this cycle
     return false;
   }
 }

@@ -34,16 +34,33 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
   };
 
   const handleClick = () => {
+    if (project.isUnreachable) return;
     navigate(`/project/${encodeURIComponent(project.path)}`);
   };
+
+  const isBlocked = project.isBlocked;
+  const isUnreachable = project.isUnreachable;
+
+  const containerClasses = [
+    "bg-white rounded-lg shadow-sm border p-4 transition-shadow",
+    isUnreachable ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md",
+    isBlocked ? "border-red-500" : "border-gray-200"
+  ].join(" ");
+
+  const titleClasses = [
+    "text-lg font-semibold truncate",
+    isBlocked ? "text-red-500" : "text-gray-900"
+  ].join(" ");
 
   return (
     <div
       onClick={handleClick}
-      className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
+      className={containerClasses}
+      title={isBlocked ? "Project contains failing tasks or disputes" : isUnreachable ? "Project is currently unreachable" : undefined}
+      aria-label={isBlocked ? "Project blocked: contains failing tasks or disputes" : isUnreachable ? "Project unreachable" : `Project ${project.name}`}
     >
       <div className="mb-3">
-        <h3 className="text-lg font-semibold text-gray-900 truncate">
+        <h3 className={titleClasses}>
           {project.name || project.path.split('/').pop() || 'Project'}
         </h3>
         <Tooltip content={project.path}>
@@ -60,18 +77,18 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
       </div>
 
       {project.stats && (
-        <div className="grid grid-cols-2 gap-3 mb-3">
+        <div className="grid grid-cols-3 gap-3 mb-3">
           <div className="bg-gray-50 rounded-lg p-2 text-center">
             <div className="text-xl font-bold text-gray-900">{project.stats.pending}</div>
             <div className="text-xs text-gray-500">Pending</div>
           </div>
-          <div className="bg-blue-50 rounded-lg p-2 text-center">
-            <div className="text-xl font-bold text-blue-600">{project.stats.in_progress}</div>
-            <div className="text-xs text-gray-500">In Progress</div>
-          </div>
-          <div className="bg-yellow-50 rounded-lg p-2 text-center">
-            <div className="text-xl font-bold text-yellow-600">{project.stats.review}</div>
-            <div className="text-xs text-gray-500">Review</div>
+          <div className="bg-gray-50 rounded-lg p-2 text-center flex flex-col justify-center items-center">
+            <div className="text-xl font-bold">
+              <span className="text-green-500">{project.stats.in_progress}</span>
+              <span className="text-gray-400 mx-1">/</span>
+              <span className="text-orange-500">{project.stats.review}</span>
+            </div>
+            <div className="text-[10px] text-gray-500 mt-1">[In Progress] / [In Review]</div>
           </div>
           <div className="bg-green-50 rounded-lg p-2 text-center">
             <div className="text-xl font-bold text-green-600">{project.stats.completed}</div>

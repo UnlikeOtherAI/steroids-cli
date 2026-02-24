@@ -80,14 +80,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ project }) => {
     fetchAggregateStats();
   }, [fetchActivityStats, fetchAggregateStats]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchActivityStats();
-      fetchAggregateStats();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [fetchActivityStats, fetchAggregateStats]);
-
   const navigateToActivity = (status: ActivityStatusType) => {
     navigate(`/activity?status=${status}&hours=${selectedRange.hours}`);
   };

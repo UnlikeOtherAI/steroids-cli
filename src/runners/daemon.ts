@@ -8,7 +8,7 @@ import { openGlobalDatabase } from './global-db.js';
 import { createHeartbeatManager } from './heartbeat.js';
 import { hasActiveRunnerForProject } from './wakeup.js';
 import { runOrchestratorLoop } from './orchestrator-loop.js';
-import { updateProjectStats, getRegisteredProject } from './projects.js';
+import { getRegisteredProject } from './projects.js';
 import { openDatabase } from '../database/connection.js';
 import { getTaskCountsByStatus } from '../database/queries.js';
 import { runParallelMerge, type MergeWorkstreamSpec } from '../parallel/merge.js';
@@ -120,25 +120,6 @@ export function updateRunnerHeartbeat(runnerId: string): void {
   }
 }
 
-/**
- * Sync project stats to global database
- * Called during heartbeat to cache stats for API/WebUI
- */
-export function syncProjectStats(projectPath: string): void {
-  try {
-    const { db, close } = openDatabase(projectPath);
-    try {
-      const stats = getTaskCountsByStatus(db);
-      updateProjectStats(projectPath, stats);
-    } finally {
-      close();
-    }
-  } catch (error) {
-    // Silently fail if project DB is unavailable
-    // (e.g., during initialization or corruption)
-    console.error(`Failed to sync stats for ${projectPath}:`, error);
-  }
-}
 
 /**
  * Update runner's current task
@@ -293,9 +274,6 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
       onIteration: (iteration) => {
         // Update heartbeat on each iteration
         updateRunnerHeartbeat(runnerId);
-
-        // Sync project stats to global DB for API/WebUI access
-        syncProjectStats(effectiveProjectPath);
       },
       onHeartbeat: () => {
         updateRunnerHeartbeat(runnerId);

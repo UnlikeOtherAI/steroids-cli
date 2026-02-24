@@ -104,7 +104,7 @@ function formatMigrationHint(originalError: Error, migrationResult?: string): st
  * Open an existing database connection
  * Automatically applies pending migrations if any are found
  */
-export function openDatabase(projectPath?: string): DatabaseConnection {
+export function openDatabase(projectPath?: string, options?: { timeoutMs?: number }): DatabaseConnection {
   const dbPath = getDbPath(projectPath);
 
   if (!existsSync(dbPath)) {
@@ -113,11 +113,13 @@ export function openDatabase(projectPath?: string): DatabaseConnection {
     );
   }
 
-  const db = new Database(dbPath);
+  // Set standard timeout, falling back to options if provided
+  const timeoutMs = options?.timeoutMs ?? 5000;
+  const db = new Database(dbPath, { timeout: timeoutMs });
 
   // Configure SQLite
   db.pragma('journal_mode = WAL');
-  db.pragma('busy_timeout = 5000');
+  db.pragma(`busy_timeout = ${timeoutMs}`);
   db.pragma('foreign_keys = ON');
 
   // Always attempt auto-migration for pending migrations
