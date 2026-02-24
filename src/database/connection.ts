@@ -129,12 +129,16 @@ export function openDatabase(projectPath?: string, options?: { timeoutMs?: numbe
       console.log(`Auto-migrated database: ${result.migrations.join(', ')}`);
     }
     if (result.error) {
-      console.error(`Warning: Migration issue: ${result.error}`);
+      db.close();
+      throw new Error(`Fatal: Database migration failed: ${result.error}`);
     }
   } catch (err) {
-    // Log but don't fail - the DB may still work if no new columns are needed
+    db.close();
+    if (err instanceof Error && err.message.startsWith('Fatal:')) {
+      throw err;
+    }
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`Warning: Could not check migrations: ${msg}`);
+    throw new Error(`Fatal: Could not check or run database migrations: ${msg}`);
   }
 
   // Wrap the database with schema error interception
