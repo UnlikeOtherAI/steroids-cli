@@ -71,6 +71,9 @@ export interface AuditEntry {
   from_status: string | null;
   to_status: string;
   actor: string;
+  category: string | null;
+  error_code: string | null;
+  metadata: string | null;
   notes: string | null;
   commit_sha: string | null;
   created_at: string;
@@ -725,6 +728,9 @@ export interface AuditOptions {
   commitSha?: string;
   actorType?: 'human' | 'coder' | 'reviewer' | 'orchestrator';
   model?: string;
+  category?: string;
+  errorCode?: string;
+  metadata?: any;
 }
 
 export function addAuditEntry(
@@ -736,30 +742,32 @@ export function addAuditEntry(
   options?: AuditOptions | string,
   commitSha?: string
 ): void {
-  // Support legacy signature: addAuditEntry(db, taskId, from, to, actor, notes, commitSha)
-  if (typeof options === 'string' || options == null) {
-    const notes = options as string | undefined;
-    db.prepare(
-      `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, model, notes, commit_sha)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(taskId, fromStatus, toStatus, actor, 'human', null, notes ?? null, commitSha ?? null);
-    return;
+  let notes: string | null = null;
+  let finalCommitSha: string | null = commitSha ?? null;
+  let actorType: string = 'human';
+  let model: string | null = null;
+  let category: string | null = null;
+  let errorCode: string | null = null;
+  let metadataStr: string | null = null;
+
+  if (typeof options === 'string') {
+    notes = options;
+  } else if (options != null) {
+    notes = options.notes ?? null;
+    finalCommitSha = options.commitSha ?? finalCommitSha;
+    actorType = options.actorType ?? 'human';
+    model = options.model ?? null;
+    category = options.category ?? null;
+    errorCode = options.errorCode ?? null;
+    if (options.metadata) {
+      metadataStr = typeof options.metadata === 'string' ? options.metadata : JSON.stringify(options.metadata);
+    }
   }
 
-  // New signature with options object
   db.prepare(
-    `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, model, notes, commit_sha)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    taskId,
-    fromStatus,
-    toStatus,
-    actor,
-    options.actorType ?? 'human',
-    options.model ?? null,
-    options.notes ?? null,
-    options.commitSha ?? null
-  );
+    `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, model, notes, commit_sha, category, error_code, metadata)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(taskId, fromStatus, toStatus, actor, actorType, model, notes, finalCommitSha, category, errorCode, metadataStr);
 }
 
 export function getTaskAudit(
@@ -875,23 +883,29 @@ export function getLatestMustImplementGuidance(
 ): MustImplementGuidance | null {
   const entry = db
     .prepare(
-      `SELECT notes, created_at
+      `SELECT notes, metadata, created_at
        FROM audit
        WHERE task_id = ?
        AND actor = 'coordinator'
-       AND notes LIKE '[must_implement]%'
+       AND category = 'must_implement'
        ORDER BY created_at DESC, id DESC
        LIMIT 1`
     )
-    .get(taskId) as { notes: string | null; created_at: string } | undefined;
+    .get(taskId) as { notes: string | null; metadata: string | null; created_at: string } | undefined;
 
   if (!entry?.notes) return null;
 
-  const rcMatch = entry.notes.match(/\[rc=(\d+)\]/);
-  const rejectionCountWatermark = rcMatch ? Number.parseInt(rcMatch[1], 10) : 0;
-  const guidance = entry.notes
-    .replace(/^\[must_implement\](?:\[rc=\d+\])?\s*/i, '')
-    .trim();
+  let rejectionCountWatermark = 0;
+  if (entry.metadata) {
+    try {
+      const meta = JSON.parse(entry.metadata);
+      if (typeof meta.rejection_count === 'number') {
+        rejectionCountWatermark = meta.rejection_count;
+      }
+    } catch {}
+  }
+
+  const guidance = entry.notes.trim();
 
   if (!guidance) return null;
 

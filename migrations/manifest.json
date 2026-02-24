@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 17,
+  "latestDbVersion": 18,
   "migrations": [
     {
       "id": 1,
@@ -135,6 +135,14 @@
       "name": "017_add_invocation_runner_id",
       "file": "017_add_invocation_runner_id.sql",
       "description": "Add runner_id to task_invocations to support deterministic workstream resets",
+      "checksum": "",
+      "cliVersion": "0.9.43"
+    },
+    {
+      "id": 18,
+      "name": "018_expand_audit_columns",
+      "file": "018_expand_audit_columns.sql",
+      "description": "Add explicit columns to audit table to replace string parsing of notes",
       "checksum": "",
       "cliVersion": "0.9.43"
     }

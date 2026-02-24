@@ -29,6 +29,9 @@ function setupProjectDb(): Database.Database {
       actor TEXT NOT NULL,
       actor_type TEXT DEFAULT 'human',
       model TEXT,
+      category TEXT,
+      error_code TEXT,
+      metadata TEXT,
       notes TEXT,
       commit_sha TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))

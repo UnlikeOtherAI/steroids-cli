@@ -347,12 +347,15 @@ function countConsecutiveOrchestratorFallbackEntries(
     const entry = audit[i];
     if (entry.actor !== 'orchestrator') break;
 
-    if ((entry.notes ?? '').includes(marker)) {
-      count += 1;
-      continue;
-    }
+    // Use category and error_code instead of marker string search
+    const isFallback = entry.category === 'fallback';
+    const matchesCode = entry.error_code === marker;
 
-    break;
+    if (isFallback && matchesCode) {
+      count += 1;
+    } else {
+      break;
+    }
   }
 
   return count;
@@ -865,11 +868,13 @@ ${mandatoryLines.join('\n')}
 
 This is a mandatory orchestrator override. Implement these changes before resubmitting.
 Only use WONT_FIX if you provide exceptional technical evidence and the orchestrator explicitly accepts it.`;
-    const persistedNote = `${MUST_IMPLEMENT_MARKER}[rc=${task.rejection_count}] ${mandatoryGuidance}`;
+    const persistedNote = mandatoryGuidance;
 
     addAuditEntry(db, task.id, task.status, task.status, 'coordinator', {
       actorType: 'orchestrator',
       notes: persistedNote,
+      category: 'must_implement',
+      metadata: { rejection_count: task.rejection_count }
     });
 
     coordinatorCache?.set(task.id, {
@@ -882,10 +887,9 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
       ...decision,
       action: 'retry',
       next_status: 'in_progress',
-      reasoning: `${MUST_IMPLEMENT_MARKER} WONT_FIX override applied`,
-        confidence: 'medium',
-    };
-  }
+      reasoning: `WONT_FIX override applied (MUST_IMPLEMENT)`,
+      confidence: 'medium',
+    };  }
 
   // STEP 6: Log orchestrator decision for audit trail
   addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {

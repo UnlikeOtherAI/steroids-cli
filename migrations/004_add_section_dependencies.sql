@@ -2,7 +2,7 @@
 -- Allows sections to declare dependencies on other sections
 
 -- UP
-CREATE TABLE section_dependencies (
+CREATE TABLE IF NOT EXISTS section_dependencies (
   id TEXT PRIMARY KEY,
   section_id TEXT NOT NULL REFERENCES sections(id),
   depends_on_section_id TEXT NOT NULL REFERENCES sections(id),

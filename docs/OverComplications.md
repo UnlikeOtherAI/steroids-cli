@@ -74,12 +74,12 @@ Every command in `src/commands/` manually handles help generation, argument pars
 The system makes architectural decisions by parsing strings in `audit.notes` (e.g., searching for `[must_implement]`).
 
 ### Tasks
-- [ ] **TASK: Audit Schema Migration**: Add `category` (TEXT), `error_code` (TEXT), and `metadata` (JSON) columns to the `audit` table.
-- [ ] **TASK: Implement Backfill**: Create a script that parses legacy `audit.notes` and populates the new columns.
+- [x] **TASK: Audit Schema Migration**: Add `category` (TEXT), `error_code` (TEXT), and `metadata` (JSON) columns to the `audit` table.
+- [x] **TASK: Implement Backfill**: Create a script that parses legacy `audit.notes` and populates the new columns.
 
 ### Acceptance Criteria
-- [ ] AC: All internal queries in `src/database/queries.ts` must use column filters instead of `LIKE '%[...]%'`.
-- [ ] AC: A test must verify that the backfill script correctly migrates 100% of existing "must_implement" and "rejected" markers in a sample DB.
+- [x] AC: All internal queries in `src/database/queries.ts` must use column filters instead of `LIKE '%[...]%'`.
+- [x] AC: A test must verify that the backfill script correctly migrates 100% of existing "must_implement" and "rejected" markers in a sample DB.
 
 ---
 

@@ -16,6 +16,7 @@ import {
   verifyChecksum,
   findPendingMigrations,
 } from './manifest.js';
+import { backfillAuditColumns } from './backfill.js';
 
 /**
  * Result of a migration operation
@@ -439,6 +440,14 @@ export function autoMigrate(db: Database.Database, dbPath?: string): {
         migrations: result.applied,
         error: `Migration failed at ${result.failed}: ${result.error}`,
       };
+    }
+
+    if (result.applied.length > 0) {
+      try {
+        backfillAuditColumns(db);
+      } catch (err) {
+        console.error('Warning: Backfill script failed:', err);
+      }
     }
 
     return {

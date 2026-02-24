@@ -75,6 +75,9 @@ CREATE TABLE IF NOT EXISTS audit (
     actor TEXT NOT NULL,
     actor_type TEXT DEFAULT 'human',
     model TEXT,
+    category TEXT,
+    error_code TEXT,
+    metadata TEXT,
     notes TEXT,
     commit_sha TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -245,4 +248,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (14, '014_add_sess
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (15, '015_add_follow_up_fields', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (16, '016_add_invocation_activity_timestamp', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (17, '017_add_invocation_runner_id', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (18, '018_expand_audit_columns', 'builtin');
 `;
