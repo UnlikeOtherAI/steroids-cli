@@ -6,7 +6,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { openGlobalDatabase } from './global-db.js';
+import { openGlobalDatabase, withGlobalDatabase } from './global-db.js';
 import { loadConfigFile, getGlobalConfigPath } from '../config/loader.js';
 
 export interface RegisteredProject {

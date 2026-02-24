@@ -282,7 +282,7 @@ EXAMPLES:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
     // Filter sections if --section specified
     let sections = listSections(db);
     if (values.section) {

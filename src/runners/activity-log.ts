@@ -3,7 +3,7 @@
  * Tracks task terminal states across all projects
  */
 
-import { openGlobalDatabase } from './global-db.js';
+import { openGlobalDatabase, withGlobalDatabase } from './global-db.js';
 
 export type ActivityStatus =
   | 'completed'

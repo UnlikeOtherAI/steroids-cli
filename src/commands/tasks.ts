@@ -770,7 +770,7 @@ EXAMPLES:
 
   const title = positionals.join(' ');
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
     let section;
     if (values.feedback) {
       section = getOrCreateFeedbackSection(db);
@@ -892,7 +892,7 @@ EXAMPLES:
 
   const identifier = positionals.join(' ');
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
     let task = getTask(db, identifier);
     if (!task) task = getTaskByTitle(db, identifier);
 
@@ -1092,7 +1092,7 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1165,7 +1165,7 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
