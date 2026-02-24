@@ -143,9 +143,7 @@ OPTIONS:
     await backupCommand(['create'], flags);
   }
 
-  const { db, close } = openDatabase(projectPath);
-
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const result = purgeCompletedTasks(
       db,
       values['older-than'],
@@ -163,9 +161,7 @@ OPTIONS:
     }
 
     outputPurgeResult('tasks', result, values.json ?? false, values['dry-run'] ?? false);
-  } finally {
-    close();
-  }
+  });
 }
 
 async function purgeIds(args: string[], _flags: GlobalFlags): Promise<void> {
@@ -202,9 +198,7 @@ OPTIONS:
     process.exit(1);
   }
 
-  const { db, close } = openDatabase(projectPath);
-
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const count = purgeOrphanedIds(db, values['dry-run'] ?? false);
 
     if (values.json) {
@@ -219,9 +213,7 @@ OPTIONS:
       const prefix = values['dry-run'] ? 'Would remove' : 'Removed';
       console.log(`${prefix} ${count} orphaned IDs.`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function purgeLogs(args: string[], _flags: GlobalFlags): Promise<void> {
@@ -345,9 +337,7 @@ OPTIONS:
     logFiles: 0,
   };
 
-  const { db, close } = openDatabase(projectPath);
-
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     // Purge completed tasks
     const taskResult = purgeCompletedTasks(db, undefined, dryRun, false);
     result.tasks = taskResult.tasks;
@@ -356,9 +346,7 @@ OPTIONS:
 
     // Purge orphaned IDs
     result.orphanedIds = purgeOrphanedIds(db, dryRun);
-  } finally {
-    close();
-  }
+  });
 
   // Purge logs
   const logsDir = join(projectPath, STEROIDS_DIR, LOGS_DIR);

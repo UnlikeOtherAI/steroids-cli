@@ -34,12 +34,12 @@ The current "Repair" model (Layer 4) uses fragile regex to fix malformed JSON. T
 There are over 85 manual `.close()` calls across the codebase, often inside complex `try/finally` blocks that are inconsistently applied.
 
 ### Tasks
-- [ ] **TASK: Implement withDatabase**: Add `withDatabase(path, callback)` and `withGlobalDatabase(callback)` wrappers that handle the open/try/finally/close cycle.
-- [ ] **TASK: Delete Manual Closes**: Replace 85+ manual close patterns with the new higher-order functions.
+- [x] **TASK: Implement withDatabase**: Add `withDatabase(path, callback)` and `withGlobalDatabase(callback)` wrappers that handle the open/try/finally/close cycle.
+- [x] **TASK: Delete Manual Closes**: Replace 85+ manual close patterns with the new higher-order functions.
 
 ### Acceptance Criteria
-- [ ] AC: A test must verify that the database is closed automatically even when the callback function throws an error.
-- [ ] AC: The total number of `close()` calls in `src/` is reduced by at least 80%.
+- [x] AC: A test must verify that the database is closed automatically even when the callback function throws an error.
+- [x] AC: The total number of `close()` calls in `src/` is reduced by at least 80%.
 
 ---
 

@@ -233,3 +233,26 @@ export function isSchemaUpToDate(db: Database.Database): boolean {
   const version = getSchemaVersion(db);
   return version === SCHEMA_VERSION;
 }
+
+/**
+ * Execute a callback with a managed database connection.
+ * Automatically handles closing the connection when done or if an error occurs.
+ */
+export function withDatabase<T>(
+  projectPath: string | undefined,
+  callback: (db: Database.Database) => T | Promise<T>,
+  options?: { timeoutMs?: number }
+): T | Promise<T> {
+  const { db, close } = openDatabase(projectPath, options);
+  try {
+    const result = callback(db);
+    if (result instanceof Promise) {
+      return result.finally(() => close());
+    }
+    close();
+    return result;
+  } catch (error) {
+    close();
+    throw error;
+  }
+}

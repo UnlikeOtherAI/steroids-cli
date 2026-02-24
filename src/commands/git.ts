@@ -172,15 +172,12 @@ OPTIONS:
   // Get current task context
   let currentTask: { id: string; title: string } | null = null;
   if (isInitialized(projectPath)) {
-    const { db, close } = openDatabase(projectPath);
-    try {
+    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
       const tasks = listTasks(db, { status: 'in_progress' });
       if (tasks.length > 0) {
         currentTask = { id: tasks[0].id, title: tasks[0].title };
       }
-    } finally {
-      close();
-    }
+    });
   }
 
   if (values.json) {

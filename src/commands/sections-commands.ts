@@ -58,8 +58,7 @@ GLOBAL OPTIONS:
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const section = createSection(db, name, position);
 
     if (flags.json) {
@@ -77,9 +76,7 @@ GLOBAL OPTIONS:
       out.log(`  ID: ${section.id}`);
       out.log(`  Position: ${section.position}`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 export async function setPriority(args: string[], flags: GlobalFlags): Promise<void> {
@@ -140,8 +137,7 @@ EXAMPLES:
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const section = getSection(db, sectionIdInput);
     if (!section) {
       throw sectionNotFoundError(sectionIdInput);
@@ -160,9 +156,7 @@ EXAMPLES:
     } else {
       out.log(`Priority set to ${priority} for section: ${section.name}`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 export async function addDependency(args: string[], flags: GlobalFlags): Promise<void> {
@@ -206,8 +200,7 @@ EXAMPLES:
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const section = getSection(db, sectionIdInput);
     if (!section) {
       throw sectionNotFoundError(sectionIdInput);
@@ -232,9 +225,7 @@ EXAMPLES:
     } else {
       out.log(`Dependency added: ${section.name} depends on ${dependsOnSection.name}`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 export async function removeDependency(args: string[], flags: GlobalFlags): Promise<void> {
@@ -278,8 +269,7 @@ EXAMPLES:
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const section = getSection(db, sectionIdInput);
     if (!section) {
       throw sectionNotFoundError(sectionIdInput);
@@ -304,7 +294,5 @@ EXAMPLES:
     } else {
       out.log(`Dependency removed: ${section.name} no longer depends on ${dependsOnSection.name}`);
     }
-  } finally {
-    close();
-  }
+  });
 }

@@ -294,9 +294,7 @@ async function runHealthIncidents(args: string[], flags: GlobalFlags): Promise<v
   }
 
   const projectPath = process.cwd();
-  const { db, close } = openDatabase(projectPath);
-
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const limit = (() => {
       const raw = (values.limit as string | undefined) ?? '50';
       const n = parseInt(raw, 10);
@@ -377,7 +375,5 @@ async function runHealthIncidents(args: string[], flags: GlobalFlags): Promise<v
       ['detected_at', 'failure_mode', 'task', 'runner', 'resolved', 'resolution'],
       rows
     );
-  } finally {
-    close();
-  }
+  });
 }

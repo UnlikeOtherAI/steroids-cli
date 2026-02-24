@@ -48,8 +48,7 @@ DESCRIPTION:
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let tasksToReset: Task[] = [];
 
     if (positionals.length > 0) {
@@ -164,9 +163,7 @@ DESCRIPTION:
       out.log(`\nSuccessfully reset ${fullyValidatedTasks.length} task(s).`);
     }
 
-  } finally {
-    close();
-  }
+  });
 }
 
 function killRunnerAndRevokeLease(taskId: string, projDb: any, out: any) {

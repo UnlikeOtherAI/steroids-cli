@@ -205,8 +205,7 @@ OPTIONS:
     process.exit(2);
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     // Find task by ID or title
     let task = getTask(db, taskIdentifier);
     if (!task) {
@@ -249,9 +248,7 @@ OPTIONS:
       console.log('');
       console.log('dispute.md has been updated.');
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function listDisputes(args: string[], flags: GlobalFlags): Promise<void> {
@@ -284,8 +281,7 @@ OPTIONS:
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     if (values.stale) {
       // Show stale disputes
       const summary = getStaleDisputeSummary(db, DEFAULT_TIMEOUT_DAYS);
@@ -327,9 +323,7 @@ OPTIONS:
 
     console.log('-'.repeat(90));
     console.log(`Total: ${disputes.length} disputes`);
-  } finally {
-    close();
-  }
+  });
 }
 
 async function showDispute(args: string[], flags: GlobalFlags): Promise<void> {
@@ -358,8 +352,7 @@ OPTIONS:
 
   const disputeId = positionals[0];
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const dispute = getDispute(db, disputeId);
 
     if (!dispute) {
@@ -417,9 +410,7 @@ OPTIONS:
       console.log('-'.repeat(60));
       console.log(`Run: steroids dispute resolve ${dispute.id.substring(0, 8)} --decision <coder|reviewer>`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function resolveDisputeCmd(args: string[], flags: GlobalFlags): Promise<void> {
@@ -468,8 +459,7 @@ EXAMPLES:
 
   const disputeId = positionals[0];
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const result = resolve(db, {
       disputeId,
       decision: values.decision,
@@ -494,9 +484,7 @@ EXAMPLES:
       console.log('');
       console.log('dispute.md has been updated.');
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function logDisputeCmd(args: string[], flags: GlobalFlags): Promise<void> {
@@ -538,8 +526,7 @@ EXAMPLES:
 
   const taskIdentifier = positionals[0];
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     // Find task by ID or title
     let task = getTask(db, taskIdentifier);
     if (!task) {
@@ -567,7 +554,5 @@ EXAMPLES:
       console.log('');
       console.log('Task status unchanged. Work continues.');
     }
-  } finally {
-    close();
-  }
+  });
 }

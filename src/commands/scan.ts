@@ -205,8 +205,7 @@ function getProjectInfo(directory: string, type: string): ProjectInfo {
 
   if (hasSteroids) {
     try {
-      const { db, close } = openDatabase(directory);
-      try {
+      /* REFACTOR_MANUAL */ withDatabase(directory, (db) => {
         const allTasks = listTasks(db, { status: 'all' });
         const pending = allTasks.filter(t =>
           t.status === 'pending' || t.status === 'in_progress' || t.status === 'review'
@@ -219,9 +218,7 @@ function getProjectInfo(directory: string, type: string): ProjectInfo {
           const completed = allTasks.filter(t => t.status === 'completed').length;
           health = Math.round((completed / totalTasks) * 100);
         }
-      } finally {
-        close();
-      }
+      });
     } catch {
       // Database error, skip
     }

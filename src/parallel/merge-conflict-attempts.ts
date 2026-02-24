@@ -8,8 +8,7 @@ export function recordConflictAttempt(
   sessionId: string,
   workstreamId: string
 ): { attempts: number; blocked: boolean; backoffMinutes: number | null } {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     const row = db
       .prepare(
         `SELECT conflict_attempts
@@ -62,14 +61,11 @@ export function recordConflictAttempt(
     ).run(attempts, `+${backoffMinutes} minutes`, sessionId, workstreamId);
 
     return { attempts, blocked: false, backoffMinutes };
-  } finally {
-    close();
-  }
+  });
 }
 
 export function clearConflictAttemptState(sessionId: string, workstreamId: string): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare(
       `UPDATE workstreams
        SET conflict_attempts = 0,
@@ -79,7 +75,5 @@ export function clearConflictAttemptState(sessionId: string, workstreamId: strin
        WHERE session_id = ?
          AND id = ?`
     ).run(sessionId, workstreamId);
-  } finally {
-    close();
-  }
+  });
 }

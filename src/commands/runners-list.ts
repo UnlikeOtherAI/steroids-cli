@@ -59,13 +59,10 @@ OPTIONS:
         return runner;
       }
       try {
-        const { db, close } = openDatabase(runner.project_path);
-        try {
+        /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db) => {
           const section = getSection(db, runner.section_id);
           return { ...runner, section_name: section?.name };
-        } finally {
-          close();
-        }
+        });
       } catch {
         return runner;
       }
@@ -102,15 +99,12 @@ OPTIONS:
     let sectionDisplay = '-';
     if (runner.section_id && runner.project_path) {
       try {
-        const { db, close } = openDatabase(runner.project_path);
-        try {
+        /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db) => {
           const section = getSection(db, runner.section_id);
           if (section) {
             sectionDisplay = section.name.substring(0, 30);
           }
-        } finally {
-          close();
-        }
+        });
       } catch {
         // If we can't fetch the section name, just show the ID prefix
         sectionDisplay = runner.section_id.substring(0, 8);
@@ -187,14 +181,11 @@ async function runListTree(json: boolean): Promise<void> {
     if (!existsSync(dbPath)) continue;
 
     try {
-      const { db, close } = openDatabase(projectPath);
-      try {
+      /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
         const inProgress = listTasks(db, { status: 'in_progress' });
         const review = listTasks(db, { status: 'review' });
         info.activeTasks = [...inProgress, ...review];
-      } finally {
-        close();
-      }
+      });
     } catch {
       // Skip inaccessible projects
     }
@@ -264,15 +255,12 @@ async function runListTree(json: boolean): Promise<void> {
         // Show section if focused
         if (runner.section_id && runner.project_path) {
           try {
-            const { db, close } = openDatabase(runner.project_path);
-            try {
+            /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db) => {
               const section = getSection(db, runner.section_id);
               if (section) {
                 console.log(`   ${childPrefix}    Section: ${section.name}`);
               }
-            } finally {
-              close();
-            }
+            });
           } catch {
             // Ignore section fetch errors
           }
@@ -281,17 +269,14 @@ async function runListTree(json: boolean): Promise<void> {
         // Show current task if available
         if (runner.current_task_id && runner.project_path) {
           try {
-            const { db, close } = openDatabase(runner.project_path);
-            try {
+            /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db) => {
               const task = getTask(db, runner.current_task_id);
               if (task) {
                 const statusMarker = task.status === 'in_progress' ? '🔧' : '👁️';
                 console.log(`   ${childPrefix}    ${statusMarker} ${task.title.substring(0, 50)}`);
                 console.log(`   ${childPrefix}       [${task.status}] ${task.id.substring(0, 8)}`);
               }
-            } finally {
-              close();
-            }
+            });
           } catch {
             console.log(`   ${childPrefix}    Task: ${runner.current_task_id.substring(0, 8)}`);
           }

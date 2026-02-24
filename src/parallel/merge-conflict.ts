@@ -60,8 +60,7 @@ function refreshMergeConflictLease(
   projectPath: string,
   runnerId: string
 ): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     const row = db
       .prepare(
         `SELECT id, claim_generation, runner_id
@@ -108,9 +107,7 @@ function refreshMergeConflictLease(
         'LEASE_FENCE_FAILED'
       );
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 function delay(ms: number): Promise<void> {

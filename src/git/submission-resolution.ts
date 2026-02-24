@@ -48,8 +48,7 @@ function getProjectRepoId(projectPath: string): string {
 function getParallelWorkstreamSources(projectPath: string): WorkstreamSource[] {
   const normalizedProjectPath = getProjectRepoId(projectPath);
   const projectRepoId = getProjectRepoId(projectPath);
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     const rows = db
       .prepare(
         `
@@ -83,9 +82,7 @@ function getParallelWorkstreamSources(projectPath: string): WorkstreamSource[] {
       });
     }
     return sources;
-  } finally {
-    close();
-  }
+  });
 }
 
 function safeRecoveryRef(pathLike: string): string {

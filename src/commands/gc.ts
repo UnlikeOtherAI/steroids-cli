@@ -90,9 +90,7 @@ export async function gcCommand(args: string[], flags: GlobalFlags): Promise<voi
     vacuumedBytes: 0,
   };
 
-  const { db, close } = openDatabase(projectPath);
-
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     // Clean orphaned IDs
     if (runAll || values['orphaned-ids']) {
       result.orphanedIds = cleanOrphanedIds(db, dryRun);
@@ -112,9 +110,7 @@ export async function gcCommand(args: string[], flags: GlobalFlags): Promise<voi
     if (runAll || values.vacuum) {
       result.vacuumedBytes = vacuumDatabase(db, dryRun);
     }
-  } finally {
-    close();
-  }
+  });
 
   outputResult(result, flags.json, dryRun);
 }

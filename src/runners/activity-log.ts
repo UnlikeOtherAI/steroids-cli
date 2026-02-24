@@ -38,24 +38,20 @@ export function logActivity(
   commitMessage?: string | null,
   commitSha?: string | null
 ): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare(
       `INSERT INTO activity_log
         (project_path, runner_id, task_id, task_title, section_name, final_status, commit_message, commit_sha)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(projectPath, runnerId, taskId, taskTitle, sectionName, finalStatus, commitMessage ?? null, commitSha ?? null);
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
  * Query activity log for entries since a given time
  */
 export function getActivitySince(hoursAgo: number = 12): ActivityLogEntry[] {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     return db
       .prepare(
         `SELECT * FROM activity_log
@@ -63,9 +59,7 @@ export function getActivitySince(hoursAgo: number = 12): ActivityLogEntry[] {
          ORDER BY created_at DESC`
       )
       .all(`-${hoursAgo}`) as ActivityLogEntry[];
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -77,8 +71,7 @@ export function getActivityFiltered(options: {
   projectPath?: string;
   limit?: number;
 }): ActivityLogEntry[] {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     const conditions: string[] = [];
     const params: (string | number)[] = [];
 
@@ -108,9 +101,7 @@ export function getActivityFiltered(options: {
          ${limitClause}`
       )
       .all(...params) as ActivityLogEntry[];
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -135,8 +126,7 @@ export interface ProjectActivityStats {
 export function getActivityStatsByProject(
   hoursAgo: number = 12
 ): ProjectActivityStats[] {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     return db
       .prepare(
         `SELECT
@@ -157,24 +147,19 @@ export function getActivityStatsByProject(
          ORDER BY a.project_path`
       )
       .all(`-${hoursAgo}`) as ProjectActivityStats[];
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
  * Get total count of activity entries
  */
 export function getActivityCount(): number {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     const row = db
       .prepare('SELECT COUNT(*) as count FROM activity_log')
       .get() as { count: number };
     return row.count;
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -184,8 +169,7 @@ export function getActivityCount(): number {
  * @returns Number of entries deleted
  */
 export function purgeActivity(keepHours?: number): number {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     if (keepHours === undefined) {
       // Delete all
       const result = db.prepare('DELETE FROM activity_log').run();
@@ -200,7 +184,5 @@ export function purgeActivity(keepHours?: number): number {
         .run(`-${keepHours}`);
       return result.changes;
     }
-  } finally {
-    close();
-  }
+  });
 }

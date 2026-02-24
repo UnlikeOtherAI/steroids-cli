@@ -231,9 +231,7 @@ USAGE:
 
   if (values.section) {
     const sectionInput = values.section as string;
-    const { db, close } = openDatabase(projectPath);
-
-    try {
+    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
       // Try to resolve by ID (exact or prefix match)
       let section;
       try {
@@ -301,9 +299,7 @@ USAGE:
       }
 
       focusedSectionId = section.id;
-    } finally {
-      close();
-    }
+    });
   }
 
   if (runFromDetachedParent) {

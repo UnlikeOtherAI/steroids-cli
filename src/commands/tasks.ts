@@ -257,8 +257,7 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
       if (!existsSync(dbPath)) continue;
 
       try {
-        const { db, close } = openDatabase(project.path);
-        try {
+        /* REFACTOR_MANUAL */ withDatabase(project.path, (db) => {
           let tasks: Task[];
           
           if (followUpsOnly) {
@@ -281,9 +280,7 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
               project_name: projectName,
             });
           }
-        } finally {
-          close();
-        }
+        });
       } catch {
         // Skip projects with inaccessible databases
       }
@@ -341,8 +338,7 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
   }
 
   // Non-global query: use current project only
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let sectionId: string | undefined;
 
     if (values.section) {
@@ -414,9 +410,7 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
 
     console.log('─'.repeat(80));
     console.log(`Total: ${tasks.length} tasks`);
-  } finally {
-    close();
-  }
+  });
 }
 
 async function showStats(args: string[], globalFlags?: GlobalFlags): Promise<void> {
@@ -448,8 +442,7 @@ EXAMPLE:
 
   const outputJson = values.json || globalFlags?.json;
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const statuses: TaskStatus[] = [
       'pending',
       'in_progress',
@@ -484,9 +477,7 @@ EXAMPLE:
     }
     console.log('─'.repeat(30));
     console.log(`  Total: ${total}`);
-  } finally {
-    close();
-  }
+  });
 }
 
 async function showTask(args: string[], flags: GlobalFlags): Promise<void> {
@@ -536,8 +527,7 @@ EXAMPLES:
   const showFullLogs = values['logs-full'];
   const limit = parseInt(values.limit as string, 10) || 5;
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -644,9 +634,7 @@ EXAMPLES:
       console.log('');
       console.log(`Tip: Use --logs to see invocation history, --logs-full for full prompts`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function addTask(args: string[], flags: GlobalFlags): Promise<void> {
@@ -782,8 +770,7 @@ EXAMPLES:
 
   const title = positionals.join(' ');
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let section;
     if (values.feedback) {
       section = getOrCreateFeedbackSection(db);
@@ -832,9 +819,7 @@ EXAMPLES:
         out.log(`  Commit: ${task.file_commit_sha?.substring(0, 7) ?? 'unknown'}`);
       }
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function updateTask(args: string[], flags: GlobalFlags): Promise<void> {
@@ -907,8 +892,7 @@ EXAMPLES:
 
   const identifier = positionals.join(' ');
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let task = getTask(db, identifier);
     if (!task) task = getTaskByTitle(db, identifier);
 
@@ -990,9 +974,7 @@ EXAMPLES:
       if (oldRejectionCount !== undefined) console.log(`  Rejections: ${oldRejectionCount} → 0 (reset)`);
       for (const c of changes) console.log(`  ${c}`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -1110,8 +1092,7 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1146,9 +1127,7 @@ OPTIONS:
       out.log(`  Status: completed`);
       out.log(`  Reviewer: ${values.model}`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function rejectTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
@@ -1186,8 +1165,7 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1225,9 +1203,7 @@ OPTIONS:
         }
       }
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function skipTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
@@ -1279,8 +1255,7 @@ EXAMPLES:
   const identifier = positionals[0];
   const newStatus = values.partial ? 'partial' : 'skipped';
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1328,9 +1303,7 @@ EXAMPLES:
       out.log('');
       out.log('  Task will not block the runner. Move on to the next task.');
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function auditTask(args: string[], flags: GlobalFlags): Promise<void> {
@@ -1359,8 +1332,7 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1391,9 +1363,7 @@ OPTIONS:
         out.log(`${ts}  ${from} ${to} ${actor} ${notes}`);
       }
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function promoteTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
@@ -1433,8 +1403,7 @@ EXAMPLES:
   const identifier = positionals[0];
   const actor = values.actor ?? 'human:cli';
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     let task = getTask(db, identifier);
     if (!task) task = getTaskByTitle(db, identifier);
 
@@ -1452,7 +1421,5 @@ EXAMPLES:
       out.log(`Task promoted: ${task.title}`);
       out.log(`  Auto-implementation enabled. The loop will pick this up next.`);
     }
-  } finally {
-    close();
-  }
+  });
 }

@@ -744,16 +744,13 @@ export function getGlobalSchemaVersion(db: Database.Database): string | null {
  */
 export function getDaemonActiveStatus(): boolean {
   try {
-    const { db, close } = openGlobalDatabase();
-    try {
+    return withGlobalDatabase((db) => {
       const row = db
         .prepare('SELECT value FROM _global_schema WHERE key = ?')
         .get('is_active') as { value: string } | undefined;
       // Default to true if not explicitly set to 'false'
       return row?.value !== 'false';
-    } finally {
-      close();
-    }
+    });
   } catch {
     return true; // Default to active on error
   }
@@ -763,15 +760,12 @@ export function getDaemonActiveStatus(): boolean {
  * Set the global daemon active status
  */
 export function setDaemonActiveStatus(isActive: boolean): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare(
       `INSERT INTO _global_schema (key, value) VALUES (?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`
     ).run('is_active', isActive ? 'true' : 'false');
-  } finally {
-    close();
-  }
+  });
 }
 
 export function updateParallelSessionStatus(
@@ -779,8 +773,7 @@ export function updateParallelSessionStatus(
   status: ParallelSessionStatus,
   markCompletedAt = false
 ): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare(
       `UPDATE parallel_sessions
        SET status = ?,
@@ -790,14 +783,11 @@ export function updateParallelSessionStatus(
            END
        WHERE id = ?`
     ).run(status, markCompletedAt ? 1 : 0, sessionId);
-  } finally {
-    close();
-  }
+  });
 }
 
 export function revokeWorkstreamLeasesForSession(sessionId: string): number {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     const result = db.prepare(
       `UPDATE workstreams
        SET runner_id = NULL,
@@ -805,29 +795,21 @@ export function revokeWorkstreamLeasesForSession(sessionId: string): number {
        WHERE session_id = ?`
     ).run(sessionId);
     return result.changes;
-  } finally {
-    close();
-  }
+  });
 }
 
 export function listParallelSessionRunners(sessionId: string): ParallelSessionRunner[] {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     return db
       .prepare('SELECT id, pid FROM runners WHERE parallel_session_id = ?')
       .all(sessionId) as ParallelSessionRunner[];
-  } finally {
-    close();
-  }
+  });
 }
 
 export function removeParallelSessionRunner(runnerId: string): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare('DELETE FROM runners WHERE id = ?').run(runnerId);
-  } finally {
-    close();
-  }
+  });
 }
 
 export function recordValidationEscalation(input: {
@@ -878,8 +860,7 @@ export function recordValidationEscalation(input: {
 }
 
 export function resolveValidationEscalationsForSession(sessionId: string): number {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     const result = db.prepare(
       `UPDATE validation_escalations
        SET status = 'resolved',
@@ -889,9 +870,7 @@ export function resolveValidationEscalationsForSession(sessionId: string): numbe
     ).run(sessionId);
 
     return result.changes;
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -899,8 +878,7 @@ export function resolveValidationEscalationsForSession(sessionId: string): numbe
  * Uses MAX so existing longer backoffs are never shortened.
  */
 export function recordProviderBackoff(provider: string, backoffUntilMs: number, reason?: string): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare(`
       INSERT INTO provider_backoffs (provider, backoff_until_ms, retry_count, reason, updated_at)
       VALUES (?, ?, 1, ?, ?)
@@ -910,35 +888,48 @@ export function recordProviderBackoff(provider: string, backoffUntilMs: number, 
         reason = excluded.reason,
         updated_at = excluded.updated_at
     `).run(provider, backoffUntilMs, reason ?? null, Date.now());
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
  * Get how many ms until the provider's global backoff expires (0 if not backed off).
  */
 export function getProviderBackoffRemainingMs(provider: string): number {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     const row = db
       .prepare('SELECT backoff_until_ms FROM provider_backoffs WHERE provider = ?')
       .get(provider) as { backoff_until_ms: number } | undefined;
     if (!row) return 0;
     return Math.max(0, row.backoff_until_ms - Date.now());
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
  * Clear a provider's backoff record (called after a successful invocation).
  */
 export function clearProviderBackoff(provider: string): void {
+  withGlobalDatabase((db) => {
+    db.prepare('DELETE FROM provider_backoffs WHERE provider = ?').run(provider);
+  });
+}
+
+/**
+ * Execute a callback with a managed global database connection.
+ * Automatically handles closing the connection when done or if an error occurs.
+ */
+export function withGlobalDatabase<T>(
+  callback: (db: Database.Database) => T | Promise<T>
+): T | Promise<T> {
   const { db, close } = openGlobalDatabase();
   try {
-    db.prepare('DELETE FROM provider_backoffs WHERE provider = ?').run(provider);
-  } finally {
+    const result = callback(db);
+    if (result instanceof Promise) {
+      return result.finally(() => close());
+    }
     close();
+    return result;
+  } catch (error) {
+    close();
+    throw error;
   }
 }

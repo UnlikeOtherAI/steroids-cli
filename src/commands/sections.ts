@@ -157,8 +157,7 @@ OPTIONS:
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const sections = listSections(db);
 
     if (flags.json) {
@@ -216,9 +215,7 @@ OPTIONS:
         );
       }
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function showGraph(args: string[], globalFlags?: GlobalFlags): Promise<void> {
@@ -285,8 +282,7 @@ EXAMPLES:
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     // Filter sections if --section specified
     let sections = listSections(db);
     if (values.section) {
@@ -419,7 +415,5 @@ EXAMPLES:
     }
 
     console.log();
-  } finally {
-    close();
-  }
+  });
 }

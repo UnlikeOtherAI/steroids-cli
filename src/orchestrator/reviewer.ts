@@ -316,8 +316,7 @@ export async function invokeReviewer(
   let unresolvedSubmissionCommits: string[] = [];
 
   try {
-    const { db, close } = openDatabase(projectPath);
-    try {
+    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
       // Get section tasks
       if (task.section_id) {
         const allSectionTasks = listTasks(db, { sectionId: task.section_id });
@@ -371,9 +370,7 @@ export async function invokeReviewer(
           console.log(`Found resumable session: ${resumeSessionId.substring(0, 8)}... (resuming with delta prompt)`);
         }
       }
-    } finally {
-      close();
-    }
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not fetch reviewer context: ${message}`);

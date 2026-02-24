@@ -153,9 +153,7 @@ export function registerProject(path: string, name?: string): void {
     return;
   }
 
-  const { db, close } = openGlobalDatabase();
-
-  try {
+  withGlobalDatabase((db) => {
     db.prepare(`
       INSERT INTO projects (path, name, registered_at, last_seen_at, enabled)
       VALUES (?, ?, datetime('now'), datetime('now'), 1)
@@ -163,9 +161,7 @@ export function registerProject(path: string, name?: string): void {
         name = COALESCE(excluded.name, name),
         last_seen_at = datetime('now')
     `).run(normalizedPath, name ?? null);
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -175,9 +171,7 @@ export function registerProject(path: string, name?: string): void {
  * @returns Array of registered projects
  */
 export function getRegisteredProjects(includeDisabled = false): RegisteredProject[] {
-  const { db, close } = openGlobalDatabase();
-
-  try {
+  return withGlobalDatabase((db) => {
     const query = includeDisabled
       ? 'SELECT * FROM projects'
       : 'SELECT * FROM projects WHERE enabled = 1';
@@ -201,9 +195,7 @@ export function getRegisteredProjects(includeDisabled = false): RegisteredProjec
       hibernating_until: row.hibernating_until,
       hibernation_tier: row.hibernation_tier,
     }));
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -214,9 +206,7 @@ export function getRegisteredProjects(includeDisabled = false): RegisteredProjec
  */
 export function getRegisteredProject(path: string): RegisteredProject | null {
   const normalizedPath = normalizePath(path);
-  const { db, close } = openGlobalDatabase();
-
-  try {
+  return withGlobalDatabase((db) => {
     const row = db
       .prepare('SELECT * FROM projects WHERE path = ?')
       .get(normalizedPath) as {
@@ -242,9 +232,7 @@ export function getRegisteredProject(path: string): RegisteredProject | null {
       hibernating_until: row.hibernating_until,
       hibernation_tier: row.hibernation_tier,
     };
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -255,13 +243,9 @@ export function getRegisteredProject(path: string): RegisteredProject | null {
  */
 export function unregisterProject(path: string): void {
   const normalizedPath = normalizePath(path);
-  const { db, close } = openGlobalDatabase();
-
-  try {
+  withGlobalDatabase((db) => {
     db.prepare('DELETE FROM projects WHERE path = ?').run(normalizedPath);
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -271,13 +255,9 @@ export function unregisterProject(path: string): void {
  */
 export function disableProject(path: string): void {
   const normalizedPath = normalizePath(path);
-  const { db, close } = openGlobalDatabase();
-
-  try {
+  withGlobalDatabase((db) => {
     db.prepare('UPDATE projects SET enabled = 0 WHERE path = ?').run(normalizedPath);
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -287,13 +267,9 @@ export function disableProject(path: string): void {
  */
 export function enableProject(path: string): void {
   const normalizedPath = normalizePath(path);
-  const { db, close } = openGlobalDatabase();
-
-  try {
+  withGlobalDatabase((db) => {
     db.prepare('UPDATE projects SET enabled = 1 WHERE path = ?').run(normalizedPath);
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -301,13 +277,10 @@ export function enableProject(path: string): void {
  */
 export function setProjectHibernation(path: string, tier: number, untilISO: string): void {
   const normalizedPath = normalizePath(path);
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare('UPDATE projects SET hibernating_until = ?, hibernation_tier = ? WHERE path = ?')
       .run(untilISO, tier, normalizedPath);
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -315,13 +288,10 @@ export function setProjectHibernation(path: string, tier: number, untilISO: stri
  */
 export function clearProjectHibernation(path: string): void {
   const normalizedPath = normalizePath(path);
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare('UPDATE projects SET hibernating_until = NULL, hibernation_tier = 0 WHERE path = ?')
       .run(normalizedPath);
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -331,9 +301,7 @@ export function clearProjectHibernation(path: string): void {
  * @returns Number of projects pruned
  */
 export function pruneProjects(): number {
-  const { db, close } = openGlobalDatabase();
-
-  try {
+  return withGlobalDatabase((db) => {
     const projects = db.prepare('SELECT path FROM projects').all() as Array<{ path: string }>;
     let removed = 0;
 
@@ -349,9 +317,7 @@ export function pruneProjects(): number {
     }
 
     return removed;
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -362,15 +328,11 @@ export function pruneProjects(): number {
  */
 export function updateProjectLastSeen(path: string): void {
   const normalizedPath = normalizePath(path);
-  const { db, close } = openGlobalDatabase();
-
-  try {
+  withGlobalDatabase((db) => {
     db.prepare("UPDATE projects SET last_seen_at = datetime('now') WHERE path = ?").run(
       normalizedPath
     );
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -381,16 +343,12 @@ export function updateProjectLastSeen(path: string): void {
  */
 export function isProjectRegistered(path: string): boolean {
   const normalizedPath = normalizePath(path);
-  const { db, close } = openGlobalDatabase();
-
-  try {
+  return withGlobalDatabase((db) => {
     const row = db
       .prepare('SELECT 1 FROM projects WHERE path = ?')
       .get(normalizedPath) as { 1: number } | undefined;
 
     return row !== undefined;
-  } finally {
-    close();
-  }
+  });
 }
 

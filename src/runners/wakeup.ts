@@ -85,8 +85,9 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
     }
 
     // Step 1: Clean up stale runners first
-    const global = openGlobalDatabase();
-    try {
+    return withGlobalDatabase((globalDb) => {
+const global = { db: globalDb };
+
     try {
       const staleRunners = findStaleRunners(global.db);
       if (staleRunners.length > 0) {
@@ -657,9 +658,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
     }
 
     return results;
-  } finally {
-    global.close();
-  }
+  });
   } finally {
     isWakeupRunning = false;
   }
@@ -675,8 +674,7 @@ export async function checkWakeupNeeded(): Promise<{
   const lockStatus = checkLockStatus();
 
   if (lockStatus.locked && lockStatus.pid) {
-    const { db, close } = openGlobalDatabase();
-    try {
+    return withGlobalDatabase((db) => {
       const staleRunners = findStaleRunners(db);
       if (staleRunners.length > 0) {
         return {
@@ -685,9 +683,7 @@ export async function checkWakeupNeeded(): Promise<{
         };
       }
       return { needed: false, reason: 'Runner is healthy' };
-    } finally {
-      close();
-    }
+    });
   }
 
   if (lockStatus.isZombie) {

@@ -123,8 +123,7 @@ async function listLocks(args: string[], flags: GlobalFlags): Promise<void> {
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const taskLocks = values.type === 'section' ? [] : listTaskLocks(db);
     const sectionLocks = values.type === 'task' ? [] : listSectionLocks(db);
 
@@ -191,9 +190,7 @@ async function listLocks(args: string[], flags: GlobalFlags): Promise<void> {
     }
 
     console.log(`Total: ${taskLocks.length} task lock(s), ${sectionLocks.length} section lock(s)`);
-  } finally {
-    close();
-  }
+  });
 }
 
 async function showLock(args: string[], flags: GlobalFlags): Promise<void> {
@@ -222,8 +219,7 @@ OPTIONS:
 
   const id = positionals[0];
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     // Try task lock first, then section lock
     const taskLock = getTaskLock(db, id);
     const sectionLock = taskLock ? null : getSectionLock(db, id);
@@ -277,9 +273,7 @@ OPTIONS:
       console.log(`Acquired:    ${sectionLock.acquired_at}`);
       console.log(`Expires:     ${sectionLock.expires_at} (${formatExpiry(sectionLock.expires_at)})`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function releaseLock(args: string[], flags: GlobalFlags): Promise<void> {
@@ -334,8 +328,7 @@ NOTE:
 
   const id = positionals[0];
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     // Try task lock first, then section lock
     const taskLock = getTaskLock(db, id);
     const sectionLock = taskLock ? null : getSectionLock(db, id);
@@ -381,9 +374,7 @@ NOTE:
       console.log(`Lock released: ${id}`);
       console.log(`  Type: ${taskLock ? 'task' : 'section'}`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 async function cleanupLocks(args: string[], flags: GlobalFlags): Promise<void> {
@@ -412,8 +403,7 @@ OPTIONS:
     return;
   }
 
-  const { db, close } = openDatabase();
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(, (db) => {
     const result = cleanupAllExpiredLocks(db, { dryRun: values['dry-run'] });
 
     if (values.json) {
@@ -452,9 +442,7 @@ OPTIONS:
       console.log();
       console.log(`Cleaned: ${totalCleaned} lock(s)`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 // ============ Helpers ============

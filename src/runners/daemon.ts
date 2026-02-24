@@ -88,8 +88,7 @@ export function updateRunnerStatus(
   status: RunnerStatus,
   currentTaskId?: string | null
 ): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     if (currentTaskId !== undefined) {
       db.prepare(
         `UPDATE runners SET status = ?, current_task_id = ?, heartbeat_at = datetime('now')
@@ -101,23 +100,18 @@ export function updateRunnerStatus(
          WHERE id = ?`
       ).run(status, runnerId);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
  * Update runner heartbeat timestamp
  */
 export function updateRunnerHeartbeat(runnerId: string): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare(
       `UPDATE runners SET heartbeat_at = datetime('now') WHERE id = ?`
     ).run(runnerId);
-  } finally {
-    close();
-  }
+  });
 }
 
 
@@ -128,26 +122,20 @@ export function updateRunnerCurrentTask(
   runnerId: string,
   taskId: string | null
 ): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare(
       `UPDATE runners SET current_task_id = ?, heartbeat_at = datetime('now') WHERE id = ?`
     ).run(taskId, runnerId);
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
  * Remove runner from database
  */
 export function unregisterRunner(runnerId: string): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     db.prepare('DELETE FROM runners WHERE id = ?').run(runnerId);
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -155,31 +143,25 @@ export function unregisterRunner(runnerId: string): void {
  * For parallel runners, resolves the original project path from parallel_sessions.
  */
 export function listRunners(): Runner[] {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     return db.prepare(
       `SELECT r.*,
               COALESCE(ps.project_path, r.project_path) AS original_project_path
        FROM runners r
        LEFT JOIN parallel_sessions ps ON r.parallel_session_id = ps.id`
     ).all() as Runner[];
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
  * Get runner by ID
  */
 export function getRunner(runnerId: string): Runner | null {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     return db
       .prepare('SELECT * FROM runners WHERE id = ?')
       .get(runnerId) as Runner | null;
-  } finally {
-    close();
-  }
+  });
 }
 
 /**
@@ -317,8 +299,7 @@ async function autoMergeOnCompletion(
   workspacePath: string,
   runnerId: string
 ): Promise<void> {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     // Find our workstream
     const ours = db.prepare(
       `SELECT id, branch_name FROM workstreams
@@ -388,9 +369,7 @@ async function autoMergeOnCompletion(
     } else {
       console.error(`[AUTO-MERGE] Failed: ${result.errors.join('; ')}`);
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 /**

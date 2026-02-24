@@ -49,8 +49,7 @@ function refreshParallelWorkstreamLease(
     return;
   }
 
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     const row = db
       .prepare(
         `SELECT id, claim_generation, runner_id
@@ -83,9 +82,7 @@ function refreshParallelWorkstreamLease(
     if (result.changes !== 1) {
       throw new Error('Parallel workstream lease fence check failed');
     }
-  } finally {
-    close();
-  }
+  });
 }
 
 export interface LoopOptions {

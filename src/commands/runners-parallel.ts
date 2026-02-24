@@ -106,9 +106,7 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
 
   const configuredMaxClones = getConfiguredMaxClones(projectPath);
   const effectiveMaxClones = maxClonesOverride ?? configuredMaxClones;
-  const { db, close } = openDatabase(projectPath);
-
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const sections = listSections(db);
     if (sections.length === 0) {
       throw new Error('No sections found');
@@ -167,9 +165,7 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
       maxClones: effectiveMaxClones,
       workstreams: filteredWorkstreams,
     };
-  } finally {
-    close();
-  }
+  });
 }
 
 export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath: string): string {

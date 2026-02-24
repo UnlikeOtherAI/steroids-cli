@@ -21,12 +21,9 @@ export async function projectHasPendingWork(projectPath: string): Promise<boolea
     // Mirror orchestrator selection logic so wakeup only starts runners
     // when there is actually an eligible task to execute.
     // Use strict 500ms timeout for O(N) querying
-    const { db, close } = openDatabase(projectPath, { timeoutMs: 500 });
-    try {
+    /* REFACTOR_MANUAL */ withDatabase(projectPath, { timeoutMs: 500 }, (db) => {
       return selectNextTask(db) !== null;
-    } finally {
-      close();
-    }
+    });
   } catch (error) {
     // Treat timeouts or locked DBs as no pending work for this cycle
     return false;
@@ -38,8 +35,7 @@ export async function projectHasPendingWork(projectPath: string): Promise<boolea
  * Exported for use in daemon startup checks
  */
 export function hasActiveRunnerForProject(projectPath: string): boolean {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     const row = db
       .prepare(
         `SELECT 1 FROM runners
@@ -51,14 +47,11 @@ export function hasActiveRunnerForProject(projectPath: string): boolean {
       .get(projectPath) as { 1: number } | undefined;
 
     return row !== undefined;
-  } finally {
-    close();
-  }
+  });
 }
 
 export function hasActiveParallelSessionForProject(projectPath: string): boolean {
-  const { db, close } = openGlobalDatabase();
-  try {
+  return withGlobalDatabase((db) => {
     // Session is considered active only when it still has non-terminal workstream
     // state or an actively heartbeating runner bound to it.
     const sessionRow = db
@@ -104,7 +97,5 @@ export function hasActiveParallelSessionForProject(projectPath: string): boolean
       .get(projectPath) as { 1: number } | undefined;
 
     return runnerRow !== undefined;
-  } finally {
-    close();
-  }
+  });
 }

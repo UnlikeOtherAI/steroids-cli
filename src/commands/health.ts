@@ -558,8 +558,7 @@ function checkTasks(): CheckResult {
     };
   }
 
-  const { db, close } = openDatabase(projectPath);
-  try {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const allTasks = listTasks(db, { status: 'all' });
     const completedTasks = allTasks.filter(t => t.status === 'completed');
 
@@ -583,9 +582,7 @@ function checkTasks(): CheckResult {
       score,
       fixable: false,
     };
-  } finally {
-    close();
-  }
+  });
 }
 
 async function attemptFixes(checks: CheckResult[]): Promise<void> {

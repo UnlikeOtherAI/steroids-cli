@@ -431,8 +431,7 @@ export async function llmCommand(args: string[], flags: GlobalFlags): Promise<vo
         if (!existsSync(dbPath)) continue;
 
         try {
-          const { db, close } = openDatabase(project.path);
-          try {
+          /* REFACTOR_MANUAL */ withDatabase(project.path, (db) => {
             const inProgress = listTasks(db, { status: 'in_progress' });
             const review = listTasks(db, { status: 'review' });
             const active = [...inProgress, ...review];
@@ -443,9 +442,7 @@ export async function llmCommand(args: string[], flags: GlobalFlags): Promise<vo
               const status = task.status === 'in_progress' ? 'CODING' : 'REVIEW';
               console.log(`  [${status}] ${projName}: ${task.title.slice(0,50)} (${task.id.slice(0,8)})`);
             }
-          } finally {
-            close();
-          }
+          });
         } catch {
           // Skip inaccessible projects
         }
@@ -468,8 +465,7 @@ export async function llmCommand(args: string[], flags: GlobalFlags): Promise<vo
         if (!existsSync(dbPath)) continue;
 
         try {
-          const { db, close } = openDatabase(project.path);
-          try {
+          /* REFACTOR_MANUAL */ withDatabase(project.path, (db) => {
             const skipped = listTasks(db, { status: 'skipped' });
             const partial = listTasks(db, { status: 'partial' });
             const allSkipped = [...skipped, ...partial];
@@ -480,9 +476,7 @@ export async function llmCommand(args: string[], flags: GlobalFlags): Promise<vo
               const marker = task.status === 'skipped' ? '[S]' : '[s]';
               console.log(`  ${marker} ${projName}: ${task.title.slice(0,50)} (${task.id.slice(0,8)})`);
             }
-          } finally {
-            close();
-          }
+          });
         } catch {
           // Skip inaccessible projects
         }

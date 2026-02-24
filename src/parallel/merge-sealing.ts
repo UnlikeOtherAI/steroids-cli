@@ -30,8 +30,7 @@ export function sealWorkstreamsForMerge(
   mainBranch: string,
   workstreams: MergeWorkstreamSpec[]
 ): void {
-  const { db, close } = openGlobalDatabase();
-  try {
+  withGlobalDatabase((db) => {
     const sealedEntries: Array<{
       streamId: string;
       sealedBaseSha: string;
@@ -101,7 +100,5 @@ export function sealWorkstreamsForMerge(
     });
 
     applySealedUpdates();
-  } finally {
-    close();
-  }
+  });
 }
