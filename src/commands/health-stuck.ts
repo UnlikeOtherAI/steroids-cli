@@ -294,7 +294,7 @@ async function runHealthIncidents(args: string[], flags: GlobalFlags): Promise<v
   }
 
   const projectPath = process.cwd();
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const limit = (() => {
       const raw = (values.limit as string | undefined) ?? '50';
       const n = parseInt(raw, 10);

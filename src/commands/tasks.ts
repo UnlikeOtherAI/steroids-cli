@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { existsSync } from 'node:fs';
 import { basename, relative, resolve } from 'node:path';
 import Database from 'better-sqlite3';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import { getRegisteredProjects } from '../runners/projects.js';
 import { logActivity } from '../runners/activity-log.js';
 import {
@@ -257,7 +257,7 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
       if (!existsSync(dbPath)) continue;
 
       try {
-        /* REFACTOR_MANUAL */ withDatabase(project.path, (db) => {
+        /* REFACTOR_MANUAL */ withDatabase(project.path, (db: any) => {
           let tasks: Task[];
           
           if (followUpsOnly) {
@@ -338,7 +338,8 @@ async function listAllTasks(args: string[], globalFlags?: GlobalFlags): Promise<
   }
 
   // Non-global query: use current project only
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     let sectionId: string | undefined;
 
     if (values.section) {
@@ -442,7 +443,8 @@ EXAMPLE:
 
   const outputJson = values.json || globalFlags?.json;
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const statuses: TaskStatus[] = [
       'pending',
       'in_progress',
@@ -527,7 +529,8 @@ EXAMPLES:
   const showFullLogs = values['logs-full'];
   const limit = parseInt(values.limit as string, 10) || 5;
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -770,7 +773,8 @@ EXAMPLES:
 
   const title = positionals.join(' ');
 
-  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db: any) => {
     let section;
     if (values.feedback) {
       section = getOrCreateFeedbackSection(db);
@@ -892,7 +896,8 @@ EXAMPLES:
 
   const identifier = positionals.join(' ');
 
-  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db: any) => {
     let task = getTask(db, identifier);
     if (!task) task = getTaskByTitle(db, identifier);
 
@@ -1092,7 +1097,8 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db: any) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1103,7 +1109,7 @@ OPTIONS:
       process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
-    approveTask(db, task.id, values.model, values.notes);
+    approveTask(db, task.id, values.model as string, values.notes as string);
 
     const updated = getTask(db, task.id);
 
@@ -1165,7 +1171,8 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db: any) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1176,7 +1183,7 @@ OPTIONS:
       process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
-    const result = rejectTask(db, task.id, values.model, values.notes);
+    const result = rejectTask(db, task.id, values.model as string, values.notes as string);
 
     // Trigger task.failed hooks if task failed
     if (result.status === 'failed') {
@@ -1255,7 +1262,8 @@ EXAMPLES:
   const identifier = positionals[0];
   const newStatus = values.partial ? 'partial' : 'skipped';
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1332,7 +1340,8 @@ OPTIONS:
 
   const identifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     let task = getTask(db, identifier);
     if (!task) {
       task = getTaskByTitle(db, identifier);
@@ -1403,7 +1412,8 @@ EXAMPLES:
   const identifier = positionals[0];
   const actor = values.actor ?? 'human:cli';
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     let task = getTask(db, identifier);
     if (!task) task = getTaskByTitle(db, identifier);
 

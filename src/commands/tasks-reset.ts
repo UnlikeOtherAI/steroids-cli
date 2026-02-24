@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import { getTask, getTaskByTitle, listTasks, getSectionDependencies, type Task } from '../database/queries.js';
 import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
@@ -48,7 +48,8 @@ DESCRIPTION:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     let tasksToReset: Task[] = [];
 
     if (positionals.length > 0) {

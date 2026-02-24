@@ -6,7 +6,7 @@ import type { GlobalFlags } from '../cli/flags.js';
  */
 
 import { parseArgs } from 'node:util';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import { getTask, getTaskByTitle } from '../database/queries.js';
 import {
   createDispute,
@@ -205,7 +205,8 @@ OPTIONS:
     process.exit(2);
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     // Find task by ID or title
     let task = getTask(db, taskIdentifier);
     if (!task) {
@@ -222,8 +223,8 @@ OPTIONS:
     const result = createDispute(db, {
       taskId: task.id,
       type: disputeType as DisputeType,
-      reason: values.reason,
-      position: values.position,
+      reason: values.reason as string,
+      position: values.position as string,
       createdBy,
     });
 
@@ -281,7 +282,8 @@ OPTIONS:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     if (values.stale) {
       // Show stale disputes
       const summary = getStaleDisputeSummary(db, DEFAULT_TIMEOUT_DAYS);
@@ -352,7 +354,8 @@ OPTIONS:
 
   const disputeId = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const dispute = getDispute(db, disputeId);
 
     if (!dispute) {
@@ -459,10 +462,11 @@ EXAMPLES:
 
   const disputeId = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const result = resolve(db, {
       disputeId,
-      decision: values.decision,
+      decision: values.decision as any,
       resolvedBy: 'human:cli',
       notes: values.notes,
     });
@@ -526,7 +530,8 @@ EXAMPLES:
 
   const taskIdentifier = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     // Find task by ID or title
     let task = getTask(db, taskIdentifier);
     if (!task) {
@@ -538,7 +543,7 @@ EXAMPLES:
       process.exit(1);
     }
 
-    const result = logMinorDisagreement(db, task.id, values.notes, 'human:cli');
+    const result = logMinorDisagreement(db, task.id, values.notes as string, 'human:cli');
 
     if (!result.success) {
       console.error(`Error: ${result.error}`);

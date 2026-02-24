@@ -2,7 +2,7 @@ import type { GlobalFlags } from '../cli/flags.js';
 import { parseArgs } from 'node:util';
 import { getRegisteredProjects } from '../runners/projects.js';
 import { listRunners, type Runner } from '../runners/daemon.js';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import {
   getSection,
   getTask,
@@ -59,8 +59,8 @@ OPTIONS:
         return runner;
       }
       try {
-        /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db) => {
-          const section = getSection(db, runner.section_id);
+        /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db: any) => {
+          const section = getSection(db, runner.section_id as string);
           return { ...runner, section_name: section?.name };
         });
       } catch {
@@ -99,8 +99,8 @@ OPTIONS:
     let sectionDisplay = '-';
     if (runner.section_id && runner.project_path) {
       try {
-        /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db) => {
-          const section = getSection(db, runner.section_id);
+        /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db: any) => {
+          const section = getSection(db, runner.section_id as string);
           if (section) {
             sectionDisplay = section.name.substring(0, 30);
           }
@@ -181,7 +181,8 @@ async function runListTree(json: boolean): Promise<void> {
     if (!existsSync(dbPath)) continue;
 
     try {
-      /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+      const projectPath = process.cwd();
+      /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
         const inProgress = listTasks(db, { status: 'in_progress' });
         const review = listTasks(db, { status: 'review' });
         info.activeTasks = [...inProgress, ...review];
@@ -255,8 +256,8 @@ async function runListTree(json: boolean): Promise<void> {
         // Show section if focused
         if (runner.section_id && runner.project_path) {
           try {
-            /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db) => {
-              const section = getSection(db, runner.section_id);
+            /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db: any) => {
+              const section = getSection(db, runner.section_id as string);
               if (section) {
                 console.log(`   ${childPrefix}    Section: ${section.name}`);
               }
@@ -269,8 +270,8 @@ async function runListTree(json: boolean): Promise<void> {
         // Show current task if available
         if (runner.current_task_id && runner.project_path) {
           try {
-            /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db) => {
-              const task = getTask(db, runner.current_task_id);
+            /* REFACTOR_MANUAL */ withDatabase(runner.project_path, (db: any) => {
+              const task = getTask(db, runner.current_task_id as string);
               if (task) {
                 const statusMarker = task.status === 'in_progress' ? '🔧' : '👁️';
                 console.log(`   ${childPrefix}    ${statusMarker} ${task.title.substring(0, 50)}`);

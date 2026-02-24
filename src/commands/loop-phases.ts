@@ -69,7 +69,7 @@ function refreshParallelWorkstreamLease(projectPath: string, leaseFence?: LeaseF
     return;
   }
 
-  withGlobalDatabase((db) => {
+  withGlobalDatabase((db: any) => {
     const row = db
       .prepare(
         `SELECT id, claim_generation, runner_id

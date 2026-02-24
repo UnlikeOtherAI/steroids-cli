@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { getRegisteredProjects } from '../runners/projects.js';
 import { listRunners } from '../runners/daemon.js';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import { listTasks } from '../database/queries.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
@@ -431,7 +431,7 @@ export async function llmCommand(args: string[], flags: GlobalFlags): Promise<vo
         if (!existsSync(dbPath)) continue;
 
         try {
-          /* REFACTOR_MANUAL */ withDatabase(project.path, (db) => {
+          /* REFACTOR_MANUAL */ withDatabase(project.path, (db: any) => {
             const inProgress = listTasks(db, { status: 'in_progress' });
             const review = listTasks(db, { status: 'review' });
             const active = [...inProgress, ...review];
@@ -465,7 +465,7 @@ export async function llmCommand(args: string[], flags: GlobalFlags): Promise<vo
         if (!existsSync(dbPath)) continue;
 
         try {
-          /* REFACTOR_MANUAL */ withDatabase(project.path, (db) => {
+          /* REFACTOR_MANUAL */ withDatabase(project.path, (db: any) => {
             const skipped = listTasks(db, { status: 'skipped' });
             const partial = listTasks(db, { status: 'partial' });
             const allSkipped = [...skipped, ...partial];

@@ -1,3 +1,4 @@
+import { withDatabase } from '../database/connection.js';
 import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids gc - Garbage collection
@@ -83,7 +84,7 @@ export const gcCommand = defineCommand({
       vacuumedBytes: 0,
     };
 
-    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
       // Clean orphaned IDs
       if (runAll || values['orphaned-ids']) {
         result.orphanedIds = cleanOrphanedIds(db, dryRun);

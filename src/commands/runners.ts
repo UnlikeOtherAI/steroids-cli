@@ -11,7 +11,7 @@ import {
   startDaemon,
   canStartDaemon,
 } from '../runners/daemon.js';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import {
   getSection,
   getSectionByName,
@@ -231,7 +231,7 @@ USAGE:
 
   if (values.section) {
     const sectionInput = values.section as string;
-    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
       // Try to resolve by ID (exact or prefix match)
       let section;
       try {
@@ -254,7 +254,7 @@ USAGE:
             }
           }
         }
-        close();
+        
         process.exit(1);
       }
 
@@ -280,7 +280,7 @@ USAGE:
             }
           }
         }
-        close();
+        
         process.exit(1);
       }
 
@@ -294,7 +294,7 @@ USAGE:
           console.error('');
           console.error(`Run 'steroids sections unskip "${section.name}"' to re-enable it.`);
         }
-        close();
+        
         process.exit(1);
       }
 

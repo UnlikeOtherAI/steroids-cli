@@ -1,3 +1,4 @@
+import { withDatabase } from '../database/connection.js';
 import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids purge - Purge completed tasks, orphaned IDs, and old logs
@@ -143,7 +144,7 @@ OPTIONS:
     await backupCommand(['create'], flags);
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const result = purgeCompletedTasks(
       db,
       values['older-than'],
@@ -198,7 +199,7 @@ OPTIONS:
     process.exit(1);
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const count = purgeOrphanedIds(db, values['dry-run'] ?? false);
 
     if (values.json) {
@@ -337,7 +338,7 @@ OPTIONS:
     logFiles: 0,
   };
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     // Purge completed tasks
     const taskResult = purgeCompletedTasks(db, undefined, dryRun, false);
     result.tasks = taskResult.tasks;

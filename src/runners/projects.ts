@@ -305,3 +305,10 @@ export function isProjectRegistered(path: string): boolean {
   });
 }
 
+
+export function enableProject(path: string): void {
+  const normalizedPath = require('node:path').resolve(path);
+  withGlobalDatabase((db: any) => {
+    db.prepare('UPDATE projects SET enabled = 1 WHERE path = ?').run(normalizedPath);
+  });
+}

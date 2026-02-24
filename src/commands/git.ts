@@ -1,3 +1,4 @@
+import { withDatabase } from '../database/connection.js';
 import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids git - Git integration commands
@@ -170,9 +171,9 @@ OPTIONS:
   }
 
   // Get current task context
-  let currentTask: { id: string; title: string } | null = null;
+  let currentTask: any = null;
   if (isInitialized(projectPath)) {
-    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
       const tasks = listTasks(db, { status: 'in_progress' });
       if (tasks.length > 0) {
         currentTask = { id: tasks[0].id, title: tasks[0].title };

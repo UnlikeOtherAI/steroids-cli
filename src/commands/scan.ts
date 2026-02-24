@@ -1,3 +1,4 @@
+import { withDatabase } from '../database/connection.js';
 import type { GlobalFlags } from '../cli/flags.js';
 /**
  * steroids scan - Scan directory for projects
@@ -205,7 +206,7 @@ function getProjectInfo(directory: string, type: string): ProjectInfo {
 
   if (hasSteroids) {
     try {
-      /* REFACTOR_MANUAL */ withDatabase(directory, (db) => {
+      /* REFACTOR_MANUAL */ withDatabase(directory || process.cwd(), (db: any) => {
         const allTasks = listTasks(db, { status: 'all' });
         const pending = allTasks.filter(t =>
           t.status === 'pending' || t.status === 'in_progress' || t.status === 'review'

@@ -4,7 +4,7 @@ import type { GlobalFlags } from '../cli/flags.js';
  */
 
 import { parseArgs } from 'node:util';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import {
   listTaskLocks,
   listSectionLocks,
@@ -123,7 +123,8 @@ async function listLocks(args: string[], flags: GlobalFlags): Promise<void> {
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const taskLocks = values.type === 'section' ? [] : listTaskLocks(db);
     const sectionLocks = values.type === 'task' ? [] : listSectionLocks(db);
 
@@ -219,7 +220,8 @@ OPTIONS:
 
   const id = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     // Try task lock first, then section lock
     const taskLock = getTaskLock(db, id);
     const sectionLock = taskLock ? null : getSectionLock(db, id);
@@ -328,7 +330,8 @@ NOTE:
 
   const id = positionals[0];
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     // Try task lock first, then section lock
     const taskLock = getTaskLock(db, id);
     const sectionLock = taskLock ? null : getSectionLock(db, id);
@@ -403,7 +406,8 @@ OPTIONS:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const result = cleanupAllExpiredLocks(db, { dryRun: values['dry-run'] });
 
     if (values.json) {

@@ -559,7 +559,7 @@ function checkTasks(): CheckResult {
     };
   }
 
-  return /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  return /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const allTasks = listTasks(db, { status: 'all' });
     const completedTasks = allTasks.filter(t => t.status === 'completed');
 

@@ -3,7 +3,7 @@
  */
 
 import { parseArgs } from 'node:util';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import {
   createSection,
   getSection,
@@ -58,7 +58,8 @@ GLOBAL OPTIONS:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const section = createSection(db, name, position);
 
     if (flags.json) {
@@ -137,7 +138,8 @@ EXAMPLES:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const section = getSection(db, sectionIdInput);
     if (!section) {
       throw sectionNotFoundError(sectionIdInput);
@@ -200,7 +202,8 @@ EXAMPLES:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const section = getSection(db, sectionIdInput);
     if (!section) {
       throw sectionNotFoundError(sectionIdInput);
@@ -269,7 +272,8 @@ EXAMPLES:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const section = getSection(db, sectionIdInput);
     if (!section) {
       throw sectionNotFoundError(sectionIdInput);

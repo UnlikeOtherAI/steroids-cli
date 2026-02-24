@@ -4,7 +4,7 @@ import type { GlobalFlags } from '../cli/flags.js';
  */
 
 import { parseArgs } from 'node:util';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import {
   listSections,
   getSectionTaskCount,
@@ -157,7 +157,8 @@ OPTIONS:
     return;
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const sections = listSections(db);
 
     if (flags.json) {
@@ -282,7 +283,8 @@ EXAMPLES:
     return;
   }
 
-  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db) => {
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db: any) => {
     // Filter sections if --section specified
     let sections = listSections(db);
     if (values.section) {
