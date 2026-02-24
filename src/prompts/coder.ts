@@ -116,6 +116,7 @@ You are a CODER in an automated task execution system. Your job is to implement 
 **Title:** ${task.title}
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
+**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
 ${fileScopeSection}${fileAnchorSection}
 ---
 
@@ -300,6 +301,7 @@ You are a CODER assigned MULTIPLE tasks from section "${sectionName}".
 ## Section: ${sectionName}
 **Total Tasks:** ${tasks.length}
 **Project:** ${projectPath}
+**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
 
 ---
 
@@ -376,6 +378,7 @@ You are a CODER resuming work on a partially completed task.
 **Status:** in_progress (resuming)
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
+**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
 ${fileAnchorSection}
 ---
 

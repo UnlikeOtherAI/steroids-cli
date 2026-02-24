@@ -408,8 +408,7 @@ export function getRecentCommits(
   count: number = 5,
   sinceSha?: string
 ): Array<{ sha: string; message: string }> {
-  try {
-    const range = sinceSha ? `${sinceSha}..HEAD` : `-${count}`;
+  const tryLog = (range: string) => {
     const log = execSync(`git log ${range} --format=%H||%s`, {
       cwd: projectPath,
       encoding: 'utf-8',
@@ -419,6 +418,18 @@ export function getRecentCommits(
       const [sha, ...messageParts] = line.split('||');
       return { sha, message: messageParts.join('||') };
     });
+  };
+
+  try {
+    if (sinceSha) {
+      try {
+        return tryLog(`${sinceSha}..HEAD`);
+      } catch {
+        // If sinceSha is unreachable (e.g., due to amend/rebase), fallback to count
+        return tryLog(`-${count}`);
+      }
+    }
+    return tryLog(`-${count}`);
   } catch {
     return [];
   }

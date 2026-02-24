@@ -134,6 +134,7 @@ A task has been rejected ${rejectionHistory.length} times. You MUST provide a de
 **Title:** ${task.title}
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
+**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory.
 
 ---
 

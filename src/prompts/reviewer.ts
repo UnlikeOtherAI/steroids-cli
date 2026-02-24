@@ -275,6 +275,7 @@ You are a REVIEWER reviewing MULTIPLE tasks from section "${sectionName}".
 ## Section: ${sectionName}
 **Total Tasks:** ${tasks.length}
 **Project:** ${projectPath}
+**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory.
 
 ---
 
