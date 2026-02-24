@@ -61,12 +61,12 @@ Identical logic for lost sessions and context windows is duplicated in `coder.ts
 Every command in `src/commands/` manually handles help generation, argument parsing, and error logging.
 
 ### Tasks
-- [ ] **TASK: Create BaseCommand**: Implement a higher-order function or base class that standardizes argument parsing (`parseArgs`), help display, and global error catching.
-- [ ] **TASK: Refactor Commands**: Migrate all command files to use the `BaseCommand` infrastructure.
+- [x] **TASK: Create BaseCommand**: Implement a higher-order function or base class that standardizes argument parsing (`parseArgs`), help display, and global error catching.
+- [x] **TASK: Refactor Commands**: Migrate all command files to use the `BaseCommand` infrastructure.
 
 ### Acceptance Criteria
-- [ ] AC: Code size across `src/commands/` is reduced by ~20%.
-- [ ] AC: A test must verify that uncaught errors in any command are automatically logged to the `System Logs` with a standardized exit code.
+- [x] AC: Code size across `src/commands/` is reduced by ~20%.
+- [x] AC: A test must verify that uncaught errors in any command are automatically logged to the `System Logs` with a standardized exit code.
 
 ---
 

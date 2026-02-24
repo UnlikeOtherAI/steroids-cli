@@ -52,68 +52,62 @@ const HELP = generateHelp({
   ],
 });
 
-export async function gcCommand(args: string[], flags: GlobalFlags): Promise<void> {
-  // Check global help flag first
-  if (flags.help) {
-    console.log(HELP);
-    return;
+import { defineCommand } from '../cli/base-command.js';
+
+export const gcCommand = defineCommand({
+  name: 'gc',
+  description: 'Garbage collection',
+  helpText: HELP,
+  requireInit: true,
+  options: {
+    'orphaned-ids': { type: 'boolean', default: false },
+    'stale-runners': { type: 'boolean', default: false },
+    'temp-files': { type: 'boolean', default: false },
+    vacuum: { type: 'boolean', default: false },
+  },
+  allowPositionals: false,
+  handler: async (args, flags, values) => {
+    const projectPath = process.cwd();
+
+    // If no specific option, run all
+    const runAll = !values['orphaned-ids'] &&
+      !values['stale-runners'] &&
+      !values['temp-files'] &&
+      !values.vacuum;
+
+    const dryRun = flags.dryRun;
+    const result: GcResult = {
+      orphanedIds: 0,
+      staleRunners: 0,
+      tempFiles: 0,
+      vacuumedBytes: 0,
+    };
+
+    /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+      // Clean orphaned IDs
+      if (runAll || values['orphaned-ids']) {
+        result.orphanedIds = cleanOrphanedIds(db, dryRun);
+      }
+
+      // Clean stale runners
+      if (runAll || values['stale-runners']) {
+        result.staleRunners = cleanStaleRunners(db, dryRun);
+      }
+
+      // Clean temp files
+      if (runAll || values['temp-files']) {
+        result.tempFiles = cleanTempFiles(projectPath, dryRun);
+      }
+
+      // Vacuum database
+      if (runAll || values.vacuum) {
+        result.vacuumedBytes = vacuumDatabase(db, dryRun);
+      }
+    });
+
+    outputResult(result, flags.json, dryRun);
   }
-
-  const { values } = parseArgs({
-    args,
-    options: {
-      'orphaned-ids': { type: 'boolean', default: false },
-      'stale-runners': { type: 'boolean', default: false },
-      'temp-files': { type: 'boolean', default: false },
-      vacuum: { type: 'boolean', default: false },
-    },
-    allowPositionals: false,
-  });
-
-  const projectPath = process.cwd();
-  if (!isInitialized(projectPath)) {
-    console.error('Steroids not initialized. Run "steroids init" first.');
-    process.exit(1);
-  }
-
-  // If no specific option, run all
-  const runAll = !values['orphaned-ids'] &&
-    !values['stale-runners'] &&
-    !values['temp-files'] &&
-    !values.vacuum;
-
-  const dryRun = flags.dryRun;
-  const result: GcResult = {
-    orphanedIds: 0,
-    staleRunners: 0,
-    tempFiles: 0,
-    vacuumedBytes: 0,
-  };
-
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
-    // Clean orphaned IDs
-    if (runAll || values['orphaned-ids']) {
-      result.orphanedIds = cleanOrphanedIds(db, dryRun);
-    }
-
-    // Clean stale runners
-    if (runAll || values['stale-runners']) {
-      result.staleRunners = cleanStaleRunners(db, dryRun);
-    }
-
-    // Clean temp files
-    if (runAll || values['temp-files']) {
-      result.tempFiles = cleanTempFiles(projectPath, dryRun);
-    }
-
-    // Vacuum database
-    if (runAll || values.vacuum) {
-      result.vacuumedBytes = vacuumDatabase(db, dryRun);
-    }
-  });
-
-  outputResult(result, flags.json, dryRun);
-}
+});
 
 function cleanOrphanedIds(db: Database.Database, dryRun: boolean): number {
   let count = 0;
