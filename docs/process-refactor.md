@@ -231,4 +231,4 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 - [x] The "Tasks" navigation link is completely removed from the `Sidebar.tsx`.
 - [x] The `/tasks` route and the `RunningTasksPage` component are fully removed from the WebUI source code.
 - [x] The `steroids tasks reset` command revokes leases and unblocks sessions in the global `parallel_sessions`/`workstreams` tables to guarantee runners resume in their existing workspace clones.
-- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
+- [x] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
