@@ -25,6 +25,7 @@ jest.unstable_mockModule('../src/parallel/clone.js', () => ({
 }));
 
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
+  withGlobalDatabase: async (cb: any) => cb((mockOpenGlobalDatabase() as any).db),
   openGlobalDatabase: mockOpenGlobalDatabase,
   recordProviderBackoff: jest.fn(),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),

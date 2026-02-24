@@ -59,6 +59,7 @@ jest.unstable_mockModule('node:child_process', () => ({
 }));
 
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
+  withGlobalDatabase: (cb: any) => cb(mockGlobalDb),
   openGlobalDatabase: mockOpenGlobalDatabase,
   recordProviderBackoff: jest.fn(),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
@@ -88,6 +89,7 @@ jest.unstable_mockModule('../src/runners/lock.js', () => ({
 }));
 
 jest.unstable_mockModule('../src/database/connection.js', () => ({
+  withDatabase: (path: any, cb: any) => cb(mockProjectDb),
   openDatabase: mockOpenDatabase,
 }));
 

@@ -1,4 +1,4 @@
-import { openGlobalDatabase } from '../runners/global-db.js';
+import { openGlobalDatabase, withGlobalDatabase } from '../runners/global-db.js';
 import { ParallelMergeError } from './merge-errors.js';
 
 export const MAX_CONFLICT_ATTEMPTS = 5;

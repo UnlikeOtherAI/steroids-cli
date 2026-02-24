@@ -194,6 +194,7 @@ describe('orchestrator loop and runner wiring', () => {
 
   beforeAll(async () => {
     jest.unstable_mockModule('../src/database/connection.js', () => ({
+      withDatabase: (path: any, cb: any) => cb((mockOpenDatabase(path) as any).db),
       openDatabase: mockOpenDatabase,
       getDbPath: mockGetDbPath,
     }));
@@ -259,6 +260,7 @@ describe('orchestrator loop and runner wiring', () => {
       spawn: jest.fn(),
     }));
     jest.unstable_mockModule('../src/runners/global-db.js', () => ({
+      withGlobalDatabase: (cb: any) => cb((mockOpenGlobalDatabase() as any).db),
       openGlobalDatabase: mockOpenGlobalDatabase,
       recordProviderBackoff: jest.fn(),
       getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),

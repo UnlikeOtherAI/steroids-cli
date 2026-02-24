@@ -1,3 +1,4 @@
+import { withGlobalDatabase } from '../runners/global-db.js';
 /**
  * Merge conflict resolution orchestrator.
  */

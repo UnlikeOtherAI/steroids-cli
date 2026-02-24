@@ -47,13 +47,13 @@ There are over 85 manual `.close()` calls across the codebase, often inside comp
 Identical logic for lost sessions and context windows is duplicated in `coder.ts` and `reviewer.ts`.
 
 ### Tasks
-- [ ] **TASK: Create HistoryManager**: Centralize session history reconstruction and `Token Guard` pruning logic.
-- [ ] **TASK: Create BaseRunner**: Encapsulate the invocation lifecycle (temp files, logging, error classification) into a role-agnostic base class.
+- [x] **TASK: Create HistoryManager**: Centralize session history reconstruction and `Token Guard` pruning logic.
+- [x] **TASK: Create BaseRunner**: Encapsulate the invocation lifecycle (temp files, logging, error classification) into a role-agnostic base class.
 
 ### Acceptance Criteria
-- [ ] AC: `coder.ts` and `reviewer.ts` code size reduced by at least 100 lines each.
-- [ ] AC: `HistoryManager` must include a test case simulating `SQLITE_BUSY` during history reconstruction to verify retry logic.
-- [ ] AC: A unit test must verify that `Token Guard` pruning preserves the "Task Specification" even when pruning tool outputs.
+- [x] AC: `coder.ts` and `reviewer.ts` code size reduced by at least 100 lines each.
+- [x] AC: `HistoryManager` must include a test case simulating `SQLITE_BUSY` during history reconstruction to verify retry logic.
+- [x] AC: A unit test must verify that `Token Guard` pruning preserves the "Task Specification" even when pruning tool outputs.
 
 ---
 

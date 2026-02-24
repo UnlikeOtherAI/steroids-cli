@@ -38,6 +38,7 @@ const mockExecSync = jest.fn();
 // ── Module mocks ────────────────────────────────────────────────────────
 
 jest.unstable_mockModule('../src/database/connection.js', () => ({
+  withDatabase: async (path: any, cb: any) => cb(mockOpenDatabase(path).db),
   openDatabase: mockOpenDatabase,
   getDbPath: mockGetDbPath,
 }));

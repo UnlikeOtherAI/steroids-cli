@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { parseDuration } from '../cli/flags.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
-import { openDatabase } from '../database/connection.js';
+import { openDatabase, withDatabase } from '../database/connection.js';
 import { loadConfig } from '../config/loader.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
 import { recoverStuckTasks } from '../health/stuck-task-recovery.js';

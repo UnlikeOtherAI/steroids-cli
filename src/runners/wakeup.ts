@@ -4,7 +4,8 @@
 
 import { existsSync } from 'node:fs';
 import { checkLockStatus, removeLock } from './lock.js';
-import { openGlobalDatabase, getDaemonActiveStatus } from './global-db.js';
+import { openGlobalDatabase,
+  withGlobalDatabase, getDaemonActiveStatus } from './global-db.js';
 import { findStaleRunners } from './heartbeat.js';
 import { getRegisteredProjects } from './projects.js';
 import { openDatabase } from '../database/connection.js';
@@ -85,7 +86,7 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
     }
 
     // Step 1: Clean up stale runners first
-    return withGlobalDatabase((globalDb) => {
+    return withGlobalDatabase(async (globalDb) => {
 const global = { db: globalDb };
 
     try {
@@ -674,7 +675,7 @@ export async function checkWakeupNeeded(): Promise<{
   const lockStatus = checkLockStatus();
 
   if (lockStatus.locked && lockStatus.pid) {
-    return withGlobalDatabase((db) => {
+    return withGlobalDatabase(async (db) => {
       const staleRunners = findStaleRunners(db);
       if (staleRunners.length > 0) {
         return {

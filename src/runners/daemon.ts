@@ -1,3 +1,4 @@
+import { withGlobalDatabase } from '../runners/global-db.js';
 /**
  * Runner daemon - background process that executes tasks
  */
@@ -299,7 +300,7 @@ async function autoMergeOnCompletion(
   workspacePath: string,
   runnerId: string
 ): Promise<void> {
-  return withGlobalDatabase((db) => {
+  return withGlobalDatabase(async (db) => {
     // Find our workstream
     const ours = db.prepare(
       `SELECT id, branch_name FROM workstreams

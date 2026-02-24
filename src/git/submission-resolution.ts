@@ -1,3 +1,4 @@
+import { withGlobalDatabase } from '../runners/global-db.js';
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';

@@ -918,13 +918,13 @@ export function clearProviderBackoff(provider: string): void {
  * Automatically handles closing the connection when done or if an error occurs.
  */
 export function withGlobalDatabase<T>(
-  callback: (db: Database.Database) => T | Promise<T>
-): T | Promise<T> {
+  callback: (db: Database.Database) => T
+): T {
   const { db, close } = openGlobalDatabase();
   try {
     const result = callback(db);
     if (result instanceof Promise) {
-      return result.finally(() => close());
+      return result.finally(() => close()) as T;
     }
     close();
     return result;

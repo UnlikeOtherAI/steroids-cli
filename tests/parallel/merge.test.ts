@@ -47,6 +47,7 @@ const mockRecordValidationEscalation = jest.fn(() => ({ id: 1 }));
 const mockResolveValidationEscalationsForSession = jest.fn(() => 0);
 
 jest.unstable_mockModule('../../src/runners/global-db.js', () => ({
+  withGlobalDatabase: async (cb: any) => cb((mockOpenGlobalDatabase() as any).db),
   openGlobalDatabase: mockOpenGlobalDatabase,
   updateParallelSessionStatus: mockUpdateParallelSessionStatus,
   recordValidationEscalation: mockRecordValidationEscalation,

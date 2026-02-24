@@ -1,3 +1,4 @@
+import { withDatabase } from '../database/connection.js';
 import { execSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -106,7 +107,7 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
 
   const configuredMaxClones = getConfiguredMaxClones(projectPath);
   const effectiveMaxClones = maxClonesOverride ?? configuredMaxClones;
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  return /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const sections = listSections(db);
     if (sections.length === 0) {
       throw new Error('No sections found');

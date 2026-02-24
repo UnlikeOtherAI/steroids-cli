@@ -14,7 +14,8 @@ import { parseArgs } from 'node:util';
 import { execSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { openDatabase, isInitialized } from '../database/connection.js';
+import { openDatabase,
+  withDatabase, isInitialized } from '../database/connection.js';
 import { listTasks } from '../database/queries.js';
 import { hasUncommittedChanges, isGitRepo } from '../git/status.js';
 import { generateHelp } from '../cli/help.js';
@@ -558,7 +559,7 @@ function checkTasks(): CheckResult {
     };
   }
 
-  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
+  return /* REFACTOR_MANUAL */ withDatabase(projectPath, (db) => {
     const allTasks = listTasks(db, { status: 'all' });
     const completedTasks = allTasks.filter(t => t.status === 'completed');
 

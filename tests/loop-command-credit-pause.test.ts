@@ -37,6 +37,7 @@ const mockCreateOutput = jest.fn().mockReturnValue({
 // ── Module mocks ────────────────────────────────────────────────────────
 
 jest.unstable_mockModule('../src/database/connection.js', () => ({
+  withDatabase: async (path: any, cb: any) => cb(mockOpenDatabase(path).db),
   openDatabase: mockOpenDatabase,
 }));
 

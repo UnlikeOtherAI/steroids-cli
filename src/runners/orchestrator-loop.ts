@@ -24,6 +24,7 @@ import { handleCreditExhaustion, checkBatchCreditExhaustion } from './credit-pau
 import { pushToRemote } from '../git/push.js';
 import {
   openGlobalDatabase,
+  withGlobalDatabase,
   recordProviderBackoff,
   getProviderBackoffRemainingMs,
   clearProviderBackoff,

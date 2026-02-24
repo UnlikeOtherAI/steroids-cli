@@ -46,6 +46,7 @@ jest.unstable_mockModule('../src/runners/orchestrator-loop.js', () => ({
 }));
 
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
+  withGlobalDatabase: async (cb: any) => cb(mockOpenGlobalDatabase().db),
   openGlobalDatabase: mockOpenGlobalDatabase,
   recordProviderBackoff: jest.fn(),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),

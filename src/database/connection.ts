@@ -240,14 +240,14 @@ export function isSchemaUpToDate(db: Database.Database): boolean {
  */
 export function withDatabase<T>(
   projectPath: string | undefined,
-  callback: (db: Database.Database) => T | Promise<T>,
+  callback: (db: Database.Database) => T,
   options?: { timeoutMs?: number }
-): T | Promise<T> {
+): T {
   const { db, close } = openDatabase(projectPath, options);
   try {
     const result = callback(db);
     if (result instanceof Promise) {
-      return result.finally(() => close());
+      return result.finally(() => close()) as T;
     }
     close();
     return result;

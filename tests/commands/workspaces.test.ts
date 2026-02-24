@@ -20,6 +20,7 @@ const mockRemoveParallelSessionRunner = jest.fn();
 const mockRevokeWorkstreamLeasesForSession = jest.fn();
 
 jest.unstable_mockModule('../../src/runners/global-db.js', () => ({
+  withGlobalDatabase: async (cb: any) => cb((mockOpenGlobalDatabase() as any).db),
   openGlobalDatabase: mockOpenGlobalDatabase,
   listParallelSessionRunners: mockListParallelSessionRunners,
   removeParallelSessionRunner: mockRemoveParallelSessionRunner,

@@ -1,3 +1,4 @@
+import { withGlobalDatabase } from '../runners/global-db.js';
 /**
  * Workstream sealing before cherry-pick merge
  */

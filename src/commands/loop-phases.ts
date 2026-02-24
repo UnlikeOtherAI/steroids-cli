@@ -1,3 +1,4 @@
+import { withGlobalDatabase } from '../runners/global-db.js';
 /**
  * Loop phase functions for coder and reviewer invocation
  * ORCHESTRATOR-DRIVEN: The orchestrator makes ALL status decisions

@@ -72,6 +72,7 @@ const mockCheckLockStatus = jest.fn();
 
 // Mock global-db
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
+  withGlobalDatabase: (cb: any) => cb((mockOpenGlobalDatabase() as any).db),
   openGlobalDatabase: mockOpenGlobalDatabase,
   recordProviderBackoff: jest.fn(),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),

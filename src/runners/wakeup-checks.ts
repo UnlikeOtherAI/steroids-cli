@@ -1,3 +1,5 @@
+import { withDatabase } from '../database/connection.js';
+import { withGlobalDatabase } from './global-db.js';
 /**
  * Project state checks for wakeup
  */
@@ -18,12 +20,9 @@ export async function projectHasPendingWork(projectPath: string): Promise<boolea
   }
 
   try {
-    // Mirror orchestrator selection logic so wakeup only starts runners
-    // when there is actually an eligible task to execute.
-    // Use strict 500ms timeout for O(N) querying
-    /* REFACTOR_MANUAL */ withDatabase(projectPath, { timeoutMs: 500 }, (db) => {
+    return withDatabase(projectPath, (db: any) => {
       return selectNextTask(db) !== null;
-    });
+    }, { timeoutMs: 500 });
   } catch (error) {
     // Treat timeouts or locked DBs as no pending work for this cycle
     return false;
@@ -35,7 +34,7 @@ export async function projectHasPendingWork(projectPath: string): Promise<boolea
  * Exported for use in daemon startup checks
  */
 export function hasActiveRunnerForProject(projectPath: string): boolean {
-  return withGlobalDatabase((db) => {
+  return withGlobalDatabase((db: any) => {
     const row = db
       .prepare(
         `SELECT 1 FROM runners
@@ -51,7 +50,7 @@ export function hasActiveRunnerForProject(projectPath: string): boolean {
 }
 
 export function hasActiveParallelSessionForProject(projectPath: string): boolean {
-  return withGlobalDatabase((db) => {
+  return withGlobalDatabase((db: any) => {
     // Session is considered active only when it still has non-terminal workstream
     // state or an actively heartbeating runner bound to it.
     const sessionRow = db

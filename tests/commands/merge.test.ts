@@ -17,10 +17,12 @@ const mockOpenDatabase = jest.fn();
 const mockRunParallelMerge = jest.fn() as unknown as jest.Mock;
 
 jest.unstable_mockModule('../../src/runners/global-db.js', () => ({
+  withGlobalDatabase: async (cb: any) => cb((mockOpenGlobalDatabase() as any).db),
   openGlobalDatabase: mockOpenGlobalDatabase,
 }));
 
 jest.unstable_mockModule('../../src/database/connection.js', () => ({
+  withDatabase: async (path: any, cb: any) => cb((mockOpenDatabase(path) as any).db),
   openDatabase: mockOpenDatabase,
 }));
 
