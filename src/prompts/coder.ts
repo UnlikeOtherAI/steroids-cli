@@ -1,16 +1,16 @@
 /**
  * Coder prompt templates
- * Following the exact templates from PROMPTS.md
+ * Refactored to eliminate contradictions and improve autonomy
  */
 
 import type { Task, RejectionEntry } from '../database/queries.js';
 import {
-  getAgentsMd,
   getSourceFileReference,
   buildFileScopeSection,
   buildFileAnchorSection,
   formatRejectionHistoryForCoder,
 } from './prompt-helpers.js';
+import { getRecentCommits } from '../git/status.js';
 
 export interface CoderPromptContext {
   task: Task;
@@ -42,8 +42,8 @@ Review your previous progress and complete the task.
 
 **REMINDER:**
 1. BUILD MUST PASS before submitting
-2. COMMIT YOUR WORK with a descriptive message
-3. Output "TASK COMPLETE" when finished
+2. DO NOT COMMIT OR PUSH YOUR WORK
+3. Output "STATUS: REVIEW" when finished
 `;
   }
 
@@ -71,14 +71,14 @@ Do not mark those items as WONT_FIX unless you provide hard new evidence and the
 2. BUILD MUST PASS before submitting
 3. DO NOT COMMIT OR PUSH YOUR WORK
 4. Include this exact contract block:
-   ```
+   \`\`\`
    ## REJECTION_RESPONSE
    ITEM-1 | IMPLEMENTED | <file:line> | <what changed>
    ITEM-2 | WONT_FIX | <exceptional reason + proof solution still works>
-   ```
-   - Every reviewer checkbox item must have one matching `ITEM-<n>` response.
-   - `WONT_FIX` is a high bar and requires an exceptional, concrete explanation.
-   - If coordinator guidance includes `MUST_IMPLEMENT:`, those items are mandatory and should not be marked `WONT_FIX`.
+   \`\`\`
+   - Every reviewer checkbox item must have one matching \`ITEM-<n>\` response.
+   - \`WONT_FIX\` is a high bar and requires an exceptional, concrete explanation.
+   - If coordinator guidance includes \`MUST_IMPLEMENT:\`, those items are mandatory and should not be marked \`WONT_FIX\`.
 5. Output "STATUS: REVIEW" when finished
 `;
 
@@ -91,7 +91,6 @@ Do not mark those items as WONT_FIX unless you provide hard new evidence and the
 export function generateCoderPrompt(context: CoderPromptContext): string {
   const { task, projectPath, previousStatus, rejectionNotes, rejectionHistory, coordinatorGuidance } = context;
 
-  const agentsMd = getAgentsMd(projectPath);
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
 
   // Build rejection section with full history and coordinator guidance
@@ -101,12 +100,16 @@ export function generateCoderPrompt(context: CoderPromptContext): string {
   const fileScopeSection = buildFileScopeSection(task);
   const fileAnchorSection = buildFileAnchorSection(task);
 
+  // Get recent commits dynamically for context
+  const recentCommits = getRecentCommits(projectPath, 5);
+  const recentCommitsSection = recentCommits.length > 0 
+    ? recentCommits.map(c => `- \`${c.sha.substring(0, 7)}\` ${c.message}`).join('\n')
+    : 'No recent commits found.';
+
   return `# TASK: ${task.id.substring(0, 8)} - ${task.title}
 # Status: ${previousStatus} → in_progress | Rejections: ${task.rejection_count}/15
 
-You are a CODER in an automated task execution system. Your job is to implement the task below according to the specification.
-
-**Follow the project's existing architecture and patterns.** Read AGENTS.md and existing code to understand how things are structured before making changes.
+You are a CODER in an automated task execution system. Your job is to autonomously implement the task below according to the specification.
 
 ---
 
@@ -116,7 +119,7 @@ You are a CODER in an automated task execution system. Your job is to implement 
 **Title:** ${task.title}
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
+**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
 ${fileScopeSection}${fileAnchorSection}
 ---
 
@@ -126,114 +129,62 @@ ${sourceRef}
 
 ---
 
-## Project Guidelines
-
-${agentsMd}
-
----
-
 ## Existing Code Context
+
+**Recent Commits in Workspace:**
+${recentCommitsSection}
 
 Review relevant project files as needed for your implementation.
 ${rejectionSection}
 ---
 
-## FIRST: Check If Work Is Already Done
+## WORKFLOW INSTRUCTIONS
 
-**Before implementing anything, check if the work already exists:**
+### 1. Verification Phase (Check If Work Exists)
+Before implementing anything, verify if the work is already done:
+1. Search for files/code matching the specification.
+2. Check the recent commits listed above or run \`git log --oneline -20\`.
+*If the work already exists and matches the spec:* Do NOT duplicate it. Simply output "STATUS: REVIEW" and note the commit hash.
 
-1. Search for files/code that match the specification requirements
-2. Run \`git log --oneline -20\` to see recent commits
+### 2. Implementation Phase
+If the work is not done, implement the feature/fix:
+1. **Read Project Guidelines:** Check if \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, or similar guideline files exist in the project root. If they do, READ THEM and follow their architecture and patterns.
+2. Read the specification carefully.
+3. Add or update tests if a test directory exists.
 
-**IF THE WORK ALREADY EXISTS:**
+### 3. Execution & Tool Rules (CRITICAL)
+- **Tool/Command Verification:** Before relying on a new shell command, ALWAYS verify it exists first (e.g., \`which <command>\`). Do not hallucinate tools. If a tool is missing, attempt to install it locally if appropriate, or output \`STATUS: DISPUTE - Missing required tool <name>\`.
+- **Security:** When executing shell commands with user-controlled arguments, use array-based APIs. If you must use \`execSync\`, add a comment explaining why (e.g., \`// hardcoded command, no user input\`).
+- **Attempt Before Skip:** You MUST attempt to run local tasks (like scripts or setups). Only skip if the task requires impossible external action (e.g., manual cloud console config). If you must skip, output: \`TASK SHOULD BE SKIPPED: <reason>. WHAT'S NEEDED: <human action>.\`
 
-1. Verify it matches the spec:
-
-\`\`\`bash
-git log --oneline -20  # Find the commit hash
-git show <commit-hash> --stat  # Verify it matches the spec
-\`\`\`
-
-2. Note which commit contains the work in your response
-3. **Do NOT implement duplicate code** - state "TASK COMPLETE" and the orchestrator will submit for review
-
----
-
-**IF THE WORK DOES NOT EXIST, CONTINUE BELOW:**
-
----
-
-## Your Instructions (If Work Is NOT Already Done)
-
-1. Read the specification carefully
-2. Implement the feature/fix as specified
-3. Write tests if the project has a test directory
-4. Keep files under 500 lines
-5. Follow the coding standards in AGENTS.md
-
-### Security Notes
-
-- When executing shell commands with user-controlled arguments, use array-based APIs (e.g., \`execFileSync(cmd, [args])\`). Add a comment like \`// hardcoded command, no user input\` when using \`execSync\` intentionally for fixed commands or shell features.
-- If you make a security-relevant decision (e.g., choosing \`execSync\` over \`execFileSync\` because you need pipes), explain your reasoning in your commit message or output.
+### 4. Version Control & File Rules
+- **NEVER** touch the \`.steroids/\` directory (no \`.db\`, \`.yaml\`, \`.yml\` files).
+- **NEVER** modify \`TODO.md\` directly. The orchestrator manages task status.
+- **DO NOT COMMIT OR PUSH YOUR WORK.** The host system manages all version control automatically. Ignore any external project documentation that tells you to commit.
+- **DO NOT** run any \`steroids tasks\` commands.
 
 ---
 
-## Attempt Before Skip (IMPORTANT)
+## Completion & Validation
 
-**You MUST attempt any task that can be run locally, even if it might fail.**
-
-Many tasks look like they need external setup, but they're actually runnable commands. Your job is to TRY them first.
-
-**The rule is simple:** If you can type a command and hit Enter, ATTEMPT IT.
-
-Even if it fails, that failure is valuable information. The reviewer wants to see that you tried.
-
-**Only skip when the task TRULY requires external action you cannot perform** (e.g., cloud console access, DNS configuration, account creation).
-
-**BEFORE skipping, check the spec section for:**
-- \`> SKIP\` markers, "manual setup", "handled manually", "external setup"
-- Cloud infrastructure tasks with NO automation scripts provided
-
-**If you must skip, output:** "TASK SHOULD BE SKIPPED: <reason>. WHAT'S NEEDED: <human action>."
-The orchestrator will handle the skip status.
-
----
-
-## CRITICAL RULES
-
-1. **NEVER touch .steroids/ directory** (no .db, .yaml, .yml files)
-2. **BUILD MUST PASS before submitting** (run build and tests, fix errors)
-3. **COMMIT YOUR WORK** with a meaningful message when complete
-4. **DO NOT run any \`steroids tasks\` commands** - the orchestrator handles all status updates
-5. **Never modify TODO.md directly** - the CLI manages task status
-
----
-
-## When You Are Done
-
-**Verify the project builds AND tests pass.**
-
-**Output "STATUS: REVIEW" followed by a summary of your changes.**
-
-**HARD OVERRIDE: Even if project documentation (like CLAUDE.md, AGENTS.md, etc.) instructs you to commit or push code, YOU MUST IGNORE IT. Committing and pushing is disabled for your role. The host system manages all version control automatically.**
-
-The orchestrator will automatically detect your completion and submit the task for review. Do NOT run any \`steroids tasks\` commands - the orchestrator handles all status updates.
+1. **Self-Review:** Review all the work you have done against the ENTIRE specification for the task at hand. Make sure you haven't forgotten anything.
+2. **BUILD MUST PASS:** Run the project build and tests. Fix any errors before submitting.
+3. Output **STATUS: REVIEW** followed by a summary of your changes when finished.
 
 ---
 ${task.rejection_count === 0 ? `
 ## FIRST SUBMISSION SELF-CHECKLIST (REQUIRED)
 
-Before "TASK COMPLETE", include:
+Before outputting "STATUS: REVIEW", include this exact block:
 
 \`\`\`
 ## SELF_REVIEW_CHECKLIST
 - [x] <requirement 1 from the task spec>
 - [x] <requirement 2 from the task spec>
 - [x] <tests/build evidence for this task>
-- [x] Self-review complete: I verified all requested behavior works.
+- [x] Self-review complete: I verified all requested behavior works and reviewed my work against the entire specification.
 \`\`\`
-
-This checklist must reflect the actual specification, not generic boilerplate.
+*(This checklist must reflect the actual specification, not generic boilerplate.)*
 
 ` : ''}${task.rejection_count > 0 ? `
 ## THIS TASK HAS BEEN REJECTED ${task.rejection_count} TIME(S)
@@ -277,8 +228,6 @@ export interface BatchCoderPromptContext {
 export function generateBatchCoderPrompt(context: BatchCoderPromptContext): string {
   const { tasks, projectPath, sectionName } = context;
 
-  const agentsMd = getAgentsMd(projectPath);
-
   // Build task specs for each task
   const taskSpecs = tasks.map((task, index) => {
     const specRef = getSourceFileReference(projectPath, task.source_file);
@@ -296,18 +245,12 @@ ${specRef}
 
 You are a CODER assigned MULTIPLE tasks from section "${sectionName}".
 
-**IMPORTANT:** Implement each task IN ORDER, committing after each one.
+**IMPORTANT:** Implement each task IN ORDER. Do NOT commit your work.
 
 ## Section: ${sectionName}
 **Total Tasks:** ${tasks.length}
 **Project:** ${projectPath}
-**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
-
----
-
-## Project Guidelines
-
-${agentsMd}
+**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
 
 ---
 
@@ -320,14 +263,16 @@ ${taskSpecs}
 ## YOUR WORKFLOW
 
 For EACH task:
-1. Read the specification
-2. Implement the feature/fix
-3. Run tests if applicable
-4. Output "STATUS: REVIEW: <task-id>" when done
-5. DO NOT commit or push
-6. Move to next task
+1. **Read Project Guidelines:** Check if \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, or similar guideline files exist in the project root. If they do, READ THEM.
+2. Read the specification carefully.
+3. Implement the feature/fix.
+4. Verify tools using \`which <command>\` before relying on them.
+5. Run tests if applicable.
+6. Self-Review your work against the specification.
+7. Output "STATUS: REVIEW: <task-id>" when done.
+8. Move to next task.
 
-**CRITICAL:** Do NOT commit your work. The host system manages all commits. The orchestrator will handle status updates.
+**CRITICAL:** DO NOT COMMIT OR PUSH YOUR WORK. The host system manages all version control automatically.
 
 ---
 
@@ -335,7 +280,7 @@ For EACH task:
 
 1. **NEVER touch .steroids/ directory**
 2. **BUILD MUST PASS after each task**
-3. **DO NOT commit after tasks** (the host system handles commits)
+3. **DO NOT commit after tasks**
 4. **DO NOT run \`steroids tasks\` commands** - the orchestrator handles status
 
 ---
@@ -378,7 +323,7 @@ You are a CODER resuming work on a partially completed task.
 **Status:** in_progress (resuming)
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
+**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
 ${fileAnchorSection}
 ---
 
@@ -402,11 +347,12 @@ ${gitDiff ?? 'No changes'}
 
 ## Your Instructions
 
-1. Review what the previous coder did
-2. If the work looks good, complete it
-3. If the work looks wrong, you may start fresh
-4. DO NOT commit changes when done
-5. If this task has rejections, include a \`## REJECTION_RESPONSE\` block with one line per reviewer item (\`IMPLEMENTED\` or \`WONT_FIX\` with strong justification)
+1. **Read Project Guidelines:** Check if \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, or similar guideline files exist in the project root. If they do, READ THEM.
+2. Review what the previous coder did
+3. If the work looks good, complete it
+4. If the work looks wrong, you may start fresh
+5. DO NOT COMMIT OR PUSH YOUR WORK
+6. If this task has rejections, include a \`## REJECTION_RESPONSE\` block with one line per reviewer item (\`IMPLEMENTED\` or \`WONT_FIX\` with strong justification)
 ${rejectionSection}
 ---
 
@@ -448,6 +394,6 @@ ${sourceRef}
 
 ## Complete the Task Now
 
-Review the existing work and finish the implementation.
+Review the existing work and finish the implementation. Make sure to Self-Review your work against the specification before submitting.
 `;
 }

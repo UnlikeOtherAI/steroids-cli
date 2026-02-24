@@ -370,8 +370,7 @@ Answer these questions:
 2. Are there bugs or logic errors?
 3. Are tests present and adequate?
 4. Does code follow AGENTS.md guidelines?
-5. Are all files under 500 lines?
-6. Are previously rejected checklist items now resolved across the cumulative task diff?
+5. Are previously rejected checklist items now resolved across the cumulative task diff?
 
 ## Security Review
 
@@ -575,7 +574,6 @@ For EACH task, verify:
 2. Are there bugs, security issues, or logic errors?
 3. Are tests present and adequate (if project requires tests)?
 4. Does code follow project guidelines?
-5. Are all files under 500 lines?
 
 ---
 
