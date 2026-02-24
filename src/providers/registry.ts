@@ -234,3 +234,19 @@ export function setProviderRegistry(registry: ProviderRegistry): void {
 export function resetProviderRegistry(): void {
   globalRegistryPromise = null;
 }
+
+/**
+ * Helper to dynamically look up the token context window size for a model
+ */
+export async function getTokenLimitForModel(providerName: string, modelName: string): Promise<number> {
+  try {
+    const registry = await getProviderRegistry();
+    const provider = registry.tryGet(providerName);
+    if (!provider) return 128000; // safe default
+    const models = provider.getModelInfo();
+    const model = models.find(m => m.id === modelName);
+    return model?.contextWindow ?? 128000;
+  } catch {
+    return 128000;
+  }
+}

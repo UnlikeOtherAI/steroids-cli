@@ -1150,6 +1150,50 @@ export function createTaskInvocation(
 }
 
 /**
+ * Get all invocations for a task session
+ * Ordered by creation time (oldest first)
+ */
+export function getTaskInvocationsBySession(
+  db: Database.Database,
+  taskId: string,
+  sessionId: string
+): TaskInvocation[] {
+  const allInvocations = db
+    .prepare(
+      `SELECT * FROM task_invocations
+       WHERE task_id = ?
+       ORDER BY created_at ASC`
+    )
+    .all(taskId) as TaskInvocation[];
+
+  const linkedSessions = new Set<string>();
+  linkedSessions.add(sessionId);
+
+  let addedNew = true;
+  while (addedNew) {
+    addedNew = false;
+    for (const inv of allInvocations) {
+      if (inv.session_id && linkedSessions.has(inv.session_id)) {
+        if (inv.resumed_from_session_id && !linkedSessions.has(inv.resumed_from_session_id)) {
+          linkedSessions.add(inv.resumed_from_session_id);
+          addedNew = true;
+        }
+      } else if (inv.resumed_from_session_id && linkedSessions.has(inv.resumed_from_session_id)) {
+        if (inv.session_id && !linkedSessions.has(inv.session_id)) {
+          linkedSessions.add(inv.session_id);
+          addedNew = true;
+        }
+      }
+    }
+  }
+
+  return allInvocations.filter(inv => 
+    (inv.session_id && linkedSessions.has(inv.session_id)) ||
+    (inv.resumed_from_session_id && linkedSessions.has(inv.resumed_from_session_id))
+  );
+}
+
+/**
  * Get all invocations for a task
  * Ordered by creation time (oldest first)
  */

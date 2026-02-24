@@ -21,6 +21,8 @@ import { getGitStatus, getGitDiff } from '../git/status.js';
 import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
+import { SessionNotFoundError } from '../providers/interface.js';
+import { countTokens, pruneResponseOutputs } from '../utils/tokens.js';
 
 export interface CoderResult {
   success: boolean;
@@ -209,20 +211,110 @@ export async function invokeCoder(
   const promptFile = writePromptToTempFile(prompt);
 
   try {
-    let result = await invokeProvider(promptFile, 900_000, task.id, projectPath, resumeSessionId ?? undefined, runnerId);
+    let result: CoderResult;
+    let sessionNotFound = false;
+    try {
+      result = await invokeProvider(promptFile, 900_000, task.id, projectPath, resumeSessionId ?? undefined, runnerId);
+    } catch (err: any) {
+      if (err instanceof SessionNotFoundError) {
+        console.warn(`Session not found for resume (${resumeSessionId?.substring(0, 8)}) — invalidating session and retrying fresh`);
+        sessionNotFound = true;
+        result = { success: false, exitCode: 1, stdout: '', stderr: '', duration: 0, timedOut: false };
+      } else {
+        throw err;
+      }
+    }
 
-    // If session resume returned empty output, invalidate session and retry fresh
-    if (resumeSessionId && result.stdout.trim().length === 0) {
-      console.warn(`Session resume returned empty output — invalidating session ${resumeSessionId.substring(0, 8)}... and retrying fresh`);
+    // If session resume failed because session was not found, retry fresh with Token Guard
+    if (resumeSessionId && sessionNotFound) {
+      const providerName = coderConfig?.provider ?? 'unknown';
+      const modelName = coderConfig?.model ?? 'unknown';
+      let guardedPrompt = '';
+      
+      const { getTokenLimitForModel } = await import('../providers/registry.js');
+      const { getTaskInvocationsBySession } = await import('../database/queries.js');
+
+      const maxContextWindow = await getTokenLimitForModel(providerName, modelName);
+      const reservedHeadroom = 8000;
+      const safeLimit = maxContextWindow - reservedHeadroom;
+
       try {
         const { db, close } = openDatabase(projectPath);
+
+        // Base system prompt and task specification
+        const baseContext = { ...context, rejectionHistory: [] };
+        const basePrompt = generateCoderPrompt(baseContext);
+        const systemPromptSize = countTokens(basePrompt, modelName);
+        
+        if (systemPromptSize > safeLimit) {
+          close();
+          throw new Error(`Context Too Large: System Prompt and Task Spec alone exceed safe context limit (${systemPromptSize} > ${safeLimit} tokens). Task cannot be processed.`);
+        }
+
+        const invocations = getTaskInvocationsBySession(db, task.id, resumeSessionId);
+        
+        // Reconstruct history
+        const buildHistory = (invs: typeof invocations, pruneOlder: boolean) => {
+          let hist = '';
+          for (let i = 0; i < invs.length; i++) {
+            const inv = invs[i];
+            // Skip the base prompt of the session (which is always the very first invocation in the DB for this session)
+            // If we have shifted the array, we must not accidentally skip a continuation prompt.
+            // We check if this invocation is the true original first one.
+            const isOriginalFirst = inv.id === invocations[0].id;
+            
+            if (inv.prompt && !isOriginalFirst) {
+               hist += `\n\n--- USER CONTINUATION ---\n${inv.prompt}`;
+            }
+            if (inv.response) {
+               const isOlder = i < invs.length - 1;
+               const responseText = (pruneOlder && isOlder) ? pruneResponseOutputs(inv.response) : inv.response;
+               hist += `\n\n--- ASSISTANT RESPONSE ---\n${responseText}`;
+            }
+          }
+          return hist;
+        };
+
+        let currentSize = countTokens(basePrompt + buildHistory(invocations, false), modelName);
+        let finalHistoryText = '';
+        const guardedInvocations = [...invocations];
+
+        if (currentSize <= safeLimit) {
+           finalHistoryText = buildHistory(guardedInvocations, false);
+        } else {
+           // Token Guard: First attempt to selectively prune tool outputs and thought blocks
+           finalHistoryText = buildHistory(guardedInvocations, true);
+           currentSize = countTokens(basePrompt + finalHistoryText, modelName);
+
+           // Token Guard: Truncate history if still necessary by dropping oldest executions entirely
+           while (currentSize > safeLimit && guardedInvocations.length > 0) {
+             guardedInvocations.shift(); // Prune oldest entry
+             finalHistoryText = buildHistory(guardedInvocations, true);
+             currentSize = countTokens(basePrompt + finalHistoryText, modelName);
+           }
+           
+           if (guardedInvocations.length < invocations.length) {
+             console.warn(`Token Guard: Pruned ${invocations.length - guardedInvocations.length} older execution(s) entirely to fit within ${safeLimit} token limit.`);
+           } else {
+             console.warn(`Token Guard: Selectively pruned tool/thought blocks to fit within ${safeLimit} token limit.`);
+           }
+        }
+
+        guardedPrompt = basePrompt + finalHistoryText;
+
         invalidateSession(db, resumeSessionId);
         close();
-      } catch {}
+      } catch (e: any) {
+         if (e.message.includes('Context Too Large')) throw e;
+         // fallback to normal fresh if DB fails
+         guardedPrompt = generateCoderPrompt(context);
+         if (countTokens(guardedPrompt, modelName) > safeLimit) {
+            throw new Error(`Context Too Large: System Prompt and Task Spec alone exceed safe context limit. Task cannot be processed.`);
+         }
+      }
 
-      // Generate fresh prompt and retry
-      const freshPrompt = generateCoderPrompt(context);
-      const freshPromptFile = writePromptToTempFile(freshPrompt);
+      // Generate guarded fresh prompt and retry
+      const freshPromptFile = writePromptToTempFile(guardedPrompt);
       try {
         result = await invokeProvider(freshPromptFile, 900_000, task.id, projectPath, undefined, runnerId);
       } finally {

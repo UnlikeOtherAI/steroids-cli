@@ -13,6 +13,7 @@ import {
   type InvokeResult,
   type ModelInfo,
   type TokenUsage,
+  SessionNotFoundError,
 } from './interface.js';
 
 /**
@@ -25,18 +26,21 @@ const CLAUDE_MODELS: ModelInfo[] = [
     name: 'Claude Opus (latest)',
     recommendedFor: ['orchestrator', 'reviewer'],
     supportsStreaming: true,
+    contextWindow: 200000,
   },
   {
     id: 'sonnet',
     name: 'Claude Sonnet (latest)',
     recommendedFor: ['coder'],
     supportsStreaming: true,
+    contextWindow: 200000,
   },
   {
     id: 'haiku',
     name: 'Claude Haiku (latest)',
     recommendedFor: [],
     supportsStreaming: true,
+    contextWindow: 200000,
   },
 ];
 
@@ -201,7 +205,7 @@ export class ClaudeProvider extends BaseAIProvider {
     // Set up isolated HOME
     const isolatedHome = this.setupIsolatedHome('.claude', ['config.json', '.credentials.json', 'settings.json']);
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const startTime = Date.now();
       let stdout = '';
       let stderr = '';
@@ -315,6 +319,12 @@ export class ClaudeProvider extends BaseAIProvider {
           rmSync(isolatedHome, { recursive: true, force: true });
         } catch {
           // Ignore cleanup errors
+        }
+
+        const outputStr = (stdout + '\n' + stderr).toLowerCase();
+        if (code !== 0 && resumeSessionId && (outputStr.includes('session not found') || outputStr.includes('failed to resume') || outputStr.includes('unknown session'))) {
+          reject(new SessionNotFoundError(`Failed to resume Claude session ${resumeSessionId}`));
+          return;
         }
 
         resolve({

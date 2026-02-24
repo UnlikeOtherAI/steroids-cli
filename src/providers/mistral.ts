@@ -17,6 +17,7 @@ import {
   type ModelInfo,
   type ProviderError,
   type TokenUsage,
+  SessionNotFoundError,
 } from './interface.js';
 
 /**
@@ -28,36 +29,42 @@ const MISTRAL_MODELS: ModelInfo[] = [
     name: 'Pixtral Large (latest)',
     recommendedFor: ['orchestrator', 'coder', 'reviewer'],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
   {
     id: 'devstral-2',
     name: 'Devstral (Le Chat)',
     recommendedFor: ['orchestrator', 'coder', 'reviewer'],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
   {
     id: 'devstral-small',
     name: 'Devstral Small (Le Chat)',
     recommendedFor: [],
     supportsStreaming: true,
+    contextWindow: 32000,
   },
   {
     id: 'mistral-large-latest',
     name: 'Mistral Large (latest)',
     recommendedFor: [],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
   {
     id: 'mistral-medium-latest',
     name: 'Mistral Medium (latest)',
     recommendedFor: [],
     supportsStreaming: true,
+    contextWindow: 32000,
   },
   {
     id: 'mistral-small-latest',
     name: 'Mistral Small (latest)',
     recommendedFor: [],
     supportsStreaming: true,
+    contextWindow: 32000,
   },
 ];
 
@@ -222,7 +229,7 @@ export class MistralProvider extends BaseAIProvider {
     const isolatedHome = this.setupIsolatedHome('.vibe', ['.env', 'config.toml', 'trusted_folders.toml']);
     const vibeHome = join(isolatedHome, '.vibe');
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const startTime = Date.now();
       let stdout = '';
       let stderr = '';
@@ -312,6 +319,12 @@ export class MistralProvider extends BaseAIProvider {
           rmSync(isolatedHome, { recursive: true, force: true });
         } catch {
           // Ignore cleanup errors
+        }
+
+        const outputStr = (stdout + '\n' + stderr).toLowerCase();
+        if (code !== 0 && resumeSessionId && (outputStr.includes('session not found') || outputStr.includes('failed to resume') || outputStr.includes('not found: session'))) {
+          reject(new SessionNotFoundError(`Failed to resume Mistral session ${resumeSessionId}`));
+          return;
         }
 
         resolve({

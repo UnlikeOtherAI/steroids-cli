@@ -13,6 +13,7 @@ import {
   type InvokeResult,
   type ModelInfo,
   type TokenUsage,
+  SessionNotFoundError,
 } from './interface.js';
 
 /**
@@ -24,24 +25,28 @@ const GEMINI_MODELS: ModelInfo[] = [
     name: 'Gemini 3.1 Pro Preview',
     recommendedFor: ['orchestrator', 'coder', 'reviewer'],
     supportsStreaming: true,
+    contextWindow: 128000, // Safe default assuming wide window for gemini pro
   },
   {
     id: 'gemini-2.5-pro',
     name: 'Gemini 2.5 Pro',
     recommendedFor: ['orchestrator', 'coder', 'reviewer'],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
   {
     id: 'gemini-2.5-flash',
     name: 'Gemini 2.5 Flash',
     recommendedFor: [],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
   {
     id: 'gemini-2.0-flash',
     name: 'Gemini 2.0 Flash',
     recommendedFor: [],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
 ];
 
@@ -240,7 +245,7 @@ export class GeminiProvider extends BaseAIProvider {
     // Also isolate gcloud config if present in the same isolated home
     this.setupIsolatedHome('.config/gcloud', ['active_config', 'credentials.db', 'configurations/config_default'], isolatedHome);
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const startTime = Date.now();
       let stdout = '';
       let stderr = '';
@@ -352,6 +357,12 @@ export class GeminiProvider extends BaseAIProvider {
           rmSync(isolatedHome, { recursive: true, force: true });
         } catch {
           // Ignore cleanup errors
+        }
+
+        const outputStr = (stdout + '\n' + stderr).toLowerCase();
+        if (code !== 0 && resumeSessionId && (outputStr.includes('session not found') || outputStr.includes('failed to resume') || outputStr.includes('not found: session'))) {
+          reject(new SessionNotFoundError(`Failed to resume Gemini session ${resumeSessionId}`));
+          return;
         }
 
         resolve({

@@ -130,10 +130,10 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 *   **Context Injection:** The fresh invocation will naturally rebuild the full conversation history from the database's `task_invocations` table and inject it as a single monolithic prompt, effectively rebuilding the lost session context.
 
 ### Acceptance Criteria (Section 5)
-- [ ] Provider wrappers explicitly throw a classified `SessionNotFoundError` when a provider CLI refuses to resume a session.
-- [ ] The orchestrating runners (`coder.ts`, `reviewer.ts`) catch `SessionNotFoundError`.
-- [ ] Upon catching the error, the orchestrating runner automatically reconstructs the full prompt history from the database and retries the API call using `invocation_mode: 'fresh'` instead of failing the task.
-- [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
+- [x] Provider wrappers explicitly throw a classified `SessionNotFoundError` when a provider CLI refuses to resume a session.
+- [x] The orchestrating runners (`coder.ts`, `reviewer.ts`) catch `SessionNotFoundError`.
+- [x] Upon catching the error, the orchestrating runner automatically reconstructs the full prompt history from the database and retries the API call using `invocation_mode: 'fresh'` instead of failing the task.
+- [x] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.
 
 ## 6. System Logs UI Page
 
@@ -222,13 +222,13 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 
 ### Acceptance Criteria (Section 8)
 - [x] The `steroids tasks reset` command successfully queries the global registry, identifies the active runner PID (if any), and validates it before terminating the process.
-- [ ] The fallback orchestrator logic calculates the exact prompt size and dynamically looks up the target model's maximum token limit.
-- [ ] The fallback orchestrator prioritizes the System Prompt and Task Specification, strictly pruning only older tool results/thoughts during context truncation.
-- [ ] The fallback orchestrator safely truncates history or blocks execution if the "fresh" monolithic prompt exceeds the calculated token limits for that model.
+- [x] The fallback orchestrator logic calculates the exact prompt size and dynamically looks up the target model's maximum token limit.
+- [x] The fallback orchestrator prioritizes the System Prompt and Task Specification, strictly pruning only older tool results/thoughts during context truncation.
+- [x] The fallback orchestrator safely truncates history or blocks execution if the "fresh" monolithic prompt exceeds the calculated token limits for that model.
 - [x] All dynamic O(N) child database queries enforce a strict timeout (e.g., 500ms) to prevent API or daemon freezing.
 - [x] The daemon explicitly and immediately closes SQLite database connections after each O(N) aggregation query to prevent file descriptor leaks.
 - [x] Projects that fail the database connection timeout are visually greyed out and rendered unclickable on the Web UI Projects Dashboard.
-- [ ] The "Tasks" navigation link is completely removed from the `Sidebar.tsx`.
-- [ ] The `/tasks` route and the `RunningTasksPage` component are fully removed from the WebUI source code.
+- [x] The "Tasks" navigation link is completely removed from the `Sidebar.tsx`.
+- [x] The `/tasks` route and the `RunningTasksPage` component are fully removed from the WebUI source code.
 - [x] The `steroids tasks reset` command revokes leases and unblocks sessions in the global `parallel_sessions`/`workstreams` tables to guarantee runners resume in their existing workspace clones.
 - [ ] **Adversarial Review:** A Gemini adversarial review has been executed against the implementation commit(s) and returned a PASS contract.

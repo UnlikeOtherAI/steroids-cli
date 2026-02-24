@@ -60,6 +60,16 @@ export interface TokenUsage {
 }
 
 /**
+ * Error thrown when a provider fails to resume a session (e.g., session not found on disk/server)
+ */
+export class SessionNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SessionNotFoundError';
+  }
+}
+
+/**
  * Result of an AI provider invocation
  */
 export interface InvokeResult {
@@ -120,6 +130,8 @@ export interface ModelInfo {
   recommendedFor?: ('orchestrator' | 'coder' | 'reviewer')[];
   /** Whether this model supports streaming */
   supportsStreaming?: boolean;
+  /** Maximum context window size in tokens */
+  contextWindow?: number;
 }
 
 /**

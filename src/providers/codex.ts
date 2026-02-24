@@ -13,6 +13,7 @@ import {
   type InvokeResult,
   type ModelInfo,
   type TokenUsage,
+  SessionNotFoundError,
 } from './interface.js';
 
 /**
@@ -24,24 +25,28 @@ const CODEX_MODELS: ModelInfo[] = [
     name: 'GPT-5.3 Codex',
     recommendedFor: ['coder', 'reviewer'],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
   {
     id: 'gpt-5.3-codex-spark',
     name: 'GPT-5.3 Codex Spark',
     recommendedFor: ['coder', 'reviewer'],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
   {
     id: 'o3',
     name: 'O3',
     recommendedFor: ['orchestrator'],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
   {
     id: 'gpt-4.1',
     name: 'GPT-4.1',
     recommendedFor: ['reviewer'],
     supportsStreaming: true,
+    contextWindow: 128000,
   },
 ];
 
@@ -239,7 +244,7 @@ export class CodexProvider extends BaseAIProvider {
     // Use persistent home to preserve session/thread state across invocations
     const { home: isolatedHome, isPersistent } = this.getPersistentHome(cwd);
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const startTime = Date.now();
       let stdout = '';
       let stderr = '';
@@ -399,6 +404,12 @@ export class CodexProvider extends BaseAIProvider {
           } catch {
             // Ignore cleanup errors
           }
+        }
+
+        const outputStr = (stdout + '\n' + stderr).toLowerCase();
+        if (code !== 0 && resumeSessionId && (outputStr.includes('session not found') || outputStr.includes('failed to load session') || outputStr.includes('could not find thread'))) {
+          reject(new SessionNotFoundError(`Failed to resume Codex session ${resumeSessionId}`));
+          return;
         }
 
         resolve({
