@@ -696,7 +696,6 @@ export async function runCoderPhase(
         ...decision,
         action: 'error',
         next_status: 'failed',
-        contract_violation: contractViolation,
         reasoning: `${marker} ${cleanReason} (retry_limit ${consecutiveContractViolations}/${MAX_CONTRACT_VIOLATION_RETRIES})`,
           confidence: 'low',
           exit_clean: false,
@@ -706,7 +705,6 @@ export async function runCoderPhase(
         ...decision,
         action: 'retry',
         next_status: 'in_progress',
-        contract_violation: contractViolation,
         reasoning: `${marker} ${cleanReason} (retry ${consecutiveContractViolations}/${MAX_CONTRACT_VIOLATION_RETRIES})`,
           confidence: 'medium',
       };
