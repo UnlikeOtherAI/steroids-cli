@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import {
+import { ChevronDownIcon, ChevronRightIcon,
   ArrowPathIcon,
   CheckIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
-import { configApi, ConfigSchema } from '../services/api';
+import { configApi, ConfigSchema, API_BASE_URL } from '../services/api';
 import { SchemaForm } from '../components/settings/SchemaForm';
 import { AISetupModal } from '../components/onboarding/AISetupModal';
 
@@ -17,6 +17,10 @@ export const SettingsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [showAISetup, setShowAISetup] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [availableSkills, setAvailableSkills] = useState<{name: string, type: string}[]>([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+
 
   // Load schema and config
   const loadData = useCallback(async () => {
@@ -36,6 +40,26 @@ export const SettingsPage: React.FC = () => {
       setLoading(false);
     }
   }, []);
+
+
+  const loadSkills = async () => {
+    setSkillsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/skills`);
+      const json = await res.json();
+      if (json.success) setAvailableSkills(json.data);
+    } catch (err) {
+      console.error('Failed to load skills:', err);
+    } finally {
+      setSkillsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (skillsOpen && availableSkills.length === 0) {
+      loadSkills();
+    }
+  }, [skillsOpen]);
 
   useEffect(() => {
     loadData();
@@ -207,6 +231,77 @@ export const SettingsPage: React.FC = () => {
         <>
           {/* Save Bar - Top */}
           <SaveBar />
+
+          
+          {/* Global Skills */}
+          <div className="mb-8">
+            <button
+              onClick={() => setSkillsOpen(!skillsOpen)}
+              className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
+            >
+              {skillsOpen ? (
+                <ChevronDownIcon className="w-5 h-5" />
+              ) : (
+                <ChevronRightIcon className="w-5 h-5" />
+              )}
+              <i className="fa-solid fa-book-open w-5 h-5 flex items-center justify-center text-sm"></i>
+              <span>Global Skills Assigned</span>
+            </button>
+
+            {skillsOpen && (
+              <div className="bg-bg-surface rounded-lg p-6 mb-8 shadow-sm border border-border">
+                <p className="text-sm text-text-muted mb-6">
+                  Select which skills should be active globally for ALL projects. You can assign additional skills on a per-project basis.
+                </p>
+                
+                {skillsLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <ArrowPathIcon className="w-6 h-6 animate-spin text-text-muted" />
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {availableSkills.map(skill => {
+                        const currentValues = getMergedValues();
+                        const currentSkills = (currentValues.skills as string[]) || [];
+                        const isAssigned = currentSkills.includes(skill.name);
+                        
+                        return (
+                          <label key={skill.name} className="flex items-start gap-3 p-4 rounded-lg border border-border bg-bg-surface2 hover:border-accent/50 cursor-pointer transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={isAssigned}
+                              onChange={(e) => {
+                                const newSkills = e.target.checked 
+                                  ? [...currentSkills, skill.name]
+                                  : currentSkills.filter(s => s !== skill.name);
+                                handleChange('skills', newSkills);
+                              }}
+                              className="mt-1 w-4 h-4 text-accent bg-bg-base border-border rounded focus:ring-accent focus:ring-2"
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-text-primary">{skill.name}</span>
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full ${skill.type === 'custom' ? 'bg-success-soft text-success' : 'bg-info-soft text-info'}`}>
+                                  {skill.type}
+                                </span>
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    
+                    {availableSkills.length === 0 && (
+                      <div className="text-center py-8 text-text-muted">
+                        No skills found. Create one in the Skills tab.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Schema Form */}
           <div className="space-y-6 mt-6">

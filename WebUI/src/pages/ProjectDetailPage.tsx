@@ -646,21 +646,25 @@ export const ProjectDetailPage: React.FC = () => {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {availableSkills.map(skill => {
+                    const globalSkills = (globalConfig.skills as string[]) || [];
+                    const isGlobal = globalSkills.includes(skill.name);
                     const currentSkills = ((settingsChanges.skills !== undefined ? settingsChanges.skills : settingsConfig.skills) as string[]) || [];
-                    const isAssigned = currentSkills.includes(skill.name);
+                    const isAssigned = isGlobal || currentSkills.includes(skill.name);
                     
                     return (
-                      <label key={skill.name} className="flex items-start gap-3 p-4 rounded-lg border border-border bg-bg-surface2 hover:border-accent/50 cursor-pointer transition-colors">
+                      <label key={skill.name} className={`flex items-start gap-3 p-4 rounded-lg border border-border ${isGlobal ? 'bg-bg-surface opacity-75 cursor-not-allowed' : 'bg-bg-surface2 hover:border-accent/50 cursor-pointer'} transition-colors`}>
                         <input
                           type="checkbox"
                           checked={isAssigned}
+                          disabled={isGlobal}
                           onChange={(e) => {
+                            if (isGlobal) return;
                             const newSkills = e.target.checked 
                               ? [...currentSkills, skill.name]
                               : currentSkills.filter(s => s !== skill.name);
                             handleSettingsChange('skills', newSkills);
                           }}
-                          className="mt-1 w-4 h-4 text-accent bg-bg-base border-border rounded focus:ring-accent focus:ring-2"
+                          className={`mt-1 w-4 h-4 text-accent bg-bg-base border-border rounded ${isGlobal ? 'cursor-not-allowed' : 'focus:ring-accent focus:ring-2'}`}
                         />
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
@@ -668,6 +672,11 @@ export const ProjectDetailPage: React.FC = () => {
                             <span className={`text-[10px] px-2 py-0.5 rounded-full ${skill.type === 'custom' ? 'bg-success-soft text-success' : 'bg-info-soft text-info'}`}>
                               {skill.type}
                             </span>
+                            {isGlobal && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-bg-elevated text-text-muted border border-border">
+                                Global
+                              </span>
+                            )}
                           </div>
                         </div>
                       </label>

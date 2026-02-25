@@ -364,35 +364,36 @@ ${lines.join('\n')}
 }
 
 
+
 /**
- * Load assigned skills and return them as a formatted section
+ * Load assigned skills and return them as a formatted section containing absolute file paths.
  */
 export function buildSkillsSection(projectPath: string): string {
   try {
-    const configPath = join(projectPath, 'steroids.config.yaml');
-    if (!existsSync(configPath)) return '';
+    const fs = require('node:fs');
+    const path = require('node:path');
     
-    const config = loadConfigFile(configPath) as SteroidsConfig;
-    if (!config.skills || config.skills.length === 0) return '';
+    // In parallel mode, projectPath is the workspace clone root
+    const skillsDir = path.join(projectPath, '.steroids', 'skills');
+    if (!fs.existsSync(skillsDir)) return '';
     
-    const loadedSkills: string[] = [];
-    for (const skill of config.skills) {
-      const content = getSkillContent(skill);
-      if (content) {
-        loadedSkills.push(`### Skill: ${skill}\n\n${content}`);
-      }
-    }
+    const skillsFiles = fs.readdirSync(skillsDir).filter((f: string) => f.endsWith('.md'));
+    if (skillsFiles.length === 0) return '';
     
-    if (loadedSkills.length === 0) return '';
+    const loadedSkills = skillsFiles.map((file: string) => {
+      const skillName = file.replace('.md', '');
+      const absolutePath = path.resolve(skillsDir, file);
+      return `- **${skillName}**: \`${absolutePath}\``;
+    });
     
     return `\n---
 
 ## Assigned Project Skills
 
 The following skills and guidelines have been explicitly assigned to this project. 
-You MUST adhere to them strictly during this task.
+If you work on anything related to the name of the skill, you MUST use the \`read_file\` tool to read these files for more instructions before proceeding.
 
-${loadedSkills.join('\n\n')}
+${loadedSkills.join('\n')}
 
 `;
   } catch {

@@ -275,28 +275,40 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
   }
 
 
+
   enforceWorkspaceDependencyIsolation(workspacePath);
 
-  // Copy assigned skills to the workspace clone
+  // Copy assigned skills (global + project) to the workspace clone
   try {
-    const configPath = resolve(projectPath, 'steroids.config.yaml');
-    if (existsSync(configPath)) {
-      const config = loadConfigFile(configPath) as SteroidsConfig;
-      if (config.skills && config.skills.length > 0) {
-        const skillsDir = resolve(workspacePath, '.steroids', 'skills');
-        if (!existsSync(skillsDir)) {
-          mkdirSync(skillsDir, { recursive: true });
-        }
-        for (const skill of config.skills) {
-          const skillContent = getSkillContent(skill);
-          if (skillContent) {
-            writeFileSync(resolve(skillsDir, `${skill}.md`), skillContent, 'utf-8');
-          }
+    const skillsToCopy = new Set<string>();
+    
+    // 1. Get global config skills
+    const globalConfigPath = require('../config/loader.js').getGlobalConfigPath();
+    if (existsSync(globalConfigPath)) {
+      const globalConfig = loadConfigFile(globalConfigPath) as SteroidsConfig;
+      if (globalConfig.skills) globalConfig.skills.forEach(s => skillsToCopy.add(s));
+    }
+
+    // 2. Get project config skills
+    const projectConfigPath = resolve(projectPath, 'steroids.config.yaml');
+    if (existsSync(projectConfigPath)) {
+      const projectConfig = loadConfigFile(projectConfigPath) as SteroidsConfig;
+      if (projectConfig.skills) projectConfig.skills.forEach(s => skillsToCopy.add(s));
+    }
+
+    if (skillsToCopy.size > 0) {
+      const skillsDir = resolve(workspacePath, '.steroids', 'skills');
+      if (!existsSync(skillsDir)) {
+        mkdirSync(skillsDir, { recursive: true });
+      }
+      for (const skill of skillsToCopy) {
+        const skillContent = getSkillContent(skill);
+        if (skillContent) {
+          writeFileSync(resolve(skillsDir, `${skill}.md`), skillContent, 'utf-8');
         }
       }
     }
   } catch (error) {
-    // Non-fatal, just log it or ignore
     console.error('Failed to copy skills to workspace clone:', error);
   }
 
