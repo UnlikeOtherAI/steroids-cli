@@ -155,6 +155,9 @@ function installAndBuild(out: ReturnType<typeof createOutput>): void {
 
   out.log('Installing WebUI dependencies...');
   run('npm install', webUiDir);
+
+  out.log('Building WebUI...');
+  run('npm run build', webUiDir);
 }
 
 /**
@@ -185,7 +188,7 @@ function launchProcesses(out: ReturnType<typeof createOutput>): void {
   // Start WebUI
   const webUiLogPath = join(LOGS_DIR, 'webui.log');
   const webUiLog = openSync(webUiLogPath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC);
-  const webUiProcess = spawn('npm', ['run', 'dev', '--', '--port', String(WEBUI_PORT)], {
+  const webUiProcess = spawn('npm', ['run', 'preview', '--', '--port', String(WEBUI_PORT)], {
     cwd: webUiDir,
     detached: true,
     stdio: ['ignore', webUiLog, webUiLog],
