@@ -304,11 +304,11 @@ USAGE:
 
   if (runFromDetachedParent) {
     // Spawn detached process - always pass --project for proper tracking
-    const spawnArgs = [process.argv[1], 'runners', 'start', '--project', projectPath];
+    const cliArgs = ['runners', 'start', '--project', projectPath];
 
     // Pass --section if specified
     if (values.section) {
-      spawnArgs.push('--section', values.section as string);
+      cliArgs.push('--section', values.section as string);
     }
 
     const {
@@ -316,8 +316,19 @@ USAGE:
       logFile: finalLogPath,
     } = spawnDetachedRunner({
       projectPath,
-      args: spawnArgs,
+      cliArgs,
     });
+    if (!pid) {
+      if (asJson) {
+        console.log(JSON.stringify({
+          success: false,
+          error: 'Failed to spawn detached runner',
+        }));
+      } else {
+        console.error('Failed to spawn detached runner');
+      }
+      process.exit(1);
+    }
 
     if (asJson) {
       console.log(JSON.stringify({

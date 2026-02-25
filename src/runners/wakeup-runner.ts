@@ -3,11 +3,12 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, openSync, mkdirSync } from 'node:fs';
+import { openSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { loadConfig } from '../config/loader.js';
 import type { WorkstreamToRestart } from './wakeup-reconcile.js';
+import { resolveCliEntrypoint } from '../cli/entrypoint.js';
 
 /**
  * Kill a process by PID
@@ -19,15 +20,6 @@ export function killProcess(pid: number): boolean {
   } catch {
     return false;
   }
-}
-
-function resolveCliEntrypoint(): string | null {
-  // Dist runtime: dist/runners/wakeup-runner.js -> dist/index.js
-  const distCliPath = join(__dirname, '..', 'index.js');
-  if (existsSync(distCliPath)) {
-    return distCliPath;
-  }
-  return null;
 }
 
 /**

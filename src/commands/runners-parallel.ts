@@ -10,6 +10,7 @@ import { loadConfig } from '../config/loader.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
 import { CyclicDependencyError, type WorkstreamSection } from '../parallel/scheduler.js';
 import { listSections, hasDependenciesMet } from '../database/queries.js';
+import { resolveCliEntrypoint } from '../cli/entrypoint.js';
 
 export interface ParallelWorkstreamPlan {
   sessionId: string;
@@ -260,8 +261,7 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
 
         const spawnResult = spawnDetachedRunner({
           projectPath: workspaceClone.workspacePath,
-          args: [
-            process.argv[1],
+          cliArgs: [
             'runners',
             'start',
             '--project', workspaceClone.workspacePath,
@@ -290,7 +290,12 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
   return plan.sessionId;
 }
 
-export function spawnDetachedRunner(options: { projectPath: string; args: string[] }): { pid: number | null; logFile?: string } {
+export function spawnDetachedRunner(options: { projectPath: string; cliArgs: string[] }): { pid: number | null; logFile?: string } {
+  const cliEntrypoint = resolveCliEntrypoint();
+  if (!cliEntrypoint) {
+    throw new Error('Failed to resolve CLI entrypoint for detached runner spawn');
+  }
+
   const config = loadConfig(options.projectPath);
   const daemonLogsEnabled = config.runners?.daemonLogs !== false;
 
@@ -308,7 +313,7 @@ export function spawnDetachedRunner(options: { projectPath: string; args: string
 
   const child = spawn(
     process.execPath,
-    options.args,
+    [cliEntrypoint, ...options.cliArgs],
     {
       cwd: options.projectPath,
       detached: true,

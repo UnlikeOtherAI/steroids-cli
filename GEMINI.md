@@ -25,6 +25,13 @@ The following files are the **absolute source of truth** for architectural stand
 - If you must implement anything that is non-deterministic (like regex parsing of LLM string outputs, or complex nested fallback layers), you MUST put deep architectural thought into it.
 - **Any non-deterministic architectural additions must usually be explicitly approved by the user** before implementation.
 
+### 1.3 Simplification First (CRITICAL)
+- Before implementing even small fixes, evaluate whether to simplify system design instead of patching symptoms.
+- Every change must include a global complexity check: does this reduce overall complexity and duplication?
+- Prioritize shared infrastructure for cross-context behavior (entrypoint resolution, process spawning, lifecycle control) over local one-off fixes.
+- Avoid patch accumulation: if a pattern is fragile in multiple files, unify it.
+- If a short-term patch is unavoidable, create a follow-up simplification task with clear scope.
+
 ### 2. Documentation Alignment
 - Every feature implementation is incomplete until `README.md`, `AGENTS.md`, and the CLI's internal `CONFIG_SCHEMA` are synchronized with the changes.
 - Always verify the "Help" strings in `src/commands/` after adding new flags or subcommands.

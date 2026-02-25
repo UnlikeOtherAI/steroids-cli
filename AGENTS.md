@@ -108,6 +108,16 @@ When a workflow fails, do **not** patch around it with additional fallbacks befo
 **Keep the whole system deterministic without any fragile parsing.** 
 If you must implement anything that is non-deterministic (such as regex parsing of LLM string outputs, fuzzy matching, or complex nested fallback layers), you MUST put deep architectural thought into it. **Any non-deterministic architectural additions must usually be explicitly approved by the user** before implementation.
 
+### Simplification First (CRITICAL)
+
+Before implementing even a small patch, evaluate whether the issue should be solved by simplifying architecture, boundaries, or control flow instead of adding another local fix.
+
+- Every change must include a brief global-impact check: "does this reduce or increase system complexity?"
+- Prefer unifying duplicated patterns over patching each occurrence independently
+- Prefer a single source of truth for command execution paths, process launching, and cross-context behavior
+- If a patch fixes a symptom but leaves a repeated or fragile pattern in place, propose (or create) a follow-up simplification task
+- Reject "just add another fallback" changes unless root-cause simplification was evaluated first
+
 ### File References
 - Always read CLAUDE.md and AGENTS.md before starting work
 - Follow the coding standards in CLAUDE.md strictly

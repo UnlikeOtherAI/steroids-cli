@@ -27,6 +27,16 @@ When debugging or fixing failures, do **not** stack additional fallbacks before 
 **Keep the whole system deterministic without any fragile parsing.** 
 If you must implement anything that is non-deterministic (such as regex parsing of LLM string outputs, fuzzy matching, or complex nested fallback layers), you MUST put deep architectural thought into it. **Any non-deterministic architectural additions must usually be explicitly approved by the user** before implementation.
 
+## Simplification First Policy (CRITICAL)
+
+Before applying even a minor patch, explicitly consider whether the correct fix is to simplify the system globally rather than add a local workaround.
+
+- Include a complexity check in each change: does this reduce total system complexity?
+- Prefer eliminating duplicated mechanisms over patching each site independently
+- Treat command/entrypoint resolution, process spawning, and lifecycle handling as shared infrastructure concerns
+- Avoid "patch stacking": if the same fragility appears in multiple places, unify the pattern
+- If immediate patching is required, add a follow-up simplification task with scope and owner
+
 ## AI Providers (CRITICAL)
 
 **OpenAI's development tool CLI is Codex.** There is no separate `openai` CLI.
