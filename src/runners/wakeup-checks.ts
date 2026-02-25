@@ -21,8 +21,24 @@ export async function projectHasPendingWork(projectPath: string): Promise<boolea
 
   try {
     return withDatabase(projectPath, (db: any) => {
-      return selectNextTask(db) !== null;
-    }, { timeoutMs: 500 });
+      // First try actionable task selection.
+      if (selectNextTask(db) !== null) {
+        return true;
+      }
+
+      // Align wakeup behavior with "outstanding work" shown in the admin UI.
+      // If there are pending/in_progress/review tasks but selection is blocked
+      // (for example transient lock/dependency timing), still consider it work.
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) as count
+           FROM tasks
+           WHERE status IN ('pending', 'in_progress', 'review')`
+        )
+        .get() as { count: number };
+
+      return row.count > 0;
+    }, { timeoutMs: 1000 });
   } catch (error) {
     // Treat timeouts or locked DBs as no pending work for this cycle
     return false;

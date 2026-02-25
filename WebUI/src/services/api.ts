@@ -207,8 +207,8 @@ export interface CronStatusResponse {
 }
 
 export interface WakeupResult {
-  project?: string;
-  action: 'started' | 'restarted' | 'skipped' | 'error';
+  projectPath?: string;
+  action: 'started' | 'restarted' | 'skipped' | 'error' | 'none' | 'cleaned' | 'would_start';
   reason?: string;
   pendingTasks?: number;
 }

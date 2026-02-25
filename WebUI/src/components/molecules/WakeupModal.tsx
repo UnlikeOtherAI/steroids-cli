@@ -40,7 +40,7 @@ export const WakeupModal: React.FC<WakeupModalProps> = ({ results, onClose }) =>
   };
 
   const totalStarted = results.filter(r => r.action === 'started' || r.action === 'restarted').length;
-  const isGlobalMessage = results.length === 1 && !results[0].project;
+  const isGlobalMessage = results.length === 1 && !results[0].projectPath;
 
   const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
@@ -84,8 +84,8 @@ export const WakeupModal: React.FC<WakeupModalProps> = ({ results, onClose }) =>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-4 mb-1">
-                      <h3 className="font-semibold text-text-primary truncate" title={result.project || 'System'}>
-                        {result.project ? result.project.split('/').pop() : 'System'}
+                      <h3 className="font-semibold text-text-primary truncate" title={result.projectPath || 'System'}>
+                        {result.projectPath ? result.projectPath.split('/').pop() : 'System'}
                       </h3>
                       <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full whitespace-nowrap ${getActionColor(result.action)}`}>
                         {result.action}
@@ -126,5 +126,4 @@ export const WakeupModal: React.FC<WakeupModalProps> = ({ results, onClose }) =>
 
   return createPortal(modalContent, document.body);
 };
-
 
