@@ -19,6 +19,144 @@ interface LogFile {
   type: 'log' | 'invocation';
 }
 
+type LogDisplayMode = 'text' | 'json' | 'jsonl';
+
+function getLogDisplayMode(fileName?: string | null): LogDisplayMode {
+  if (!fileName) {
+    return 'text';
+  }
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.jsonl')) {
+    return 'jsonl';
+  }
+  if (lower.endsWith('.json')) {
+    return 'json';
+  }
+  return 'text';
+}
+
+function formatLineForLog(line: string): { text: string; style: string; highlightedText?: React.ReactNode } {
+  const trimmed = line.trim();
+
+  if (!trimmed) {
+    return { text: '\u00a0', style: 'text-text-secondary' };
+  }
+
+  if (/^[-=]{5,}$/.test(trimmed)) {
+    return { text: line, style: 'text-text-muted' };
+  }
+
+  const keyValueMatch = trimmed.match(
+    /^(Timestamp|Role|Provider|Model|Task ID|Duration|Exit Code|Success|Timed Out):\s*(.*)$/i
+  );
+  if (keyValueMatch) {
+    return {
+      text: line,
+      style: 'text-text-secondary',
+      highlightedText: (
+        <>
+          <span className="text-text-primary font-semibold">{keyValueMatch[1]}:</span>
+          <span className="text-text-primary"> {keyValueMatch[2]}</span>
+        </>
+      ),
+    };
+  }
+
+  if (/^LLM INVOCATION LOG$/i.test(trimmed)) {
+    return { text: line, style: 'text-accent font-semibold' };
+  }
+
+  if (/^(PROMPT|RESPONSE|ERROR)$/i.test(trimmed)) {
+    return { text: line, style: 'text-warning' };
+  }
+
+  if (/\b(FATAL|CRITICAL|ERROR|FAILED)\b/i.test(trimmed)) {
+    return { text: line, style: 'text-danger' };
+  }
+
+  if (/\b(WARN|WARNING)\b/i.test(trimmed)) {
+    return { text: line, style: 'text-warning' };
+  }
+
+  if (/\b(SUCCESS|COMPLETED|DONE)\b/i.test(trimmed)) {
+    return { text: line, style: 'text-green-300' };
+  }
+
+  return { text: line, style: 'text-gray-300' };
+}
+
+function formatJsonLines(content: string): React.ReactNode[] {
+  return content
+    .split('\n')
+    .map((line, index) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return (
+          <div key={`jsonl-${index}`} className="h-3 border-b border-transparent">
+            <span className="text-text-muted">&nbsp;</span>
+          </div>
+        );
+      }
+
+      try {
+        const parsed = JSON.parse(trimmed);
+        return (
+          <div key={`jsonl-${index}`} className="mb-3">
+            <div className="text-xs font-semibold text-accent mb-1">[entry #{index + 1}]</div>
+            <pre className="whitespace-pre-wrap break-words text-gray-100">{JSON.stringify(parsed, null, 2)}</pre>
+          </div>
+        );
+      } catch {
+        return (
+          <div key={`jsonl-${index}`} className="text-gray-300">
+            {line}
+          </div>
+        );
+      }
+    })
+    .filter(Boolean) as React.ReactNode[];
+}
+
+function formatTextLog(content: string): React.ReactNode {
+  return (
+    <div className="text-sm font-mono leading-relaxed">
+      {content.split('\n').map((line, index) => {
+        const formatted = formatLineForLog(line);
+        return (
+          <div
+            key={`line-${index}`}
+            className={`whitespace-pre-wrap break-words py-0.5 ${formatted.style}`}
+          >
+            {formatted.highlightedText ?? formatted.text}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function formatLogContent(content: string, fileName?: string | null): React.ReactNode {
+  const displayMode = getLogDisplayMode(fileName);
+
+  if (displayMode === 'json') {
+    try {
+      return <pre className="text-sm font-mono text-gray-100 leading-relaxed whitespace-pre-wrap break-words">{JSON.stringify(JSON.parse(content), null, 2)}</pre>;
+    } catch {
+      return formatTextLog(content);
+    }
+  }
+
+  if (displayMode === 'jsonl') {
+    return (
+      <div className="space-y-2">
+        {formatJsonLines(content)}
+      </div>
+    );
+  }
+
+  return formatTextLog(content);
+}
+
 export const SystemLogsPage: React.FC = () => {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [logs, setLogs] = useState<LogFile[]>([]);
@@ -27,8 +165,8 @@ export const SystemLogsPage: React.FC = () => {
   const [loadingList, setLoadingList] = useState(false);
   const [loadingContent, setLoadingContent] = useState(false);
   const [copied, setCopied] = useState(false);
-  
-  const contentRef = useRef<HTMLPreElement>(null);
+
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (selectedProject) {
@@ -212,14 +350,11 @@ export const SystemLogsPage: React.FC = () => {
                   >
                     <ArrowUpIcon className="w-5 h-5" />
                   </button>
+                  <div ref={contentRef} className="h-full w-full p-4 overflow-auto text-sm">
+                    <div className="text-gray-300">{formatLogContent(logContent, selectedLogPath)}</div>
+                  </div>
                 </>
               )}
-              <pre
-                ref={contentRef}
-                className="h-full w-full p-4 overflow-auto text-sm font-mono text-gray-300 leading-relaxed whitespace-pre-wrap break-words"
-              >
-                <code>{logContent || ''}</code>
-              </pre>
             </>
           )}
         </div>
