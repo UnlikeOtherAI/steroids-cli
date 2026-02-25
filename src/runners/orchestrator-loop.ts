@@ -8,9 +8,12 @@ import { autoMigrate } from '../migrations/index.js';
 import { getTask, getSection, incrementTaskFailureCount, updateTaskStatus, listTasks } from '../database/queries.js';
 import {
   selectNextTask,
+  selectNextTaskWithLock,
   selectTaskBatch,
   markTaskInProgress,
+  releaseTaskLockAfterCompletion,
   getTaskCounts,
+  type SelectedTaskWithLock,
 } from '../orchestrator/task-selector.js';
 import { invokeCoderBatch } from '../orchestrator/coder.js';
 import { loadConfig } from '../config/loader.js';
@@ -324,8 +327,16 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
         }
       }
 
-      // Select next task
-      const selected = selectNextTask(db, activeSectionIds);
+      // Select next task — use locking when a runnerId is present (parallel mode)
+      // to prevent two runners from picking the same task simultaneously.
+      const selected = options.runnerId
+        ? selectNextTaskWithLock(db, {
+            runnerId: options.runnerId,
+            sectionId: options.sectionId,
+            sectionIds: options.sectionIds,
+            parallelSessionId: options.parallelSessionId,
+          })
+        : selectNextTask(db, activeSectionIds);
 
       if (!selected) {
         console.log('');
@@ -337,56 +348,67 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       }
 
       const { task, action } = selected;
+      // heartbeat is only present when selectNextTaskWithLock was used
+      const lockHeartbeat = 'lockResult' in selected
+        ? (selected as SelectedTaskWithLock).heartbeat
+        : undefined;
 
       console.log(`Task: ${task.title}`);
       console.log(`Action: ${action}`);
       console.log(`Status: ${task.status}`);
 
-      options.onTaskStart?.(task.id, action);
-      if (action === 'start') {
-        markTaskInProgress(db, task.id);
-        await runCoderPhase(
-          db,
-          task,
-          projectPath,
-          'start',
-          false,
-          undefined,
-          undefined,
-          {
-            parallelSessionId: options.parallelSessionId,
-            runnerId: options.runnerId,
-          },
-          branchName
-        );
-      } else if (action === 'resume') {
-        await runCoderPhase(
-          db,
-          task,
-          projectPath,
-          'resume',
-          false,
-          undefined,
-          undefined,
-          {
-            parallelSessionId: options.parallelSessionId,
-            runnerId: options.runnerId,
-          },
-          branchName
-        );
-      } else if (action === 'review') {
-        await runReviewerPhase(
-          db,
-          task,
-          projectPath,
-          false,
-          undefined,
-          branchName,
-          {
-            parallelSessionId: options.parallelSessionId,
-            runnerId: options.runnerId,
-          }
-        );
+      try {
+        options.onTaskStart?.(task.id, action);
+        lockHeartbeat?.start();
+        if (action === 'start') {
+          markTaskInProgress(db, task.id);
+          await runCoderPhase(
+            db,
+            task,
+            projectPath,
+            'start',
+            false,
+            undefined,
+            undefined,
+            {
+              parallelSessionId: options.parallelSessionId,
+              runnerId: options.runnerId,
+            },
+            branchName
+          );
+        } else if (action === 'resume') {
+          await runCoderPhase(
+            db,
+            task,
+            projectPath,
+            'resume',
+            false,
+            undefined,
+            undefined,
+            {
+              parallelSessionId: options.parallelSessionId,
+              runnerId: options.runnerId,
+            },
+            branchName
+          );
+        } else if (action === 'review') {
+          await runReviewerPhase(
+            db,
+            task,
+            projectPath,
+            false,
+            undefined,
+            branchName,
+            {
+              parallelSessionId: options.parallelSessionId,
+              runnerId: options.runnerId,
+            }
+          );
+        }
+      } finally {
+        if (options.runnerId) {
+          releaseTaskLockAfterCompletion(db, task.id, options.runnerId, lockHeartbeat);
+        }
       }
 
       // Log activity if task reached terminal status

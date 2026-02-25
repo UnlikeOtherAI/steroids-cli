@@ -69,6 +69,22 @@ export function hasActiveRunnerForProject(projectPath: string): boolean {
 export function hasActiveParallelSessionForProject(projectPath: string): boolean {
   return withGlobalDatabase((db: any) => {
     closeStaleParallelSessions(db, { projectPath });
-    return hasActiveParallelSessionForProjectDb(db, projectPath);
+    if (hasActiveParallelSessionForProjectDb(db, projectPath)) return true;
+
+    // Also block if any parallel runner is still alive for this project,
+    // even if the session has been marked terminal. This prevents spawning
+    // a new session while ghost runners from a prior session are still running.
+    const ghostRunner = db
+      .prepare(
+        `SELECT 1
+         FROM runners r
+         JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
+         WHERE ps.project_path = ?
+           AND r.status != 'stopped'
+           AND r.heartbeat_at > datetime('now', '-5 minutes')`
+      )
+      .get(projectPath) as { 1: number } | undefined;
+
+    return ghostRunner !== undefined;
   });
 }
