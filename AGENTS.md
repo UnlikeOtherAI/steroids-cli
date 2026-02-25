@@ -110,13 +110,14 @@ If you must implement anything that is non-deterministic (such as regex parsing 
 
 ### Simplification First (CRITICAL)
 
-Before implementing even a small patch, evaluate whether the issue should be solved by simplifying architecture, boundaries, or control flow instead of adding another local fix.
+Before implementing even a small patch, evaluate whether the correct fix is to simplify architecture, boundaries, or control flow instead of adding another local workaround.
 
-- Every change must include a brief global-impact check: "does this reduce or increase system complexity?"
+- Every change must include a brief global-impact check: does this reduce or increase total system complexity?
 - Prefer unifying duplicated patterns over patching each occurrence independently
 - Prefer a single source of truth for command execution paths, process launching, and cross-context behavior
-- If a patch fixes a symptom but leaves a repeated or fragile pattern in place, propose (or create) a follow-up simplification task
-- Reject "just add another fallback" changes unless root-cause simplification was evaluated first
+- If two code paths answer the same invariant question, they must use one shared source of truth
+- Avoid fallback/patch stacking that masks design flaws
+- If a short-term patch is unavoidable, create a follow-up simplification task with concrete scope
 
 ### File References
 - Always read CLAUDE.md and AGENTS.md before starting work
@@ -159,3 +160,26 @@ Each follow-up must include:
 3. **HOW**: Suggested approach or implementation hints
 
 **Limit:** Suggest a maximum of 3 follow-up tasks per approval. Prioritize the most impactful ones.
+
+---
+
+## Release / Publish Runbook (CRITICAL)
+
+When the user says "do a release" or "do a publish", execute this exact sequence:
+
+1. Commit all intended changes
+2. Bump version (`npm version patch|minor|major`)
+3. Push commit + tags (`git push && git push --tags`)
+4. Publish to npm (`npm publish`)
+5. Create GitHub release with `gh release create v<version> --title ... --notes ...`
+6. Install latest CLI globally from npm (`npm i -g steroids-cli@latest`)
+7. Reload web assets with `steroids web`
+
+### Required release notes content
+- Include concrete, user-visible changes
+- Include key bug fixes and behavior changes
+- Include compare link to previous tag
+
+### Verification after install
+- `steroids --version` must match the released version
+- `steroids web` must start successfully

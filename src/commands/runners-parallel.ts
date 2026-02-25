@@ -8,6 +8,7 @@ import { openDatabase } from '../database/connection.js';
 import { createWorkspaceClone } from '../parallel/clone.js';
 import { loadConfig } from '../config/loader.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
+import { closeStaleParallelSessions, findActiveParallelSessionForRepo } from '../runners/parallel-session-state.js';
 import { CyclicDependencyError, type WorkstreamSection } from '../parallel/scheduler.js';
 import { listSections, hasDependenciesMet } from '../database/queries.js';
 import { resolveCliEntrypoint } from '../cli/entrypoint.js';
@@ -185,15 +186,8 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
       );
     }
 
-    const activeSession = db
-      .prepare(
-        `SELECT id, status
-         FROM parallel_sessions
-         WHERE project_repo_id = ?
-           AND status NOT IN ('completed', 'failed', 'aborted')
-         LIMIT 1`
-      )
-      .get(plan.projectRepoId) as { id: string; status: string } | undefined;
+    closeStaleParallelSessions(db as any, { projectRepoId: plan.projectRepoId });
+    const activeSession = findActiveParallelSessionForRepo(db as any, plan.projectRepoId);
 
     if (activeSession) {
       throw new Error(

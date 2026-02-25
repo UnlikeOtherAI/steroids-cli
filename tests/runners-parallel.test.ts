@@ -403,6 +403,97 @@ describe('launchParallelSession', () => {
 
     globalDb.close();
   });
+
+  it('repairs stale running sessions with no active work and allows relaunch', () => {
+    const globalDb = new Database(':memory:');
+    globalDb.exec(`
+      CREATE TABLE parallel_sessions (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        project_repo_id TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT
+      );
+
+      CREATE TABLE workstreams (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        branch_name TEXT NOT NULL,
+        section_ids TEXT NOT NULL,
+        clone_path TEXT,
+        status TEXT NOT NULL,
+        runner_id TEXT,
+        claim_generation INTEGER NOT NULL DEFAULT 0,
+        lease_expires_at TEXT,
+        sealed_base_sha TEXT,
+        sealed_head_sha TEXT,
+        sealed_commit_shas TEXT,
+        completion_order INTEGER,
+        recovery_attempts INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_reconcile_action TEXT,
+        last_reconciled_at TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE runners (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        pid INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        current_task_id TEXT,
+        heartbeat_at TEXT NOT NULL DEFAULT (datetime('now')),
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        stopped_at TEXT,
+        metadata TEXT,
+        parallel_session_id TEXT
+      );
+    `);
+
+    globalDb
+      .prepare(
+        'INSERT INTO parallel_sessions (id, project_path, project_repo_id, status) VALUES (?, ?, ?, ?)'
+      )
+      .run('session-stale', '/tmp/project', '/tmp/project', 'running');
+    globalDb
+      .prepare(
+        `INSERT INTO workstreams (id, session_id, branch_name, section_ids, clone_path, status)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run('ws-stale', 'session-stale', 'steroids/ws-stale', '["sec-1"]', '/tmp/ws-stale', 'completed');
+
+    mockOpenGlobalDatabase.mockReturnValue({ db: globalDb, close: jest.fn() });
+
+    const workspacePath = makeTempDir('steroids-parallel-stale-repair');
+    mockCreateWorkspaceClone.mockReturnValue({ workspacePath });
+    mockSpawn.mockReturnValue(createMockProcess(4567));
+
+    const plan: Parameters<typeof testModule.launchParallelSession>[0] = {
+      sessionId: 'session-fresh',
+      projectPath: '/tmp/project',
+      projectRepoId: '/tmp/project',
+      maxClones: 1,
+      workstreams: [
+        {
+          id: 'ws-fresh',
+          branchName: 'steroids/ws-fresh',
+          sectionIds: ['sec-2'],
+          sectionNames: ['Section 2'],
+        },
+      ],
+    };
+
+    expect(() => testModule.launchParallelSession(plan, '/tmp/project')).not.toThrow();
+
+    const staleSession = globalDb
+      .prepare('SELECT status FROM parallel_sessions WHERE id = ?')
+      .get('session-stale') as { status: string };
+    expect(staleSession.status).toBe('completed');
+
+    globalDb.close();
+  });
 });
 
 describe('spawnDetachedRunner', () => {
