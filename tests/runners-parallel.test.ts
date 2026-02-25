@@ -43,6 +43,10 @@ jest.unstable_mockModule('node:child_process', () => ({
   spawn: mockSpawn,
 }));
 
+jest.unstable_mockModule('../src/cli/entrypoint.js', () => ({
+  resolveCliEntrypoint: jest.fn().mockReturnValue('/fake/steroids/index.js'),
+}));
+
 const createMockProcess = (pid: number = 9001): MockSpawnHandle => ({
   pid,
   unref: jest.fn(),
@@ -245,6 +249,16 @@ describe('launchParallelSession', () => {
         completed_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
+
+      CREATE TABLE runners (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'idle',
+        pid INTEGER,
+        project_path TEXT,
+        current_task_id TEXT,
+        heartbeat_at TEXT NOT NULL DEFAULT (datetime('now')),
+        parallel_session_id TEXT
+      );
     `);
 
     const close = jest.fn();
@@ -302,7 +316,7 @@ describe('launchParallelSession', () => {
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(process.execPath, [
-      process.argv[1],
+      '/fake/steroids/index.js',
       'runners',
       'start',
       '--project',
@@ -370,12 +384,30 @@ describe('launchParallelSession', () => {
         completed_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
+
+      CREATE TABLE runners (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'idle',
+        pid INTEGER,
+        project_path TEXT,
+        current_task_id TEXT,
+        heartbeat_at TEXT NOT NULL DEFAULT (datetime('now')),
+        parallel_session_id TEXT
+      );
     `);
     globalDb
       .prepare(
         'INSERT INTO parallel_sessions (id, project_path, project_repo_id, status) VALUES (?, ?, ?, ?)'
       )
       .run('session-existing', '/tmp/project', '/tmp/project', 'running');
+
+    // Active runner keeps closeStaleParallelSessions from auto-completing the session.
+    globalDb
+      .prepare(
+        `INSERT INTO runners (id, status, pid, heartbeat_at, parallel_session_id)
+         VALUES ('r-existing', 'running', 99999, datetime('now'), 'session-existing')`
+      )
+      .run();
 
     mockOpenGlobalDatabase.mockReturnValue({
       db: globalDb,
@@ -503,13 +535,13 @@ describe('spawnDetachedRunner', () => {
 
     const result = testModule.spawnDetachedRunner({
       projectPath: '/tmp/project',
-      args: ['runners', 'start'],
+      cliArgs: ['runners', 'start'],
     });
 
     expect(result).toEqual({ pid: 4321 });
     expect(mockSpawn).toHaveBeenCalledWith(
       process.execPath,
-      ['runners', 'start'],
+      ['/fake/steroids/index.js', 'runners', 'start'],
       {
         cwd: '/tmp/project',
         detached: true,
@@ -534,13 +566,13 @@ describe('spawnDetachedRunner', () => {
 
     const result = testModule.spawnDetachedRunner({
       projectPath: '/tmp/project',
-      args: ['runners', 'start'],
+      cliArgs: ['runners', 'start'],
     });
 
     expect(result).toMatchObject({ pid: 9876 });
     expect(result.logFile).toMatch(/daemon-9876\.log$/);
     expect(child.unref).toHaveBeenCalled();
-    expect(mockSpawn).toHaveBeenCalledWith(process.execPath, ['runners', 'start'], {
+    expect(mockSpawn).toHaveBeenCalledWith(process.execPath, ['/fake/steroids/index.js', 'runners', 'start'], {
       cwd: '/tmp/project',
       detached: true,
       stdio: ['ignore', expect.any(Number), expect.any(Number)],

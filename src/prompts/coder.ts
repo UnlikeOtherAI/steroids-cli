@@ -120,7 +120,7 @@ You are a CODER in an automated task execution system. Your job is to autonomous
 **Title:** ${task.title}
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
+**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory. If files referenced in the task do not exist in your current working directory, they either need to be CREATED (per the task specification) or the task spec refers to files on a different branch that have not been merged yet — in either case you must work only within your current directory. **Never navigate to \`../\` or any sibling directories. Never use absolute paths to access workspaces, clones, or any path outside your CWD.**
 ${fileScopeSection}${fileAnchorSection}${buildSkillsSection(projectPath)}
 ---
 
@@ -251,7 +251,7 @@ You are a CODER assigned MULTIPLE tasks from section "${sectionName}".
 ## Section: ${sectionName}
 **Total Tasks:** ${tasks.length}
 **Project:** ${projectPath}
-**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
+**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory. If files referenced in the task do not exist in your current working directory, they either need to be CREATED (per the task specification) or the task spec refers to files on a different branch that have not been merged yet — in either case you must work only within your current directory. **Never navigate to \`../\` or any sibling directories. Never use absolute paths to access workspaces, clones, or any path outside your CWD.**
 
 ---
 
@@ -324,7 +324,7 @@ You are a CODER resuming work on a partially completed task.
 **Status:** in_progress (resuming)
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory.
+**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory. If files referenced in the task do not exist in your current working directory, they either need to be CREATED (per the task specification) or the task spec refers to files on a different branch that have not been merged yet — in either case you must work only within your current directory. **Never navigate to \`../\` or any sibling directories. Never use absolute paths to access workspaces, clones, or any path outside your CWD.**
 ${fileAnchorSection}
 ---
 

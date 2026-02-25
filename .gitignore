@@ -29,6 +29,17 @@ Assets/banner_no_logo.jpeg
 # Temporary files
 tmp/
 
+# One-off scripts (never commit these)
+fix*.js
+refix*.js
+refactor*.js
+
+# Backup files (never commit these)
+*.bak
+*.backup
+*.before-*
+*.orig
+
 # Logs
 *.log
 logs/

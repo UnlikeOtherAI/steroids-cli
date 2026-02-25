@@ -59,10 +59,12 @@ export {
 export {
   type ParallelSessionStatus,
   type ParallelSessionRunner,
+  type PriorWorkstreamSeed,
   updateParallelSessionStatus,
   revokeWorkstreamLeasesForSession,
   listParallelSessionRunners,
   removeParallelSessionRunner,
+  findPriorWorkstreamForSections,
 } from './global-db-sessions';
 
 // Validation escalations

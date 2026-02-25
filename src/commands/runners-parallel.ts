@@ -8,6 +8,7 @@ import { openDatabase } from '../database/connection.js';
 import { createWorkspaceClone } from '../parallel/clone.js';
 import { loadConfig } from '../config/loader.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
+import { findPriorWorkstreamForSections } from '../runners/global-db-sessions.js';
 import { closeStaleParallelSessions, findActiveParallelSessionForRepo } from '../runners/parallel-session-state.js';
 import { CyclicDependencyError, type WorkstreamSection } from '../parallel/scheduler.js';
 import { listSections, hasDependenciesMet } from '../database/queries.js';
@@ -211,11 +212,19 @@ export function launchParallelSession(plan: ParallelWorkstreamPlan, projectPath:
       let workspacePath: string | null = null;
 
       try {
+        // Seed from prior workstream if one exists on disk, so prior work is not lost.
+        const priorSeed = findPriorWorkstreamForSections(db, plan.projectRepoId, plan.sessionId, workstream.sectionIds);
+        const seedPath =
+          priorSeed && priorSeed.clone_path && fs.existsSync(priorSeed.clone_path)
+            ? priorSeed.clone_path
+            : undefined;
+
         const workspaceClone = createWorkspaceClone({
           projectPath,
           workstreamId: workstream.id,
           branchName: workstream.branchName,
           workspaceRoot: configuredWorkspaceRoot,
+          fromPath: seedPath,
         });
 
         workspacePath = workspaceClone.workspacePath;

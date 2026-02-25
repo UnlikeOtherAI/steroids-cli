@@ -33,6 +33,8 @@ export interface WorkspaceCloneOptions {
   branchName: string;
   workspaceRoot?: string;
   force?: boolean;
+  /** When provided, seed the new clone from this prior workstream path instead of projectPath. */
+  fromPath?: string;
 }
 
 export interface WorkspaceCloneResult {
@@ -273,19 +275,28 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
   mkdirSync(workspaceRoot, { recursive: true });
   mkdirSync(resolve(workspacePath, '..'), { recursive: true });
 
-  let usedLocalClone = isSameFileSystem(projectPath, workspaceRoot);
-  const cloneArgs = ['clone', '--depth', '1', '--no-tags', '--single-branch', ...(usedLocalClone ? ['--local'] : []), projectPath, workspacePath];
+  // When seeding from a prior workstream, clone from that path (preserving full history).
+  // Otherwise clone from projectPath with shallow flags.
+  const cloneSource = options.fromPath ? resolve(options.fromPath) : projectPath;
+  let usedLocalClone = isSameFileSystem(cloneSource, workspaceRoot);
+
+  const buildCloneArgs = (useLocal: boolean): string[] => {
+    const baseArgs = options.fromPath
+      ? ['clone'] // full history — prior work is in the object store
+      : ['clone', '--depth', '1', '--no-tags', '--single-branch'];
+    return [...baseArgs, ...(useLocal ? ['--local'] : []), cloneSource, workspacePath];
+  };
 
   try {
     // hardcoded command, no user input
-    execFileSync('git', cloneArgs, { cwd: process.cwd(), stdio: 'inherit' });
+    execFileSync('git', buildCloneArgs(usedLocalClone), { cwd: process.cwd(), stdio: 'inherit' });
   } catch (error: unknown) {
     // If --local clone failed, retry without it (handles cross-device link on macOS APFS)
     if (usedLocalClone) {
       rmSync(workspacePath, { recursive: true, force: true });
       usedLocalClone = false;
       try {
-        execFileSync('git', ['clone', '--depth', '1', '--no-tags', '--single-branch', projectPath, workspacePath], { cwd: process.cwd(), stdio: 'inherit' });
+        execFileSync('git', buildCloneArgs(false), { cwd: process.cwd(), stdio: 'inherit' });
       } catch (retryError: unknown) {
         rmSync(workspacePath, { recursive: true, force: true });
         throw new WorkspaceCloneError('Git clone failed', retryError);
@@ -293,6 +304,18 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
     } else {
       rmSync(workspacePath, { recursive: true, force: true });
       throw new WorkspaceCloneError('Git clone failed', error);
+    }
+  }
+
+  // When seeding from a prior workstream, git sets origin to that local path.
+  // Reset it to the canonical projectPath so `git push origin` works correctly.
+  if (options.fromPath) {
+    try {
+      // hardcoded command, no user input
+      execFileSync('git', ['-C', workspacePath, 'remote', 'set-url', 'origin', projectPath], { stdio: 'inherit' });
+    } catch (error: unknown) {
+      rmSync(workspacePath, { recursive: true, force: true });
+      throw new WorkspaceCloneError('Failed to reset origin after seeding clone from prior workstream', error);
     }
   }
 

@@ -88,3 +88,44 @@ export function removeParallelSessionRunner(runnerId: string): void {
     db.prepare('DELETE FROM runners WHERE id = ?').run(runnerId);
   });
 }
+
+export interface PriorWorkstreamSeed {
+  clone_path: string;
+  branch_name: string;
+}
+
+/**
+ * Find the most recent completed (non-running) workstream for any of the given
+ * section IDs within the same project, from a different session than the caller's.
+ * Used to seed new workspace clones with prior work when a parallel session ended
+ * without merging.
+ */
+export function findPriorWorkstreamForSections(
+  db: import('better-sqlite3').Database,
+  projectRepoId: string,
+  currentSessionId: string,
+  sectionIds: string[]
+): PriorWorkstreamSeed | null {
+  if (sectionIds.length === 0) return null;
+
+  const placeholders = sectionIds.map(() => '?').join(', ');
+  const row = db
+    .prepare(
+      `SELECT w.clone_path, w.branch_name
+       FROM workstreams w
+       JOIN parallel_sessions ps ON ps.id = w.session_id
+       WHERE ps.project_repo_id = ?
+         AND w.session_id != ?
+         AND w.status != 'running'
+         AND w.clone_path IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM json_each(w.section_ids)
+           WHERE json_each.value IN (${placeholders})
+         )
+       ORDER BY w.created_at DESC
+       LIMIT 1`
+    )
+    .get(projectRepoId, currentSessionId, ...sectionIds) as PriorWorkstreamSeed | undefined;
+
+  return row ?? null;
+}
