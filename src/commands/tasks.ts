@@ -17,6 +17,7 @@ import {
   getTaskByTitle,
   updateTaskStatus,
   resetRejectionCount,
+  resetTaskFailureCount,
   approveTask,
   rejectTask,
   getTaskAudit,
@@ -856,6 +857,7 @@ USAGE:
 
 OPTIONS:
   --status <status>     New status: pending | in_progress | review | completed
+                        Setting status to pending clears failure_count for manual restarts
   --title <text>        Change the task title
   --source <file>       Change the specification file
   --section <id>        Move task to a different section
@@ -908,6 +910,7 @@ EXAMPLES:
 
     const actor = values.model ? `model:${values.model}` : values.actor ?? 'human:cli';
     let oldRejectionCount: number | undefined;
+    let oldFailureCount: number | undefined;
     const changes: string[] = [];
 
     // Update editable fields if any provided
@@ -960,6 +963,16 @@ EXAMPLES:
     const previousStatus = task.status;
     if (values.status) {
       updateTaskStatus(db, task.id, values.status as TaskStatus, actor, values.notes as string | undefined);
+      if (values.status === 'pending') {
+        oldFailureCount = resetTaskFailureCount(
+          db,
+          task.id,
+          actor,
+          values.notes
+            ? `Failure count reset during manual restart: ${values.notes}`
+            : 'Failure count reset during manual restart'
+        );
+      }
     }
 
     const updated = getTask(db, task.id);
@@ -972,11 +985,19 @@ EXAMPLES:
     }
 
     if (flags.json) {
-      out.success({ task: updated, rejectionReset: oldRejectionCount !== undefined, oldRejectionCount, changes });
+      out.success({
+        task: updated,
+        rejectionReset: oldRejectionCount !== undefined,
+        oldRejectionCount,
+        failureReset: oldFailureCount !== undefined,
+        oldFailureCount,
+        changes,
+      });
     } else {
       console.log(`Task updated: ${updated?.title ?? task.title}`);
       if (values.status) console.log(`  Status: ${task.status} → ${values.status}`);
       if (oldRejectionCount !== undefined) console.log(`  Rejections: ${oldRejectionCount} → 0 (reset)`);
+      if (oldFailureCount !== undefined) console.log(`  Failures: ${oldFailureCount} → 0 (reset)`);
       for (const c of changes) console.log(`  ${c}`);
     }
   });

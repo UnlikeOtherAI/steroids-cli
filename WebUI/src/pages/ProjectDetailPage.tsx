@@ -56,6 +56,7 @@ export const ProjectDetailPage: React.FC = () => {
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [clearing, setClearing] = useState(false);
   const [clearMsg, setClearMsg] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [availableSkills, setAvailableSkills] = useState<{name: string, type: string}[]>([]);
@@ -315,6 +316,21 @@ export const ProjectDetailPage: React.FC = () => {
     }
   };
 
+  const handleResetProject = async () => {
+    if (!project) return;
+    try {
+      setResetting(true);
+      await projectsApi.reset(project.path);
+      await loadProject();
+      await loadSections();
+      setError(null);
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : 'Failed to reset project');
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const getRunnerStatus = () => {
     if (!project?.runner) return 'No Runner';
     return project.runner.status.charAt(0).toUpperCase() + project.runner.status.slice(1);
@@ -329,6 +345,12 @@ export const ProjectDetailPage: React.FC = () => {
   };
 
   const projectName = project?.name || project?.path.split('/').pop() || 'Project';
+  const canResetProject = Boolean(
+    project?.isBlocked ||
+      (project?.stats?.failed ?? 0) > 0 ||
+      (project?.stats?.disputed ?? 0) > 0 ||
+      (project?.stats?.skipped ?? 0) > 0
+  );
 
   const getTimeRangeValue = () => {
     switch (selectedHours) {
@@ -384,17 +406,26 @@ export const ProjectDetailPage: React.FC = () => {
 
           {/* Action buttons */}
           <div className="mb-8 flex gap-3">
-        {project.enabled ? (
-          <Button variant="secondary" onClick={handleDisable}>
-            Disable Project
-          </Button>
-        ) : (
-          <Button onClick={handleEnable}>Enable Project</Button>
-        )}
-        <Button variant="secondary" onClick={handleRemove}>
-          Remove Project
-        </Button>
-      </div>
+            {project.enabled ? (
+              <Button variant="secondary" onClick={handleDisable}>
+                Disable Project
+              </Button>
+            ) : (
+              <Button onClick={handleEnable}>Enable Project</Button>
+            )}
+            <Button variant="secondary" onClick={handleRemove}>
+              Remove Project
+            </Button>
+            <Button
+              className="ml-auto"
+              variant="accent"
+              onClick={handleResetProject}
+              disabled={!canResetProject || resetting}
+            >
+              {resetting ? <ArrowPathIcon className="w-4 h-4 animate-spin inline mr-1" /> : null}
+              A Reset Project
+            </Button>
+          </div>
 
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">

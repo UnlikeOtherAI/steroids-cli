@@ -4,6 +4,20 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 const router = Router();
+interface SkillListing {
+  name: string;
+  type: 'pre-installed' | 'custom';
+  characterCount: number;
+}
+
+function readSkillLength(filePath: string): number {
+  if (!existsSync(filePath)) {
+    return 0;
+  }
+
+  const content = readFileSync(filePath, 'utf-8');
+  return content.length;
+}
 
 function getCustomSkillsDir(): string {
   const dir = join(homedir(), '.steroids', 'skills');
@@ -28,14 +42,15 @@ function getPreinstalledSkillsDir(): string {
 }
 
 router.get('/skills', (req, res) => {
-  const skills: { name: string; type: 'pre-installed' | 'custom' }[] = [];
+  const skills: SkillListing[] = [];
 
   try {
     const customDir = getCustomSkillsDir();
     if (existsSync(customDir)) {
       for (const file of readdirSync(customDir)) {
         if (file.endsWith('.md')) {
-          skills.push({ name: file.replace('.md', ''), type: 'custom' });
+          const name = file.replace('.md', '');
+          skills.push({ name, type: 'custom', characterCount: readSkillLength(join(customDir, file)) });
         }
       }
     }
@@ -44,8 +59,9 @@ router.get('/skills', (req, res) => {
     if (existsSync(preinstalledDir)) {
       for (const file of readdirSync(preinstalledDir)) {
         if (file.endsWith('.md')) {
-          if (!skills.find(s => s.name === file.replace('.md', ''))) {
-            skills.push({ name: file.replace('.md', ''), type: 'pre-installed' });
+          const name = file.replace('.md', '');
+          if (!skills.find(s => s.name === name)) {
+            skills.push({ name, type: 'pre-installed', characterCount: readSkillLength(join(preinstalledDir, file)) });
           }
         }
       }

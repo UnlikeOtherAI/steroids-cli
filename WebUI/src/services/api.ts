@@ -114,6 +114,16 @@ export const projectsApi = {
   },
 
   /**
+   * Reset failed, skipped, and disputed tasks for a project, and re-enable it
+   */
+  async reset(path: string): Promise<void> {
+    await fetchJson('/api/projects/reset', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  },
+
+  /**
    * Prune stale projects
    */
   async prune(): Promise<number> {

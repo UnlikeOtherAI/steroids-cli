@@ -20,11 +20,20 @@ import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 import { isValidProjectPath, validatePathRequest } from '../utils/validation.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
 import { getCachedListStorage } from '../utils/storage-cache.js';
+import { fileURLToPath } from 'node:url';
 
 const router = Router();
 
 interface ProjectLiveData {
-  stats: { pending: number; in_progress: number; review: number; completed: number; failed: number; disputed: number };
+  stats: {
+    pending: number;
+    in_progress: number;
+    review: number;
+    completed: number;
+    failed: number;
+    disputed: number;
+    skipped: number;
+  };
   last_task_added_at: string | null;
   isBlocked: boolean;
   isUnreachable: boolean;
@@ -35,7 +44,7 @@ interface ProjectLiveData {
  */
 function getProjectLiveData(projectPath: string): ProjectLiveData {
   const empty: ProjectLiveData = {
-    stats: { pending: 0, in_progress: 0, review: 0, completed: 0, failed: 0, disputed: 0 },
+    stats: { pending: 0, in_progress: 0, review: 0, completed: 0, failed: 0, disputed: 0, skipped: 0 },
     last_task_added_at: null,
     isBlocked: false,
     isUnreachable: true,
@@ -54,15 +63,27 @@ function getProjectLiveData(projectPath: string): ProjectLiveData {
             COALESCE(SUM(CASE WHEN status = 'review' THEN 1 ELSE 0 END), 0) as review,
             COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed,
             COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed,
+            COALESCE(SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END), 0) as skipped,
             COALESCE(SUM(CASE WHEN status = 'disputed' THEN 1 ELSE 0 END), 0) as disputed,
             COALESCE(SUM(CASE WHEN failure_count >= 3 THEN 1 ELSE 0 END), 0) as high_failures,
             MAX(created_at) as last_task_added_at
           FROM tasks`
         )
-        .get() as { pending: number; in_progress: number; review: number; completed: number; failed: number; disputed: number; high_failures: number; last_task_added_at: string | null } | undefined;
+        .get() as {
+          pending: number;
+          in_progress: number;
+          review: number;
+          completed: number;
+          failed: number;
+          disputed: number;
+          skipped: number;
+          high_failures: number;
+          last_task_added_at: string | null;
+        } | undefined;
 
       const failedCount = row?.failed ?? 0;
       const disputedCount = row?.disputed ?? 0;
+      const skippedCount = row?.skipped ?? 0;
       const highFailuresCount = row?.high_failures ?? 0;
 
       return {
@@ -73,9 +94,10 @@ function getProjectLiveData(projectPath: string): ProjectLiveData {
           completed: row?.completed ?? 0,
           failed: failedCount,
           disputed: disputedCount,
+          skipped: skippedCount,
         },
         last_task_added_at: row?.last_task_added_at ?? null,
-        isBlocked: failedCount > 0 || disputedCount > 0 || highFailuresCount > 0,
+        isBlocked: failedCount > 0 || disputedCount > 0 || skippedCount > 0 || highFailuresCount > 0,
         isUnreachable: false,
       };
     } finally {
@@ -103,6 +125,7 @@ interface ProjectResponse {
     completed: number;
     failed: number;
     disputed: number;
+    skipped: number;
   };
   runner?: {
     id: string;
@@ -330,6 +353,53 @@ router.post('/projects/enable', (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to enable project',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/projects/reset
+ * Reset failed, skipped, and disputed tasks for a project, and re-enable it.
+ * Body: { path: string }
+ */
+router.post('/projects/reset', (req: Request, res: Response) => {
+  try {
+    const validation = validatePathRequest(req.body);
+    if (!validation.valid) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid request',
+        message: validation.error,
+      });
+      return;
+    }
+
+    if (!isValidProjectPath(validation.path!)) {
+      res.status(403).json({
+        success: false,
+        error: 'Access denied',
+        message: 'Invalid project path',
+      });
+      return;
+    }
+
+    // Re-enable project first
+    enableProject(validation.path!);
+
+    // Run the CLI reset command
+    const cliBin = fileURLToPath(new URL('../../../dist/index.js', import.meta.url));
+    execSync(`node "${cliBin}" tasks reset --all`, { cwd: validation.path, stdio: 'pipe' });
+
+    res.json({
+      success: true,
+      message: 'Project tasks reset and project enabled successfully'
+    });
+  } catch (error) {
+    console.error('Error resetting project:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reset project',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

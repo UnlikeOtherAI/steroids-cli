@@ -26,6 +26,7 @@ export interface Project {
     completed: number;
     failed: number;
     disputed: number;
+    skipped: number;
   };
   runner?: {
     id: string;

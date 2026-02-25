@@ -624,6 +624,37 @@ export function resetRejectionCount(
   return oldCount;
 }
 
+export function resetTaskFailureCount(
+  db: Database.Database,
+  taskId: string,
+  actor: string,
+  notes?: string
+): number {
+  const task = getTask(db, taskId);
+  if (!task) {
+    throw new Error(`Task not found: ${taskId}`);
+  }
+
+  const oldFailureCount = task.failure_count ?? 0;
+
+  db.prepare(
+    `UPDATE tasks
+     SET failure_count = 0, last_failure_at = NULL, updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(taskId);
+
+  addAuditEntry(
+    db,
+    taskId,
+    task.status,
+    task.status,
+    actor,
+    notes ?? `Failure count reset from ${oldFailureCount} to 0`
+  );
+
+  return oldFailureCount;
+}
+
 /**
  * Update editable task fields (title, source, file anchor, section)
  * Only updates fields that are explicitly provided (not undefined)
