@@ -49,6 +49,24 @@ export function reconcileParallelSessionRecovery(
       }>;
 
     for (const candidate of candidates) {
+      const activeRunnerForClone = db
+        .prepare(
+          `SELECT r.id
+           FROM runners r
+           WHERE r.parallel_session_id = ?
+             AND r.project_path = ?
+             AND r.status != 'stopped'
+             AND r.heartbeat_at > datetime('now', '-5 minutes')
+           LIMIT 1`
+        )
+        .get(session.id, candidate.clone_path) as { id: string } | undefined;
+
+      // If the original runner is still alive for this clone, do not restart.
+      // Lease expiry alone is not enough to infer runner death.
+      if (activeRunnerForClone) {
+        continue;
+      }
+
       const nextAttempts = (candidate.recovery_attempts ?? 0) + 1;
 
       if (nextAttempts >= 5) {

@@ -336,7 +336,12 @@ export class ClaudeProvider extends BaseAIProvider {
         }
 
         const outputStr = (stdout + '\n' + stderr).toLowerCase();
-        if (code !== 0 && resumeSessionId && (outputStr.includes('session not found') || outputStr.includes('failed to resume') || outputStr.includes('unknown session'))) {
+        if (code !== 0 && resumeSessionId && (
+          !outputStr.trim() || // No output = session file missing (e.g. isolated home was cleaned up)
+          outputStr.includes('session not found') ||
+          outputStr.includes('failed to resume') ||
+          outputStr.includes('unknown session')
+        )) {
           reject(new SessionNotFoundError(`Failed to resume Claude session ${resumeSessionId}`));
           return;
         }

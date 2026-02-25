@@ -43,12 +43,12 @@ function refreshParallelWorkstreamLease(
   parallelSessionId: string | undefined,
   projectPath: string,
   runnerId: string | undefined
-): void {
+): boolean {
   if (!parallelSessionId) {
-    return;
+    return true;
   }
 
-  withGlobalDatabase((db) => {
+  return withGlobalDatabase((db) => {
     const row = db
       .prepare(
         `SELECT id, claim_generation, runner_id
@@ -63,7 +63,7 @@ function refreshParallelWorkstreamLease(
       | undefined;
 
     if (!row) {
-      throw new Error('Parallel workstream row not found for lease refresh');
+      return false;
     }
 
     const owner = runnerId ?? row.runner_id ?? `runner:${process.pid ?? 'unknown'}`;
@@ -78,9 +78,7 @@ function refreshParallelWorkstreamLease(
       )
       .run(owner, row.id, row.claim_generation);
 
-    if (result.changes !== 1) {
-      throw new Error('Parallel workstream lease fence check failed');
-    }
+    return result.changes === 1;
   });
 }
 
@@ -152,7 +150,10 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       iteration++;
       console.log(`\n─── Iteration ${iteration} ───\n`);
       options.onIteration?.(iteration);
-      refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId);
+      if (!refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId)) {
+        console.log('Lease ownership lost for this workstream runner; stopping loop.');
+        break;
+      }
       // Batch mode: process multiple pending tasks at once
       // Only active when not focusing on a specific section and batch mode is enabled
       if (batchMode && !activeSectionIds) {
@@ -161,7 +162,10 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           console.log(`[BATCH MODE] Section "${batch.sectionName}" - ${batch.tasks.length} tasks`);
 
           // Mark all tasks as in_progress
-          refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId);
+          if (!refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId)) {
+            console.log('Lease ownership lost during batch processing; stopping loop.');
+            break;
+          }
           for (const task of batch.tasks) {
             markTaskInProgress(db, task.id);
             options.onTaskStart?.(task.id, 'batch');
@@ -301,7 +305,10 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             });
 
             if (approvedTasks.length > 0) {
-              refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId);
+              if (!refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId)) {
+                console.log('Lease ownership lost before batch push; skipping remaining work in this runner.');
+                break;
+              }
               const pushResult = pushToRemote(projectPath, 'origin', branchName);
               if (pushResult.success) {
                 console.log('Pushing batch changes to git...');

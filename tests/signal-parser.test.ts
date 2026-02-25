@@ -164,6 +164,36 @@ Wait, actually DECISION: REJECT`;
       expect(result.followUpTasks[1].description).toBe('We need more unit tests.');
     });
 
+    it('parses Title/Description keyed follow-up format as a single task', () => {
+      const output = `DECISION: APPROVE
+
+### Follow-Up Tasks
+- **Title:** Clean up trailing whitespace in Spinner.test.tsx
+- **Description:** Remove trailing whitespace from the final line.
+`;
+      const result = SignalParser.parseReviewerSignal(output);
+      expect(result.followUpTasks).toHaveLength(1);
+      expect(result.followUpTasks[0].title).toBe('Clean up trailing whitespace in Spinner.test.tsx');
+      expect(result.followUpTasks[0].description).toBe('Remove trailing whitespace from the final line.');
+    });
+
+    it('parses multiple Title/Description follow-ups', () => {
+      const output = `DECISION: APPROVE
+
+### Follow-Up Tasks
+- Title: Tighten retry backoff policy
+- Description: Add bounded exponential backoff limits.
+- Title: Add parser unit tests
+- Description: Cover malformed follow-up block shapes.
+`;
+      const result = SignalParser.parseReviewerSignal(output);
+      expect(result.followUpTasks).toHaveLength(2);
+      expect(result.followUpTasks[0].title).toBe('Tighten retry backoff policy');
+      expect(result.followUpTasks[0].description).toBe('Add bounded exponential backoff limits.');
+      expect(result.followUpTasks[1].title).toBe('Add parser unit tests');
+      expect(result.followUpTasks[1].description).toBe('Cover malformed follow-up block shapes.');
+    });
+
     it('handles missing follow-up tasks gracefully', () => {
       const output = `DECISION: APPROVE
 

@@ -65,12 +65,15 @@ interface LeaseFenceContext {
   runnerId?: string;
 }
 
-function refreshParallelWorkstreamLease(projectPath: string, leaseFence?: LeaseFenceContext): void {
+const WORKSTREAM_LEASE_TTL_SECONDS = 120;
+const LEASE_HEARTBEAT_INTERVAL_MS = 30_000;
+
+function refreshParallelWorkstreamLease(projectPath: string, leaseFence?: LeaseFenceContext): boolean {
   if (!leaseFence?.parallelSessionId) {
-    return;
+    return true;
   }
 
-  withGlobalDatabase((db: any) => {
+  return withGlobalDatabase((db: any) => {
     const row = db
       .prepare(
         `SELECT id, claim_generation, runner_id
@@ -85,7 +88,7 @@ function refreshParallelWorkstreamLease(projectPath: string, leaseFence?: LeaseF
       | undefined;
 
     if (!row) {
-      throw new Error('Parallel workstream row not found for lease refresh');
+      return false;
     }
 
     const owner = leaseFence.runnerId ?? row.runner_id ?? `runner:${process.pid ?? 'unknown'}`;
@@ -93,17 +96,47 @@ function refreshParallelWorkstreamLease(projectPath: string, leaseFence?: LeaseF
       .prepare(
         `UPDATE workstreams
          SET runner_id = ?,
-             lease_expires_at = datetime('now', '+120 seconds')
+             lease_expires_at = datetime('now', '+${WORKSTREAM_LEASE_TTL_SECONDS} seconds')
          WHERE id = ?
            AND status = 'running'
            AND claim_generation = ?`
       )
       .run(owner, row.id, row.claim_generation);
 
-    if (updateResult.changes !== 1) {
-      throw new Error('Parallel workstream lease fence check failed');
-    }
+    return updateResult.changes === 1;
   });
+}
+
+async function invokeWithLeaseHeartbeat<T>(
+  projectPath: string,
+  leaseFence: LeaseFenceContext | undefined,
+  invokeFn: () => Promise<T>
+): Promise<{ superseded: boolean; result?: T }> {
+  if (!leaseFence?.parallelSessionId) {
+    return { superseded: false, result: await invokeFn() };
+  }
+
+  let superseded = false;
+  const interval = setInterval(() => {
+    if (superseded) {
+      return;
+    }
+    const refreshed = refreshParallelWorkstreamLease(projectPath, leaseFence);
+    if (!refreshed) {
+      superseded = true;
+    }
+  }, LEASE_HEARTBEAT_INTERVAL_MS);
+  interval.unref?.();
+
+  try {
+    const result = await invokeFn();
+    if (superseded) {
+      return { superseded: true };
+    }
+    return { superseded: false, result };
+  } finally {
+    clearInterval(interval);
+  }
 }
 
 export interface CreditExhaustionResult {
@@ -402,7 +435,12 @@ export async function runCoderPhase(
   branchName = 'main'
 ): Promise<void> {
   if (!task) return;
-  refreshParallelWorkstreamLease(projectPath, leaseFence);
+  if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+    if (!jsonMode) {
+      console.log('\n↺ Lease ownership lost before coder phase; skipping task in this runner.');
+    }
+    return;
+  }
 
   let coordinatorGuidance: string | undefined;
   const thresholds = coordinatorThresholds || [2, 5, 9];
@@ -514,7 +552,18 @@ export async function runCoderPhase(
 
   const initialSha = getCurrentCommitSha(projectPath) || '';
   const coderConfig = loadConfig(projectPath).ai?.coder as ReviewerConfig | undefined;
-  const coderResult: CoderResult = await invokeCoder(task, projectPath, action, coordinatorGuidance, leaseFence?.runnerId);
+  const coderInvocation = await invokeWithLeaseHeartbeat(
+    projectPath,
+    leaseFence,
+    () => invokeCoder(task, projectPath, action, coordinatorGuidance, leaseFence?.runnerId)
+  );
+  if (coderInvocation.superseded || !coderInvocation.result) {
+    if (!jsonMode) {
+      console.log('\n↺ Lease ownership changed during coder invocation; skipping post-processing in this runner.');
+    }
+    return;
+  }
+  const coderResult: CoderResult = coderInvocation.result;
 
   if (coderResult.timedOut || !coderResult.success) {
     const providerName = coderConfig?.provider ?? loadConfig(projectPath).ai?.coder?.provider ?? 'unknown';
@@ -767,11 +816,21 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
     }
   }
 
-  // STEP 6: Log orchestrator decision for audit trail
-  addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
+  // STEP 6: Log orchestrator decision for audit trail.
+  // Use a non-transition audit row here; actual status transitions are recorded
+  // only after execution succeeds (e.g. updateTaskStatus/approveTask/rejectTask).
+  addAuditEntry(db, task.id, task.status, task.status, 'orchestrator', {
     actorType: 'orchestrator',
     notes: `[${decision.action}] ${decision.reasoning} (confidence: ${decision.confidence})`,
+    category: 'decision',
   });
+
+  if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+    if (!jsonMode) {
+      console.log('\n↺ Lease ownership changed before applying coder decision; skipping in this runner.');
+    }
+    return;
+  }
 
   // STEP 7: Execute the decision
   switch (decision.action) {
@@ -884,7 +943,12 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
         break;
       }
 
-      refreshParallelWorkstreamLease(projectPath, leaseFence);
+      if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+        if (!jsonMode) {
+          console.log('\n↺ Lease ownership lost before auto-commit; skipping task in this runner.');
+        }
+        return;
+      }
       // Stage all changes
       try {
         execSync('git add -A', { cwd: projectPath, stdio: 'pipe' });
@@ -935,10 +999,16 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
           console.log(`\n✓ Auto-committed and submitted to review (confidence: ${decision.confidence})`);
         }
       } catch (error) {
-        console.error('Failed to stage/commit:', error);
-        // Fallback to retry
+        const failureReason = summarizeErrorMessage(error);
+        updateTaskStatus(
+          db,
+          task.id,
+          'failed',
+          'orchestrator',
+          `Task failed: auto-commit step failed before review (${failureReason})`
+        );
         if (!jsonMode) {
-          console.log('\n⟳ Failed to commit, will retry');
+          console.log('\n✗ Task failed (auto-commit step failed before review)');
         }
       }
       break;
@@ -970,7 +1040,12 @@ export async function runReviewerPhase(
   leaseFence?: LeaseFenceContext
 ): Promise<void> {
   if (!task) return;
-  refreshParallelWorkstreamLease(projectPath, leaseFence);
+  if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+    if (!jsonMode) {
+      console.log('\n↺ Lease ownership lost before reviewer phase; skipping task in this runner.');
+    }
+    return;
+  }
 
   const submissionResolution = resolveSubmissionCommitWithRecovery(
     projectPath,
@@ -1009,14 +1084,26 @@ export async function runReviewerPhase(
       }
     }
 
-    reviewerResults = await invokeReviewers(
-      task,
+    const reviewerInvocation = await invokeWithLeaseHeartbeat(
       projectPath,
-      reviewerConfigs,
-      coordinatorResult?.guidance,
-      coordinatorResult?.decision,
-      leaseFence?.runnerId
+      leaseFence,
+      () =>
+        invokeReviewers(
+          task,
+          projectPath,
+          reviewerConfigs,
+          coordinatorResult?.guidance,
+          coordinatorResult?.decision,
+          leaseFence?.runnerId
+        )
     );
+    if (reviewerInvocation.superseded || !reviewerInvocation.result) {
+      if (!jsonMode) {
+        console.log('\n↺ Lease ownership changed during reviewer invocation; skipping post-processing in this runner.');
+      }
+      return;
+    }
+    reviewerResults = reviewerInvocation.result;
 
     const failedReviewerIndex = reviewerResults.findIndex((res) => !res.success || res.timedOut);
     if (failedReviewerIndex !== -1) {
@@ -1063,14 +1150,26 @@ export async function runReviewerPhase(
       }
     }
 
-    reviewerResult = await invokeReviewer(
-      task,
+    const reviewerInvocation = await invokeWithLeaseHeartbeat(
       projectPath,
-      coordinatorResult?.guidance,
-      coordinatorResult?.decision,
-      undefined,
-      leaseFence?.runnerId
+      leaseFence,
+      () =>
+        invokeReviewer(
+          task,
+          projectPath,
+          coordinatorResult?.guidance,
+          coordinatorResult?.decision,
+          undefined,
+          leaseFence?.runnerId
+        )
     );
+    if (reviewerInvocation.superseded || !reviewerInvocation.result) {
+      if (!jsonMode) {
+        console.log('\n↺ Lease ownership changed during reviewer invocation; skipping post-processing in this runner.');
+      }
+      return;
+    }
+    reviewerResult = reviewerInvocation.result;
 
     if (!reviewerResult.success || reviewerResult.timedOut) {
       const providerName =
@@ -1326,11 +1425,20 @@ export async function runReviewerPhase(
     }
   }
 
-  // STEP 5: Log orchestrator decision for audit trail
-  addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {
+  // STEP 5: Log orchestrator decision for audit trail (non-transition row).
+  // Concrete status transitions are recorded by approve/reject/update calls below.
+  addAuditEntry(db, task.id, task.status, task.status, 'orchestrator', {
     actorType: 'orchestrator',
     notes: `[${decision.decision}] ${decision.reasoning} (confidence: ${decision.confidence})`,
+    category: 'decision',
   });
+
+  if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+    if (!jsonMode) {
+      console.log('\n↺ Lease ownership changed before applying reviewer decision; skipping in this runner.');
+    }
+    return;
+  }
 
   // STEP 5.5: Create follow-up tasks if any (ONLY on approval)
   if (decision.decision === 'approve' && decision.follow_up_tasks && decision.follow_up_tasks.length > 0) {
@@ -1383,7 +1491,12 @@ export async function runReviewerPhase(
         console.log(`\n✓ Task APPROVED (confidence: ${decision.confidence})`);
         console.log('Pushing to git...');
       }
-      refreshParallelWorkstreamLease(projectPath, leaseFence);
+      if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+        if (!jsonMode) {
+          console.log('\n↺ Lease ownership lost before review push; skipping push in this runner.');
+        }
+        return;
+      }
       const pushResult = pushToRemote(projectPath, 'origin', branchName);
       if (!jsonMode && pushResult.success) {
         console.log(`Pushed successfully (${pushResult.commitHash})`);
@@ -1406,7 +1519,12 @@ export async function runReviewerPhase(
         console.log(`\n! Task DISPUTED (confidence: ${decision.confidence})`);
         console.log('Pushing current work and moving to next task.');
       }
-      refreshParallelWorkstreamLease(projectPath, leaseFence);
+      if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+        if (!jsonMode) {
+          console.log('\n↺ Lease ownership lost before dispute push; skipping push in this runner.');
+        }
+        return;
+      }
       const disputePush = pushToRemote(projectPath, 'origin', branchName);
       if (!jsonMode && disputePush.success) {
         console.log(`Pushed disputed work (${disputePush.commitHash})`);

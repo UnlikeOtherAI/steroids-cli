@@ -13,6 +13,11 @@ export interface ParsedReviewerOutput {
   followUpTasks: { title: string; description: string }[];
 }
 
+interface ParsedFollowUpBullet {
+  key: string;
+  value: string;
+}
+
 export class SignalParser {
   /**
    * Removes all content inside Markdown code fences
@@ -98,14 +103,8 @@ export class SignalParser {
     
     if (taskSectionMatch) {
        const taskText = taskSectionMatch[1];
-       const bulletRegex = /(?:^|\n)(?:[-*]|\d+\.)\s+(.*?):\s*(.*?)(?=\n(?:[-*]|\d+\.)|\n\n|$)/gs;
-       let bulletMatch;
-       while ((bulletMatch = bulletRegex.exec(taskText)) !== null) {
-         followUpTasks.push({
-           title: bulletMatch[1].replace(/(^\*+)|(\*+$)/g, '').trim(),
-           description: bulletMatch[2].replace(/^(?:\*+)?\s*/, '').replace(/(\*+$)/g, '').trim()
-         });
-       }
+       const bullets = this.extractFollowUpBullets(taskText);
+       followUpTasks.push(...this.toFollowUpTasks(bullets));
     }
 
     return {
@@ -113,5 +112,58 @@ export class SignalParser {
       notes: output.trim(),
       followUpTasks
     };
+  }
+
+  private static normalizeFollowUpPart(value: string): string {
+    return value
+      .trim()
+      .replace(/^`+|`+$/g, '')
+      .replace(/^(\*+)\s*/, '')
+      .replace(/\s*(\*+)$/g, '')
+      .trim();
+  }
+
+  private static isPlaceholderValue(value: string): boolean {
+    const normalized = value.trim().toLowerCase();
+    return normalized === '' || normalized === 'title' || normalized === 'description';
+  }
+
+  private static extractFollowUpBullets(taskText: string): ParsedFollowUpBullet[] {
+    const bullets: ParsedFollowUpBullet[] = [];
+    const bulletRegex = /(?:^|\n)(?:[-*]|\d+\.)\s+(.*?):\s*(.*?)(?=\n(?:[-*]|\d+\.)|\n\n|$)/gs;
+    let bulletMatch: RegExpExecArray | null;
+    while ((bulletMatch = bulletRegex.exec(taskText)) !== null) {
+      const key = this.normalizeFollowUpPart(bulletMatch[1]);
+      const value = this.normalizeFollowUpPart(bulletMatch[2]);
+      if (!key || !value) continue;
+      bullets.push({ key, value });
+    }
+    return bullets;
+  }
+
+  private static toFollowUpTasks(
+    bullets: ParsedFollowUpBullet[]
+  ): { title: string; description: string }[] {
+    const tasks: { title: string; description: string }[] = [];
+    let pendingTitle: string | null = null;
+
+    for (const bullet of bullets) {
+      const key = bullet.key.toLowerCase();
+      if (key === 'title') {
+        pendingTitle = this.isPlaceholderValue(bullet.value) ? null : bullet.value;
+        continue;
+      }
+      if (key === 'description') {
+        if (pendingTitle && !this.isPlaceholderValue(bullet.value)) {
+          tasks.push({ title: pendingTitle, description: bullet.value });
+          pendingTitle = null;
+        }
+        continue;
+      }
+      tasks.push({ title: bullet.key, description: bullet.value });
+      pendingTitle = null;
+    }
+
+    return tasks;
   }
 }
