@@ -51,7 +51,7 @@ export const SystemLogsPage: React.FC = () => {
   const fetchLogsList = async (projectPath: string) => {
     setLoadingList(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/projects/logs?path=${encodeURIComponent(projectPath)}`);
+      const response = await fetch(`${API_BASE_URL}/api/projects/logs?path=${encodeURIComponent(projectPath)}`);
       const data = await response.json();
       if (data.success) {
         setLogs(data.logs);
@@ -71,7 +71,7 @@ export const SystemLogsPage: React.FC = () => {
   const fetchLogContent = async (projectPath: string, logPath: string) => {
     setLoadingContent(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/projects/logs/content?path=${encodeURIComponent(projectPath)}&file=${encodeURIComponent(logPath)}`);
+      const response = await fetch(`${API_BASE_URL}/api/projects/logs/content?path=${encodeURIComponent(projectPath)}&file=${encodeURIComponent(logPath)}`);
       if (response.ok) {
         const text = await response.text();
         setLogContent(text);
