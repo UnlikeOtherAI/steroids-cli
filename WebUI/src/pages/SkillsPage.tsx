@@ -15,8 +15,31 @@ interface SkillContent extends Skill {
 
 function SkillMarkdown({ content }: { content: string }): JSX.Element {
   return (
-    <div className="prose prose-invert max-w-none text-text-primary">
-      <ReactMarkdown>{content}</ReactMarkdown>
+    <div className="skill-markdown max-w-none text-text-primary">
+      <ReactMarkdown
+        components={{
+          h1: ({ children, ...props }) => <h1 className="text-3xl font-bold my-3" {...props}>{children}</h1>,
+          h2: ({ children, ...props }) => <h2 className="text-2xl font-semibold my-2.5" {...props}>{children}</h2>,
+          h3: ({ children, ...props }) => <h3 className="text-xl font-semibold my-2" {...props}>{children}</h3>,
+          p: ({ children, ...props }) => <p className="mb-3 leading-relaxed" {...props}>{children}</p>,
+          ul: ({ children, ...props }) => <ul className="list-disc pl-6 mb-3 space-y-1" {...props}>{children}</ul>,
+          ol: ({ children, ...props }) => <ol className="list-decimal pl-6 mb-3 space-y-1" {...props}>{children}</ol>,
+          li: ({ children, ...props }) => <li className="leading-relaxed" {...props}>{children}</li>,
+          strong: ({ children, ...props }) => <strong className="font-semibold" {...props}>{children}</strong>,
+          em: ({ children, ...props }) => <em className="italic" {...props}>{children}</em>,
+          code: ({ children, ...props }) => (
+            <code className="font-mono text-sm bg-bg-surface rounded px-1 py-0.5" {...props}>
+              {children}
+            </code>
+          ),
+          pre: ({ children, ...props }) => <pre className="bg-bg-surface rounded-lg p-3 overflow-x-auto" {...props}>{children}</pre>,
+          blockquote: ({ children, ...props }) => (
+            <blockquote className="border-l-4 border-accent pl-4 italic text-text-secondary my-3" {...props}>{children}</blockquote>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -206,7 +229,7 @@ export const SkillsPage: React.FC = () => {
                 </button>
               )}
             </div>
-            <div className="p-8 flex-1 overflow-y-auto prose prose-invert max-w-none text-text-primary">
+            <div className="p-8 flex-1 overflow-y-auto max-w-none text-text-primary">
               <SkillMarkdown content={selectedSkill.content} />
             </div>
           </div>
