@@ -7,8 +7,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { loadConfigFile, type SteroidsConfig } from '../config/loader.js';
-import { getSkillContent } from '../commands/skills.js';
-
 import type { Task, RejectionEntry } from '../database/queries.js';
 
 /**
@@ -383,15 +381,16 @@ export function buildSkillsSection(projectPath: string): string {
     const loadedSkills = skillsFiles.map((file: string) => {
       const skillName = file.replace('.md', '');
       const absolutePath = path.resolve(skillsDir, file);
-      return `- **${skillName}**: \`${absolutePath}\``;
+      const skillLink = `file://${encodeURI(absolutePath)}`;
+      return `- [${skillName}](${skillLink})`;
     });
     
     return `\n---
 
 ## Assigned Project Skills
 
-The following skills and guidelines have been explicitly assigned to this project. 
-If you work on anything related to the name of the skill, you MUST use the \`read_file\` tool to read these files for more instructions before proceeding.
+The following skills and guidelines have been explicitly assigned to this project.
+If your work is related to one of these skill areas, you MUST use the \`read_file\` tool on the linked files before proceeding.
 
 ${loadedSkills.join('\n')}
 
