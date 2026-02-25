@@ -23,10 +23,8 @@ import { getRegisteredProject } from './projects.js';
 import { execSync } from 'node:child_process';
 import { runCoderPhase, runReviewerPhase } from '../commands/loop-phases.js';
 import { pushToRemote } from '../git/push.js';
-import {
-  openGlobalDatabase,
-  withGlobalDatabase,
-} from './global-db.js';
+import { withGlobalDatabase } from './global-db.js';
+import { ensureWorkspaceSteroidsSymlink } from '../parallel/clone.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,6 +80,30 @@ function refreshParallelWorkstreamLease(
   });
 }
 
+function resolveParallelSourceProjectPath(parallelSessionId: string | undefined): string | null {
+  if (!parallelSessionId) {
+    return null;
+  }
+
+  return withGlobalDatabase((db) => {
+    const row = db
+      .prepare('SELECT project_path FROM parallel_sessions WHERE id = ? LIMIT 1')
+      .get(parallelSessionId) as { project_path: string } | undefined;
+    return row?.project_path ?? null;
+  });
+}
+
+function ensureParallelWorkspaceSteroids(
+  workspacePath: string,
+  sourceProjectPath: string | null
+): void {
+  if (!sourceProjectPath) {
+    return;
+  }
+
+  ensureWorkspaceSteroidsSymlink(workspacePath, sourceProjectPath);
+}
+
 export interface LoopOptions {
   projectPath: string;
   once?: boolean;
@@ -111,6 +133,10 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
     branchName = 'main',
   } = options;
   const activeSectionIds = resolveSectionIds(sectionId, sectionIds);
+  const parallelSourceProjectPath = resolveParallelSourceProjectPath(options.parallelSessionId);
+
+  // Parallel workspaces use a `.steroids` symlink; repair it if a prior command deleted it.
+  ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
 
   const { db, close } = openDatabase(projectPath);
 
@@ -150,6 +176,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       iteration++;
       console.log(`\n─── Iteration ${iteration} ───\n`);
       options.onIteration?.(iteration);
+      ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
       if (!refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId)) {
         console.log('Lease ownership lost for this workstream runner; stopping loop.');
         break;
@@ -172,6 +199,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           }
 
           // Invoke batch coder
+          ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
           console.log('\n>>> Invoking BATCH CODER...\n');
           const batchCoderResult = await invokeCoderBatch(batch.tasks, batch.sectionName, projectPath);
 
@@ -210,6 +238,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             console.log(`\n[BATCH MODE] ${tasksInReview.length} tasks ready for batch review\n`);
 
             // Invoke batch reviewer
+            ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
             console.log('\n>>> Invoking BATCH REVIEWER...\n');
             const batchReviewerResult = await invokeReviewerBatch(tasksInReview, batch.sectionName, projectPath);
 
@@ -368,6 +397,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
         options.onTaskStart?.(task.id, action);
         lockHeartbeat?.start();
         if (action === 'start') {
+          ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
           markTaskInProgress(db, task.id);
           await runCoderPhase(
             db,
@@ -384,6 +414,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             branchName
           );
         } else if (action === 'resume') {
+          ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
           await runCoderPhase(
             db,
             task,
@@ -399,6 +430,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             branchName
           );
         } else if (action === 'review') {
+          ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
           await runReviewerPhase(
             db,
             task,

@@ -9,11 +9,13 @@ import { getSkillContent } from '../commands/skills.js';
 
 import { execFileSync } from 'node:child_process';
 import {
+  appendFileSync,
   accessSync,
   constants,
   existsSync,
   lstatSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statfsSync,
@@ -21,7 +23,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 type StatFs = ReturnType<typeof statfsSync>;
 
@@ -171,6 +173,34 @@ function verifySteroidsSymlink(steroidsPath: string): void {
   accessSync(dbPath, constants.R_OK);
 }
 
+function ensureWorkspaceGitExcludesSteroids(workspacePath: string): void {
+  const excludePath = join(workspacePath, '.git', 'info', 'exclude');
+  mkdirSync(dirname(excludePath), { recursive: true });
+
+  let existing = '';
+  try {
+    existing = readFileSync(excludePath, 'utf-8');
+  } catch {
+    existing = '';
+  }
+
+  const patterns = ['.steroids', '/.steroids'];
+  const existingLines = new Set(
+    existing
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+  );
+
+  const missing = patterns.filter((pattern) => !existingLines.has(pattern));
+  if (missing.length === 0) {
+    return;
+  }
+
+  const prefix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
+  appendFileSync(excludePath, `${prefix}${missing.join('\n')}\n`, 'utf-8');
+}
+
 function enforceWorkspaceDependencyIsolation(workspacePath: string): void {
   const nodeModulesPath = join(workspacePath, 'node_modules');
   if (!existsSync(nodeModulesPath)) {
@@ -185,21 +215,33 @@ function enforceWorkspaceDependencyIsolation(workspacePath: string): void {
   }
 }
 
-function createWorkspaceSymlink(
-  clonePath: string,
+export function ensureWorkspaceSteroidsSymlink(
+  workspacePath: string,
   projectPath: string
 ): string {
   const targetSteroidsPath = resolveSteroidsDir(projectPath);
-  const destination = join(clonePath, '.steroids');
+  const destination = join(workspacePath, '.steroids');
 
+  let shouldRecreate = true;
   if (existsSync(destination)) {
-    rmSync(destination, { recursive: true, force: true });
+    try {
+      const stats = lstatSync(destination);
+      if (stats.isSymbolicLink() && realpathSync(destination) === targetSteroidsPath) {
+        shouldRecreate = false;
+      }
+    } catch {
+      shouldRecreate = true;
+    }
   }
 
-  // Use the resolved path to avoid symlink chain surprises.
-  symlinkSync(targetSteroidsPath, destination);
-  verifySteroidsSymlink(destination);
+  if (shouldRecreate) {
+    rmSync(destination, { recursive: true, force: true });
+    // Use the resolved path to avoid symlink chain surprises.
+    symlinkSync(targetSteroidsPath, destination);
+  }
 
+  verifySteroidsSymlink(destination);
+  ensureWorkspaceGitExcludesSteroids(workspacePath);
   return destination;
 }
 
@@ -268,7 +310,7 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
 
   let steroidsSymlinkPath: string;
   try {
-    steroidsSymlinkPath = createWorkspaceSymlink(workspacePath, projectPath);
+    steroidsSymlinkPath = ensureWorkspaceSteroidsSymlink(workspacePath, projectPath);
   } catch (error: unknown) {
     rmSync(workspacePath, { recursive: true, force: true });
     throw new WorkspaceCloneError('Failed to create .steroids symlink', error);
