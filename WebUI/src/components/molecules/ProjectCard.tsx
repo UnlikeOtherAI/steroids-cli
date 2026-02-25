@@ -88,7 +88,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
               <span className="text-gray-400 mx-1">/</span>
               <span className="text-orange-500">{project.stats.review}</span>
             </div>
-            <div className="text-[10px] text-gray-500 mt-1">[In Progress] / [In Review]</div>
+            <div className="text-[10px] text-gray-500 mt-1">Dev / Review</div>
           </div>
           <div className="bg-green-50 rounded-lg p-2 text-center">
             <div className="text-xl font-bold text-green-600">{project.stats.completed}</div>
