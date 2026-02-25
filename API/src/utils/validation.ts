@@ -22,8 +22,11 @@ export function isValidProjectPath(path: string): boolean {
     }
 
     // Must not be system directories
-    const forbidden = ['/etc', '/var', '/usr', '/bin', '/sbin', '/System'];
-    if (forbidden.some((f) => realPath.startsWith(f))) {
+    const forbidden = ['/etc', '/var', '/usr', '/bin', '/sbin'];
+    if (
+      forbidden.some((f) => realPath.startsWith(f)) || 
+      (realPath.startsWith('/System') && !realPath.startsWith('/System/Volumes/Data'))
+    ) {
       return false;
     }
 
