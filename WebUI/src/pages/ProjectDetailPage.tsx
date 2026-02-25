@@ -7,7 +7,7 @@ import {
   ArrowPathIcon,
   CheckIcon,
 } from '@heroicons/react/24/outline';
-import { projectsApi, activityApi, configApi, sectionsApi, ApiError, ConfigSchema } from '../services/api';
+import { projectsApi, activityApi, configApi, sectionsApi, ApiError, ConfigSchema, API_BASE_URL } from '../services/api';
 import { Project, ActivityStats, TimeRangeOption, Section, StorageInfo } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
@@ -173,7 +173,7 @@ export const ProjectDetailPage: React.FC = () => {
   const loadSkills = async () => {
     setSkillsLoading(true);
     try {
-      const res = await fetch(\`\${API_BASE_URL}/api/skills\`);
+      const res = await fetch(`${API_BASE_URL}/api/skills`);
       const json = await res.json();
       if (json.success) setAvailableSkills(json.data);
     } catch (err) {

@@ -25,7 +25,7 @@ export const SkillsPage: React.FC = () => {
   const fetchSkills = async () => {
     setLoading(true);
     try {
-      const res = await fetch(\`\${API_BASE_URL}/api/skills\`);
+      const res = await fetch(`${API_BASE_URL}/api/skills`);
       const json = await res.json();
       if (json.success) {
         setSkills(json.data);
@@ -43,7 +43,7 @@ export const SkillsPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(\`\${API_BASE_URL}/api/skills/\${name}\`);
+      const res = await fetch(`${API_BASE_URL}/api/skills/${name}`);
       const json = await res.json();
       if (json.success) {
         setSelectedSkill(json.data);
@@ -62,7 +62,7 @@ export const SkillsPage: React.FC = () => {
     if (!editName || !editContent) return;
     setSaving(true);
     try {
-      const res = await fetch(\`\${API_BASE_URL}/api/skills/${editName}`, {
+      const res = await fetch(`${API_BASE_URL}/api/skills/${editName}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: editContent }),
