@@ -28,13 +28,6 @@ const CODEX_MODELS: ModelInfo[] = [
     contextWindow: 128000,
   },
   {
-    id: 'gpt-5.3-codex-spark',
-    name: 'GPT-5.3 Codex Spark',
-    recommendedFor: ['coder', 'reviewer'],
-    supportsStreaming: true,
-    contextWindow: 128000,
-  },
-  {
     id: 'o3',
     name: 'O3',
     recommendedFor: ['orchestrator'],
