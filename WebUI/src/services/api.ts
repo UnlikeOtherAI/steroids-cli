@@ -196,6 +196,19 @@ export interface CronStatusResponse {
   last_wakeup_at: string | null;
 }
 
+export interface WakeupResult {
+  project?: string;
+  action: 'started' | 'restarted' | 'skipped' | 'error';
+  reason?: string;
+  pendingTasks?: number;
+}
+
+export interface WakeupResponse {
+  success: boolean;
+  message: string;
+  wakeup: WakeupResult[];
+}
+
 export const runnersApi = {
   /**
    * List all runners
@@ -244,8 +257,8 @@ export const runnersApi = {
   /**
    * Force an immediate wakeup cycle
    */
-  async wakeupNow(): Promise<void> {
-    await fetchJson('/api/runners/wakeup/now', { method: 'POST' });
+  async wakeupNow(): Promise<WakeupResponse> {
+    return fetchJson<WakeupResponse>('/api/runners/wakeup/now', { method: 'POST' });
   },
 };
 

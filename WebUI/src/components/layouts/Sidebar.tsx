@@ -12,7 +12,8 @@ import {
   PauseIcon,
   BookOpenIcon,
 } from '@heroicons/react/24/outline';
-import { runnersApi } from '../../services/api';
+import { runnersApi, WakeupResult } from '../../services/api';
+import { WakeupModal } from '../molecules/WakeupModal';
 
 interface SidebarProps {
   projectName?: string;
@@ -43,6 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   const [lastWakeup, setLastWakeup] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [wakeupLoading, setWakeupLoading] = useState(false);
+  const [wakeupResults, setWakeupResults] = useState<WakeupResult[] | null>(null);
 
   const navItems = [
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
@@ -92,7 +94,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     if (wakeupLoading) return;
     setWakeupLoading(true);
     try {
-      await runnersApi.wakeupNow();
+      const res = await runnersApi.wakeupNow();
+      setWakeupResults(res.wakeup || []);
       await fetchCronStatus();
     } catch (err: any) {
       console.error('Failed to trigger wakeup:', err);
@@ -107,7 +110,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   };
 
   return (
-    <aside className="w-60 bg-sidebar flex flex-col h-full max-h-screen lg:rounded-l-xl">
+    <>
+      {wakeupResults && <WakeupModal results={wakeupResults} onClose={() => setWakeupResults(null)} />}
+      <aside className="w-60 bg-sidebar flex flex-col h-full max-h-screen lg:rounded-l-xl">
       <div className="py-4 pr-4 flex items-center justify-between overflow-hidden">
         <div className="flex items-center">
           <img src="/logo-hand.png" alt="" className="h-20 w-auto" style={{ marginLeft: '-2px' }} />
@@ -180,5 +185,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
         )}
       </div>
     </aside>
+    </>
   );
 };
