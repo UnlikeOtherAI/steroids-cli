@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { AppShell } from '../components/layouts';
 import { PlusIcon, DocumentIcon } from '@heroicons/react/24/outline';
 import ReactMarkdown from 'react-markdown';
 
@@ -86,9 +85,8 @@ export const SkillsPage: React.FC = () => {
   }, []);
 
   return (
-    <AppShell title="AI Skills Management">
-      <div className="flex h-full min-h-[600px] overflow-hidden">
-        {/* Left Column: List */}
+    <div className="flex h-full min-h-[600px] overflow-hidden -m-4">
+      {/* Left Column: List */}
         <div className="w-1/3 border-r border-border flex flex-col bg-bg-surface2">
           <div className="p-4 border-b border-border flex justify-between items-center">
             <h2 className="text-lg font-semibold text-text-primary">All Skills</h2>
@@ -195,6 +193,5 @@ export const SkillsPage: React.FC = () => {
           )}
         </div>
       </div>
-    </AppShell>
   );
 };

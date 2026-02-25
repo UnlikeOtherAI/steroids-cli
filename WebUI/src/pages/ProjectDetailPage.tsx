@@ -57,6 +57,10 @@ export const ProjectDetailPage: React.FC = () => {
   const [clearing, setClearing] = useState(false);
   const [clearMsg, setClearMsg] = useState<string | null>(null);
 
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [availableSkills, setAvailableSkills] = useState<{name: string, type: string}[]>([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+
   // Settings state
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSchema, setSettingsSchema] = useState<ConfigSchema | null>(null);
@@ -164,6 +168,27 @@ export const ProjectDetailPage: React.FC = () => {
       setClearing(false);
     }
   };
+
+
+  const loadSkills = async () => {
+    setSkillsLoading(true);
+    try {
+      const res = await fetch('http://localhost:3501/api/skills');
+      const json = await res.json();
+      if (json.success) setAvailableSkills(json.data);
+    } catch (err) {
+      console.error('Failed to load skills:', err);
+    } finally {
+      setSkillsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (skillsOpen && availableSkills.length === 0) {
+      loadSkills();
+      if (!settingsSchema) loadSettings();
+    }
+  }, [skillsOpen]);
 
   const loadSettings = useCallback(async () => {
     if (!decodedPath) return;
@@ -587,6 +612,111 @@ export const ProjectDetailPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      
+      {/* Project Skills */}
+      <div className="mb-8">
+        <button
+          onClick={() => setSkillsOpen(!skillsOpen)}
+          className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
+        >
+          {skillsOpen ? (
+            <ChevronDownIcon className="w-5 h-5" />
+          ) : (
+            <ChevronRightIcon className="w-5 h-5" />
+          )}
+          <i className="fa-solid fa-book-open w-5 h-5 flex items-center justify-center text-sm"></i>
+          <span>Project Skills Assigned</span>
+        </button>
+
+        {skillsOpen && (
+          <div className="bg-bg-surface rounded-lg p-6 mb-8 shadow-sm border border-border">
+            <p className="text-sm text-text-muted mb-6">
+              Select which skills this project should adhere to. These guidelines are injected into the context of every AI agent working on this project.
+            </p>
+            
+            {skillsLoading || settingsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <ArrowPathIcon className="w-6 h-6 animate-spin text-text-muted" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {availableSkills.map(skill => {
+                    const currentSkills = ((settingsChanges.skills !== undefined ? settingsChanges.skills : settingsConfig.skills) as string[]) || [];
+                    const isAssigned = currentSkills.includes(skill.name);
+                    
+                    return (
+                      <label key={skill.name} className="flex items-start gap-3 p-4 rounded-lg border border-border bg-bg-surface2 hover:border-accent/50 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={isAssigned}
+                          onChange={(e) => {
+                            const newSkills = e.target.checked 
+                              ? [...currentSkills, skill.name]
+                              : currentSkills.filter(s => s !== skill.name);
+                            handleSettingsChange('skills', newSkills);
+                          }}
+                          className="mt-1 w-4 h-4 text-accent bg-bg-base border-border rounded focus:ring-accent focus:ring-2"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-text-primary">{skill.name}</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${skill.type === 'custom' ? 'bg-success-soft text-success' : 'bg-info-soft text-info'}`}>
+                              {skill.type}
+                            </span>
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                
+                {availableSkills.length === 0 && (
+                  <div className="text-center py-8 text-text-muted">
+                    No skills found. Create one in the Skills tab.
+                  </div>
+                )}
+                
+                {/* Save Bar */}
+                <div className="flex items-center justify-between mt-6 pt-4 border-t border-border">
+                  <div className="flex items-center gap-2">
+                    {Object.keys(settingsChanges).length > 0 && (
+                      <span className="text-sm text-text-muted">
+                        Unsaved changes pending
+                      </span>
+                    )}
+                    {settingsSaveStatus === 'success' && (
+                      <span className="flex items-center gap-1 text-sm text-success">
+                        <CheckIcon className="w-4 h-4" />
+                        Saved
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleSettingsSave}
+                    disabled={Object.keys(settingsChanges).length === 0 || settingsSaving}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      Object.keys(settingsChanges).length > 0
+                        ? 'bg-accent text-white hover:bg-accent/80'
+                        : 'bg-bg-base text-text-muted cursor-not-allowed'
+                    }`}
+                  >
+                    {settingsSaving ? (
+                      <span className="flex items-center gap-2">
+                        <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                        Saving...
+                      </span>
+                    ) : (
+                      'Save Assignments'
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
