@@ -89,7 +89,7 @@ export const SkillsPage: React.FC = () => {
   return (
     <div className="flex h-full min-h-[600px] overflow-hidden -m-4">
       <div className="w-1/3 flex flex-col bg-bg-surface2">
-        <div className="px-5 py-4 flex justify-between items-start">
+        <div className="px-5 py-4 flex justify-between items-center">
           <h2 className="text-lg font-semibold text-text-primary">All Skills</h2>
           <button
             onClick={() => {
@@ -125,7 +125,7 @@ export const SkillsPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col bg-bg-surface">
+          <div className="flex-1 flex flex-col bg-bg-surface">
         {error && (
           <div className="m-4 p-4 bg-danger-soft text-danger rounded-lg text-sm">{error}</div>
         )}
@@ -165,7 +165,7 @@ export const SkillsPage: React.FC = () => {
           </div>
         ) : selectedSkill ? (
           <div className="flex-1 flex flex-col">
-            <div className="p-5 pr-8 flex justify-between items-start bg-bg-surface2">
+            <div className="p-5 pr-8 flex justify-between items-center bg-bg-surface2">
               <div className="leading-tight">
                 <h2 className="text-xl font-bold text-text-primary">{selectedSkill.name}.md</h2>
                 <span className="text-sm text-text-secondary">{selectedSkill.type} skill</span>
@@ -176,8 +176,8 @@ export const SkillsPage: React.FC = () => {
                     setEditName(selectedSkill.name);
                     setEditContent(selectedSkill.content);
                     setIsEditing(true);
-                  }}
-                  className="px-4 py-2 bg-bg-elevated rounded-lg text-sm text-text-primary hover:shadow-card mt-1"
+                }}
+                  className="px-4 py-2 bg-bg-elevated rounded-lg text-sm text-text-primary hover:shadow-card"
                 >
                   Edit Skill
                 </button>

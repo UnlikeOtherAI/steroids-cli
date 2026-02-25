@@ -1,15 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
-import { ProjectsPage } from './pages/ProjectsPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { ActivityListPage } from './pages/ActivityListPage';
-import { RunnersPage } from './pages/RunnersPage';
-import { ProjectDetailPage } from './pages/ProjectDetailPage';
-import { ProjectTasksPage } from './pages/ProjectTasksPage';
-import { TaskDetailPage } from './pages/TaskDetailPage';
-import { SystemLogsPage } from './pages/SystemLogsPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { SkillsPage } from './pages/SkillsPage';
 import { AppShell } from './components/layouts';
 import { AISetupModal } from './components/onboarding/AISetupModal';
 import { CreditExhaustionModal } from './components/molecules/CreditExhaustionModal';
@@ -17,6 +7,17 @@ import { useProject } from './contexts/ProjectContext';
 import { configApi, creditAlertsApi } from './services/api';
 import type { CreditAlert } from './services/api';
 import './App.css';
+
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(({ DashboardPage }) => ({ default: DashboardPage })));
+const ActivityListPage = lazy(() => import('./pages/ActivityListPage').then(({ ActivityListPage }) => ({ default: ActivityListPage })));
+const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage').then(({ ProjectDetailPage }) => ({ default: ProjectDetailPage })));
+const ProjectTasksPage = lazy(() => import('./pages/ProjectTasksPage').then(({ ProjectTasksPage }) => ({ default: ProjectTasksPage })));
+const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage').then(({ TaskDetailPage }) => ({ default: TaskDetailPage })));
+const RunnersPage = lazy(() => import('./pages/RunnersPage').then(({ RunnersPage }) => ({ default: RunnersPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })));
+const SkillsPage = lazy(() => import('./pages/SkillsPage').then(({ SkillsPage }) => ({ default: SkillsPage })));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(({ ProjectsPage }) => ({ default: ProjectsPage })));
+const SystemLogsPage = lazy(() => import('./pages/SystemLogsPage').then(({ SystemLogsPage }) => ({ default: SystemLogsPage })));
 
 function App() {
   const { selectedProject } = useProject();
@@ -123,18 +124,23 @@ function App() {
       )}
       <div className={blurContent ? 'blur-sm pointer-events-none' : ''}>
         <AppShell title={getPageTitle()} project={selectedProject}>
-          <Routes>
-            <Route path="/" element={<DashboardPage project={selectedProject} />} />
-            <Route path="/projects" element={<ProjectsPage />} />
-            <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
-            <Route path="/project/:projectPath/tasks" element={<ProjectTasksPage />} />
-            <Route path="/activity" element={<ActivityListPage />} />
-            <Route path="/task/:taskId" element={<TaskDetailPage />} />
-            <Route path="/runners" element={<RunnersPage />} />
-            <Route path="/logs" element={<SystemLogsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/skills" element={<SkillsPage />} />
-          </Routes>
+          <Suspense fallback={<div className="p-6 text-sm text-text-muted">Loading page…</div>}>
+            <Routes>
+              <Route
+                path="/"
+                element={<DashboardPage project={selectedProject} />}
+              />
+              <Route path="/projects" element={<ProjectsPage />} />
+              <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
+              <Route path="/project/:projectPath/tasks" element={<ProjectTasksPage />} />
+              <Route path="/activity" element={<ActivityListPage />} />
+              <Route path="/task/:taskId" element={<TaskDetailPage />} />
+              <Route path="/runners" element={<RunnersPage />} />
+              <Route path="/logs" element={<SystemLogsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/skills" element={<SkillsPage />} />
+            </Routes>
+          </Suspense>
         </AppShell>
       </div>
     </>
