@@ -173,7 +173,7 @@ export const ProjectDetailPage: React.FC = () => {
   const loadSkills = async () => {
     setSkillsLoading(true);
     try {
-      const res = await fetch('http://localhost:3501/api/skills');
+      const res = await fetch(\`\${API_BASE_URL}/api/skills\`);
       const json = await res.json();
       if (json.success) setAvailableSkills(json.data);
     } catch (err) {

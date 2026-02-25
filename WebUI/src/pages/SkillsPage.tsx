@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PlusIcon, DocumentIcon } from '@heroicons/react/24/outline';
 import ReactMarkdown from 'react-markdown';
+import { API_BASE_URL } from '../services/api';
 
 interface Skill {
   name: string;
@@ -24,7 +25,7 @@ export const SkillsPage: React.FC = () => {
   const fetchSkills = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:3501/api/skills');
+      const res = await fetch(\`\${API_BASE_URL}/api/skills\`);
       const json = await res.json();
       if (json.success) {
         setSkills(json.data);
@@ -42,7 +43,7 @@ export const SkillsPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`http://localhost:3501/api/skills/${name}`);
+      const res = await fetch(\`\${API_BASE_URL}/api/skills/\${name}\`);
       const json = await res.json();
       if (json.success) {
         setSelectedSkill(json.data);
@@ -61,7 +62,7 @@ export const SkillsPage: React.FC = () => {
     if (!editName || !editContent) return;
     setSaving(true);
     try {
-      const res = await fetch(`http://localhost:3501/api/skills/${editName}`, {
+      const res = await fetch(\`\${API_BASE_URL}/api/skills/${editName}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: editContent }),
