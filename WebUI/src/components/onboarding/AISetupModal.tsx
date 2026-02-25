@@ -252,7 +252,16 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     const envVar = API_KEY_ENV_VARS[config.provider];
 
     // Check if this value is inherited from global config
-    const inheritedValue = inheritedConfig?.ai ? inheritedConfig.ai[role as keyof typeof inheritedConfig.ai] : null;
+    let inheritedValue = null;
+    if (inheritedConfig?.ai) {
+      if (typeof role === 'number') {
+        // Multi-review: access reviewers array
+        inheritedValue = inheritedConfig.ai.reviewers?.[role];
+      } else {
+        // Single review or other roles
+        inheritedValue = inheritedConfig.ai[role as keyof typeof inheritedConfig.ai];
+      }
+    }
     const isInherited = isProjectLevel && !config.provider && inheritedValue;
 
     return (
@@ -279,22 +288,19 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
             <select
               value={config.provider}
               onChange={(e) => onProviderChange(role, e.target.value)}
-              disabled={isProjectLevel && !config.provider && inheritedValue}
-              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent"
             >
-              {isProjectLevel && !config.provider && inheritedValue && (
+              {isInherited && (
                 <option value="">(Inherited)</option>
               )}
               {!isInherited && (
-                <>
-                  <option value="">Select provider...</option>
-                  {providers.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}{!p.installed ? ' (not installed)' : ''}
-                    </option>
-                  ))}
-                </>
+                <option value="">Select provider...</option>
               )}
+              {providers.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name}{!p.installed ? ' (not installed)' : ''}
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -326,8 +332,8 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
               className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {isInherited ? (
-                <option value={inheritedConfig?.ai?.[role as keyof typeof inheritedConfig.ai]?.model || ''}>
-                  {inheritedConfig?.ai?.[role as keyof typeof inheritedConfig.ai]?.model || '(inherited from global)'}
+                <option value={inheritedValue?.model || ''}>
+                  {inheritedValue?.model || '(inherited from global)'}
                 </option>
               ) : (
                 <>
@@ -389,7 +395,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
-      <div className="relative bg-bg-shell rounded-2xl shadow-2xl w-full max-w-xl mx-4 overflow-hidden">
+      <div className="relative bg-bg-shell rounded-2xl shadow-2xl w-full max-w-3xl mx-4 overflow-hidden">
         <div className="px-6 py-4 border-b border-border">
           <div className="flex items-start justify-between">
             <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
