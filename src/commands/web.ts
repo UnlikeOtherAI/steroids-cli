@@ -223,32 +223,49 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
       } else {
         // Check if we need to update to match CLI version
         out.log('Checking version...');
+        const expectedTag = `v${CLI_VERSION}`;
         try {
-          const currentTag = execSync('git describe --tags --exact-match', {
+          const currentHead = execSync('git rev-parse HEAD', {
             cwd: WEB_DIR,
             encoding: 'utf-8',
-            stdio: ['pipe', 'pipe', 'pipe']
+            stdio: ['pipe', 'pipe', 'pipe'],
           }).trim();
-          const expectedTag = `v${CLI_VERSION}`;
 
-          if (currentTag === expectedTag) {
-            out.log(`Already on ${expectedTag}.`);
-          } else {
-            out.log(`Updating from ${currentTag} to ${expectedTag}...`);
-            if (hasRemoteTag(expectedTag, WEB_DIR)) {
-              execSync(`git fetch --depth 1 origin tag ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
-              execSync(`git checkout ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
+          if (hasRemoteTag(expectedTag, WEB_DIR)) {
+            execSync(`git fetch --depth 1 origin tag ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
+            const expectedHead = execSync(`git rev-list -n 1 ${expectedTag}`, {
+              cwd: WEB_DIR,
+              encoding: 'utf-8',
+              stdio: ['pipe', 'pipe', 'pipe'],
+            }).trim();
+
+            if (currentHead === expectedHead) {
+              out.log(`Already on ${expectedTag}.`);
             } else {
-              // Tag not yet published — pull latest main instead
-              out.log(`Tag ${expectedTag} not found on remote, pulling latest main...`);
-              execSync(`git fetch origin main`, { cwd: WEB_DIR, stdio: 'inherit' });
+              out.log(`Updating to ${expectedTag}...`);
+              execSync(`git checkout ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
+              installAndBuild(out);
+            }
+          } else {
+            // Tag not yet published — pull latest main instead
+            out.log(`Tag ${expectedTag} not found on remote, pulling latest main...`);
+            execSync(`git fetch origin main`, { cwd: WEB_DIR, stdio: 'inherit' });
+            const latestMainHead = execSync('git rev-parse origin/main', {
+              cwd: WEB_DIR,
+              encoding: 'utf-8',
+              stdio: ['pipe', 'pipe', 'pipe'],
+            }).trim();
+
+            if (currentHead === latestMainHead) {
+              out.log('Already on latest main.');
+            } else {
               execSync(`git checkout -B main origin/main`, { cwd: WEB_DIR, stdio: 'inherit' });
               execSync(`git pull --ff-only origin main`, { cwd: WEB_DIR, stdio: 'inherit' });
+              installAndBuild(out);
             }
-            installAndBuild(out);
           }
         } catch {
-          out.log('Could not verify version. Launching with current code.');
+          out.log('Could not verify or sync version. Launching with current code.');
         }
       }
       launchProcesses(out);

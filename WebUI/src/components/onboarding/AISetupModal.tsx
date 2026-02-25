@@ -79,10 +79,27 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
       ]);
       setProviders(providerList);
 
+      // Extract global AI config for inheritance logic
+      const globalAI = globalConfig.ai as any;
+
       // Pre-fill from existing config (project-level takes precedence)
       const configToUse = isProjectLevel && projectConfig ? projectConfig : globalConfig;
       const ai = configToUse.ai as any;
-      if (ai) {
+
+      if (isProjectLevel && globalAI && !projectConfig?.ai) {
+        // Project-level with no project config - show inherited with global config
+        if (globalAI.orchestrator?.provider) setOrchestrator({ provider: '', model: globalAI.orchestrator.model || '' });
+        if (globalAI.coder?.provider) setCoder({ provider: '', model: globalAI.coder.model || '' });
+
+        if (globalAI.reviewers && Array.isArray(globalAI.reviewers) && globalAI.reviewers.length > 0) {
+          setUseMultiReview(true);
+          setReviewers(globalAI.reviewers.map((r: any) => ({ provider: '', model: r.model || '' })));
+          setReviewer({ provider: '', model: globalAI.reviewers[0].model || '' });
+        } else if (globalAI.reviewer?.provider) {
+          setReviewer({ provider: '', model: globalAI.reviewer.model || '' });
+        }
+      } else if (ai) {
+        // Use project config or global config directly
         if (ai.orchestrator?.provider) setOrchestrator({ provider: ai.orchestrator.provider, model: ai.orchestrator.model || '' });
         if (ai.coder?.provider) setCoder({ provider: ai.coder.provider, model: ai.coder.model || '' });
 
@@ -225,7 +242,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     icon: string,
     config: RoleConfig,
     onProviderChange: (role: any, provider: string) => void,
-    onModelChange: (val: any) => void,
+    _onModelChange: (val: any) => void,
     role: any
   ) => {
     const selectedProvider = getProviderById(config.provider);
@@ -262,14 +279,22 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
             <select
               value={config.provider}
               onChange={(e) => onProviderChange(role, e.target.value)}
-              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent"
+              disabled={isProjectLevel && !config.provider && inheritedValue}
+              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <option value="">Select provider...</option>
-              {providers.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name}{!p.installed ? ' (not installed)' : ''}
-                </option>
-              ))}
+              {isProjectLevel && !config.provider && inheritedValue && (
+                <option value="">(Inherited)</option>
+              )}
+              {!isInherited && (
+                <>
+                  <option value="">Select provider...</option>
+                  {providers.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}{!p.installed ? ' (not installed)' : ''}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
           </div>
           <div>
@@ -294,17 +319,13 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                 </button>
               )}
             </div>
-            <select
-              value={config.model}
-              onChange={(e) => onModelChange(e.target.value)}
-              disabled={!config.provider || isNotInstalled || refreshingProvider === config.provider}
-              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-50"
-            >
-              <option value="">Select model...</option>
-              {(models[config.provider] || []).map(m => (
-                <option key={m.id} value={m.id}>{m.name || m.id}</option>
-              ))}
-            </select>
+            <input
+              type="text"
+              value={isInherited && inheritedConfig?.ai?.[role as keyof typeof inheritedConfig.ai]?.model ? inheritedConfig.ai[role as keyof typeof inheritedConfig.ai].model : config.model}
+              disabled={true}
+              placeholder="(inherited from global)"
+              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 cursor-not-allowed"
+            />
           </div>
         </div>
 
