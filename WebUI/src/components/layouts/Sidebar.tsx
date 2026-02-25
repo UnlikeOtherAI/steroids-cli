@@ -10,6 +10,7 @@ import {
   XMarkIcon,
   BoltIcon,
   PauseIcon,
+  BookOpenIcon,
 } from '@heroicons/react/24/outline';
 import { runnersApi } from '../../services/api';
 
@@ -48,6 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     { to: '/runners', icon: PlayIcon, label: 'Runners' },
     { to: '/projects', icon: FolderIcon, label: 'Projects' },
     { to: '/logs', icon: DocumentTextIcon, label: 'System Logs' },
+    { to: '/skills', icon: BookOpenIcon, label: 'Skills' },
     { to: '/settings', icon: Cog6ToothIcon, label: 'Settings' },
   ];
 

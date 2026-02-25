@@ -9,6 +9,7 @@ import { ProjectTasksPage } from './pages/ProjectTasksPage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
 import { SystemLogsPage } from './pages/SystemLogsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { SkillsPage } from './pages/SkillsPage';
 import { AppShell } from './components/layouts';
 import { AISetupModal } from './components/onboarding/AISetupModal';
 import { CreditExhaustionModal } from './components/molecules/CreditExhaustionModal';
@@ -77,6 +78,7 @@ function App() {
       case '/runners': return 'Runners';
       case '/logs': return 'System Logs';
       case '/settings': return 'Settings';
+      case '/skills': return 'Skills';
       default: return 'Dashboard';
     }
   };
@@ -131,6 +133,7 @@ function App() {
             <Route path="/runners" element={<RunnersPage />} />
             <Route path="/logs" element={<SystemLogsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/skills" element={<SkillsPage />} />
           </Routes>
         </AppShell>
       </div>

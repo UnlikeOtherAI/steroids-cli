@@ -16,6 +16,7 @@ import tasksRouter from './routes/tasks.js';
 import configRouter from './routes/config.js';
 import healthRouter from './routes/health.js';
 import incidentsRouter from './routes/incidents.js';
+import skillsRouter from './routes/skills.js';
 import { creditAlertRoutes } from './routes/credit-alerts.js';
 
 const PORT = process.env.PORT || 3501;
@@ -69,6 +70,7 @@ export function createApp(): express.Express {
   app.use('/api', configRouter);
   app.use('/api', healthRouter);
   app.use('/api', incidentsRouter);
+  app.use('/api', skillsRouter);
   app.use('/api/credit-alerts', creditAlertRoutes);
 
   // Health check
