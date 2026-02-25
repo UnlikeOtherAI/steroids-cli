@@ -13,6 +13,14 @@ interface SkillContent extends Skill {
   content: string;
 }
 
+function SkillMarkdown({ content }: { content: string }): JSX.Element {
+  return (
+    <div className="prose prose-invert max-w-none text-text-primary">
+      <ReactMarkdown>{content}</ReactMarkdown>
+    </div>
+  );
+}
+
 export const SkillsPage: React.FC = () => {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<SkillContent | null>(null);
@@ -22,6 +30,7 @@ export const SkillsPage: React.FC = () => {
   const [, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showMarkdownPreview, setShowMarkdownPreview] = useState(true);
 
   const fetchSkills = async () => {
     setLoading(true);
@@ -149,6 +158,20 @@ export const SkillsPage: React.FC = () => {
             />
             <div className="mt-4 flex justify-end gap-3">
               <button
+                onClick={() => setShowMarkdownPreview((prev) => !prev)}
+                className="px-3 py-2 border border-border rounded-lg text-text-secondary hover:bg-bg-surface2"
+              >
+                {showMarkdownPreview ? 'Hide' : 'Show'} Markdown Preview
+              </button>
+            </div>
+            {showMarkdownPreview && (
+              <div className="flex-1 mt-3 rounded-lg bg-bg-elevated p-4 overflow-auto">
+                <div className="text-sm text-text-secondary mb-2">Markdown Preview</div>
+                <SkillMarkdown content={editContent} />
+              </div>
+            )}
+            <div className="mt-4 flex justify-end gap-3">
+              <button
                 onClick={() => setIsEditing(false)}
                 className="px-6 py-2 border border-border rounded-lg text-text-secondary hover:bg-bg-surface2"
               >
@@ -184,7 +207,7 @@ export const SkillsPage: React.FC = () => {
               )}
             </div>
             <div className="p-8 flex-1 overflow-y-auto prose prose-invert max-w-none text-text-primary">
-              <ReactMarkdown>{selectedSkill.content}</ReactMarkdown>
+              <SkillMarkdown content={selectedSkill.content} />
             </div>
           </div>
         ) : (
