@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { XMarkIcon, CheckCircleIcon, ExclamationCircleIcon, MinusCircleIcon, PlayIcon, ArrowPathIcon, BoltIcon } from '@heroicons/react/24/outline';
 import { WakeupResult } from '../../services/api';
 
@@ -41,7 +42,7 @@ export const WakeupModal: React.FC<WakeupModalProps> = ({ results, onClose }) =>
   const totalStarted = results.filter(r => r.action === 'started' || r.action === 'restarted').length;
   const isGlobalMessage = results.length === 1 && !results[0].project;
 
-  return (
+  const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
       <div className="bg-bg-page rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] border border-border animate-fade-in">
         
@@ -122,6 +123,8 @@ export const WakeupModal: React.FC<WakeupModalProps> = ({ results, onClose }) =>
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 };
 
 
