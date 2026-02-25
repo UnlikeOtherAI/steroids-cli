@@ -56,6 +56,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
+  const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null);
 
   // Role configurations
   const [orchestrator, setOrchestrator] = useState<RoleConfig>({ provider: '', model: '' });
@@ -195,6 +196,20 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     setTimeout(() => setCopiedCommand(null), 2000);
   };
 
+  const refreshModels = async (providerId: string) => {
+    if (!providerId) return;
+    setRefreshingProvider(providerId);
+    try {
+      const response = await aiApi.getModels(providerId);
+      setModels(prev => ({ ...prev, [providerId]: response.models }));
+      setModelSources(prev => ({ ...prev, [providerId]: response.source }));
+    } catch (err) {
+      console.error('Failed to refresh models:', err);
+    } finally {
+      setRefreshingProvider(null);
+    }
+  };
+
   const getProviderById = (id: string) => providers.find(p => p.id === id);
 
   // Check if all fields are complete for validation
@@ -258,19 +273,31 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
             </select>
           </div>
           <div>
-            <label className="block text-xs text-text-secondary mb-1">
-              Model
-              {modelSources[config.provider] && (
-                <span className="ml-1 text-text-secondary/60">
-                  ({modelSources[config.provider] === 'cache' ? 'CLI' :
-                    modelSources[config.provider] === 'api' ? 'API' : 'static'})
-                </span>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs text-text-secondary">
+                Model
+                {modelSources[config.provider] && (
+                  <span className="ml-1 text-text-secondary/60">
+                    ({modelSources[config.provider] === 'cache' ? 'CLI' :
+                      modelSources[config.provider] === 'api' ? 'API' : 'static'})
+                  </span>
+                )}
+              </label>
+              {config.provider && !isNotInstalled && modelSources[config.provider] !== 'fallback' && (
+                <button
+                  onClick={() => refreshModels(config.provider)}
+                  disabled={refreshingProvider === config.provider}
+                  className="p-1 text-text-muted hover:text-accent disabled:opacity-50 transition-colors"
+                  title="Refresh models"
+                >
+                  <i className={`fa-solid fa-arrows-rotate ${refreshingProvider === config.provider ? 'animate-spin' : ''}`}></i>
+                </button>
               )}
-            </label>
+            </div>
             <select
               value={config.model}
               onChange={(e) => onModelChange(e.target.value)}
-              disabled={!config.provider || isNotInstalled}
+              disabled={!config.provider || isNotInstalled || refreshingProvider === config.provider}
               className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-50"
             >
               <option value="">Select model...</option>
