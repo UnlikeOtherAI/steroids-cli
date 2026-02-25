@@ -35,11 +35,6 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _type: 'string',
         _default: 'claude-sonnet-4-6',
       },
-      cli: {
-        _description: 'Path to CLI executable',
-        _type: 'string',
-        _default: '',
-      },
     },
     coder: {
       _description: 'AI settings for code generation',
@@ -54,16 +49,6 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _description: 'Model identifier for coder',
         _type: 'string',
         _default: 'claude-sonnet-4-6',
-      },
-      cli: {
-        _description: 'Path to CLI executable',
-        _type: 'string',
-        _default: '',
-      },
-      skipExternalSetup: {
-        _description: 'Auto-skip tasks marked as external/manual setup (Cloud SQL, etc.)',
-        _type: 'boolean',
-        _default: true,
       },
     },
     reviewer: {
@@ -80,55 +65,16 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _type: 'string',
         _default: 'claude-sonnet-4-6',
       },
-      cli: {
-        _description: 'Path to CLI executable',
-        _type: 'string',
-        _default: '',
-      },
     },
     reviewers: {
       _description: 'Multiple independent AI reviewers (all must approve)',
       _type: 'array',
       _default: [],
     },
-    review: {
-      _description: 'Review policy settings',
-      _type: 'object',
-      strict: {
-        _description: 'Fail if any reviewer is unavailable (strict mode)',
-        _type: 'boolean',
-        _default: true,
-      },
-    },
-  },
-  output: {
-    _description: 'Output formatting options',
-    _type: 'object',
-    format: {
-      _description: 'Default output format for CLI commands',
-      _type: 'string',
-      _options: ['table', 'json'] as const,
-      _default: 'table',
-    },
-    colors: {
-      _description: 'Enable colored output',
-      _type: 'boolean',
-      _default: true,
-    },
-    verbose: {
-      _description: 'Show detailed output',
-      _type: 'boolean',
-      _default: false,
-    },
   },
   git: {
     _description: 'Git workflow settings',
     _type: 'object',
-    autoPush: {
-      _description: 'Automatically push after task completion',
-      _type: 'boolean',
-      _default: true,
-    },
     remote: {
       _description: 'Remote name for push operations',
       _type: 'string',
@@ -139,45 +85,10 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _type: 'string',
       _default: 'main',
     },
-    commitPrefix: {
-      _description: 'Prefix for commit messages',
-      _type: 'string',
-      _default: '',
-    },
-    retryOnFailure: {
-      _description: 'Retry push on temporary failure',
-      _type: 'boolean',
-      _default: true,
-    },
   },
   runners: {
     _description: 'Runner daemon configuration',
     _type: 'object',
-    heartbeatInterval: {
-      _description: 'Interval between heartbeat updates',
-      _type: 'string',
-      _default: '30s',
-    },
-    staleTimeout: {
-      _description: 'Time after which runner is considered stale',
-      _type: 'string',
-      _default: '5m',
-    },
-    subprocessHangTimeout: {
-      _description: 'Kill subprocess if no output for this duration',
-      _type: 'string',
-      _default: '15m',
-    },
-    maxConcurrent: {
-      _description: 'Maximum concurrent runners (global)',
-      _type: 'number',
-      _default: 5,
-    },
-    logRetention: {
-      _description: 'How long to keep runner logs',
-      _type: 'string',
-      _default: '7d',
-    },
     daemonLogs: {
       _description: 'Enable daemon stdout/stderr logging to disk',
       _type: 'boolean',
@@ -221,45 +132,11 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _type: 'boolean',
         _default: true,
       },
-      cleanupOnFailure: {
-        _description: 'Preserve workspace clones after failures for debugging',
-        _type: 'boolean',
-        _default: false,
-      },
     },
   },
   health: {
     _description: 'Health check configuration',
     _type: 'object',
-    threshold: {
-      _description: 'Minimum health score (0-100)',
-      _type: 'number',
-      _default: 80,
-    },
-    checks: {
-      _description: 'Which checks to run',
-      _type: 'object',
-      git: {
-        _description: 'Check for clean git working tree',
-        _type: 'boolean',
-        _default: true,
-      },
-      deps: {
-        _description: 'Check dependencies are installed',
-        _type: 'boolean',
-        _default: true,
-      },
-      tests: {
-        _description: 'Run tests as part of health check',
-        _type: 'boolean',
-        _default: true,
-      },
-      lint: {
-        _description: 'Run linting as part of health check',
-        _type: 'boolean',
-        _default: true,
-      },
-    },
     sanitiseEnabled: {
       _description: 'Enable periodic project sanitise pass during wakeup',
       _type: 'boolean',
@@ -316,96 +193,9 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _default: 10,
     },
   },
-  locking: {
-    _description: 'Task and section locking settings',
-    _type: 'object',
-    taskTimeout: {
-      _description: 'Maximum time a task can be locked',
-      _type: 'string',
-      _default: '60m',
-    },
-    sectionTimeout: {
-      _description: 'Maximum time a section can be locked',
-      _type: 'string',
-      _default: '120m',
-    },
-    waitTimeout: {
-      _description: 'How long to wait for a lock before failing',
-      _type: 'string',
-      _default: '30m',
-    },
-    pollInterval: {
-      _description: 'How often to check for lock availability',
-      _type: 'string',
-      _default: '5s',
-    },
-  },
-  database: {
-    _description: 'Database settings',
-    _type: 'object',
-    autoMigrate: {
-      _description: 'Automatically run migrations on startup',
-      _type: 'boolean',
-      _default: true,
-    },
-    backupBeforeMigrate: {
-      _description: 'Create backup before running migrations',
-      _type: 'boolean',
-      _default: true,
-    },
-  },
-  logs: {
-    _description: 'Logging configuration',
-    _type: 'object',
-    retention: {
-      _description: 'How long to keep log files',
-      _type: 'string',
-      _default: '30d',
-    },
-    keepLogs: {
-      _description: 'Whether to persist logs to disk',
-      _type: 'boolean',
-      _default: true,
-    },
-    level: {
-      _description: 'Minimum log level to record',
-      _type: 'string',
-      _options: ['debug', 'info', 'warn', 'error'] as const,
-      _default: 'info',
-    },
-  },
-  disputes: {
-    _description: 'Dispute handling settings',
-    _type: 'object',
-    timeoutDays: {
-      _description: 'Days before stale dispute auto-resolution',
-      _type: 'number',
-      _default: 7,
-    },
-    autoCreateOnMaxRejections: {
-      _description: 'Auto-create dispute when task hits 15 rejections',
-      _type: 'boolean',
-      _default: false,
-    },
-    majorBlocksLoop: {
-      _description: 'Whether major disputes block the loop',
-      _type: 'boolean',
-      _default: false,
-    },
-  },
   projects: {
     _description: 'Project scanning settings',
     _type: 'object',
-    scanPaths: {
-      _description: 'Directories to scan for projects',
-      _type: 'array',
-      _default: ['~/Projects'],
-    },
-    excludePatterns: {
-      _description: 'Patterns to exclude from scanning',
-      _type: 'array',
-      _default: ['node_modules', '.git'],
-    },
     allowedPaths: {
       _description: 'Whitelist: only allow project registration from these directories (prefix match). Empty = allow all.',
       _type: 'array',
@@ -415,67 +205,6 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _description: 'Blacklist: block project registration from these directories (prefix match). Empty = block none.',
       _type: 'array',
       _default: [],
-    },
-  },
-  backup: {
-    _description: 'Backup configuration',
-    _type: 'object',
-    enabled: {
-      _description: 'Enable automatic backups',
-      _type: 'boolean',
-      _default: true,
-    },
-    retention: {
-      _description: 'How long to keep backups',
-      _type: 'string',
-      _default: '7d',
-    },
-    includeConfig: {
-      _description: 'Include config files in backup',
-      _type: 'boolean',
-      _default: true,
-    },
-    includeLogs: {
-      _description: 'Include log files in backup',
-      _type: 'boolean',
-      _default: false,
-    },
-  },
-  build: {
-    _description: 'Build settings',
-    _type: 'object',
-    timeout: {
-      _description: 'Maximum time for build commands',
-      _type: 'string',
-      _default: '5m',
-    },
-  },
-  test: {
-    _description: 'Test settings',
-    _type: 'object',
-    timeout: {
-      _description: 'Maximum time for test commands',
-      _type: 'string',
-      _default: '10m',
-    },
-  },
-  webui: {
-    _description: 'Web UI settings',
-    _type: 'object',
-    port: {
-      _description: 'Port for web server',
-      _type: 'number',
-      _default: 3000,
-    },
-    host: {
-      _description: 'Host to bind to',
-      _type: 'string',
-      _default: 'localhost',
-    },
-    auth: {
-      _description: 'Enable authentication',
-      _type: 'boolean',
-      _default: false,
     },
   },
   quality: {
@@ -521,16 +250,6 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _description: 'Maximum chain depth for follow-up tasks',
       _type: 'number',
       _default: 2,
-    },
-    maxPerApproval: {
-      _description: 'Maximum number of follow-up tasks per reviewer approval',
-      _type: 'number',
-      _default: 3,
-    },
-    minDescriptionLength: {
-      _description: 'Minimum required length for follow-up task descriptions',
-      _type: 'number',
-      _default: 100,
     },
   },
   hooks: {

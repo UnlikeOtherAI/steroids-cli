@@ -9,6 +9,12 @@ import { join } from 'node:path';
 export interface StorageBreakdown {
   total_bytes: number;
   total_human: string;
+  disk: {
+    total_bytes: number;
+    total_human: string;
+    available_bytes: number;
+    available_human: string;
+  } | null;
   breakdown: {
     database: { bytes: number; human: string };
     invocations: { bytes: number; human: string; file_count: number };
@@ -62,6 +68,7 @@ export async function sumDirectorySize(
 function emptyBreakdown(): StorageBreakdown {
   return {
     total_bytes: 0, total_human: '0 B',
+    disk: null,
     breakdown: {
       database: { bytes: 0, human: '0 B' },
       invocations: { bytes: 0, human: '0 B', file_count: 0 },
@@ -71,6 +78,42 @@ function emptyBreakdown(): StorageBreakdown {
     },
     clearable_bytes: 0, clearable_human: '0 B', threshold_warning: null,
   };
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'bigint') {
+    const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+    if (value > maxSafe) return Number.MAX_SAFE_INTEGER;
+    if (value < 0n) return 0;
+    return Number(value);
+  }
+  return 0;
+}
+
+async function getDiskCapacity(path: string): Promise<StorageBreakdown['disk']> {
+  try {
+    const statfs = await fs.statfs(path);
+    const blockSize = Math.max(
+      toNumber((statfs as { bsize?: unknown }).bsize),
+      toNumber((statfs as { frsize?: unknown }).frsize),
+    );
+    const blocks = toNumber((statfs as { blocks?: unknown }).blocks);
+    const availableBlocks = toNumber((statfs as { bavail?: unknown }).bavail);
+
+    if (blockSize <= 0 || blocks <= 0 || availableBlocks < 0) return null;
+
+    const totalBytes = Math.max(0, Math.floor(blockSize * blocks));
+    const availableBytes = Math.max(0, Math.floor(blockSize * availableBlocks));
+    return {
+      total_bytes: totalBytes,
+      total_human: formatBytes(totalBytes),
+      available_bytes: availableBytes,
+      available_human: formatBytes(availableBytes),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Duplicate of backups.ts logic for metrics consistency */
@@ -102,6 +145,7 @@ export async function getStorageBreakdown(
   backupRetentionDays: number = 30
 ): Promise<StorageBreakdown> {
   try { await fs.access(steroidsDir); } catch { return emptyBreakdown(); }
+  const disk = await getDiskCapacity(steroidsDir);
 
   const dbSizes = await Promise.all(DB_FILES.map(f => safeStatSize(join(steroidsDir, f))));
   const dbBytes = dbSizes.reduce((a, b) => a + b, 0);
@@ -168,6 +212,7 @@ export async function getStorageBreakdown(
 
   return {
     total_bytes: totalBytes, total_human: formatBytes(totalBytes),
+    disk,
     breakdown: {
       database: { bytes: dbBytes, human: formatBytes(dbBytes) },
       invocations: { bytes: invocations.bytes, human: formatBytes(invocations.bytes), file_count: invocations.fileCount },

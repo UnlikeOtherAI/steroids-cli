@@ -60,6 +60,12 @@ export interface StorageSize {
 export interface StorageInfo {
   total_bytes: number;
   total_human: string;
+  disk?: {
+    total_bytes: number;
+    total_human: string;
+    available_bytes: number;
+    available_human: string;
+  } | null;
   breakdown: {
     database: StorageSize;
     invocations: StorageSize;

@@ -322,7 +322,7 @@ function saveConfiguration(state: SetupState): void {
     }
   }
 
-  saveConfig(partialConfig, configPath);
+  saveConfig(partialConfig, configPath, { pruneUnknownToSchema: !state.global });
 }
 
 /**
@@ -658,7 +658,7 @@ export async function quickAISetup(options: {
     },
   };
 
-  saveConfig(partialConfig, configPath);
+  saveConfig(partialConfig, configPath, { pruneUnknownToSchema: !global });
 
   return { success: true };
 }

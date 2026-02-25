@@ -66,7 +66,7 @@ const HELP = generateHelp({
     { command: 'steroids config show quality.tests', description: 'Show specific nested value' },
     { command: 'steroids config get ai.coder.model', description: 'Get value' },
     { command: 'steroids config set ai.coder.model opus', description: 'Set value' },
-    { command: 'steroids config set output.colors false --global', description: 'Set in global config' },
+    { command: 'steroids config set runners.parallel.maxClones 4 --global', description: 'Set in global config' },
     { command: 'steroids config validate', description: 'Validate config' },
     { command: 'steroids config path', description: 'Show file paths' },
     { command: 'steroids config edit', description: 'Open in editor' },
@@ -191,9 +191,8 @@ OPTIONS:
           coder: { provider: 'claude', model: 'claude-sonnet-4' },
           reviewer: { provider: 'claude', model: 'claude-sonnet-4' },
         },
-        output: { format: 'table', colors: true },
-        git: { autoPush: true, remote: 'origin', branch: 'main' },
-        runners: { heartbeatInterval: '30s', staleTimeout: '5m' },
+        git: { remote: 'origin', branch: 'main' },
+        runners: { daemonLogs: true },
       };
   }
 
@@ -203,7 +202,7 @@ OPTIONS:
     mkdirSync(dir, { recursive: true });
   }
 
-  saveConfig(config, configPath);
+  saveConfig(config, configPath, { pruneUnknownToSchema: !values.global });
 
   if (values.json) {
     console.log(JSON.stringify({ created: configPath, template: values.template }));
@@ -301,8 +300,8 @@ USAGE:
 
 EXAMPLES:
   steroids config get ai.coder.model
-  steroids config get output.format
-  steroids config get runners.heartbeatInterval
+  steroids config get git.remote
+  steroids config get runners.parallel.maxClones
 `);
     return;
   }
@@ -352,8 +351,8 @@ OPTIONS:
 
 EXAMPLES:
   steroids config set ai.coder.model claude-opus-4
-  steroids config set output.colors false
-  steroids config set webui.port 8080
+  steroids config set runners.parallel.maxClones 4
+  steroids config set projects.allowedPaths '["~/Projects"]'
 `);
     return;
   }
@@ -378,7 +377,7 @@ EXAMPLES:
   const existingConfig = loadConfigFile(configPath);
   const newConfig = setConfigValue(existingConfig as SteroidsConfig, key, value);
 
-  saveConfig(newConfig, configPath);
+  saveConfig(newConfig, configPath, { pruneUnknownToSchema: !values.global });
 
   if (values.json) {
     console.log(JSON.stringify({ key, value, path: configPath }));
@@ -667,7 +666,7 @@ ENVIRONMENT VARIABLES:
          config.ai.reviewers = config.ai.reviewer ? [{...config.ai.reviewer}] : [];
        }
        config.ai.reviewers.push({ provider: values.provider as any, model: values.model });
-       saveConfig(config, configPath);
+       saveConfig(config, configPath, { pruneUnknownToSchema: !values.global });
        console.log(`Added reviewer: ${values.provider} / ${values.model}`);
        return;
     }
@@ -685,7 +684,7 @@ ENVIRONMENT VARIABLES:
          console.error(`Reviewer with provider '${values.remove}' not found in reviewers list.`);
          process.exit(1);
        }
-       saveConfig(config, configPath);
+       saveConfig(config, configPath, { pruneUnknownToSchema: !values.global });
        console.log(`Removed reviewer: ${values.remove}`);
        return;
     }
@@ -699,7 +698,7 @@ ENVIRONMENT VARIABLES:
        const config = loadConfigFile(configPath);
        if (!config.ai) config.ai = {};
        config.ai.reviewers = reviewers;
-       saveConfig(config, configPath);
+       saveConfig(config, configPath, { pruneUnknownToSchema: !values.global });
        console.log(`Set ${reviewers.length} reviewers.`);
        return;
     }

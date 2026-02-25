@@ -17,9 +17,9 @@ vi.mock('../services/api', async (importOriginal) => {
       clearLogs: vi.fn(),
       openFolder: vi.fn(),
     },
-    activityApi: {
-      ...actual.activityApi,
-      getStats: vi.fn(),
+    tasksApi: {
+      ...actual.tasksApi,
+      listForProject: vi.fn(),
     },
     sectionsApi: {
       ...actual.sectionsApi,
@@ -40,8 +40,8 @@ const mockProjectsApi = api.projectsApi as unknown as {
   openFolder: ReturnType<typeof vi.fn>;
 };
 
-const mockActivityApi = api.activityApi as unknown as {
-  getStats: ReturnType<typeof vi.fn>;
+const mockTasksApi = api.tasksApi as unknown as {
+  listForProject: ReturnType<typeof vi.fn>;
 };
 
 const mockSectionsApi = api.sectionsApi as unknown as {
@@ -63,12 +63,19 @@ const fakeProject = {
     completed: 10,
     failed: 2,
     disputed: 1,
+    skipped: 1,
   },
 };
 
 const fakeStorage: StorageInfo = {
   total_bytes: 52428800,
   total_human: '50.0 MB',
+  disk: {
+    total_bytes: 536870912000,
+    total_human: '500.0 GB',
+    available_bytes: 268435456000,
+    available_human: '250.0 GB',
+  },
   breakdown: {
     database: { bytes: 2097152, human: '2.0 MB' },
     invocations: { bytes: 35651584, human: '34.0 MB', file_count: 847 },
@@ -104,13 +111,61 @@ import { beforeAll } from 'vitest';
 
 describe('ProjectDetailPage storage section', () => {
   beforeEach(() => {
+    document.cookie = 'steroids_pd_storage_open=; path=/; max-age=0';
+    document.cookie = 'steroids_pd_sections_open=; path=/; max-age=0';
+    document.cookie = 'steroids_pd_issues_open=; path=/; max-age=0';
+    document.cookie = 'steroids_stats_hours=; path=/; max-age=0';
     mockProjectsApi.list.mockResolvedValue([fakeProject]);
     mockProjectsApi.getStorage.mockResolvedValue(fakeStorage);
     mockProjectsApi.openFolder.mockResolvedValue(undefined);
-    mockActivityApi.getStats.mockResolvedValue({
-      completed: 10, failed: 2, skipped: 1, partial: 0, disputed: 0,
-      total: 13,
-      tasks_per_hour: 1.5, success_rate: 77,
+    mockTasksApi.listForProject.mockImplementation((_path: string, options?: { issue?: string }) => {
+      if (options?.issue === 'failed_retries') {
+        return Promise.resolve({
+          success: true,
+          project: '/tmp/test-project',
+          tasks: [
+            {
+              id: 'retry-task-1',
+              title: 'Retry task',
+              status: 'failed',
+              section_id: null,
+              section_name: null,
+              source_file: null,
+              rejection_count: 3,
+              failure_count: 2,
+              created_at: '2025-01-01T00:00:00Z',
+              updated_at: '2025-01-01T00:00:00Z',
+            },
+          ],
+          count: 1,
+          status_counts: { failed: 1 },
+        });
+      }
+
+      if (options?.issue === 'stale') {
+        return Promise.resolve({
+          success: true,
+          project: '/tmp/test-project',
+          tasks: [],
+          count: 0,
+          status_counts: {},
+        });
+      }
+
+      return Promise.resolve({
+        success: true,
+        project: '/tmp/test-project',
+        tasks: [],
+        count: 0,
+        status_counts: {
+          pending: 3,
+          in_progress: 2,
+          review: 1,
+          completed: 10,
+          failed: 2,
+          disputed: 1,
+        },
+      });
     });
     mockSectionsApi.listForProject.mockResolvedValue({ sections: [] });
   });
@@ -142,6 +197,8 @@ describe('ProjectDetailPage storage section', () => {
     expect(screen.getByText('Invocation Logs')).toBeInTheDocument();
     expect(screen.getByText('Text Logs')).toBeInTheDocument();
     expect(screen.getByText('Backups')).toBeInTheDocument();
+    expect(screen.getByText('Disk Available')).toBeInTheDocument();
+    expect(screen.getByText('50.0 MB used / 250.0 GB available')).toBeInTheDocument();
     expect(screen.getByText('50.0 MB')).toBeInTheDocument();
   });
 
@@ -250,7 +307,7 @@ describe('ProjectDetailPage storage section', () => {
     });
   });
 
-  it('renders stats section with queue cards and no activity cards', async () => {
+  it('renders project-scoped task stats cards and hides current queue', async () => {
     renderPage();
 
     await waitFor(() => {
@@ -258,10 +315,10 @@ describe('ProjectDetailPage storage section', () => {
     });
 
     expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument();
-    expect(screen.getByText('Current Queue')).toBeInTheDocument();
-    expect(screen.getByText('Rate: 1.5 tasks/hour')).toBeInTheDocument();
-    expect(screen.getByText('Success Rate: 77%')).toBeInTheDocument();
-    expect(screen.getByText('13 tasks in selected range')).toBeInTheDocument();
+    expect(screen.queryByText('Current Queue')).not.toBeInTheDocument();
+    expect(screen.getByText('Rate: 0 tasks/hour')).toBeInTheDocument();
+    expect(screen.getByText('Success Rate: 52.6%')).toBeInTheDocument();
+    expect(screen.getByText('19 tasks in selected range')).toBeInTheDocument();
 
     expect(screen.getByText('Pending')).toBeInTheDocument();
     expect(screen.getByText('In Progress')).toBeInTheDocument();
@@ -270,13 +327,95 @@ describe('ProjectDetailPage storage section', () => {
     expect(screen.getByText('Failed')).toBeInTheDocument();
     expect(screen.getByText('Disputed')).toBeInTheDocument();
 
-    expect(screen.queryByText('Skipped')).not.toBeInTheDocument();
-    expect(screen.queryByText('Partial')).not.toBeInTheDocument();
-
     expect(screen.getByRole('button', { name: '12h' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '24h' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '1w' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '1m' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '1y' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1y' })).toHaveClass('bg-accent');
+  });
+
+  it('persists storage, issues, and sections collapsed state in cookies across renders', async () => {
+    const user = userEvent.setup();
+    const firstRender = renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Storage' })).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    const storageToggle = screen.getByRole('button', { name: 'Storage' });
+    const issuesToggle = screen.getByRole('button', { name: 'Issues' });
+    const sectionsToggle = screen.getByRole('button', { name: 'Sections' });
+
+    await user.click(storageToggle);
+    await user.click(issuesToggle);
+    await user.click(sectionsToggle);
+
+    expect(storageToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(issuesToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(sectionsToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(document.cookie).toContain('steroids_pd_storage_open=0');
+    expect(document.cookie).toContain('steroids_pd_issues_open=0');
+    expect(document.cookie).toContain('steroids_pd_sections_open=0');
+
+    firstRender.unmount();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Storage' })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: 'Issues' })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: 'Sections' })).toHaveAttribute('aria-expanded', 'false');
+    });
+  });
+
+  it('hides issues section when there are no runner-blocking issues', async () => {
+    mockProjectsApi.list.mockResolvedValue([
+      {
+        ...fakeProject,
+        stats: {
+          pending: 3,
+          in_progress: 2,
+          review: 1,
+          completed: 10,
+          failed: 0,
+          disputed: 0,
+          skipped: 0,
+        },
+      },
+    ]);
+    mockTasksApi.listForProject.mockImplementation((_path: string, options?: { issue?: string }) => {
+      if (options?.issue === 'failed_retries' || options?.issue === 'stale') {
+        return Promise.resolve({
+          success: true,
+          project: '/tmp/test-project',
+          tasks: [],
+          count: 0,
+          status_counts: {},
+        });
+      }
+      return Promise.resolve({
+        success: true,
+        project: '/tmp/test-project',
+        tasks: [],
+        count: 0,
+        status_counts: {
+          pending: 3,
+          in_progress: 2,
+          review: 1,
+          completed: 10,
+          failed: 0,
+          disputed: 0,
+          skipped: 0,
+        },
+      });
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Stats')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('button', { name: 'Issues' })).not.toBeInTheDocument();
   });
 });

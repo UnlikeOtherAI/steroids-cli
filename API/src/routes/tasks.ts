@@ -24,6 +24,7 @@ interface TaskDetails {
   section_name: string | null;
   source_file: string | null;
   rejection_count: number;
+  failure_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -948,6 +949,8 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
  * Query params:
  *   - status: string (optional) - filter by status
  *   - section: string (optional) - filter by section id
+ *   - issue: string (optional) - filter by issue bucket (failed_retries, stale)
+ *   - hours: number (optional) - filter to tasks created within last N hours
  *   - limit: number (optional) - max entries (default: 100)
  */
 router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
@@ -956,7 +959,22 @@ router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
     const projectPath = decodeURIComponent(req.params.projectPath);
     const statusFilter = req.query.status as string | undefined;
     const sectionFilter = req.query.section as string | undefined;
+    const issueFilter = req.query.issue as string | undefined;
+    const hoursParam = req.query.hours;
     const limitParam = req.query.limit;
+
+    const normalizedIssueFilter =
+      issueFilter === 'failed_retries' || issueFilter === 'stale'
+        ? issueFilter
+        : undefined;
+
+    if (issueFilter && !normalizedIssueFilter) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid issue parameter - supported values: failed_retries, stale',
+      });
+      return;
+    }
 
     let limit = 100;
     if (limitParam !== undefined) {
@@ -964,6 +982,19 @@ router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
       if (!isNaN(parsed) && parsed > 0) {
         limit = Math.min(parsed, 500);
       }
+    }
+
+    let hoursFilter: number | undefined;
+    if (hoursParam !== undefined) {
+      const parsed = parseInt(hoursParam as string, 10);
+      if (isNaN(parsed) || parsed <= 0) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid hours parameter - must be a positive integer',
+        });
+        return;
+      }
+      hoursFilter = parsed;
     }
 
     const db = openProjectDatabase(projectPath);
@@ -977,11 +1008,23 @@ router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
     }
 
     try {
+      let staleIssueSupported = false;
+      if (normalizedIssueFilter === 'stale') {
+        try {
+          const row = db
+            .prepare(`SELECT 1 as exists_flag FROM sqlite_master WHERE type = 'table' AND name = 'incidents' LIMIT 1`)
+            .get() as { exists_flag: number } | undefined;
+          staleIssueSupported = Boolean(row?.exists_flag);
+        } catch {
+          staleIssueSupported = false;
+        }
+      }
+
       let query = `
         SELECT
           t.id, t.title, t.status, t.section_id,
           s.name as section_name,
-          t.source_file, t.rejection_count,
+          t.source_file, t.rejection_count, t.failure_count,
           t.created_at, t.updated_at
         FROM tasks t
         LEFT JOIN sections s ON t.section_id = s.id
@@ -999,19 +1042,72 @@ router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
         params.push(sectionFilter);
       }
 
+      if (hoursFilter) {
+        query += ` AND julianday(t.created_at) >= julianday('now', ? || ' hours')`;
+        params.push(`-${hoursFilter}`);
+      }
+
+      if (normalizedIssueFilter === 'failed_retries') {
+        query += ` AND COALESCE(t.failure_count, 0) > 0`;
+      }
+
+      if (normalizedIssueFilter === 'stale') {
+        if (!staleIssueSupported) {
+          query += ' AND 1=0';
+        } else {
+          query += `
+            AND EXISTS (
+              SELECT 1
+              FROM incidents i
+              WHERE i.task_id = t.id
+                AND i.resolved_at IS NULL
+                AND i.failure_mode IN ('orphaned_task', 'hanging_invocation')
+            )
+          `;
+        }
+      }
+
       query += ' ORDER BY t.created_at DESC LIMIT ?';
       params.push(limit);
 
       const tasks = db.prepare(query).all(...params) as TaskDetails[];
 
       // Get task counts by status
+      let countsQuery = `
+        SELECT status, COUNT(*) as count
+        FROM tasks
+        WHERE 1=1
+      `;
+      const countParams: (string | number)[] = [];
+      if (hoursFilter) {
+        countsQuery += ` AND julianday(created_at) >= julianday('now', ? || ' hours')`;
+        countParams.push(`-${hoursFilter}`);
+      }
+
+      if (normalizedIssueFilter === 'failed_retries') {
+        countsQuery += ` AND COALESCE(failure_count, 0) > 0`;
+      }
+
+      if (normalizedIssueFilter === 'stale') {
+        if (!staleIssueSupported) {
+          countsQuery += ' AND 1=0';
+        } else {
+          countsQuery += `
+            AND EXISTS (
+              SELECT 1
+              FROM incidents i
+              WHERE i.task_id = tasks.id
+                AND i.resolved_at IS NULL
+                AND i.failure_mode IN ('orphaned_task', 'hanging_invocation')
+            )
+          `;
+        }
+      }
+      countsQuery += ' GROUP BY status';
+
       const statusCounts = db
-        .prepare(
-          `SELECT status, COUNT(*) as count
-          FROM tasks
-          GROUP BY status`
-        )
-        .all() as { status: string; count: number }[];
+        .prepare(countsQuery)
+        .all(...countParams) as { status: string; count: number }[];
 
       const counts = statusCounts.reduce(
         (acc, { status, count }) => {

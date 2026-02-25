@@ -116,6 +116,7 @@ export interface TaskListItem {
   section_name: string | null;
   source_file: string | null;
   rejection_count: number;
+  failure_count: number;
   created_at: string;
   updated_at: string;
 }

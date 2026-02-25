@@ -14,6 +14,19 @@ interface RoleConfig {
   model: string;
 }
 
+type RoleKey = 'orchestrator' | 'coder' | 'reviewer';
+
+interface InheritedRoleConfig {
+  provider?: string;
+  model?: string;
+}
+
+function hasProviderAndModel(value: unknown): value is Required<InheritedRoleConfig> {
+  if (!value || typeof value !== 'object') return false;
+  const role = value as InheritedRoleConfig;
+  return Boolean(role.provider && role.model);
+}
+
 // Installation commands for each provider
 const INSTALL_COMMANDS: Record<string, { command: string; description: string }> = {
   claude: {
@@ -64,6 +77,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
   const [reviewer, setReviewer] = useState<RoleConfig>({ provider: '', model: '' });
   const [reviewers, setReviewers] = useState<RoleConfig[]>([]);
   const [useMultiReview, setUseMultiReview] = useState(false);
+  const [globalAIConfig, setGlobalAIConfig] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     loadProviders();
@@ -81,6 +95,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
 
       // Extract global AI config for inheritance logic
       const globalAI = globalConfig.ai as any;
+      setGlobalAIConfig(globalAI ?? null);
 
       // Pre-fill from existing config (project-level takes precedence)
       const configToUse = isProjectLevel && projectConfig ? projectConfig : globalConfig;
@@ -159,19 +174,73 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     }
   };
 
+  const getInheritedValue = (role: RoleKey | number): InheritedRoleConfig | null => {
+    const inheritedAi = (inheritedConfig?.ai as Record<string, unknown> | undefined)
+      ?? globalAIConfig;
+    if (!inheritedAi || typeof inheritedAi !== 'object') return null;
+
+    if (typeof role === 'number') {
+      const reviewersConfig = (inheritedAi as Record<string, unknown>).reviewers;
+      if (Array.isArray(reviewersConfig)) {
+        const reviewerConfig = reviewersConfig[role];
+        if (reviewerConfig && typeof reviewerConfig === 'object') {
+          return reviewerConfig as InheritedRoleConfig;
+        }
+      }
+      // Fallback: first reviewer inherits from single reviewer config.
+      if (role === 0) {
+        const singleReviewer = (inheritedAi as Record<string, unknown>).reviewer;
+        if (singleReviewer && typeof singleReviewer === 'object') {
+          return singleReviewer as InheritedRoleConfig;
+        }
+      }
+      return null;
+    }
+
+    const value = (inheritedAi as Record<string, unknown>)[role];
+    return value && typeof value === 'object' ? (value as InheritedRoleConfig) : null;
+  };
+
+  const normalizeRoleConfig = (config: RoleConfig, role: RoleKey | number) => {
+    const inheritedValue = getInheritedValue(role);
+    const usesInheritance = isProjectLevel && !config.provider;
+
+    if (usesInheritance) {
+      return {
+        provider: '',
+        model: '',
+        valid: hasProviderAndModel(inheritedValue),
+        inherited: true,
+      };
+    }
+
+    return {
+      provider: config.provider,
+      model: config.model,
+      valid: Boolean(config.provider && config.model),
+      inherited: false,
+    };
+  };
+
   const handleSave = async () => {
-    if (!orchestrator.provider || !orchestrator.model ||
-        !coder.provider || !coder.model) {
+    const normalizedOrchestrator = normalizeRoleConfig(orchestrator, 'orchestrator');
+    const normalizedCoder = normalizeRoleConfig(coder, 'coder');
+
+    if (!normalizedOrchestrator.valid || !normalizedCoder.valid) {
       setError('Please configure orchestrator and coder roles');
       return;
     }
 
-    if (useMultiReview && (reviewers.length < 2 || reviewers.some(r => !r.provider || !r.model))) {
+    const normalizedReviewers = useMultiReview
+      ? reviewers.map((r, index) => normalizeRoleConfig(r, index))
+      : [normalizeRoleConfig(reviewer, 'reviewer')];
+
+    if (useMultiReview && (reviewers.length < 2 || normalizedReviewers.some((r) => !r.valid))) {
       setError('Please configure at least 2 reviewers for multi-review mode');
       return;
     }
 
-    if (!useMultiReview && (!reviewer.provider || !reviewer.model)) {
+    if (!useMultiReview && !normalizedReviewers[0].valid) {
       setError('Please configure the reviewer role');
       return;
     }
@@ -181,19 +250,23 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
 
     try {
       const updates: Record<string, any> = {
-        'ai.orchestrator.provider': orchestrator.provider,
-        'ai.orchestrator.model': orchestrator.model,
-        'ai.coder.provider': coder.provider,
-        'ai.coder.model': coder.model,
+        'ai.orchestrator.provider': normalizedOrchestrator.provider,
+        'ai.orchestrator.model': normalizedOrchestrator.model,
+        'ai.coder.provider': normalizedCoder.provider,
+        'ai.coder.model': normalizedCoder.model,
       };
 
       if (useMultiReview) {
-        updates['ai.reviewers'] = reviewers;
-        updates['ai.reviewer.provider'] = reviewers[0].provider;
-        updates['ai.reviewer.model'] = reviewers[0].model;
+        const reviewerUpdates = normalizedReviewers.map((r) => ({
+          provider: r.provider,
+          model: r.model,
+        }));
+        updates['ai.reviewers'] = reviewerUpdates;
+        updates['ai.reviewer.provider'] = reviewerUpdates[0].provider;
+        updates['ai.reviewer.model'] = reviewerUpdates[0].model;
       } else {
-        updates['ai.reviewer.provider'] = reviewer.provider;
-        updates['ai.reviewer.model'] = reviewer.model;
+        updates['ai.reviewer.provider'] = normalizedReviewers[0].provider;
+        updates['ai.reviewer.model'] = normalizedReviewers[0].model;
         updates['ai.reviewers'] = [];
       }
 
@@ -230,12 +303,17 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
   const getProviderById = (id: string) => providers.find(p => p.id === id);
 
   // Check if all fields are complete for validation
-  const isFormComplete =
-    orchestrator.provider && orchestrator.model &&
-    coder.provider && coder.model &&
-    (useMultiReview ? 
-      (reviewers.length >= 2 && reviewers.every(r => r.provider && r.model)) : 
-      (reviewer.provider && reviewer.model));
+  const isFormComplete = (() => {
+    const orchestratorReady = normalizeRoleConfig(orchestrator, 'orchestrator').valid;
+    const coderReady = normalizeRoleConfig(coder, 'coder').valid;
+    if (!orchestratorReady || !coderReady) return false;
+
+    if (useMultiReview) {
+      return reviewers.length >= 2 && reviewers.every((r, index) => normalizeRoleConfig(r, index).valid);
+    }
+
+    return normalizeRoleConfig(reviewer, 'reviewer').valid;
+  })();
 
   const renderRoleSelector = (
     label: string,
@@ -251,18 +329,8 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     const installInfo = INSTALL_COMMANDS[config.provider];
     const envVar = API_KEY_ENV_VARS[config.provider];
 
-    // Check if this value is inherited from global config
-    let inheritedValue = null;
-    if (inheritedConfig?.ai) {
-      if (typeof role === 'number') {
-        // Multi-review: access reviewers array
-        inheritedValue = inheritedConfig.ai.reviewers?.[role];
-      } else {
-        // Single review or other roles
-        inheritedValue = inheritedConfig.ai[role as keyof typeof inheritedConfig.ai];
-      }
-    }
-    const isInherited = isProjectLevel && !config.provider && inheritedValue;
+    const inheritedValue = getInheritedValue(role);
+    const isInherited = isProjectLevel && !config.provider && hasProviderAndModel(inheritedValue);
 
     return (
       <div className={`bg-bg-base rounded-lg p-4 border border-border ${isInherited ? 'opacity-75 relative' : ''}`}>
@@ -326,7 +394,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
               )}
             </div>
             <select
-              value={config.model}
+              value={isInherited ? inheritedValue?.model || '' : config.model}
               onChange={(e) => _onModelChange(e.target.value)}
               disabled={isInherited}
               className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"

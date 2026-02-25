@@ -6,6 +6,25 @@ import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
 import { Badge } from '../components/atoms/Badge';
 import { PageLayout } from '../components/templates/PageLayout';
 
+const STATS_HOURS_COOKIE = 'steroids_stats_hours';
+const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+function getStatsHoursCookie(): number | null {
+  if (typeof document === 'undefined') return null;
+  const entries = document.cookie.split(';').map((item) => item.trim()).filter(Boolean);
+  const found = entries.find((entry) => entry.startsWith(`${STATS_HOURS_COOKIE}=`));
+  if (!found) return null;
+  const raw = found.slice(STATS_HOURS_COOKIE.length + 1);
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function setStatsHoursCookie(hours: number): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${STATS_HOURS_COOKIE}=${hours}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}`;
+}
+
 const STATUS_LABELS: Record<ActivityStatusType, string> = {
   completed: 'Completed',
   failed: 'Failed',
@@ -45,8 +64,14 @@ export const ActivityListPage: React.FC = () => {
   const hoursParam = searchParams.get('hours');
   const projectParam = searchParams.get('project');
 
-  const initialHours = hoursParam ? parseInt(hoursParam, 10) : 24;
-  const initialRange = TIME_RANGE_OPTIONS.find(o => o.hours === initialHours) || TIME_RANGE_OPTIONS[1];
+  const initialHours = (() => {
+    if (hoursParam) {
+      const parsed = parseInt(hoursParam, 10);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return getStatsHoursCookie() ?? 8760;
+  })();
+  const initialRange = TIME_RANGE_OPTIONS.find(o => o.hours === initialHours) || TIME_RANGE_OPTIONS[TIME_RANGE_OPTIONS.length - 1];
 
   const [selectedRange, setSelectedRange] = useState<TimeRangeOption>(initialRange);
   const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
@@ -74,6 +99,10 @@ export const ActivityListPage: React.FC = () => {
     fetchEntries();
   }, [fetchEntries]);
 
+  useEffect(() => {
+    setStatsHoursCookie(selectedRange.hours);
+  }, [selectedRange.hours]);
+
   const handleRangeChange = (range: TimeRangeOption) => {
     setSelectedRange(range);
     const params = new URLSearchParams(searchParams);
@@ -94,6 +123,8 @@ export const ActivityListPage: React.FC = () => {
   const projectName = projectParam ? projectParam.split('/').pop() : null;
   const pageTitle = statusParam ? `${STATUS_LABELS[statusParam]} Tasks` : 'All Activity';
   const pageSubtitle = projectName ? `in ${projectName}` : null;
+  const projectBackTo = projectParam ? `/project/${encodeURIComponent(projectParam)}` : undefined;
+  const projectBackLabel = projectName ? `Back to ${projectName}` : 'Back to Project';
 
   const handleClearProject = () => {
     const params = new URLSearchParams(searchParams);
@@ -105,6 +136,8 @@ export const ActivityListPage: React.FC = () => {
     <PageLayout
       title={pageTitle}
       titleSuffix={pageSubtitle || undefined}
+      backTo={projectBackTo}
+      backLabel={projectBackLabel}
       subtitle={`${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} in last ${selectedRange.label}`}
       loading={loading}
       loadingMessage="Loading activity..."

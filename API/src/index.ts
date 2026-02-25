@@ -117,7 +117,7 @@ export function createApp(): express.Express {
         'GET /api/projects',
         'GET /api/projects/status?path=<path>',
         'GET /api/projects/storage?path=<path>',
-        'GET /api/projects/<path>/tasks',
+        'GET /api/projects/<path>/tasks?status=<status>&section=<id>&issue=<failed_retries|stale>&hours=<hours>',
         'GET /api/projects/<path>/sections',
         'POST /api/projects',
         'POST /api/projects/remove',

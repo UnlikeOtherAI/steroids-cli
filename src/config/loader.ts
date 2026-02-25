@@ -7,6 +7,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { parse, stringify } from 'yaml';
+import { CONFIG_SCHEMA, isSchemaField, type SchemaField, type SchemaObject } from './schema.js';
 
 const STEROIDS_DIR = '.steroids';
 const CONFIG_FILE = 'config.yaml';
@@ -17,10 +18,6 @@ export interface ReviewerConfig {
   provider?: ProviderName;
   model?: string;
   cli?: string;
-}
-
-export interface ReviewPolicy {
-  strict?: boolean;          // Default: true (fail if any reviewer unavailable)
 }
 
 export interface SteroidsConfig {
@@ -38,26 +35,12 @@ export interface SteroidsConfig {
     };
     reviewer?: ReviewerConfig;         // Existing single reviewer
     reviewers?: ReviewerConfig[];      // NEW: multi-reviewer array
-    review?: ReviewPolicy;             // NEW: review policy
-  };
-  output?: {
-    format?: 'table' | 'json';
-    colors?: boolean;
-    verbose?: boolean;
   };
   git?: {
-    autoPush?: boolean;
     remote?: string;
     branch?: string;
-    commitPrefix?: string;
-    retryOnFailure?: boolean;
   };
   runners?: {
-    heartbeatInterval?: string;
-    staleTimeout?: string;
-    subprocessHangTimeout?: string;
-    maxConcurrent?: number;
-    logRetention?: string;
     daemonLogs?: boolean;
     parallel?: {
       enabled?: boolean;
@@ -67,17 +50,9 @@ export interface SteroidsConfig {
       validationCommand?: string;
       allowSharedMutableDependencies?: boolean;
       cleanupOnSuccess?: boolean;
-      cleanupOnFailure?: boolean;
     };
   };
   health?: {
-    threshold?: number;
-    checks?: {
-      git?: boolean;
-      deps?: boolean;
-      tests?: boolean;
-      lint?: boolean;
-    };
     sanitiseEnabled?: boolean;
     sanitiseIntervalMinutes?: number;
     sanitiseInvocationTimeoutSec?: number;
@@ -91,49 +66,9 @@ export interface SteroidsConfig {
     maxRecoveryAttempts?: number;
     maxIncidentsPerHour?: number;
   };
-  locking?: {
-    taskTimeout?: string;
-    sectionTimeout?: string;
-    waitTimeout?: string;
-    pollInterval?: string;
-  };
-  database?: {
-    autoMigrate?: boolean;
-    backupBeforeMigrate?: boolean;
-  };
-  logs?: {
-    retention?: string;
-    keepLogs?: boolean;
-    level?: 'debug' | 'info' | 'warn' | 'error';
-  };
-  disputes?: {
-    timeoutDays?: number;
-    autoCreateOnMaxRejections?: boolean;
-    majorBlocksLoop?: boolean;
-    coordinatorCanDispute?: boolean;  // If true, coordinator can auto-dispute (stops loop). Default: false
-  };
   projects?: {
-    scanPaths?: string[];
-    excludePatterns?: string[];
     allowedPaths?: string[];
     blockedPaths?: string[];
-  };
-  backup?: {
-    enabled?: boolean;
-    retention?: string;
-    includeConfig?: boolean;
-    includeLogs?: boolean;
-  };
-  build?: {
-    timeout?: string;
-  };
-  test?: {
-    timeout?: string;
-  };
-  webui?: {
-    port?: number;
-    host?: string;
-    auth?: boolean;
   };
   quality?: {
     tests?: {
@@ -148,8 +83,6 @@ export interface SteroidsConfig {
   followUpTasks?: {
     autoImplementDepth1?: boolean; // Automatically do the first round of follow-ups
     maxDepth?: number;
-    maxPerApproval?: number;
-    minDescriptionLength?: number;
   };
   hooks?: unknown[]; // Array of hook configurations
 }
@@ -171,28 +104,14 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       provider: 'claude',
       model: 'claude-sonnet-4-6',
     },
-    review: {
-      strict: true,
-    }
-  },
-  output: {
-    format: 'table',
-    colors: true,
-    verbose: false,
+    reviewers: [],
   },
   git: {
-    autoPush: true,
     remote: 'origin',
     branch: 'main',
-    commitPrefix: '',
-    retryOnFailure: true,
   },
   runners: {
-    heartbeatInterval: '30s',
-    staleTimeout: '5m',
-    subprocessHangTimeout: '15m',
-    maxConcurrent: 5,
-    logRetention: '7d',
+    daemonLogs: true,
     parallel: {
       enabled: true,
       maxClones: 5,
@@ -201,17 +120,9 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       validationCommand: '',
       allowSharedMutableDependencies: false,
       cleanupOnSuccess: true,
-      cleanupOnFailure: false,
     },
   },
   health: {
-    threshold: 80,
-    checks: {
-      git: true,
-      deps: true,
-      tests: true,
-      lint: true,
-    },
     sanitiseEnabled: true,
     sanitiseIntervalMinutes: 5,
     sanitiseInvocationTimeoutSec: 1800,
@@ -224,48 +135,9 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
     maxRecoveryAttempts: 3,
     maxIncidentsPerHour: 10,
   },
-  locking: {
-    taskTimeout: '60m',
-    sectionTimeout: '120m',
-    waitTimeout: '30m',
-    pollInterval: '5s',
-  },
-  database: {
-    autoMigrate: true,
-    backupBeforeMigrate: true,
-  },
-  logs: {
-    retention: '30d',
-    keepLogs: true,
-    level: 'info',
-  },
-  disputes: {
-    timeoutDays: 7,
-    autoCreateOnMaxRejections: true,
-    majorBlocksLoop: false,
-  },
   projects: {
-    scanPaths: ['~/Projects'],
-    excludePatterns: ['node_modules', '.git'],
     allowedPaths: [],
     blockedPaths: [],
-  },
-  backup: {
-    enabled: true,
-    retention: '7d',
-    includeConfig: true,
-    includeLogs: false,
-  },
-  build: {
-    timeout: '5m',
-  },
-  test: {
-    timeout: '10m',
-  },
-  webui: {
-    port: 3000,
-    host: 'localhost',
-    auth: false,
   },
   quality: {
     tests: {
@@ -279,9 +151,8 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
   followUpTasks: {
     autoImplementDepth1: true,
     maxDepth: 2,
-    maxPerApproval: 3,
-    minDescriptionLength: 100,
   },
+  hooks: [],
 };
 
 /**
@@ -439,19 +310,60 @@ export function loadConfig(projectPath?: string): SteroidsConfig {
   return config as SteroidsConfig;
 }
 
+function pruneConfigNodeToSchema(
+  value: unknown,
+  schemaNode: SchemaField | SchemaObject
+): unknown {
+  if (isSchemaField(schemaNode)) {
+    return value;
+  }
+
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+
+  const pruned: Record<string, unknown> = {};
+  for (const [key, childValue] of Object.entries(value as Record<string, unknown>)) {
+    const childSchema = (schemaNode as SchemaObject)[key];
+    if (!childSchema) {
+      continue;
+    }
+    pruned[key] = pruneConfigNodeToSchema(childValue, childSchema as SchemaField | SchemaObject);
+  }
+
+  return pruned;
+}
+
+export function pruneConfigToSchema(
+  config: Partial<SteroidsConfig>
+): Partial<SteroidsConfig> {
+  return pruneConfigNodeToSchema(
+    config as Record<string, unknown>,
+    CONFIG_SCHEMA
+  ) as Partial<SteroidsConfig>;
+}
+
+export interface SaveConfigOptions {
+  pruneUnknownToSchema?: boolean;
+}
+
 /**
  * Save config to file
  */
 export function saveConfig(
   config: Partial<SteroidsConfig>,
-  filePath: string
+  filePath: string,
+  options?: SaveConfigOptions
 ): void {
   const dir = dirname(filePath);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
 
-  const content = stringify(config, { indent: 2 });
+  const content = stringify(
+    options?.pruneUnknownToSchema ? pruneConfigToSchema(config) : config,
+    { indent: 2 }
+  );
   writeFileSync(filePath, content, 'utf-8');
 }
 

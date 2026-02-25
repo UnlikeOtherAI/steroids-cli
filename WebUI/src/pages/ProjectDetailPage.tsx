@@ -7,8 +7,8 @@ import {
   ArrowPathIcon,
   CheckIcon,
 } from '@heroicons/react/24/outline';
-import { projectsApi, activityApi, configApi, sectionsApi, ApiError, ConfigSchema, API_BASE_URL } from '../services/api';
-import { Project, ActivityStats, TimeRangeOption, Section, StorageInfo } from '../types';
+import { projectsApi, tasksApi, configApi, sectionsApi, ApiError, ConfigSchema, API_BASE_URL } from '../services/api';
+import { Project, TimeRangeOption, Section, StorageInfo } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
 import { Tooltip } from '../components/atoms/Tooltip';
@@ -17,6 +17,44 @@ import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
 import { SchemaForm } from '../components/settings/SchemaForm';
 import { AISetupModal } from '../components/onboarding/AISetupModal';
 import { PageLayout } from '../components/templates/PageLayout';
+
+const STORAGE_OPEN_COOKIE = 'steroids_pd_storage_open';
+const SECTIONS_OPEN_COOKIE = 'steroids_pd_sections_open';
+const ISSUES_OPEN_COOKIE = 'steroids_pd_issues_open';
+const STATS_HOURS_COOKIE = 'steroids_stats_hours';
+const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+function getCookieBoolean(name: string, defaultValue: boolean): boolean {
+  if (typeof document === 'undefined') return defaultValue;
+  const entries = document.cookie.split(';').map((item) => item.trim()).filter(Boolean);
+  const found = entries.find((entry) => entry.startsWith(`${name}=`));
+  if (!found) return defaultValue;
+  const value = found.slice(name.length + 1);
+  if (value === '1') return true;
+  if (value === '0') return false;
+  return defaultValue;
+}
+
+function setCookieBoolean(name: string, value: boolean): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=${value ? '1' : '0'}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}`;
+}
+
+function getStatsHoursCookie(): number | null {
+  if (typeof document === 'undefined') return null;
+  const entries = document.cookie.split(';').map((item) => item.trim()).filter(Boolean);
+  const found = entries.find((entry) => entry.startsWith(`${STATS_HOURS_COOKIE}=`));
+  if (!found) return null;
+  const raw = found.slice(STATS_HOURS_COOKIE.length + 1);
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function setStatsHoursCookie(hours: number): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${STATS_HOURS_COOKIE}=${hours}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}`;
+}
 
 function StorageBar({ label, item, color, total }: {
   label: string;
@@ -40,23 +78,60 @@ function StorageBar({ label, item, color, total }: {
   );
 }
 
+interface ProjectRangeStats {
+  pending: number;
+  in_progress: number;
+  review: number;
+  completed: number;
+  failed: number;
+  disputed: number;
+  total: number;
+  tasks_per_hour: number;
+  success_rate: number;
+}
+
+interface IssueSummary {
+  count: number;
+  singleTaskId: string | null;
+}
+
+interface ProjectIssues {
+  failedRetries: IssueSummary;
+  stale: IssueSummary;
+}
+
+function sumStatusCounts(counts: Record<string, number> | undefined): number {
+  if (!counts) return 0;
+  return Object.values(counts).reduce((sum, count) => sum + count, 0);
+}
+
 export const ProjectDetailPage: React.FC = () => {
   const { projectPath } = useParams<{ projectPath: string }>();
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
-  const [stats, setStats] = useState<ActivityStats | null>(null);
+  const [stats, setStats] = useState<ProjectRangeStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedHours, setSelectedHours] = useState(24);
+  const [selectedHours, setSelectedHours] = useState(() => getStatsHoursCookie() ?? 8760);
 
   // Sections state
   const [sections, setSections] = useState<Section[]>([]);
   const [sectionsLoading, setSectionsLoading] = useState(false);
+  const [sectionsOpen, setSectionsOpen] = useState(() => getCookieBoolean(SECTIONS_OPEN_COOKIE, true));
+
+  // Issues state
+  const [issuesOpen, setIssuesOpen] = useState(() => getCookieBoolean(ISSUES_OPEN_COOKIE, true));
+  const [issuesLoading, setIssuesLoading] = useState(false);
+  const [issues, setIssues] = useState<ProjectIssues>({
+    failedRetries: { count: 0, singleTaskId: null },
+    stale: { count: 0, singleTaskId: null },
+  });
 
   // Storage state
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [clearing, setClearing] = useState(false);
   const [clearMsg, setClearMsg] = useState<string | null>(null);
+  const [storageOpen, setStorageOpen] = useState(() => getCookieBoolean(STORAGE_OPEN_COOKIE, true));
   const [resetting, setResetting] = useState(false);
 
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -123,10 +198,79 @@ export const ProjectDetailPage: React.FC = () => {
     if (!decodedPath) return;
 
     try {
-      const data = await activityApi.getStats(selectedHours, decodedPath);
-      setStats(data);
+      const response = await tasksApi.listForProject(decodedPath, {
+        hours: selectedHours,
+        limit: 1,
+      });
+
+      const counts = response.status_counts || {};
+      const pending = counts.pending ?? 0;
+      const inProgress = counts.in_progress ?? 0;
+      const review = counts.review ?? 0;
+      const completed = counts.completed ?? 0;
+      const failed = counts.failed ?? 0;
+      const disputed = counts.disputed ?? 0;
+      const total = pending + inProgress + review + completed + failed + disputed;
+      const tasksPerHour = selectedHours > 0
+        ? Math.round((total / selectedHours) * 100) / 100
+        : 0;
+      const successRate = total > 0
+        ? Math.round((completed / total) * 1000) / 10
+        : 0;
+
+      setStats({
+        pending,
+        in_progress: inProgress,
+        review,
+        completed,
+        failed,
+        disputed,
+        total,
+        tasks_per_hour: tasksPerHour,
+        success_rate: successRate,
+      });
     } catch (err) {
       console.error('Failed to load stats:', err);
+    }
+  };
+
+  const loadIssues = async () => {
+    if (!decodedPath) return;
+
+    setIssuesLoading(true);
+    try {
+      const [failedRetriesResponse, staleResponse] = await Promise.all([
+        tasksApi.listForProject(decodedPath, { issue: 'failed_retries', limit: 2 }),
+        tasksApi.listForProject(decodedPath, { issue: 'stale', limit: 2 }),
+      ]);
+
+      const failedRetriesCount = sumStatusCounts(failedRetriesResponse.status_counts);
+      const staleCount = sumStatusCounts(staleResponse.status_counts);
+
+      setIssues({
+        failedRetries: {
+          count: failedRetriesCount,
+          singleTaskId:
+            failedRetriesCount === 1 && failedRetriesResponse.tasks.length === 1
+              ? failedRetriesResponse.tasks[0].id
+              : null,
+        },
+        stale: {
+          count: staleCount,
+          singleTaskId:
+            staleCount === 1 && staleResponse.tasks.length === 1
+              ? staleResponse.tasks[0].id
+              : null,
+        },
+      });
+    } catch (err) {
+      console.error('Failed to load issues:', err);
+      setIssues({
+        failedRetries: { count: 0, singleTaskId: null },
+        stale: { count: 0, singleTaskId: null },
+      });
+    } finally {
+      setIssuesLoading(false);
     }
   };
 
@@ -278,6 +422,7 @@ export const ProjectDetailPage: React.FC = () => {
 
   useEffect(() => {
     loadProject();
+    loadIssues();
     loadSections();
     loadStorage();
   }, [decodedPath]);
@@ -289,6 +434,22 @@ export const ProjectDetailPage: React.FC = () => {
   }, [settingsOpen, settingsSchema, loadSettings]);
 
   useEffect(() => {
+    setCookieBoolean(STORAGE_OPEN_COOKIE, storageOpen);
+  }, [storageOpen]);
+
+  useEffect(() => {
+    setCookieBoolean(SECTIONS_OPEN_COOKIE, sectionsOpen);
+  }, [sectionsOpen]);
+
+  useEffect(() => {
+    setCookieBoolean(ISSUES_OPEN_COOKIE, issuesOpen);
+  }, [issuesOpen]);
+
+  useEffect(() => {
+    setStatsHoursCookie(selectedHours);
+  }, [selectedHours]);
+
+  useEffect(() => {
     loadStats();
   }, [decodedPath, selectedHours]);
 
@@ -297,6 +458,7 @@ export const ProjectDetailPage: React.FC = () => {
     try {
       await projectsApi.enable(project.path);
       await loadProject();
+      await loadIssues();
     } catch (err) {
       alert(err instanceof ApiError ? err.message : 'Failed to enable project');
     }
@@ -307,6 +469,7 @@ export const ProjectDetailPage: React.FC = () => {
     try {
       await projectsApi.disable(project.path);
       await loadProject();
+      await loadIssues();
     } catch (err) {
       alert(err instanceof ApiError ? err.message : 'Failed to disable project');
     }
@@ -332,6 +495,8 @@ export const ProjectDetailPage: React.FC = () => {
       setResetting(true);
       await projectsApi.reset(project.path);
       await loadProject();
+      await loadStats();
+      await loadIssues();
       await loadSections();
       setError(null);
     } catch (err) {
@@ -361,6 +526,62 @@ export const ProjectDetailPage: React.FC = () => {
       (project?.stats?.disputed ?? 0) > 0 ||
       (project?.stats?.skipped ?? 0) > 0
   );
+
+  const issueRows = [
+    {
+      key: 'failed_retries',
+      label: 'Failed retries',
+      count: issues.failedRetries.count,
+      singleTaskId: issues.failedRetries.singleTaskId,
+      listPath: `/project/${encodeURIComponent(decodedPath)}/tasks?issue=failed_retries`,
+      icon: 'fa-rotate-left',
+      badgeClasses: 'bg-danger-soft text-danger',
+    },
+    {
+      key: 'stale',
+      label: 'Stale tasks',
+      count: issues.stale.count,
+      singleTaskId: issues.stale.singleTaskId,
+      listPath: `/project/${encodeURIComponent(decodedPath)}/tasks?issue=stale`,
+      icon: 'fa-clock',
+      badgeClasses: 'bg-warning-soft text-warning',
+    },
+    {
+      key: 'failed',
+      label: 'Failed tasks',
+      count: project?.stats?.failed ?? 0,
+      singleTaskId: null,
+      listPath: `/project/${encodeURIComponent(decodedPath)}/tasks?status=failed`,
+      icon: 'fa-circle-xmark',
+      badgeClasses: 'bg-danger-soft text-danger',
+    },
+    {
+      key: 'skipped',
+      label: 'Skipped tasks',
+      count: project?.stats?.skipped ?? 0,
+      singleTaskId: null,
+      listPath: `/project/${encodeURIComponent(decodedPath)}/tasks?status=skipped`,
+      icon: 'fa-forward',
+      badgeClasses: 'bg-warning-soft text-warning',
+    },
+    {
+      key: 'disputed',
+      label: 'Disputed tasks',
+      count: project?.stats?.disputed ?? 0,
+      singleTaskId: null,
+      listPath: `/project/${encodeURIComponent(decodedPath)}/tasks?status=disputed`,
+      icon: 'fa-triangle-exclamation',
+      badgeClasses: 'bg-danger-soft text-danger',
+    },
+  ].filter((item) => item.count > 0);
+
+  const navigateToIssue = (singleTaskId: string | null, listPath: string) => {
+    if (singleTaskId) {
+      navigate(`/task/${singleTaskId}?project=${encodeURIComponent(decodedPath)}`);
+      return;
+    }
+    navigate(listPath);
+  };
 
   const getTimeRangeValue = () => {
     switch (selectedHours) {
@@ -437,9 +658,6 @@ export const ProjectDetailPage: React.FC = () => {
             ) : (
               <Button onClick={handleEnable}>Enable Project</Button>
             )}
-            <Button variant="secondary" onClick={handleRemove}>
-              Remove Project
-            </Button>
             <button
               onClick={() => setShowAISetup(true)}
               className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent text-white hover:bg-accent/90 text-sm font-medium transition-colors"
@@ -471,191 +689,284 @@ export const ProjectDetailPage: React.FC = () => {
         </div>
 
         {stats && (
-          <div className="mb-4 flex flex-wrap gap-6 text-sm text-text-secondary">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <StatTile
+              label="Pending"
+              value={stats.pending}
+              variant="default"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=pending&hours=${selectedHours}`)}
+            />
+            <StatTile
+              label="In Progress"
+              value={stats.in_progress}
+              variant="info"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=in_progress&hours=${selectedHours}`)}
+            />
+            <StatTile
+              label="Review"
+              value={stats.review}
+              variant="warning"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=review&hours=${selectedHours}`)}
+            />
+            <StatTile
+              label="Completed"
+              value={stats.completed}
+              variant="success"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=completed&hours=${selectedHours}`)}
+            />
+            <StatTile
+              label="Failed"
+              value={stats.failed}
+              variant="danger"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=failed&hours=${selectedHours}`)}
+            />
+            <StatTile
+              label="Disputed"
+              value={stats.disputed}
+              variant="danger"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=disputed&hours=${selectedHours}`)}
+            />
+          </div>
+        )}
+
+        {stats && (
+          <div className="mt-4 flex flex-wrap gap-6 text-sm text-text-secondary">
             <span>{stats.total} tasks in selected range</span>
             <span>Rate: {stats.tasks_per_hour} tasks/hour</span>
             <span>Success Rate: {stats.success_rate}%</span>
           </div>
         )}
-
-        {project.stats && (
-          <div>
-            <h3 className="text-base font-semibold text-text-primary mb-3">Current Queue</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <StatTile
-                label="Pending"
-                value={project.stats.pending}
-                variant="default"
-                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=pending`)}
-              />
-              <StatTile
-                label="In Progress"
-                value={project.stats.in_progress}
-                variant="info"
-                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=in_progress`)}
-              />
-              <StatTile
-                label="Review"
-                value={project.stats.review}
-                variant="warning"
-                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=review`)}
-              />
-              <StatTile
-                label="Completed"
-                value={project.stats.completed}
-                variant="success"
-                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=completed`)}
-              />
-              <StatTile
-                label="Failed"
-                value={project.stats.failed}
-                variant="danger"
-                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=failed`)}
-              />
-              <StatTile
-                label="Disputed"
-                value={project.stats.disputed}
-                variant="danger"
-                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=disputed`)}
-              />
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Storage */}
-      <div className="mb-8 bg-bg-surface rounded-xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-text-primary">Storage</h3>
-          <span className="text-lg font-semibold text-text-primary">{storage ? storage.total_human : ''}</span>
-        </div>
-        {!storage ? (
-          <div className="space-y-2" data-testid="storage-loading">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="animate-pulse">
-                <div className="h-3 bg-bg-surface2 rounded w-1/3 mb-1" />
-                <div className="h-1.5 bg-bg-surface2 rounded-full" />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <>
-            <div className="space-y-2">
-              <StorageBar label="Database" item={storage.breakdown?.database ?? { bytes: 0, human: '0 B' }} color="bg-info" total={storage.total_bytes} />
-              <StorageBar label="Invocation Logs" item={storage.breakdown?.invocations ?? { bytes: 0, human: '0 B' }} color="bg-warning" total={storage.total_bytes} />
-              <StorageBar label="Text Logs" item={storage.breakdown?.logs ?? { bytes: 0, human: '0 B' }} color="bg-accent" total={storage.total_bytes} />
-              <StorageBar label="Backups" item={storage.breakdown?.backups ?? { bytes: 0, human: '0 B' }} color="bg-success" total={storage.total_bytes} />
-            </div>
-            {storage.threshold_warning && (
-              <div className={`mt-4 p-3 rounded-lg flex items-center justify-between ${
-                storage.threshold_warning === 'red' ? 'bg-danger-soft' : 'bg-warning-soft'
-              }`}>
-                <div className="flex items-center gap-2">
-                  <i className="fa-solid fa-triangle-exclamation text-sm" />
-                  <span className="text-sm">{storage.clearable_human} of old logs and backups can be cleared</span>
+      {/* Issues */}
+      {issueRows.length > 0 && (
+        <div className="mb-8">
+          <button
+            onClick={() => setIssuesOpen(!issuesOpen)}
+            className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
+            aria-expanded={issuesOpen}
+          >
+            {issuesOpen ? (
+              <ChevronDownIcon className="w-5 h-5" />
+            ) : (
+              <ChevronRightIcon className="w-5 h-5" />
+            )}
+            <i className="fa-solid fa-bug w-5 h-5 flex items-center justify-center text-sm"></i>
+            <span>Issues</span>
+          </button>
+
+          {issuesOpen && (
+            <div className="bg-bg-surface rounded-xl p-4">
+              {issuesLoading ? (
+                <div className="flex items-center justify-center py-6">
+                  <ArrowPathIcon className="w-6 h-6 animate-spin text-text-muted" />
                 </div>
-                <button
-                  onClick={handleClearLogs}
-                  disabled={clearing}
-                  className="px-3 py-1.5 text-sm font-medium bg-bg-elevated rounded-lg hover:bg-bg-surface2 transition-colors disabled:opacity-50"
-                >
-                  {clearing ? <ArrowPathIcon className="w-4 h-4 animate-spin inline" /> : 'Cleanup Project'}
-                </button>
+              ) : (
+                <div className="space-y-2">
+                  {issueRows.map((item) => (
+                    <button
+                      key={item.key}
+                      onClick={() => navigateToIssue(item.singleTaskId, item.listPath)}
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-bg-surface2 hover:border-accent/40 hover:bg-bg-elevated transition-colors flex items-center justify-between text-left"
+                    >
+                      <div className="flex items-center gap-2">
+                        <i className={`fa-solid ${item.icon} text-sm text-text-muted`} />
+                        <span className="text-sm font-medium text-text-primary">{item.label}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${item.badgeClasses}`}>
+                          {item.count}
+                        </span>
+                        <i className="fa-solid fa-arrow-right text-xs text-text-muted" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Storage */}
+      <div className="mb-8">
+        <button
+          onClick={() => setStorageOpen(!storageOpen)}
+          className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
+          aria-expanded={storageOpen}
+        >
+          {storageOpen ? (
+            <ChevronDownIcon className="w-5 h-5" />
+          ) : (
+            <ChevronRightIcon className="w-5 h-5" />
+          )}
+          <i className="fa-solid fa-database w-5 h-5 flex items-center justify-center text-sm"></i>
+          <span>Storage</span>
+        </button>
+
+        {storageOpen && (
+          <div className="bg-bg-surface rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-text-primary">Total Used</h3>
+              <span className="text-lg font-semibold text-text-primary">{storage ? storage.total_human : ''}</span>
+            </div>
+            {!storage ? (
+              <div className="space-y-2" data-testid="storage-loading">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="animate-pulse">
+                    <div className="h-3 bg-bg-surface2 rounded w-1/3 mb-1" />
+                    <div className="h-1.5 bg-bg-surface2 rounded-full" />
+                  </div>
+                ))}
               </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <StorageBar label="Database" item={storage.breakdown?.database ?? { bytes: 0, human: '0 B' }} color="bg-info" total={storage.total_bytes} />
+                  <StorageBar label="Invocation Logs" item={storage.breakdown?.invocations ?? { bytes: 0, human: '0 B' }} color="bg-warning" total={storage.total_bytes} />
+                  <StorageBar label="Text Logs" item={storage.breakdown?.logs ?? { bytes: 0, human: '0 B' }} color="bg-accent" total={storage.total_bytes} />
+                  <StorageBar label="Backups" item={storage.breakdown?.backups ?? { bytes: 0, human: '0 B' }} color="bg-success" total={storage.total_bytes} />
+                  {storage.disk && (
+                    <StorageBar
+                      label="Disk Available"
+                      item={{
+                        bytes: storage.total_bytes,
+                        human: `${storage.total_human} used / ${storage.disk.available_human} available`,
+                      }}
+                      color="bg-info"
+                      total={Math.max(storage.total_bytes + storage.disk.available_bytes, 1)}
+                    />
+                  )}
+                </div>
+                {storage.threshold_warning && (
+                  <div className={`mt-4 p-3 rounded-lg flex items-center justify-between ${
+                    storage.threshold_warning === 'red' ? 'bg-danger-soft' : 'bg-warning-soft'
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      <i className="fa-solid fa-triangle-exclamation text-sm" />
+                      <span className="text-sm">{storage.clearable_human} of old logs and backups can be cleared</span>
+                    </div>
+                    <button
+                      onClick={handleClearLogs}
+                      disabled={clearing}
+                      className="px-3 py-1.5 text-sm font-medium bg-bg-elevated rounded-lg hover:bg-bg-surface2 transition-colors disabled:opacity-50"
+                    >
+                      {clearing ? <ArrowPathIcon className="w-4 h-4 animate-spin inline" /> : 'Cleanup Project'}
+                    </button>
+                  </div>
+                )}
+                {clearMsg && (
+                  <p className={`mt-2 text-sm ${clearMsg.startsWith('Freed') ? 'text-success' : 'text-danger'}`}>{clearMsg}</p>
+                )}
+              </>
             )}
-            {clearMsg && (
-              <p className={`mt-2 text-sm ${clearMsg.startsWith('Freed') ? 'text-success' : 'text-danger'}`}>{clearMsg}</p>
-            )}
-          </>
+          </div>
         )}
       </div>
 
       {/* Sections */}
       <div className="mb-8">
-        <h2 className="text-xl font-semibold text-text-primary mb-4">Sections</h2>
-        {sectionsLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <ArrowPathIcon className="w-6 h-6 animate-spin text-text-muted" />
-          </div>
-        ) : sections.length === 0 ? (
-          <div className="card p-6 text-center">
-            <p className="text-text-muted">No sections found. Tasks are organized into sections.</p>
-          </div>
-        ) : (
-          <div className="overflow-hidden rounded-lg border border-border">
-            <table className="w-full">
-              <thead className="bg-bg-surface2">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-text-secondary">Section</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Total</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Pending</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Active</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Done</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Failed</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {sections.map((section) => (
-                  <tr
-                    key={section.id}
-                    onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?section=${section.id}`)}
-                    className="bg-bg-surface hover:bg-bg-surface2 cursor-pointer transition-colors"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-text-primary">
-                        <i className="fa-solid fa-folder text-text-muted mr-2"></i>
-                        {section.name}
-                      </div>
-                      {section.priority !== 50 && (
-                        <div className="text-xs text-text-muted mt-0.5">
-                          Priority: {section.priority}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center text-sm text-text-primary font-medium">
-                      {section.total_tasks}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {section.pending > 0 ? (
-                        <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
-                          {section.pending}
-                        </span>
-                      ) : (
-                        <span className="text-text-muted">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {section.in_progress + section.review > 0 ? (
-                        <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                          {section.in_progress + section.review}
-                        </span>
-                      ) : (
-                        <span className="text-text-muted">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {section.completed > 0 ? (
-                        <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                          {section.completed}
-                        </span>
-                      ) : (
-                        <span className="text-text-muted">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {section.failed > 0 ? (
-                        <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                          {section.failed}
-                        </span>
-                      ) : (
-                        <span className="text-text-muted">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <button
+          onClick={() => setSectionsOpen(!sectionsOpen)}
+          className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
+          aria-expanded={sectionsOpen}
+        >
+          {sectionsOpen ? (
+            <ChevronDownIcon className="w-5 h-5" />
+          ) : (
+            <ChevronRightIcon className="w-5 h-5" />
+          )}
+          <i className="fa-solid fa-folder-open w-5 h-5 flex items-center justify-center text-sm"></i>
+          <span>Sections</span>
+        </button>
+
+        {sectionsOpen && (
+          <>
+            {sectionsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <ArrowPathIcon className="w-6 h-6 animate-spin text-text-muted" />
+              </div>
+            ) : sections.length === 0 ? (
+              <div className="card p-6 text-center">
+                <p className="text-text-muted">No sections found. Tasks are organized into sections.</p>
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-lg border border-border">
+                <table className="w-full">
+                  <thead className="bg-bg-surface2">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-text-secondary">Section</th>
+                      <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Total</th>
+                      <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Pending</th>
+                      <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Active</th>
+                      <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Done</th>
+                      <th className="px-4 py-3 text-center text-sm font-medium text-text-secondary w-20">Failed</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {sections.map((section) => (
+                      <tr
+                        key={section.id}
+                        onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?section=${section.id}`)}
+                        className="bg-bg-surface hover:bg-bg-surface2 cursor-pointer transition-colors"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-text-primary">
+                            <i className="fa-solid fa-folder text-text-muted mr-2"></i>
+                            {section.name}
+                          </div>
+                          {section.priority !== 50 && (
+                            <div className="text-xs text-text-muted mt-0.5">
+                              Priority: {section.priority}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center text-sm text-text-primary font-medium">
+                          {section.total_tasks}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {section.pending > 0 ? (
+                            <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
+                              {section.pending}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted">-</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {section.in_progress + section.review > 0 ? (
+                            <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                              {section.in_progress + section.review}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted">-</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {section.completed > 0 ? (
+                            <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                              {section.completed}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted">-</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {section.failed > 0 ? (
+                            <span className="inline-flex items-center justify-center min-w-[24px] px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                              {section.failed}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -913,6 +1224,25 @@ export const ProjectDetailPage: React.FC = () => {
                 Current Task: {project.runner.current_task_id}
               </p>
             )}
+          </div>
+
+          <div className="mt-10">
+            <Button variant="danger" onClick={handleRemove}>
+              Remove Project
+            </Button>
+          </div>
+
+          <div className="mt-10 pt-6 text-sm text-text-muted">
+            Made in Scotland with Love by{' '}
+            <a
+              href="https://www.unlikeotherai.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent hover:text-accent/80 transition-colors"
+            >
+              Unlike Another AI
+            </a>{' '}
+            &copy; {new Date().getFullYear()}
           </div>
         </>
       )}

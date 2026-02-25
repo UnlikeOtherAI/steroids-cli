@@ -324,7 +324,13 @@ export const tasksApi = {
    */
   async listForProject(
     projectPath: string,
-    options?: { status?: string; section?: string; limit?: number }
+    options?: {
+      status?: string;
+      section?: string;
+      issue?: 'failed_retries' | 'stale';
+      hours?: number;
+      limit?: number;
+    }
   ): Promise<TaskListResponse> {
     let url = `/api/projects/${encodeURIComponent(projectPath)}/tasks`;
     const params = new URLSearchParams();
@@ -333,6 +339,12 @@ export const tasksApi = {
     }
     if (options?.section) {
       params.set('section', options.section);
+    }
+    if (options?.issue) {
+      params.set('issue', options.issue);
+    }
+    if (options?.hours) {
+      params.set('hours', options.hours.toString());
     }
     if (options?.limit) {
       params.set('limit', options.limit.toString());

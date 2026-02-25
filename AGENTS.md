@@ -187,13 +187,16 @@ Each follow-up must include:
 
 When the user says "do a release" or "do a publish", execute this exact sequence:
 
-1. Commit all intended changes
+1. Commit all intended changes (only files intended for the release)
 2. Bump version (`npm version patch|minor|major`)
 3. Push commit + tags (`git push && git push --tags`)
 4. Publish to npm (`npm publish`)
 5. Create GitHub release with `gh release create v<version> --title ... --notes ...`
 6. Install latest CLI globally from npm (`npm i -g steroids-cli@latest`)
-7. Reload web assets with `steroids web`
+7. Reload web assets with a clean restart:
+   - `steroids web stop`
+   - `steroids web`
+   - If UI still looks stale on versions that do not auto-rebuild web assets: `steroids web update` then `steroids web stop && steroids web`
 
 ### Required release notes content
 - Include concrete, user-visible changes
@@ -202,4 +205,5 @@ When the user says "do a release" or "do a publish", execute this exact sequence
 
 ### Verification after install
 - `steroids --version` must match the released version
-- `steroids web` must start successfully
+- `steroids web` must start successfully (Web UI and API URLs printed, no startup errors)
+- If browser still shows old UI after restart, hard-refresh the page (Cmd+Shift+R) and re-run `steroids web update`

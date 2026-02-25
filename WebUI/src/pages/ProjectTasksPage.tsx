@@ -15,6 +15,13 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   disputed: 'Disputed',
 };
 
+type IssueFilter = 'failed_retries' | 'stale';
+
+const ISSUE_LABELS: Record<IssueFilter, string> = {
+  failed_retries: 'Failed Retries',
+  stale: 'Stale Tasks',
+};
+
 const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'info' | 'default'> = {
   pending: 'default',
   in_progress: 'info',
@@ -41,6 +48,14 @@ export const ProjectTasksPage: React.FC = () => {
 
   const statusParam = searchParams.get('status') as TaskStatus | null;
   const sectionParam = searchParams.get('section');
+  const issueParamRaw = searchParams.get('issue');
+  const issueParam: IssueFilter | null =
+    issueParamRaw === 'failed_retries' || issueParamRaw === 'stale'
+      ? issueParamRaw
+      : null;
+  const hoursParam = searchParams.get('hours');
+  const hoursFilter = hoursParam ? parseInt(hoursParam, 10) : null;
+  const validHoursFilter = hoursFilter && Number.isFinite(hoursFilter) && hoursFilter > 0 ? hoursFilter : null;
   const decodedPath = projectPath ? decodeURIComponent(projectPath) : '';
 
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
@@ -77,6 +92,8 @@ export const ProjectTasksPage: React.FC = () => {
       const response = await tasksApi.listForProject(decodedPath, {
         status: statusParam || undefined,
         section: sectionParam || undefined,
+        issue: issueParam || undefined,
+        hours: validHoursFilter || undefined,
         limit: 100,
       });
 
@@ -111,7 +128,7 @@ export const ProjectTasksPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [decodedPath, statusParam, sectionParam]);
+  }, [decodedPath, statusParam, sectionParam, issueParam, validHoursFilter]);
 
   useEffect(() => {
     fetchSections();
@@ -144,6 +161,8 @@ export const ProjectTasksPage: React.FC = () => {
   const projectName = decodedPath.split('/').pop() || 'Project';
   const pageTitle = currentSection
     ? currentSection.name
+    : issueParam
+      ? ISSUE_LABELS[issueParam]
     : statusParam
       ? `${STATUS_LABELS[statusParam]} Tasks`
       : 'All Tasks';
@@ -160,7 +179,7 @@ export const ProjectTasksPage: React.FC = () => {
     <PageLayout
       title={pageTitle}
       titleSuffix={`in ${projectName}`}
-      subtitle={`${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`}
+      subtitle={`${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}${validHoursFilter ? ` in last ${validHoursFilter}h` : ''}`}
       backTo={`/project/${encodeURIComponent(decodedPath)}`}
       backLabel={`Back to ${projectName}`}
       loading={loading}

@@ -7,10 +7,16 @@ import type { GlobalFlags } from '../cli/flags.js';
 import { createOutput } from '../cli/output.js';
 import { generateHelp } from '../cli/help.js';
 import { execSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, constants as fsConstants } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+  constants as fsConstants,
+} from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { readFileSync } from 'node:fs';
 
 // Get CLI version from package.json (relative to dist/commands/)
 function getCLIVersion(): string {
@@ -25,9 +31,16 @@ const CLI_VERSION = getCLIVersion();
 
 const WEB_DIR = join(homedir(), '.steroids', 'webui');
 const LOGS_DIR = join(homedir(), '.steroids', 'logs');
+const WEB_BUILD_STATE_PATH = join(homedir(), '.steroids', 'web-build-state.json');
 const REPO_URL = 'https://github.com/UnlikeOtherAI/steroids-cli.git';
 const API_PORT = 3501;
 const WEBUI_PORT = 3500;
+
+interface WebBuildState {
+  webDir: string;
+  head: string;
+  cliVersion: string;
+}
 
 const HELP = generateHelp({
   command: 'web',
@@ -99,6 +112,75 @@ function hasRemoteTag(tag: string, cwd?: string): boolean {
   }
 }
 
+function getCurrentHead(cwd: string): string | null {
+  try {
+    return execSync('git rev-parse HEAD', {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function hasBuiltArtifacts(): boolean {
+  return (
+    existsSync(join(WEB_DIR, 'dist', 'index.js'))
+    && existsSync(join(WEB_DIR, 'API', 'dist', 'index.js'))
+    && existsSync(join(WEB_DIR, 'WebUI', 'dist', 'index.html'))
+  );
+}
+
+function readBuildState(): WebBuildState | null {
+  try {
+    const raw = readFileSync(WEB_BUILD_STATE_PATH, 'utf-8');
+    const parsed = JSON.parse(raw) as Partial<WebBuildState>;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (typeof parsed.webDir !== 'string') return null;
+    if (typeof parsed.head !== 'string') return null;
+    if (typeof parsed.cliVersion !== 'string') return null;
+    return {
+      webDir: parsed.webDir,
+      head: parsed.head,
+      cliVersion: parsed.cliVersion,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeBuildState(head: string): void {
+  try {
+    mkdirSync(join(homedir(), '.steroids'), { recursive: true });
+    const state: WebBuildState = {
+      webDir: WEB_DIR,
+      head,
+      cliVersion: CLI_VERSION,
+    };
+    writeFileSync(WEB_BUILD_STATE_PATH, JSON.stringify(state), 'utf-8');
+  } catch {
+    // Non-fatal: launch can proceed without persistent build metadata.
+  }
+}
+
+function shouldRebuildForHead(head: string): boolean {
+  if (!hasBuiltArtifacts()) {
+    return true;
+  }
+
+  const state = readBuildState();
+  if (!state) {
+    return true;
+  }
+
+  return (
+    state.webDir !== WEB_DIR
+    || state.head !== head
+    || state.cliVersion !== CLI_VERSION
+  );
+}
+
 /**
  * Ensure the web repo is cloned
  */
@@ -158,6 +240,11 @@ function installAndBuild(out: ReturnType<typeof createOutput>): void {
 
   out.log('Building WebUI...');
   run('npm run build', webUiDir);
+
+  const head = getCurrentHead(WEB_DIR);
+  if (head) {
+    writeBuildState(head);
+  }
 }
 
 /**
@@ -226,11 +313,10 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
         out.log('Checking version...');
         const expectedTag = `v${CLI_VERSION}`;
         try {
-          const currentHead = execSync('git rev-parse HEAD', {
-            cwd: WEB_DIR,
-            encoding: 'utf-8',
-            stdio: ['pipe', 'pipe', 'pipe'],
-          }).trim();
+          const currentHead = getCurrentHead(WEB_DIR);
+          if (!currentHead) {
+            throw new Error('Unable to resolve current web repo head');
+          }
 
           if (hasRemoteTag(expectedTag, WEB_DIR)) {
             execSync(`git fetch --depth 1 origin tag ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
@@ -242,6 +328,10 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
 
             if (currentHead === expectedHead) {
               out.log(`Already on ${expectedTag}.`);
+              if (shouldRebuildForHead(currentHead)) {
+                out.log('Detected stale or missing build artifacts. Rebuilding...');
+                installAndBuild(out);
+              }
             } else {
               out.log(`Updating to ${expectedTag}...`);
               execSync(`git checkout ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
@@ -259,6 +349,10 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
 
             if (currentHead === latestMainHead) {
               out.log('Already on latest main.');
+              if (shouldRebuildForHead(currentHead)) {
+                out.log('Detected stale or missing build artifacts. Rebuilding...');
+                installAndBuild(out);
+              }
             } else {
               execSync(`git checkout -B main origin/main`, { cwd: WEB_DIR, stdio: 'inherit' });
               execSync(`git pull --ff-only origin main`, { cwd: WEB_DIR, stdio: 'inherit' });
