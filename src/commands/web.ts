@@ -182,6 +182,7 @@ function launchProcesses(out: ReturnType<typeof createOutput>): void {
     cwd: apiDir,
     detached: true,
     stdio: ['ignore', apiLog, apiLog],
+    env: process.env,
   });
   apiProcess.unref();
 
