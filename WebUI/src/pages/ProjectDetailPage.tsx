@@ -15,6 +15,7 @@ import { Tooltip } from '../components/atoms/Tooltip';
 import { StatTile } from '../components/molecules/StatTile';
 import { TimeRangeSelector } from '../components/molecules/TimeRangeSelector';
 import { SchemaForm } from '../components/settings/SchemaForm';
+import { AISetupModal } from '../components/onboarding/AISetupModal';
 import { PageLayout } from '../components/templates/PageLayout';
 
 function StorageBar({ label, item, color, total }: {
@@ -72,6 +73,9 @@ export const ProjectDetailPage: React.FC = () => {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [pathCopied, setPathCopied] = useState(false);
+
+  // AI Setup state
+  const [showAISetup, setShowAISetup] = useState(false);
 
   const decodedPath = projectPath ? decodeURIComponent(projectPath) : '';
 
@@ -404,8 +408,22 @@ export const ProjectDetailPage: React.FC = () => {
             </Tooltip>
           </div>
 
+          {/* AI Setup Modal */}
+          {showAISetup && (
+            <AISetupModal
+              isProjectLevel={true}
+              projectPath={decodedPath}
+              inheritedConfig={globalConfig}
+              onComplete={() => {
+                setShowAISetup(false);
+                loadSettings();
+              }}
+              onClose={() => setShowAISetup(false)}
+            />
+          )}
+
           {/* Action buttons */}
-          <div className="mb-8 flex gap-3">
+          <div className="mb-8 flex gap-3 flex-wrap">
             {project.enabled ? (
               <Button variant="secondary" onClick={handleDisable}>
                 Disable Project
@@ -416,6 +434,13 @@ export const ProjectDetailPage: React.FC = () => {
             <Button variant="secondary" onClick={handleRemove}>
               Remove Project
             </Button>
+            <button
+              onClick={() => setShowAISetup(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent text-white hover:bg-accent/90 text-sm font-medium transition-colors"
+            >
+              <i className="fa-solid fa-robot"></i>
+              Reconfigure AI
+            </button>
             <Button
               className="ml-auto flex flex-col items-start gap-0.5"
               variant="accent"
@@ -837,6 +862,7 @@ export const ProjectDetailPage: React.FC = () => {
                   onChange={handleSettingsChange}
                   scope="project"
                   globalValues={globalConfig}
+                  hideAI={true}
                 />
 
                 {/* Save Bar - Bottom */}

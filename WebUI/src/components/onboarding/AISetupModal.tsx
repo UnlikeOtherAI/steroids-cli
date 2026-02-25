@@ -4,6 +4,9 @@ import { aiApi, configApi, AIProvider, AIModel } from '../../services/api';
 interface AISetupModalProps {
   onComplete: () => void;
   onClose?: () => void;
+  isProjectLevel?: boolean;
+  projectPath?: string;
+  inheritedConfig?: Record<string, any>;
 }
 
 interface RoleConfig {
@@ -39,7 +42,13 @@ const API_KEY_ENV_VARS: Record<string, string> = {
   mistral: 'STEROIDS_MISTRAL',
 };
 
-export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose }) => {
+export const AISetupModal: React.FC<AISetupModalProps> = ({
+  onComplete,
+  onClose,
+  isProjectLevel = false,
+  projectPath,
+  inheritedConfig,
+}) => {
   const [providers, setProviders] = useState<AIProvider[]>([]);
   const [models, setModels] = useState<Record<string, AIModel[]>>({});
   const [modelSources, setModelSources] = useState<Record<string, string>>({});
@@ -62,18 +71,20 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
   const loadProviders = async () => {
     try {
       setLoading(true);
-      const [providerList, globalConfig] = await Promise.all([
+      const [providerList, globalConfig, projectConfig] = await Promise.all([
         aiApi.getProviders(),
         configApi.getConfig('global'),
+        isProjectLevel && projectPath ? configApi.getConfig('project', projectPath) : Promise.resolve(null),
       ]);
       setProviders(providerList);
 
-      // Pre-fill from existing config
-      const ai = globalConfig.ai as any;
+      // Pre-fill from existing config (project-level takes precedence)
+      const configToUse = isProjectLevel && projectConfig ? projectConfig : globalConfig;
+      const ai = configToUse.ai as any;
       if (ai) {
         if (ai.orchestrator?.provider) setOrchestrator({ provider: ai.orchestrator.provider, model: ai.orchestrator.model || '' });
         if (ai.coder?.provider) setCoder({ provider: ai.coder.provider, model: ai.coder.model || '' });
-        
+
         if (ai.reviewers && Array.isArray(ai.reviewers) && ai.reviewers.length > 0) {
           setUseMultiReview(true);
           setReviewers(ai.reviewers.map((r: any) => ({ provider: r.provider || '', model: r.model || '' })));
@@ -168,7 +179,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
         updates['ai.reviewers'] = [];
       }
 
-      await configApi.setConfig(updates, 'global');
+      await configApi.setConfig(updates, isProjectLevel ? 'project' : 'global', isProjectLevel ? projectPath : undefined);
 
       onComplete();
     } catch (err) {
@@ -208,11 +219,25 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
     const installInfo = INSTALL_COMMANDS[config.provider];
     const envVar = API_KEY_ENV_VARS[config.provider];
 
+    // Check if this value is inherited from global config
+    const inheritedValue = inheritedConfig?.ai ? inheritedConfig.ai[role as keyof typeof inheritedConfig.ai] : null;
+    const isInherited = isProjectLevel && !config.provider && inheritedValue;
+
     return (
-      <div className="bg-bg-base rounded-lg p-4 border border-border">
+      <div className={`bg-bg-base rounded-lg p-4 border border-border ${isInherited ? 'opacity-75 relative' : ''}`}>
         <div className="flex items-center gap-2 mb-3">
           <i className={`fa-solid ${icon} text-accent`}></i>
           <span className="font-medium text-text-primary">{label}</span>
+          {isInherited && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-info-soft text-info border border-info/30">
+              Inherited
+            </span>
+          )}
+          {isProjectLevel && !isInherited && config.provider && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-success-soft text-success border border-success/30">
+              Project Override
+            </span>
+          )}
         </div>
 
         {/* Provider and Model Selection */}
@@ -309,15 +334,19 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({ onComplete, onClose 
           <div className="flex items-start justify-between">
             <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
               <i className="fa-solid fa-robot text-accent"></i>
-              AI Configuration Required
+              {isProjectLevel ? 'Project AI Configuration' : 'AI Configuration Required'}
             </h2>
             {onClose && (
-              <button onClick={onClose} className="p-1 rounded-lg hover:bg-bg-surface2 text-text-muted hover:text-text-primary transition-colors">
+              <button onClick={onClose} className="p-1 rounded-lg hover:bg-danger/10 text-danger hover:text-danger/80 transition-colors" title="Close">
                 <i className="fa-solid fa-xmark text-lg"></i>
               </button>
             )}
           </div>
-          <p className="text-sm text-text-secondary mt-1">Configure models for each role</p>
+          <p className="text-sm text-text-secondary mt-1">
+            {isProjectLevel
+              ? 'Override global AI settings for this project'
+              : 'Configure models for each role'}
+          </p>
         </div>
 
         <div className="px-6 py-4 max-h-[65vh] overflow-y-auto">

@@ -44,6 +44,8 @@ interface SchemaFormProps {
   // For project-level settings to show inherited values
   scope?: 'global' | 'project';
   globalValues?: Record<string, unknown>;
+  // Hide AI configuration section (use AISetupModal instead)
+  hideAI?: boolean;
 }
 
 export const SchemaForm: React.FC<SchemaFormProps> = ({
@@ -56,6 +58,7 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
   onToggleCollapse,
   scope = 'global',
   globalValues,
+  hideAI = false,
 }) => {
   // Only manage state at root level
   const [localCollapsed, setLocalCollapsed] = useState<Record<string, boolean>>(() =>
@@ -119,6 +122,11 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
           .replace(/([A-Z])/g, ' $1')
           .replace(/^./, (str) => str.toUpperCase())
           .trim();
+
+        // Skip entire AI section if hideAI is true
+        if (hideAI && key === 'ai' && level === 0) {
+          return null;
+        }
 
         // Check if this is an AI role section (orchestrator, coder, reviewer, reviewers under ai)
         const isAIRoleSection =
@@ -201,6 +209,7 @@ export const SchemaForm: React.FC<SchemaFormProps> = ({
                     onToggleCollapse={toggleCollapse}
                     scope={scope}
                     globalValues={globalValues}
+                    hideAI={hideAI}
                   />
                 </div>
               )}
