@@ -7,7 +7,9 @@ export interface CoderOrchestrationResult {
   reasoning: string;
   commits: string[];
   commit_message?: string;
+  /** @deprecated Soft-deprecated: encoded in REASON prefix instead. Remove in follow-up. */
   contract_violation?: 'checklist_required' | 'rejection_response_required' | null;
+  /** @deprecated Soft-deprecated: encoded in REASON prefix instead. Remove in follow-up. */
   wont_fix_override_items?: string[];
   next_status: 'review' | 'in_progress' | 'failed';
   files_changed: number;

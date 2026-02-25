@@ -33,7 +33,7 @@ ${stderr_tail}
 
 You are a state machine that analyzes reviewer output and determines the next action.
 
-**CRITICAL: You MUST respond ONLY with valid JSON. No markdown, no other text.**
+**CRITICAL: Your response MUST end with the required signal lines below. No JSON.**
 
 ---
 
@@ -93,120 +93,65 @@ ${stderrSection}
 
 ---
 
-## Output Format (JSON ONLY)
+## Required Output (last lines)
 
-\`\`\`json
-{
-  "decision": "approve" | "reject" | "dispute" | "skip" | "unclear",
-  "reasoning": "One sentence why (max 100 chars)",
-  "notes": "Feedback for coder (required if reject)",
-  "follow_up_tasks": [
-    {
-      "title": "Short descriptive title (10-100 chars)",
-      "description": "Detailed context: WHAT, WHY, and HOW (100-4000 chars)"
-    }
-  ],
-  "next_status": "completed" | "in_progress" | "disputed" | "skipped" | "review",
-  "rejection_count": 0,
-  "confidence": "high" | "medium" | "low",
-  "push_to_remote": false,
-  "repeated_issue": false
-}
-\`\`\`
+DECISION: APPROVE | REJECT | DISPUTE | SKIP
+NOTES: <feedback for coder, required if REJECT>
+CONFIDENCE: HIGH | MEDIUM | LOW
 
-### Field Rules
+Optional (only on APPROVE):
+### Follow-Up Tasks
+- **Title:** Description
 
-**decision:**
-- \`approve\` → Work meets requirements, task complete
-- \`reject\` → Issues found, send back to coder
-- \`dispute\` → Fundamental disagreement or hit limit, needs human
-- \`skip\` → Task requires external work, no code needed
-- \`unclear\` → Couldn't determine decision, retry review
+### Decision Values
 
-**next_status:**
-- \`completed\` for approve
-- \`in_progress\` for reject
-- \`disputed\` for dispute
-- \`skipped\` for skip
-- \`review\` for unclear
+- \`APPROVE\` → Work meets requirements, task complete
+- \`REJECT\` → Issues found, send back to coder
+- \`DISPUTE\` → Fundamental disagreement or hit limit, needs human
+- \`SKIP\` → Task requires external work, no code needed
 
-**notes:** Required if reject (specific feedback for coder)
+If you cannot determine a decision, omit the DECISION line (will be treated as unclear).
 
-**follow_up_tasks:** Optional (0-3 items). Use ONLY for approvals where non-blocking improvements or technical debt were identified.
+### NOTES
 
-**metadata.push_to_remote:**
-- \`true\` for approve, dispute, skip
-- \`false\` for reject, unclear
+Required if REJECT (specific feedback for coder). Include all issues found.
+
+### Follow-Up Tasks
+
+Optional (0-3 items). Use ONLY for approvals where non-blocking improvements or technical debt were identified.
 
 ---
 
 ## Examples
 
 ### Example 1: Approval with Follow-up
-\`\`\`json
-{
-  "decision": "approve",
-  "reasoning": "Explicit approval signal",
-  "notes": "Implementation meets all requirements",
-  "follow_up_tasks": [
-    {
-      "title": "Add unit tests for edge cases in validation.ts",
-      "description": "WHAT: Add unit tests for null/undefined and malformed inputs in the new validation logic.\\n\\nWHY: The current implementation only covers happy paths. We need more coverage before this module is considered bulletproof.\\n\\nHOW: Use the existing pattern in tests/validation.test.ts. Focus on the new boundary conditions introduced in this task."
-    }
-  ],
-  "next_status": "completed",
-  "rejection_count": 0,
-  "confidence": "high",
-  "push_to_remote": true,
-  "repeated_issue": false
-}
-\`\`\`
+
+DECISION: APPROVE
+NOTES: Implementation meets all requirements
+CONFIDENCE: HIGH
+
+### Follow-Up Tasks
+- **Add unit tests for edge cases in validation.ts:** Add tests for null/undefined inputs in the new validation logic.
 
 ### Example 2: Rejection
-\`\`\`json
-{
-  "decision": "reject",
-  "reasoning": "Specific issues identified",
-  "notes": "1. Add error handling in parseConfig(). 2. Missing test for edge case. 3. Fix type error on line 42.",
-  "next_status": "in_progress",
-  "rejection_count": 1,
-  "confidence": "high",
-  "push_to_remote": false,
-  "repeated_issue": false
-}
-\`\`\`
+
+DECISION: REJECT
+NOTES: 1. Add error handling in parseConfig(). 2. Missing test for edge case. 3. Fix type error on line 42.
+CONFIDENCE: HIGH
 
 ### Example 3: Dispute (Repeated)
-\`\`\`json
-{
-  "decision": "dispute",
-  "reasoning": "Same issue repeated 4 times, hitting limit",
-  "notes": "Reviewer demanding global test coverage outside task scope. Human decision needed.",
-  "next_status": "disputed",
-  "rejection_count": 11,
-  "confidence": "high",
-  "push_to_remote": true,
-  "repeated_issue": true
-}
-\`\`\`
 
-### Example 4: Unclear
-\`\`\`json
-{
-  "decision": "unclear",
-  "reasoning": "No decision statement in output",
-  "notes": "Reviewer did not complete analysis",
-  "next_status": "review",
-  "rejection_count": 2,
-  "confidence": "low",
-  "push_to_remote": false,
-  "repeated_issue": false
-}
-\`\`\`
+DECISION: DISPUTE
+NOTES: Reviewer demanding global test coverage outside task scope. Human decision needed.
+CONFIDENCE: HIGH
+
+### Example 4: Unclear output
+
+(no DECISION line — will trigger retry)
 
 ---
 
-Analyze the context above and respond with JSON:`;
+Analyze the context above and respond with the signal lines:`;
 }
 
 /**
@@ -233,7 +178,7 @@ ${r.stdout.slice(-5000)}
 You are receiving rejection notes from ${reviewer_results.length} independent reviewers.
 The DECISION is already REJECT. Your job is to MERGE THE NOTES into a single checklist.
 
-**CRITICAL: You MUST respond ONLY with valid JSON. No markdown, no other text.**
+**CRITICAL: Your response MUST end with the required signal lines below. No JSON.**
 
 ---
 
@@ -273,27 +218,21 @@ ${reviewers_formatted}
 
 ---
 
-## Output Format (JSON ONLY)
+## Required Output (last lines)
 
-\`\`\`json
-{
-  "decision": "reject",
-  "reasoning": "Consolidated rejection notes from ${reviewer_results.length} reviewers",
-  "notes": "## Merged Review Findings\\n\\n### File.ts\\n- [ ] Issue found (Reviewer name)\\n...",
-  "follow_up_tasks": [
-    {
-      "title": "Title",
-      "description": "WHAT/WHY/HOW"
-    }
-  ],
-  "next_status": "in_progress",
-  "rejection_count": ${task.rejection_count},
-  "confidence": "high",
-  "push_to_remote": false,
-  "repeated_issue": false,
-  "reviewer_count": ${reviewer_results.length}
-}
-\`\`\`
+DECISION: REJECT
+NOTES:
+## Merged Review Findings
+### File.ts
+- [ ] Issue found (Reviewer name)
+...
 
-Analyze the context above and respond with JSON:`;
+### Follow-Up Tasks
+- **Title:** Description
+
+CONFIDENCE: HIGH | MEDIUM | LOW
+
+---
+
+Analyze the context above and respond with the signal lines:`;
 }

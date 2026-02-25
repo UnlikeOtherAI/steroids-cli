@@ -175,6 +175,7 @@ async function classifyOrchestratorFailure(
 const MAX_ORCHESTRATOR_PARSE_RETRIES = 3;
 const MAX_CONTRACT_VIOLATION_RETRIES = 3;
 const MAX_PROVIDER_NONZERO_FAILURES = 3;
+const MAX_CONSECUTIVE_CODER_RETRIES = 3;
 const CODER_PARSE_FALLBACK_MARKER = '[retry] FALLBACK: Orchestrator failed, defaulting to retry';
 const REVIEWER_PARSE_FALLBACK_MARKER = '[unclear] FALLBACK: Orchestrator failed, retrying review';
 const CONTRACT_CHECKLIST_MARKER = '[contract:checklist]';
@@ -272,6 +273,32 @@ function countConsecutiveUnclearEntries(
     if (entry.actor !== 'orchestrator') break;
 
     if ((entry.notes ?? '').startsWith('[unclear]')) {
+      count += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return count;
+}
+
+/**
+ * Count consecutive coder retry entries (notes starting with [retry]).
+ * Used as a universal retry cap to prevent infinite loops.
+ */
+function countConsecutiveRetryEntries(
+  db: ReturnType<typeof openDatabase>['db'],
+  taskId: string
+): number {
+  const audit = getTaskAudit(db, taskId);
+  let count = 0;
+
+  for (let i = audit.length - 1; i >= 0; i--) {
+    const entry = audit[i];
+    if (entry.actor !== 'orchestrator') break;
+
+    if ((entry.notes ?? '').startsWith('[retry]')) {
       count += 1;
       continue;
     }
@@ -564,16 +591,7 @@ export async function runCoderPhase(
     const orchestratorFailure = await classifyOrchestratorFailure(error, projectPath);
 
     if (orchestratorFailure && !orchestratorFailure.retryable) {
-      orchestratorOutput = JSON.stringify({
-        action: 'error',
-        reasoning: `FALLBACK: Non-retryable orchestrator failure (${orchestratorFailure.type})`,
-        commits: [],
-        next_status: 'failed',
-          files_changed: 0,
-          confidence: 'low',
-          exit_clean: false,
-          has_commits: false,
-      });
+      orchestratorOutput = `STATUS: ERROR\nREASON: FALLBACK: Non-retryable orchestrator failure (${orchestratorFailure.type})\nCONFIDENCE: LOW`;
     } else {
     // Check if coder seems finished even if orchestrator failed
     const isTaskComplete = hasCoderCompletionSignal(coderResult.stdout);
@@ -582,28 +600,10 @@ export async function runCoderPhase(
     const hasWork = hasRelevantChanges;
 
     if (isTaskComplete && hasWork) {
-      orchestratorOutput = JSON.stringify({
-        action: has_uncommitted ? 'stage_commit_submit' : 'submit',
-        reasoning: 'FALLBACK: Orchestrator failed but coder signaled completion',
-        commits: commits.map(c => c.sha),
-        next_status: 'review',
-          files_changed: files_changed.length,
-          confidence: 'low',
-          exit_clean: true,
-          has_commits: commits.length > 0,
-      });
+      orchestratorOutput = `STATUS: REVIEW\nREASON: FALLBACK: Orchestrator failed but coder signaled completion\nCONFIDENCE: LOW`;
     } else {
       // Fallback to safe default: retry
-      orchestratorOutput = JSON.stringify({
-        action: 'retry',
-        reasoning: 'FALLBACK: Orchestrator failed, defaulting to retry',
-        commits: [],
-        next_status: 'in_progress',
-          files_changed: 0,
-          confidence: 'low',
-          exit_clean: true,
-          has_commits: false,
-      });
+      orchestratorOutput = `STATUS: RETRY\nREASON: FALLBACK: Orchestrator failed, defaulting to retry\nCONFIDENCE: LOW`;
     }
     }
   }
@@ -611,6 +611,21 @@ export async function runCoderPhase(
   // STEP 5: Parse orchestrator output with fallback
   const handler = new OrchestrationFallbackHandler();
   let decision = handler.parseCoderOutput(orchestratorOutput);
+
+  // Fill git-state fields from actual git state (parser returns placeholders)
+  decision.commits = commits.map(c => c.sha);
+  decision.files_changed = files_changed.length;
+  decision.has_commits = commits.length > 0;
+
+  // Derive stage_commit_submit from submit + uncommitted + completion signal
+  if (decision.action === 'submit' && has_uncommitted && commits.length === 0) {
+    const isTaskComplete = hasCoderCompletionSignal(coderResult.stdout);
+    if (isTaskComplete) {
+      decision.action = 'stage_commit_submit';
+    }
+    // If not complete, leave as 'submit' — the existing submit handler
+    // will fail safely when it can't find a valid commit hash
+  }
 
   // When orchestrator parse falls back to retry, check coder output + git state
   // for completion signals before giving up (same logic as the catch block above)
@@ -656,12 +671,13 @@ export async function runCoderPhase(
     }
   }
 
-  // Contract-violation handling (structured-first, legacy-prefix fallback).
+  // Contract-violation handling (detected via REASON prefix from text signals).
   const legacyChecklistViolation = /^CHECKLIST_REQUIRED:/i.test(decision.reasoning || '');
   const legacyRejectionResponseViolation = /^REJECTION_RESPONSE_REQUIRED:/i.test(decision.reasoning || '');
-  const contractViolation = decision.contract_violation
-    ?? (legacyChecklistViolation ? 'checklist_required' : null)
-    ?? (legacyRejectionResponseViolation ? 'rejection_response_required' : null);
+  const contractViolation: 'checklist_required' | 'rejection_response_required' | null =
+    legacyChecklistViolation ? 'checklist_required'
+    : legacyRejectionResponseViolation ? 'rejection_response_required'
+    : null;
 
   if (contractViolation) {
     const marker = contractViolation === 'checklist_required'
@@ -698,17 +714,14 @@ export async function runCoderPhase(
   }
 
   // Enforce orchestrator authority over weak/unsupported WONT_FIX claims.
-  const structuredOverrideItems = Array.isArray(decision.wont_fix_override_items)
-    ? decision.wont_fix_override_items.filter(item => typeof item === 'string' && item.trim().length > 0)
-    : [];
+  // WONT_FIX overrides are now encoded in the REASON prefix as semicolon-separated items.
   const legacyWontFixOverrideMatch = (decision.reasoning || '').match(/WONT_FIX_OVERRIDE:\s*([\s\S]+)/i);
-  const fallbackLegacyItems = legacyWontFixOverrideMatch?.[1]
+  const overrideItems = legacyWontFixOverrideMatch?.[1]
     ? legacyWontFixOverrideMatch[1]
-        .split('\n')
+        .split(';')
         .map(line => line.trim())
         .filter(Boolean)
     : [];
-  const overrideItems = structuredOverrideItems.length > 0 ? structuredOverrideItems : fallbackLegacyItems;
 
   if (overrideItems.length > 0) {
     const mandatoryLines = overrideItems.map((item, idx) => `${idx + 1}. ${item}`);
@@ -739,6 +752,22 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
       reasoning: `WONT_FIX override applied (MUST_IMPLEMENT)`,
       confidence: 'medium',
     };  }
+
+  // Universal retry cap: prevent infinite loops for ANY consecutive [retry] entries.
+  // This catches the bug where SignalParser returns 'unclear' → 'retry' without escalation.
+  if (decision.action === 'retry') {
+    const consecutiveRetries = countConsecutiveRetryEntries(db, task.id) + 1;
+    if (consecutiveRetries >= MAX_CONSECUTIVE_CODER_RETRIES) {
+      decision = {
+        ...decision,
+        action: 'error',
+        reasoning: `Coder retry limit reached (${consecutiveRetries} consecutive retries); escalating to failed`,
+        next_status: 'failed',
+        confidence: 'low',
+        exit_clean: false,
+      };
+    }
+  }
 
   // STEP 6: Log orchestrator decision for audit trail
   addAuditEntry(db, task.id, task.status, decision.next_status, 'orchestrator', {

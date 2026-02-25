@@ -3,7 +3,8 @@
  * Replaces fragile JSON schema parsing.
  */
 
-export type CoderSignal = 'review' | 'unclear';
+export type CoderSignal = 'review' | 'retry' | 'error' | 'unclear';
+export type ConfidenceLevel = 'high' | 'medium' | 'low';
 export type ReviewerDecision = 'approve' | 'reject' | 'dispute' | 'skip' | 'unclear';
 
 export interface ParsedReviewerOutput {
@@ -33,13 +34,42 @@ export class SignalParser {
       const line = lines[i].trim();
       if (!line) continue;
       
-      const match = line.match(/(?:\*\*)?STATUS(?:\*\*)?:\s*(?:\*\*)?(REVIEW)(?:\*\*)?/i);
+      const match = line.match(/(?:\*\*)?STATUS(?:\*\*)?:\s*(?:\*\*)?(REVIEW|RETRY|ERROR)(?:\*\*)?/i);
       if (match) {
         return match[1].toLowerCase() as CoderSignal;
       }
     }
     
     return 'unclear';
+  }
+
+  /**
+   * Extracts the REASON: line from output.
+   * Returns everything after `REASON:` on that line, trimmed.
+   */
+  public static extractReason(output: string): string | null {
+    const cleanOutput = this.stripCodeBlocks(output);
+    const match = cleanOutput.match(/(?:\*\*)?REASON(?:\*\*)?:\s*(.*)/i);
+    return match ? match[1].trim() : null;
+  }
+
+  /**
+   * Extracts the CONFIDENCE: level from output.
+   * Returns 'high', 'medium', or 'low'. Defaults to 'medium' if not found.
+   */
+  public static extractConfidence(output: string): ConfidenceLevel {
+    const cleanOutput = this.stripCodeBlocks(output);
+    const match = cleanOutput.match(/(?:\*\*)?CONFIDENCE(?:\*\*)?:\s*(?:\*\*)?(HIGH|MEDIUM|LOW)(?:\*\*)?/i);
+    return match ? match[1].toLowerCase() as ConfidenceLevel : 'medium';
+  }
+
+  /**
+   * Extracts the COMMIT_MESSAGE: line from output.
+   */
+  public static extractCommitMessage(output: string): string | null {
+    const cleanOutput = this.stripCodeBlocks(output);
+    const match = cleanOutput.match(/(?:\*\*)?COMMIT_MESSAGE(?:\*\*)?:\s*(.*)/i);
+    return match ? match[1].trim() || null : null;
   }
 
   /**

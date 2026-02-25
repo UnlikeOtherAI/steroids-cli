@@ -1,44 +1,50 @@
 /**
- * Legacy fallback handler wrapping the new SignalParser.
- * This file will be fully replaced in Task 5/6 when loop-phases is refactored,
- * but for now it bridges the gap to allow deleting schemas.ts.
+ * Fallback handler wrapping SignalParser for text-signal routing.
+ * Parses plain-text STATUS/DECISION/REASON/CONFIDENCE signals from orchestrator output.
  */
 
 import { CoderOrchestrationResult, ReviewerOrchestrationResult } from './types.js';
 import { SignalParser } from './signal-parser.js';
+import type { CoderSignal } from './signal-parser.js';
+
+const ACTION_MAP: Record<CoderSignal, CoderOrchestrationResult['action']> = {
+  review: 'submit',
+  retry: 'retry',
+  error: 'error',
+  unclear: 'retry',
+};
+
+const STATUS_MAP: Record<CoderSignal, CoderOrchestrationResult['next_status']> = {
+  review: 'review',
+  retry: 'in_progress',
+  error: 'failed',
+  unclear: 'in_progress',
+};
 
 export class OrchestrationFallbackHandler {
   parseCoderOutput(rawOutput: string): CoderOrchestrationResult {
     const signal = SignalParser.parseCoderSignal(rawOutput);
-
-    if (signal === 'review') {
-      return {
-        action: 'submit',
-        reasoning: 'SignalParser detected STATUS: REVIEW',
-        commits: [],
-        next_status: 'review',
-        files_changed: 1,
-        confidence: 'high',
-        exit_clean: true,
-        has_commits: false
-      };
-    }
+    const reason = SignalParser.extractReason(rawOutput);
+    const confidence = SignalParser.extractConfidence(rawOutput);
+    const commitMessage = SignalParser.extractCommitMessage(rawOutput);
 
     return {
-      action: 'retry',
-      reasoning: 'SignalParser detected unclear status',
-      commits: [],
-      next_status: 'in_progress',
-      files_changed: 0,
-      confidence: 'low',
-      exit_clean: true,
-      has_commits: false
+      action: ACTION_MAP[signal],
+      reasoning: reason || `SignalParser detected ${signal === 'unclear' ? 'unclear status' : `STATUS: ${signal.toUpperCase()}`}`,
+      commits: [],          // caller fills from git state
+      commit_message: commitMessage ?? undefined,
+      next_status: STATUS_MAP[signal],
+      files_changed: 0,     // caller fills from git state
+      confidence: signal === 'unclear' ? 'low' : confidence,
+      exit_clean: signal !== 'error',
+      has_commits: false,    // caller fills from git state
     };
   }
 
   parseReviewerOutput(rawOutput: string): ReviewerOrchestrationResult {
     const result = SignalParser.parseReviewerSignal(rawOutput);
-    
+    const confidence = SignalParser.extractConfidence(rawOutput);
+
     let nextStatus: 'completed' | 'in_progress' | 'disputed' | 'skipped' | 'review' = 'review';
     if (result.decision === 'approve') nextStatus = 'completed';
     if (result.decision === 'reject') nextStatus = 'in_progress';
@@ -52,7 +58,7 @@ export class OrchestrationFallbackHandler {
       follow_up_tasks: result.followUpTasks,
       next_status: nextStatus,
       rejection_count: 0,
-      confidence: 'high',
+      confidence: result.decision === 'unclear' ? 'low' : confidence,
       push_to_remote: false,
       repeated_issue: false
     };

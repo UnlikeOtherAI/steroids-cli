@@ -88,7 +88,7 @@ ${extractedBlocks.join('\n\n')}
 
 You are a state machine that analyzes coder output and determines the next action.
 
-**CRITICAL: You MUST respond ONLY with valid JSON. No markdown, no other text.**
+**CRITICAL: Your response MUST end with the required signal lines below. No JSON.**
 
 ---
 
@@ -129,31 +129,29 @@ ${filesSection}
 ## Decision Rules
 
 ### 1. Error States
-- Exit code non-zero + timeout → \`error\` (process killed)
-- Exit code non-zero + no commits + no changes → \`error\` (failed to start)
-- Stderr contains "fatal" / "Permission denied" → \`error\`
+- Exit code non-zero + timeout → STATUS: ERROR (process killed)
+- Exit code non-zero + no commits + no changes → STATUS: ERROR (failed to start)
+- Stderr contains "fatal" / "Permission denied" → STATUS: ERROR
 
 ### 2. Incomplete Work
-- Exit 0 but no commits and no changes → \`retry\` (did nothing)
-- Timeout but has commits/changes → \`stage_commit_submit\` (save progress)
-- Output contains "need more time" / "continuing" → \`retry\`
+- Exit 0 but no commits and no changes → STATUS: RETRY (did nothing)
+- Timeout but has commits/changes → STATUS: REVIEW (save progress)
+- Output contains "need more time" / "continuing" → STATUS: RETRY
 
 ### 3. Completion Without Commit
-- Exit 0 + uncommitted changes + completion signal → \`stage_commit_submit\`
+- Exit 0 + uncommitted changes + completion signal → STATUS: REVIEW
 - Look for: "changes ready", "implementation complete", "finished"
 
 ### 4. Normal Completion
-- Exit 0 + commits exist → \`submit\`
+- Exit 0 + commits exist → STATUS: REVIEW
 - Most common happy path
 
 ### 5. First-Submission Self-Checklist
 - If \`Rejection Count\` is 0, require a \`SELF_REVIEW_CHECKLIST\` block in coder output
 - Checklist must include a final self-review confirmation item
 - If missing, return:
-  - \`action: "retry"\`
-  - \`next_status: "in_progress"\`
-  - \`reasoning\` starting with \`CHECKLIST_REQUIRED:\` (short)
-  - \`contract_violation: "checklist_required"\`
+  - STATUS: RETRY
+  - REASON: CHECKLIST_REQUIRED: <details>
 
 ### 6. Rejection Response Contract (Required on Resubmissions)
 - If \`Rejection Count\` is > 0, require a \`REJECTION_RESPONSE\` block
@@ -161,10 +159,8 @@ ${filesSection}
   - \`ITEM-<n> | IMPLEMENTED | ...\`
   - or \`ITEM-<n> | WONT_FIX | ...\`
 - If missing or clearly incomplete, return:
-  - \`action: "retry"\`
-  - \`next_status: "in_progress"\`
-  - \`reasoning\` starting with \`REJECTION_RESPONSE_REQUIRED:\` (short)
-  - \`contract_violation: "rejection_response_required"\`
+  - STATUS: RETRY
+  - REASON: REJECTION_RESPONSE_REQUIRED: <details>
 - \`REJECTION_RESPONSE\` completeness check must use \`Open Rejection Items (latest)\` from task context
 - Require sequential responses: \`ITEM-1\` through \`ITEM-N\`
 
@@ -175,112 +171,72 @@ ${filesSection}
   - Concrete evidence the task still works without that item
   - No conflict with any mandatory override guidance
 - If any of the above is missing, return:
-  - \`action: "retry"\`
-  - \`next_status: "in_progress"\`
-  - \`reasoning\` that starts with \`WONT_FIX_OVERRIDE:\` (short)
-  - \`wont_fix_override_items\` containing specific mandatory fixes
-- If evidence is strong and functionality is complete, \`submit\` is allowed
+  - STATUS: RETRY
+  - REASON: WONT_FIX_OVERRIDE: <item1>; <item2>; ...
+- If evidence is strong and functionality is complete, STATUS: REVIEW is allowed
 
 ### 8. Uncertainty Default
-- When signals conflict → \`retry\` (safer than error)
+- When signals conflict → STATUS: RETRY (safer than error)
 
 ---
 
-## Output Format (JSON ONLY)
+## Required Output (last lines)
 
-\`\`\`json
-{
-  "action": "submit" | "retry" | "stage_commit_submit" | "error",
-  "reasoning": "One sentence why (max 100 chars)",
-  "commits": ["sha1", "sha2"],
-  "commit_message": "Only if stage_commit_submit",
-  "contract_violation": "checklist_required" | "rejection_response_required" | null,
-  "wont_fix_override_items": ["specific required fix", "another required fix"],
-  "next_status": "review" | "in_progress" | "failed",
-  "files_changed": 0,
-  "confidence": "high" | "medium" | "low",
-  "exit_clean": true,
-  "has_commits": false
-}
-\`\`\`
+STATUS: REVIEW | RETRY | ERROR
+REASON: <one sentence why, max 100 chars>
 
-### Field Rules
+Optional:
+CONFIDENCE: HIGH | MEDIUM | LOW
+COMMIT_MESSAGE: <message if uncommitted changes need committing>
 
-**action:**
-- \`submit\` → Work complete, has commits, ready for review
-- \`retry\` → Incomplete or unclear, run coder again
-- \`stage_commit_submit\` → Work complete but not committed
-- \`error\` → Fatal issue, needs human intervention
+### Status Values
 
-**contract_violation:**
-- \`checklist_required\` when first submission missing required self-checklist
-- \`rejection_response_required\` when resubmission misses required ITEM responses
-- \`null\` when no contract violation
+- \`REVIEW\` → Work complete, ready for review (maps to submit or stage_commit_submit)
+- \`RETRY\` → Incomplete or unclear, run coder again
+- \`ERROR\` → Fatal issue, needs human intervention
 
-**wont_fix_override_items:**
-- Optional list of mandatory fixes when WONT_FIX is rejected by orchestrator
-- Use this field for detailed override items (do NOT put long detail in reasoning)
+### REASON Prefixes (for contract violations)
 
-**next_status:**
-- \`review\` for submit and stage_commit_submit
-- \`in_progress\` for retry
-- \`failed\` for error
-
-**confidence:**
-- \`high\` - Clear signals, obvious decision
-- \`medium\` - Reasonable inference from context
-- \`low\` - Uncertain, making best guess
+- \`REASON: CHECKLIST_REQUIRED: <details>\` — first submission missing self-checklist
+- \`REASON: REJECTION_RESPONSE_REQUIRED: <details>\` — resubmission missing ITEM responses
+- \`REASON: WONT_FIX_OVERRIDE: <item1>; <item2>; ...\` — mandatory fixes when WONT_FIX is rejected
 
 ---
 
 ## Examples
 
 ### Example 1: Normal Completion
-\`\`\`json
-{
-  "action": "submit",
-  "reasoning": "Clean exit with 2 commits",
-  "commits": ["abc123", "def456"],
-  "commit_message": null,
-  "next_status": "review",
-  "files_changed": 3,
-  "confidence": "high",
-  "exit_clean": true,
-  "has_commits": true
-}
-\`\`\`
+
+STATUS: REVIEW
+REASON: Clean exit with 2 commits
+CONFIDENCE: HIGH
 
 ### Example 2: Uncommitted Work
-\`\`\`json
-{
-  "action": "stage_commit_submit",
-  "reasoning": "Work complete but not committed",
-  "commits": [],
-  "commit_message": "feat: implement task specification",
-  "next_status": "review",
-  "files_changed": 2,
-  "confidence": "high",
-  "exit_clean": true,
-  "has_commits": false
-}
-\`\`\`
 
-### Example 3: Timeout
-\`\`\`json
-{
-  "action": "retry",
-  "reasoning": "Timeout with no output, retrying",
-  "commits": [],
-  "commit_message": null,
-  "next_status": "in_progress",
-  "files_changed": 0,
-  "confidence": "high",
-  "exit_clean": false,
-  "has_commits": false
-}
-\`\`\`
+STATUS: REVIEW
+REASON: Work complete but not committed
+CONFIDENCE: HIGH
+COMMIT_MESSAGE: feat: implement task specification
+
+### Example 3: Timeout with no output
+
+STATUS: RETRY
+REASON: Timeout with no output, retrying
+CONFIDENCE: HIGH
+
+### Example 4: Fatal error
+
+STATUS: ERROR
+REASON: Non-zero exit with no changes, fatal
+CONFIDENCE: HIGH
+
+### Example 5: Missing self-checklist
+
+STATUS: RETRY
+REASON: CHECKLIST_REQUIRED: No SELF_REVIEW_CHECKLIST block found
+CONFIDENCE: HIGH
 
 ---
 
-Analyze the context above and respond with JSON:`;
+Analyze the context above and respond with the signal lines:`;
 }
