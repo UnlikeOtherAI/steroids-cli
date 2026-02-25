@@ -119,6 +119,26 @@ Before implementing even a small patch, evaluate whether the correct fix is to s
 - Avoid fallback/patch stacking that masks design flaws
 - If a short-term patch is unavoidable, create a follow-up simplification task with concrete scope
 
+### Documentation Alignment (CRITICAL)
+
+- Treat feature work as incomplete until relevant documentation is updated (`README.md`, `AGENTS.md`, and configuration/schema docs where applicable).
+- When adding or changing CLI flags/subcommands, update related help text in `src/commands/`.
+
+### Command Execution Discipline (CRITICAL)
+
+- Use non-interactive command modes for scripted/automated flows whenever available.
+- For `npx` invocations in automation, use `-y`/`--yes` to avoid interactive install prompts.
+
+### Architecture and Quality Practices
+
+- Prefer existing proven patterns in this codebase over introducing new architectural models for routine problems.
+- If a file grows too large to maintain effectively, split it into focused modules.
+- For bug fixes and new logic, include targeted tests when validation is in scope.
+
+### Workflow and Backups
+
+- Keep work in small, isolated commits and push promptly so remote history remains a reliable recovery point.
+
 ### File References
 - Always read CLAUDE.md and AGENTS.md before starting work
 - Follow the coding standards in CLAUDE.md strictly
