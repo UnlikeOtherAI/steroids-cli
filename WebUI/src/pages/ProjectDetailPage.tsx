@@ -216,6 +216,12 @@ export const ProjectDetailPage: React.FC = () => {
     }
   }, [decodedPath]);
 
+  useEffect(() => {
+    if (showAISetup && !globalConfig?.ai) {
+      loadSettings();
+    }
+  }, [showAISetup, globalConfig?.ai, loadSettings]);
+
   const handleSettingsChange = (path: string, value: unknown) => {
     setSettingsChanges((prev) => ({ ...prev, [path]: value }));
     setSettingsSaveStatus('idle');

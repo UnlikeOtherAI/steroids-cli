@@ -319,13 +319,25 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                 </button>
               )}
             </div>
-            <input
-              type="text"
-              value={isInherited && inheritedConfig?.ai?.[role as keyof typeof inheritedConfig.ai]?.model ? inheritedConfig.ai[role as keyof typeof inheritedConfig.ai].model : config.model}
-              disabled={true}
-              placeholder="(inherited from global)"
-              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 cursor-not-allowed"
-            />
+            <select
+              value={config.model}
+              onChange={(e) => _onModelChange(e.target.value)}
+              disabled={isInherited}
+              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isInherited ? (
+                <option value={inheritedConfig?.ai?.[role as keyof typeof inheritedConfig.ai]?.model || ''}>
+                  {inheritedConfig?.ai?.[role as keyof typeof inheritedConfig.ai]?.model || '(inherited from global)'}
+                </option>
+              ) : (
+                <>
+                  <option value="">Select model...</option>
+                  {(models[config.provider] || []).map(m => (
+                    <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                  ))}
+                </>
+              )}
+            </select>
           </div>
         </div>
 
