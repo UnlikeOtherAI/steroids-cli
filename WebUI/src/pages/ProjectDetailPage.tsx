@@ -417,13 +417,16 @@ export const ProjectDetailPage: React.FC = () => {
               Remove Project
             </Button>
             <Button
-              className="ml-auto"
+              className="ml-auto flex flex-col items-start gap-0.5"
               variant="accent"
               onClick={handleResetProject}
               disabled={!canResetProject || resetting}
             >
-              {resetting ? <ArrowPathIcon className="w-4 h-4 animate-spin inline mr-1" /> : null}
-              A Reset Project
+              <span className="flex items-center gap-1">
+                {resetting ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : null}
+                Reset Project
+              </span>
+              <span className="text-xs text-white/80">Failed and stale tasks</span>
             </Button>
           </div>
 

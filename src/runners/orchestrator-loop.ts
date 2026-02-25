@@ -5,7 +5,7 @@
 
 import { openDatabase, getDbPath } from '../database/connection.js';
 import { autoMigrate } from '../migrations/index.js';
-import { getTask, getSection } from '../database/queries.js';
+import { getTask, getSection, incrementTaskFailureCount, updateTaskStatus, listTasks } from '../database/queries.js';
 import {
   selectNextTask,
   selectTaskBatch,
@@ -15,19 +15,14 @@ import {
 import { invokeCoderBatch } from '../orchestrator/coder.js';
 import { loadConfig } from '../config/loader.js';
 import { invokeReviewerBatch } from '../orchestrator/reviewer.js';
-import { listTasks } from '../database/queries.js';
 import { logActivity } from './activity-log.js';
 import { getRegisteredProject } from './projects.js';
 import { execSync } from 'node:child_process';
 import { runCoderPhase, runReviewerPhase } from '../commands/loop-phases.js';
-import { handleCreditExhaustion, checkBatchCreditExhaustion } from './credit-pause.js';
 import { pushToRemote } from '../git/push.js';
 import {
   openGlobalDatabase,
   withGlobalDatabase,
-  recordProviderBackoff,
-  getProviderBackoffRemainingMs,
-  clearProviderBackoff,
 } from './global-db.js';
 
 function sleep(ms: number): Promise<void> {
@@ -133,7 +128,6 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
   const config = loadConfig(projectPath);
   const batchMode = config.sections?.batchMode ?? false;
   const maxBatchSize = config.sections?.maxBatchSize ?? 10;
-  const providerRateLimitCounts = new Map<string, number>();
 
   try {
     let iteration = 0;
@@ -156,14 +150,6 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       console.log(`\n─── Iteration ${iteration} ───\n`);
       options.onIteration?.(iteration);
       refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId);
-      const iterationProvider = config.ai?.coder?.provider ?? 'claude';
-      const iterationBackoffMs = getProviderBackoffRemainingMs(iterationProvider);
-      if (iterationBackoffMs > 0) {
-        const waitSec = (iterationBackoffMs / 1000).toFixed(0);
-        console.log(`[RATE LIMIT] Global backoff active for ${iterationProvider}. Waiting ${waitSec}s...`);
-        await sleep(iterationBackoffMs);
-      }
-
       // Batch mode: process multiple pending tasks at once
       // Only active when not focusing on a specific section and batch mode is enabled
       if (batchMode && !activeSectionIds) {
@@ -182,23 +168,30 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           console.log('\n>>> Invoking BATCH CODER...\n');
           const batchCoderResult = await invokeCoderBatch(batch.tasks, batch.sectionName, projectPath);
 
-          // Check for credit exhaustion in batch coder result
-          const batchCoderCredit = await checkBatchCreditExhaustion(batchCoderResult, 'coder', projectPath);
-          if (batchCoderCredit) {
-            const pauseResult = await handleCreditExhaustion({
-              provider: batchCoderCredit.provider,
-              model: batchCoderCredit.model,
-              role: batchCoderCredit.role,
-              message: batchCoderCredit.message,
-              runnerId: options.runnerId ?? '',
-              projectPath,
+          if (batchCoderResult.timedOut || !batchCoderResult.success) {
+            const coderConfig = loadConfig(projectPath).ai?.coder;
+            const providerName = coderConfig?.provider ?? 'unknown';
+            const modelName = coderConfig?.model ?? 'unknown';
+            const output = (batchCoderResult.stderr || batchCoderResult.stdout || '').trim();
+            handleBatchProviderFailure(
               db,
-              shouldStop: shouldStop ?? (() => false),
-              onHeartbeat: options.onHeartbeat,
-              onceMode: once,
+              batch.tasks,
+              'coder',
+              providerName,
+              modelName,
+              batchCoderResult.exitCode ?? 1,
+              output
+            );
+
+            const batchHasWork = batch.tasks.some((task) => {
+              const current = getTask(db, task.id);
+              return !!current && current.status === 'pending';
             });
-            if (!pauseResult.resolved) break;
-            continue; // Retry iteration after config change
+            if (batchHasWork) {
+              continue;
+            }
+
+            break;
           }
 
           // Check which tasks are now in review status
@@ -213,23 +206,30 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             console.log('\n>>> Invoking BATCH REVIEWER...\n');
             const batchReviewerResult = await invokeReviewerBatch(tasksInReview, batch.sectionName, projectPath);
 
-            // Check for credit exhaustion in batch reviewer result
-            const batchReviewerCredit = await checkBatchCreditExhaustion(batchReviewerResult, 'reviewer', projectPath);
-            if (batchReviewerCredit) {
-              const pauseResult = await handleCreditExhaustion({
-                provider: batchReviewerCredit.provider,
-                model: batchReviewerCredit.model,
-                role: batchReviewerCredit.role,
-                message: batchReviewerCredit.message,
-                runnerId: options.runnerId ?? '',
-                projectPath,
+            if (batchReviewerResult.timedOut || !batchReviewerResult.success) {
+              const reviewerConfig = loadConfig(projectPath).ai?.reviewer;
+              const providerName = reviewerConfig?.provider ?? 'unknown';
+              const modelName = reviewerConfig?.model ?? 'unknown';
+              const output = (batchReviewerResult.stderr || batchReviewerResult.stdout || '').trim();
+              handleBatchProviderFailure(
                 db,
-                shouldStop: shouldStop ?? (() => false),
-                onHeartbeat: options.onHeartbeat,
-                onceMode: once,
+                tasksInReview,
+                'reviewer',
+                providerName,
+                modelName,
+                batchReviewerResult.exitCode ?? 1,
+                output
+              );
+
+              const batchHasWork = tasksInReview.some((task) => {
+                const current = getTask(db, task.id);
+                return !!current && current.status === 'pending';
               });
-              if (!pauseResult.resolved) break;
-              continue; // Retry iteration after config change
+              if (batchHasWork) {
+                continue;
+              }
+
+              break;
             }
 
             // Handle results for each reviewed task
@@ -343,14 +343,9 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       console.log(`Status: ${task.status}`);
 
       options.onTaskStart?.(task.id, action);
-      const providerName = action === 'review'
-        ? (config.ai?.reviewer?.provider ?? 'claude')
-        : (config.ai?.coder?.provider ?? 'claude');
-
-      let phaseResult;
       if (action === 'start') {
         markTaskInProgress(db, task.id);
-        phaseResult = await runCoderPhase(
+        await runCoderPhase(
           db,
           task,
           projectPath,
@@ -365,7 +360,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           branchName
         );
       } else if (action === 'resume') {
-        phaseResult = await runCoderPhase(
+        await runCoderPhase(
           db,
           task,
           projectPath,
@@ -380,7 +375,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           branchName
         );
       } else if (action === 'review') {
-        phaseResult = await runReviewerPhase(
+        await runReviewerPhase(
           db,
           task,
           projectPath,
@@ -393,45 +388,6 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           }
         );
       }
-
-      // Check for credit exhaustion from single-task phase
-      if (phaseResult?.action === 'pause_credit_exhaustion') {
-        const pauseResult = await handleCreditExhaustion({
-          provider: phaseResult.provider,
-          model: phaseResult.model,
-          role: phaseResult.role,
-          message: phaseResult.message,
-          runnerId: options.runnerId ?? '',
-          projectPath,
-          db,
-          shouldStop: shouldStop ?? (() => false),
-          onHeartbeat: options.onHeartbeat,
-          onceMode: once,
-        });
-        if (!pauseResult.resolved) break;
-        continue; // Retry iteration after config change
-      }
-
-      // Rate limit: back off before retrying. The 'rate_limit' action is returned by
-      // runCoderPhase/runReviewerPhase when the provider returns a 429 or similar. Without
-      // this handler the loop would fall through to sleep(1000) and hammer the API every ~4s.
-      if (phaseResult?.action === 'rate_limit') {
-        const rateLimitedProvider = phaseResult.provider || providerName;
-        const count = (providerRateLimitCounts.get(rateLimitedProvider) ?? 0) + 1;
-        providerRateLimitCounts.set(rateLimitedProvider, count);
-        const baseDelayMs = Math.min(60_000 * 2 ** (count - 1), 600_000);
-        const delayMs = Math.round(baseDelayMs * (0.7 + Math.random() * 0.6));
-        const waitSec = (delayMs / 1000).toFixed(0);
-        console.log(`[RATE LIMIT] Provider: ${rateLimitedProvider}, attempt #${count}, waiting ${waitSec}s`);
-        const backoffUntilMs = Date.now() + delayMs;
-        recordProviderBackoff(rateLimitedProvider, backoffUntilMs, phaseResult.message);
-        await sleep(delayMs);
-        continue;
-      }
-
-      const successfulProvider = phaseResult?.provider ?? providerName;
-      providerRateLimitCounts.delete(successfulProvider);
-      clearProviderBackoff(successfulProvider);
 
       // Log activity if task reached terminal status
       if (options.runnerId) {
@@ -486,6 +442,41 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
     console.log(`  Disputed:  ${finalCounts.disputed}`);
   } finally {
     close();
+  }
+}
+
+function formatBatchProviderFailureMessage(
+  taskId: string,
+  role: 'coder' | 'reviewer',
+  provider: string,
+  model: string,
+  exitCode: number,
+  output: string
+): string {
+  const sanitizedOutput = output || 'provider invocation failed with no output.';
+  return `Task ${taskId}: provider ${provider}/${model} exited with non-zero status ${exitCode} during ${role} phase: ${sanitizedOutput}`;
+}
+
+function handleBatchProviderFailure(
+  db: any,
+  tasks: Array<{ id: string }>,
+  role: 'coder' | 'reviewer',
+  provider: string,
+  model: string,
+  exitCode: number,
+  output: string
+): void {
+  for (const task of tasks) {
+    const failureCount = incrementTaskFailureCount(db, task.id);
+    const message = formatBatchProviderFailureMessage(task.id, role, provider, model, exitCode, output);
+
+    if (failureCount >= 3) {
+      const reason = `${message} (provider invocation failed ${failureCount} time(s). Task failed.)`;
+      updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
+      console.log(`\n✗ Task failed (${reason})`);
+    } else {
+      updateTaskStatus(db, task.id, 'pending', 'orchestrator', `${message} (attempt ${failureCount}/3, retrying)`);
+    }
   }
 }
 

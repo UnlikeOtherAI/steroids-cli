@@ -19,6 +19,8 @@ import {
   addAuditEntry,
   getFollowUpDepth,
   createFollowUpTask,
+  incrementTaskFailureCount,
+  clearTaskFailureCount,
 } from '../database/queries.js';
 import type { openDatabase } from '../database/connection.js';
 import { invokeCoder, type CoderResult } from '../orchestrator/coder.js';
@@ -55,7 +57,6 @@ import { loadConfig, type ReviewerConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { InvokeResult } from '../providers/interface.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
-import type { ProviderError } from '../providers/interface.js';
 
 export { type CoordinatorResult };
 
@@ -105,9 +106,6 @@ function refreshParallelWorkstreamLease(projectPath: string, leaseFence?: LeaseF
   });
 }
 
-/**
- * Returned when a provider invocation is classified as credit exhaustion or rate limit.
- */
 export interface CreditExhaustionResult {
   action: 'pause_credit_exhaustion' | 'rate_limit';
   provider: string;
@@ -115,159 +113,6 @@ export interface CreditExhaustionResult {
   role: 'coder' | 'reviewer';
   message: string;
   retryAfterMs?: number;
-}
-
-/**
- * Check a coder/reviewer result for credit exhaustion or rate limits using the provider's classifier.
- * Uses provider.classifyResult() which checks both stderr and stdout.
- * Returns a CreditExhaustionResult if credits are exhausted or rate limited, null otherwise.
- */
-async function checkCreditExhaustion(
-  result: InvokeResult,
-  role: 'coder' | 'reviewer',
-  projectPath: string,
-  reviewerConfig?: ReviewerConfig,
-  classification?: ProviderError | null
-): Promise<CreditExhaustionResult | null> {
-  if (result.success) return null;
-
-  const resolvedClassification =
-    classification === undefined ? await classifyProviderResult(result, role, projectPath, reviewerConfig) : classification;
-  if (!resolvedClassification) return null;
-
-  const config = loadConfig(projectPath);
-  const roleConfig = reviewerConfig || config.ai?.[role];
-  const providerName = roleConfig?.provider;
-  const modelName = roleConfig?.model;
-  if (!providerName || !modelName) return null;
-
-  if (resolvedClassification.type === 'credit_exhaustion') {
-    return {
-      action: 'pause_credit_exhaustion',
-      provider: providerName,
-      model: modelName,
-      role,
-      message: resolvedClassification.message,
-    };
-  }
-
-  if (resolvedClassification.type === 'rate_limit') {
-    return {
-      action: 'rate_limit',
-      provider: providerName,
-      model: modelName,
-      role,
-      message: resolvedClassification.message,
-      retryAfterMs: resolvedClassification.retryAfterMs,
-    };
-  }
-
-  return null;
-}
-
-/**
- * Classify a provider invocation result exactly once per path.
- */
-async function classifyProviderResult(
-  result: InvokeResult,
-  role: 'coder' | 'reviewer',
-  projectPath: string,
-  reviewerConfig?: ReviewerConfig
-): Promise<ProviderError | null> {
-  if (result.success) return null;
-
-  const config = loadConfig(projectPath);
-  const roleConfig = reviewerConfig || config.ai?.[role];
-  const providerName = roleConfig?.provider;
-
-  if (!providerName) return null;
-
-  const registry = await getProviderRegistry();
-  const provider = registry.tryGet(providerName);
-  if (!provider) return null;
-
-  return provider.classifyResult(result);
-}
-
-/**
- * Check for non-retryable provider failures that should fail the task immediately.
- */
-async function checkNonRetryableProviderFailure(
-  result: InvokeResult,
-  role: 'coder' | 'reviewer',
-  projectPath: string,
-  reviewerConfig?: ReviewerConfig,
-  classification?: ProviderError | null
-): Promise<{ type: string; provider: string; model: string; message: string } | null> {
-  if (result.success) return null;
-
-  const config = loadConfig(projectPath);
-  const roleConfig = reviewerConfig || config.ai?.[role];
-  const providerName = roleConfig?.provider;
-  const modelName = roleConfig?.model;
-
-  if (!providerName || !modelName) return null;
-
-  const registry = await getProviderRegistry();
-  const provider = registry.tryGet(providerName);
-  if (!provider) return null;
-
-  const resolvedClassification =
-    classification === undefined ? await classifyProviderResult(result, role, projectPath, reviewerConfig) : classification;
-  if (!resolvedClassification) return null;
-
-  if (
-    resolvedClassification.type === 'model_not_found' ||
-    resolvedClassification.type === 'context_exceeded'
-  ) {
-    return {
-      type: resolvedClassification.type,
-      provider: providerName,
-      model: modelName,
-      message: resolvedClassification.message,
-    };
-  }
-
-  return null;
-}
-
-/**
- * Check for policy or safety violations
- */
-export async function checkSafetyViolation(
-  result: InvokeResult,
-  role: 'coder' | 'reviewer',
-  projectPath: string,
-  reviewerConfig?: ReviewerConfig,
-  classification?: ProviderError | null
-): Promise<{ type: string; provider: string; model: string; message: string } | null> {
-  if (result.success) return null;
-
-  const config = loadConfig(projectPath);
-  const roleConfig = reviewerConfig || config.ai?.[role];
-  const providerName = roleConfig?.provider;
-  const modelName = roleConfig?.model;
-
-  if (!providerName || !modelName) return null;
-
-  const resolvedClassification =
-    classification === undefined ? await classifyProviderResult(result, role, projectPath, reviewerConfig) : classification;
-  if (!resolvedClassification) return null;
-
-  if (
-    resolvedClassification.type === 'safety_violation' ||
-    resolvedClassification.type === 'policy_violation' ||
-    resolvedClassification.type === 'invalid_prompt'
-  ) {
-    return {
-      type: resolvedClassification.type,
-      provider: providerName,
-      model: modelName,
-      message: resolvedClassification.message,
-    };
-  }
-
-  return null;
 }
 
 function summarizeErrorMessage(error: unknown): string {
@@ -329,11 +174,61 @@ async function classifyOrchestratorFailure(
 
 const MAX_ORCHESTRATOR_PARSE_RETRIES = 3;
 const MAX_CONTRACT_VIOLATION_RETRIES = 3;
+const MAX_PROVIDER_NONZERO_FAILURES = 3;
 const CODER_PARSE_FALLBACK_MARKER = '[retry] FALLBACK: Orchestrator failed, defaulting to retry';
 const REVIEWER_PARSE_FALLBACK_MARKER = '[unclear] FALLBACK: Orchestrator failed, retrying review';
 const CONTRACT_CHECKLIST_MARKER = '[contract:checklist]';
 const CONTRACT_REJECTION_RESPONSE_MARKER = '[contract:rejection_response]';
 const MUST_IMPLEMENT_MARKER = '[must_implement]';
+
+interface ProviderFailureContext {
+  role: 'coder' | 'reviewer';
+  provider: string;
+  model: string;
+  exitCode: number;
+  output: string;
+}
+
+interface ProviderInvocationFailureDecision {
+  shouldStopTask: boolean;
+}
+
+function formatProviderFailureMessage(
+  taskId: string,
+  context: ProviderFailureContext
+): string {
+  const output = context.output || 'provider invocation failed with no output.';
+  return `Task ${taskId}: provider ${context.provider}/${context.model} exited with non-zero status ${context.exitCode} during ${context.role} phase: ${output}`;
+}
+
+async function handleProviderInvocationFailure(
+  db: ReturnType<typeof openDatabase>['db'],
+  taskId: string,
+  context: ProviderFailureContext,
+  jsonMode: boolean
+): Promise<ProviderInvocationFailureDecision> {
+  const failureCount = incrementTaskFailureCount(db, taskId);
+  const providerMessage = formatProviderFailureMessage(taskId, context);
+
+  if (failureCount >= MAX_PROVIDER_NONZERO_FAILURES) {
+    const reason = `${providerMessage} (provider invocation failed ${failureCount} time(s). Task failed.)`;
+    updateTaskStatus(db, taskId, 'failed', 'orchestrator', reason);
+
+    if (!jsonMode) {
+      console.log(`\n✗ Task failed (${reason})`);
+    }
+
+    return { shouldStopTask: true };
+  }
+
+  if (!jsonMode) {
+    const retriesLeft = MAX_PROVIDER_NONZERO_FAILURES - failureCount;
+    console.log(`\n⟳ Provider invocation failed (${failureCount}/${MAX_PROVIDER_NONZERO_FAILURES}) for task ${taskId}; retrying (${retriesLeft} attempt(s) left).`);
+    console.log(`    ${providerMessage}`);
+  }
+
+  return { shouldStopTask: false };
+}
 
 function countConsecutiveOrchestratorFallbackEntries(
   db: ReturnType<typeof openDatabase>['db'],
@@ -478,7 +373,7 @@ export async function runCoderPhase(
   coordinatorThresholds?: number[],
   leaseFence?: LeaseFenceContext,
   branchName = 'main'
-): Promise<CreditExhaustionResult | void> {
+): Promise<void> {
   if (!task) return;
   refreshParallelWorkstreamLease(projectPath, leaseFence);
 
@@ -591,79 +486,33 @@ export async function runCoderPhase(
   }
 
   const initialSha = getCurrentCommitSha(projectPath) || '';
-  const coderConfigSnapshot = loadConfig(projectPath).ai?.coder as ReviewerConfig | undefined;
+  const coderConfig = loadConfig(projectPath).ai?.coder as ReviewerConfig | undefined;
   const coderResult: CoderResult = await invokeCoder(task, projectPath, action, coordinatorGuidance, leaseFence?.runnerId);
 
-  if (coderResult.timedOut) {
-    console.warn('Coder timed out. Will retry next iteration.');
-    return;
-  }
+  if (coderResult.timedOut || !coderResult.success) {
+    const providerName = coderConfig?.provider ?? loadConfig(projectPath).ai?.coder?.provider ?? 'unknown';
+    const modelName = coderConfig?.model ?? loadConfig(projectPath).ai?.coder?.model ?? 'unknown';
+    const output = (coderResult.stderr || coderResult.stdout || '').trim();
+    const failed = await handleProviderInvocationFailure(
+      db,
+      task.id,
+      {
+        role: 'coder',
+        provider: providerName,
+        model: modelName,
+        exitCode: coderResult.exitCode ?? 1,
+        output,
+      },
+      jsonMode
+    );
 
-  const classification = await classifyProviderResult(coderResult, 'coder', projectPath, coderConfigSnapshot);
-  const hardFailureFromKnownTypes = await checkNonRetryableProviderFailure(
-    coderResult,
-    'coder',
-    projectPath,
-    coderConfigSnapshot,
-    classification
-  );
-  
-  const safetyViolation = await checkSafetyViolation(
-    coderResult,
-    'coder',
-    projectPath,
-    coderConfigSnapshot,
-    classification
-  );
-
-  // Check for credit/rate-limit classification (once).
-  const creditCheck = await checkCreditExhaustion(
-    coderResult,
-    'coder',
-    projectPath,
-    coderConfigSnapshot,
-    classification
-  );
-
-  if (hardFailureFromKnownTypes) {
-    const reason = `Task failed: provider ${hardFailureFromKnownTypes.provider}/${hardFailureFromKnownTypes.model} returned non-recoverable error (${hardFailureFromKnownTypes.type}) during coder phase: ${hardFailureFromKnownTypes.message}`;
-    updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
-    return;
-  }
-  
-  if (safetyViolation) {
-    // Check if we've exhausted our 2 attempts to resolve safety violations
-    const pastRejections = getTaskRejections(db, task.id);
-    const safetyRejections = pastRejections.filter(r => r.notes?.includes('[safety_violation]')).length;
-    
-    if (safetyRejections >= 2) {
-      const reason = `Task failed: Provider safety/policy violation could not be automatically resolved after 2 attempts. Error: ${safetyViolation.message}`;
-      updateTaskStatus(db, task.id, 'disputed', 'orchestrator', reason);
-      if (!jsonMode) {
-        console.log(`\nTask disputed: Provider safety/policy violation could not be resolved.`);
-      }
+    if (failed.shouldStopTask) {
       return;
     }
-    
-    // Inject the safety violation as a rejection so the orchestrator attempts to resolve it on the next loop
-    rejectTask(db, task.id, `[safety_violation] The provider blocked the request due to a safety/policy violation: ${safetyViolation.message}\n\nPlease analyze the task description and previous outputs, and adjust your approach or prompt to comply with safety policies. You have ${2 - safetyRejections} attempt(s) remaining.`, 'orchestrator', 'coder');
-    if (!jsonMode) {
-      console.log(`\n⟳ Coder hit safety violation. Rejected back to orchestrator for automatic resolution (${safetyRejections + 1}/2 attempts).`);
-    }
     return;
   }
 
-  if (creditCheck) {
-    return creditCheck;
-  }
-
-  // Early bail: if coder returned empty output and failed, skip orchestrator and retry
-  if (!coderResult.success && coderResult.stdout.trim().length === 0) {
-    if (!jsonMode) {
-      console.log('\n⟳ Coder returned empty output (provider failure), will retry');
-    }
-    return;
-  }
+  clearTaskFailureCount(db, task.id);
 
   // STEP 2: Gather git state
   const commits = getRecentCommits(projectPath, 5, initialSha);
@@ -1092,7 +941,7 @@ export async function runReviewerPhase(
   coordinatorResult?: CoordinatorResult,
   branchName: string = 'main',
   leaseFence?: LeaseFenceContext
-): Promise<CreditExhaustionResult | void> {
+): Promise<void> {
   if (!task) return;
   refreshParallelWorkstreamLease(projectPath, leaseFence);
 
@@ -1119,7 +968,6 @@ export async function runReviewerPhase(
   const phaseConfig = loadConfig(projectPath);
   const multiReviewEnabled = isMultiReviewEnabled(phaseConfig);
   let effectiveMultiReviewEnabled = multiReviewEnabled;
-  const strict = phaseConfig.ai?.review?.strict ?? true;
 
   let reviewerResult: ReviewerResult | undefined;
   let reviewerResults: ReviewerResult[] = [];
@@ -1143,117 +991,43 @@ export async function runReviewerPhase(
       leaseFence?.runnerId
     );
 
-    // Check for hard failures and classify all results
-    const classifications = await Promise.all(
-      reviewerResults.map((res, i) => classifyProviderResult(res, 'reviewer', projectPath, reviewerConfigs[i]))
-    );
+    const failedReviewerIndex = reviewerResults.findIndex((res) => !res.success || res.timedOut);
+    if (failedReviewerIndex !== -1) {
+      const failedReviewer = reviewerResults[failedReviewerIndex];
+      const failedConfig = reviewerConfigs[failedReviewerIndex];
+      const providerName =
+        failedReviewer.provider ??
+        failedConfig?.provider ??
+        phaseConfig.ai?.reviewer?.provider ??
+        'unknown';
+      const modelName =
+        failedReviewer.model ??
+        failedConfig?.model ??
+        phaseConfig.ai?.reviewer?.model ??
+        'unknown';
+      const output = (failedReviewer.stderr || failedReviewer.stdout || '').trim();
+      const failed = await handleProviderInvocationFailure(
+        db,
+        task.id,
+        {
+          role: 'reviewer',
+          provider: providerName,
+          model: modelName,
+          exitCode: failedReviewer.exitCode ?? 1,
+          output,
+        },
+        jsonMode
+      );
 
-    let creditExhaustionSignal: CreditExhaustionResult | undefined;
-    let rateLimitSignal: CreditExhaustionResult | undefined;
-    const failedRateLimitIndices = new Set<number>();
-    const failedOtherIndices = new Set<number>();
-
-    for (let i = 0; i < reviewerResults.length; i++) {
-      const res = reviewerResults[i];
-      const classification = classifications[i];
-
-      const hardFailure = await checkNonRetryableProviderFailure(res, 'reviewer', projectPath, reviewerConfigs[i], classification);
-      if (hardFailure) {
-        const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during reviewer phase: ${hardFailure.message}`;
-        updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
+      if (failed.shouldStopTask) {
         return;
       }
-      
-      const safetyViolation = await checkSafetyViolation(res as any, 'reviewer', projectPath, reviewerConfigs[i], classification);
-      if (safetyViolation) {
-        const pastRejections = getTaskRejections(db, task.id);
-        const safetyRejections = pastRejections.filter(r => r.notes?.includes('[safety_violation]')).length;
-        
-        if (safetyRejections >= 2) {
-          const reason = `Task failed: Provider safety/policy violation could not be automatically resolved after 2 attempts. Error: ${safetyViolation.message}`;
-          updateTaskStatus(db, task.id, 'disputed', 'orchestrator', reason);
-          if (!jsonMode) {
-            console.log(`\nTask disputed: Provider safety/policy violation could not be resolved.`);
-          }
-          return;
-        }
-        
-        rejectTask(db, task.id, `[safety_violation] The provider blocked the request due to a safety/policy violation: ${safetyViolation.message}\n\nPlease analyze the task description and previous outputs, and adjust your approach or prompt to comply with safety policies. You have ${2 - safetyRejections} attempt(s) remaining.`, 'orchestrator', 'reviewer');
-        if (!jsonMode) {
-          console.log(`\n⟳ Reviewer hit safety violation. Rejected back to orchestrator for automatic resolution (${safetyRejections + 1}/2 attempts).`);
-        }
-        return;
-      }
-
-      const creditCheck = await checkCreditExhaustion(res as any, 'reviewer', projectPath, reviewerConfigs[i], classification);
-      if (creditCheck) {
-        if (creditCheck.action === 'pause_credit_exhaustion' && !creditExhaustionSignal) {
-          creditExhaustionSignal = creditCheck;
-        }
-        if (creditCheck.action === 'rate_limit' && !rateLimitSignal) {
-          rateLimitSignal = creditCheck;
-        }
-      }
-
-      if (!res.success) {
-        if (classification?.type === 'rate_limit') {
-          failedRateLimitIndices.add(i);
-        } else {
-          failedOtherIndices.add(i);
-        }
-      }
+      return;
     }
 
-    const successfulReviewers = reviewerResults.filter((res) => res.success);
-    const failedCount = reviewerResults.length - successfulReviewers.length;
-    const canDegradeToAvailableReviewers =
-      successfulReviewers.length > 0 &&
-      failedCount > 0 &&
-      failedOtherIndices.size === 0 &&
-      failedRateLimitIndices.size === failedCount &&
-      !creditExhaustionSignal;
-
-    if (canDegradeToAvailableReviewers) {
-      const rateLimitedProviders = Array.from(failedRateLimitIndices)
-        .map((i) => reviewerConfigs[i])
-        .filter((cfg): cfg is ReviewerConfig => !!cfg)
-        .map((cfg) => `${cfg.provider}/${cfg.model}`)
-        .join(', ');
-      const strictLabel = strict ? ' (strict override)' : '';
-      const auditNote =
-        `[reviewer_degraded] Falling back to ${successfulReviewers.length}/${reviewerResults.length} reviewer(s)` +
-        `${strictLabel}; rate-limited reviewers: ${rateLimitedProviders || 'unknown'}`;
-
-      addAuditEntry(db, task.id, task.status, task.status, 'orchestrator', {
-        actorType: 'orchestrator',
-        notes: auditNote,
-      });
-
-      if (!jsonMode) {
-        console.warn(`! ${auditNote}`);
-      }
-
-      reviewerResults = successfulReviewers;
-      reviewerResult = reviewerResults[0];
-      effectiveMultiReviewEnabled = reviewerResults.length > 1;
-    } else {
-      if (creditExhaustionSignal) {
-        return creditExhaustionSignal;
-      }
-      if (rateLimitSignal) {
-        return rateLimitSignal;
-      }
-
-      // Handle failures in strict mode or other unrecoverable failures
-      const failures = reviewerResults.filter(r => !r.success);
-      if (strict && failures.length > 0) {
-        if (!jsonMode) {
-          console.warn(`${failures.length} reviewer(s) failed in strict mode. Will retry.`);
-        }
-        return;
-      }
-    }
-    // If not strict, we continue with the successful ones (resolveDecision handles empty/unclear)
+    clearTaskFailureCount(db, task.id);
+    reviewerResult = reviewerResults[0];
+    effectiveMultiReviewEnabled = reviewerResults.length > 1;
   } else {
     if (!jsonMode) {
       console.log('\n>>> Invoking REVIEWER...\n');
@@ -1271,55 +1045,36 @@ export async function runReviewerPhase(
       leaseFence?.runnerId
     );
 
-    if (reviewerResult.timedOut) {
-      if (!jsonMode) {
-        console.warn('Reviewer timed out. Will retry next iteration.');
-      }
-      return;
-    }
+    if (!reviewerResult.success || reviewerResult.timedOut) {
+      const providerName =
+        reviewerResult.provider ??
+        phaseConfig.ai?.reviewer?.provider ??
+        'unknown';
+      const modelName =
+        reviewerResult.model ??
+        phaseConfig.ai?.reviewer?.model ??
+        'unknown';
+      const output = (reviewerResult.stderr || reviewerResult.stdout || '').trim();
+      const failed = await handleProviderInvocationFailure(
+        db,
+        task.id,
+        {
+          role: 'reviewer',
+          provider: providerName,
+          model: modelName,
+          exitCode: reviewerResult.exitCode ?? 1,
+          output,
+        },
+        jsonMode
+      );
 
-    const classification = await classifyProviderResult(reviewerResult as any, 'reviewer', projectPath);
-    const hardFailure = await checkNonRetryableProviderFailure(reviewerResult as any, 'reviewer', projectPath, undefined, classification);
-    if (hardFailure) {
-      const reason = `Task failed: provider ${hardFailure.provider}/${hardFailure.model} returned non-recoverable error (${hardFailure.type}) during reviewer phase: ${hardFailure.message}`;
-      updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
-      return;
-    }
-    
-    const safetyViolation = await checkSafetyViolation(reviewerResult as any, 'reviewer', projectPath, undefined, classification);
-    if (safetyViolation) {
-      const pastRejections = getTaskRejections(db, task.id);
-      const safetyRejections = pastRejections.filter(r => r.notes?.includes('[safety_violation]')).length;
-      
-      if (safetyRejections >= 2) {
-        const reason = `Task failed: Provider safety/policy violation could not be automatically resolved after 2 attempts. Error: ${safetyViolation.message}`;
-        updateTaskStatus(db, task.id, 'disputed', 'orchestrator', reason);
-        if (!jsonMode) {
-          console.log(`\nTask disputed: Provider safety/policy violation could not be resolved.`);
-        }
+      if (failed.shouldStopTask) {
         return;
       }
-      
-      rejectTask(db, task.id, `[safety_violation] The provider blocked the request due to a safety/policy violation: ${safetyViolation.message}\n\nPlease analyze the task description and previous outputs, and adjust your approach or prompt to comply with safety policies. You have ${2 - safetyRejections} attempt(s) remaining.`, 'orchestrator', 'reviewer');
-      if (!jsonMode) {
-        console.log(`\n⟳ Reviewer hit safety violation. Rejected back to orchestrator for automatic resolution (${safetyRejections + 1}/2 attempts).`);
-      }
       return;
     }
 
-    // Check for credit exhaustion
-    const creditCheck = await checkCreditExhaustion(reviewerResult as any, 'reviewer', projectPath, undefined, classification);
-    if (creditCheck) {
-      return creditCheck;
-    }
-
-    // Early bail: reviewer returned no output at all (provider crash/rate limit not caught above)
-    if (!reviewerResult.success && reviewerResult.stdout.trim().length === 0 && reviewerResult.stderr.trim().length === 0) {
-      if (!jsonMode) {
-        console.log('\n⟳ Reviewer returned no output (provider failure), will retry');
-      }
-      return;
-    }
+    clearTaskFailureCount(db, task.id);
   }
 
   // STEP 2: Gather git context

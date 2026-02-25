@@ -655,6 +655,38 @@ export function resetTaskFailureCount(
   return oldFailureCount;
 }
 
+export function incrementTaskFailureCount(db: Database.Database, taskId: string): number {
+  db.prepare(
+    `UPDATE tasks
+     SET failure_count = COALESCE(failure_count, 0) + 1,
+         last_failure_at = datetime('now'),
+         updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(taskId);
+
+  const row = db
+    .prepare('SELECT failure_count FROM tasks WHERE id = ?')
+    .get(taskId) as { failure_count: number | null } | undefined;
+
+  return Number(row?.failure_count ?? 0);
+}
+
+export function clearTaskFailureCount(db: Database.Database, taskId: string): number {
+  const oldFailureCount = db
+    .prepare('SELECT failure_count FROM tasks WHERE id = ?')
+    .get(taskId) as { failure_count: number | null } | undefined;
+
+  db.prepare(
+    `UPDATE tasks
+     SET failure_count = 0,
+         last_failure_at = NULL,
+         updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(taskId);
+
+  return Number(oldFailureCount?.failure_count ?? 0);
+}
+
 /**
  * Update editable task fields (title, source, file anchor, section)
  * Only updates fields that are explicitly provided (not undefined)
