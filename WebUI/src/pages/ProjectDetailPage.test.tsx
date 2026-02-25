@@ -56,6 +56,14 @@ const fakeProject = {
   last_seen_at: '2025-01-01T00:00:00Z',
   last_activity_at: '2025-01-15T10:30:00Z',
   last_task_added_at: '2025-01-15T10:30:00Z',
+  stats: {
+    pending: 3,
+    in_progress: 2,
+    review: 1,
+    completed: 10,
+    failed: 2,
+    disputed: 1,
+  },
 };
 
 const fakeStorage: StorageInfo = {
@@ -101,6 +109,7 @@ describe('ProjectDetailPage storage section', () => {
     mockProjectsApi.openFolder.mockResolvedValue(undefined);
     mockActivityApi.getStats.mockResolvedValue({
       completed: 10, failed: 2, skipped: 1, partial: 0, disputed: 0,
+      total: 13,
       tasks_per_hour: 1.5, success_rate: 77,
     });
     mockSectionsApi.listForProject.mockResolvedValue({ sections: [] });
@@ -239,5 +248,35 @@ describe('ProjectDetailPage storage section', () => {
     await waitFor(() => {
       expect(screen.getByText('Cleanup failed')).toBeInTheDocument();
     });
+  });
+
+  it('renders stats section with queue cards and no activity cards', async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('Stats')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument();
+    expect(screen.getByText('Current Queue')).toBeInTheDocument();
+    expect(screen.getByText('Rate: 1.5 tasks/hour')).toBeInTheDocument();
+    expect(screen.getByText('Success Rate: 77%')).toBeInTheDocument();
+    expect(screen.getByText('13 tasks in selected range')).toBeInTheDocument();
+
+    expect(screen.getByText('Pending')).toBeInTheDocument();
+    expect(screen.getByText('In Progress')).toBeInTheDocument();
+    expect(screen.getByText('Review')).toBeInTheDocument();
+    expect(screen.getByText('Completed')).toBeInTheDocument();
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.getByText('Disputed')).toBeInTheDocument();
+
+    expect(screen.queryByText('Skipped')).not.toBeInTheDocument();
+    expect(screen.queryByText('Partial')).not.toBeInTheDocument();
+
+    expect(screen.getByRole('button', { name: '12h' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '24h' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1w' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1m' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1y' })).toBeInTheDocument();
   });
 });

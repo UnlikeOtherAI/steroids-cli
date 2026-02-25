@@ -463,7 +463,7 @@ export const ProjectDetailPage: React.FC = () => {
 
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-text-primary">Activity</h2>
+          <h2 className="text-xl font-semibold text-text-primary">Stats</h2>
           <TimeRangeSelector
             value={getTimeRangeValue()}
             onChange={(option: TimeRangeOption) => setSelectedHours(option.hours)}
@@ -471,79 +471,57 @@ export const ProjectDetailPage: React.FC = () => {
         </div>
 
         {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <StatTile
-              label="Completed"
-              value={stats.completed}
-              variant="success"
-              onClick={() => navigate(`/activity?status=completed&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
-            />
-            <StatTile
-              label="Failed"
-              value={stats.failed}
-              variant="danger"
-              onClick={() => navigate(`/activity?status=failed&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
-            />
-            <StatTile
-              label="Skipped"
-              value={stats.skipped}
-              variant="warning"
-              onClick={() => navigate(`/activity?status=skipped&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
-            />
-            <StatTile
-              label="Partial"
-              value={stats.partial}
-              variant="info"
-              onClick={() => navigate(`/activity?status=partial&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
-            />
-            <StatTile
-              label="Disputed"
-              value={stats.disputed}
-              variant="default"
-              onClick={() => navigate(`/activity?status=disputed&hours=${selectedHours}&project=${encodeURIComponent(decodedPath)}`)}
-            />
-          </div>
-        )}
-
-        {stats && (
-          <div className="mt-4 flex gap-6 text-sm text-text-secondary">
+          <div className="mb-4 flex flex-wrap gap-6 text-sm text-text-secondary">
+            <span>{stats.total} tasks in selected range</span>
             <span>Rate: {stats.tasks_per_hour} tasks/hour</span>
             <span>Success Rate: {stats.success_rate}%</span>
           </div>
         )}
-      </div>
 
-      {project.stats && (
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold text-text-primary mb-4">Current Queue</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatTile
-              label="Pending"
-              value={project.stats.pending}
-              variant="default"
-              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=pending`)}
-            />
-            <StatTile
-              label="In Progress"
-              value={project.stats.in_progress}
-              variant="info"
-              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=in_progress`)}
-            />
-            <StatTile
-              label="Review"
-              value={project.stats.review}
-              variant="warning"
-              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=review`)}
-            />
-            <StatTile
-              label="Completed"
-              value={project.stats.completed}
-              variant="success"
-              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=completed`)}
-            />
+        {project.stats && (
+          <div>
+            <h3 className="text-base font-semibold text-text-primary mb-3">Current Queue</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <StatTile
+                label="Pending"
+                value={project.stats.pending}
+                variant="default"
+                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=pending`)}
+              />
+              <StatTile
+                label="In Progress"
+                value={project.stats.in_progress}
+                variant="info"
+                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=in_progress`)}
+              />
+              <StatTile
+                label="Review"
+                value={project.stats.review}
+                variant="warning"
+                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=review`)}
+              />
+              <StatTile
+                label="Completed"
+                value={project.stats.completed}
+                variant="success"
+                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=completed`)}
+              />
+              <StatTile
+                label="Failed"
+                value={project.stats.failed}
+                variant="danger"
+                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=failed`)}
+              />
+              <StatTile
+                label="Disputed"
+                value={project.stats.disputed}
+                variant="danger"
+                onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=disputed`)}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Storage */}
       <div className="mb-8 bg-bg-surface rounded-xl p-4">
