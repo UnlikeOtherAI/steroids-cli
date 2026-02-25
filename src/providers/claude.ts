@@ -17,27 +17,41 @@ import {
 } from './interface.js';
 
 /**
- * Available Claude models
- * Use aliases (sonnet, opus, haiku) for latest versions
+ * Available Claude models with pinned version identifiers.
+ * These are accepted by the Claude CLI as --model values.
  */
 const CLAUDE_MODELS: ModelInfo[] = [
   {
-    id: 'opus',
-    name: 'Claude Opus (latest)',
+    id: 'claude-opus-4-6',
+    name: 'Claude Opus 4.6',
     recommendedFor: ['orchestrator', 'reviewer'],
     supportsStreaming: true,
     contextWindow: 200000,
   },
   {
-    id: 'sonnet',
-    name: 'Claude Sonnet (latest)',
-    recommendedFor: ['coder'],
+    id: 'claude-sonnet-4-6',
+    name: 'Claude Sonnet 4.6',
+    recommendedFor: ['coder', 'orchestrator', 'reviewer'],
     supportsStreaming: true,
     contextWindow: 200000,
   },
   {
-    id: 'haiku',
-    name: 'Claude Haiku (latest)',
+    id: 'claude-opus-4-5-20251101',
+    name: 'Claude Opus 4.5',
+    recommendedFor: [],
+    supportsStreaming: true,
+    contextWindow: 200000,
+  },
+  {
+    id: 'claude-sonnet-4-5-20250929',
+    name: 'Claude Sonnet 4.5',
+    recommendedFor: [],
+    supportsStreaming: true,
+    contextWindow: 200000,
+  },
+  {
+    id: 'claude-haiku-4-5-20251001',
+    name: 'Claude Haiku 4.5',
     recommendedFor: [],
     supportsStreaming: true,
     contextWindow: 200000,
@@ -48,9 +62,9 @@ const CLAUDE_MODELS: ModelInfo[] = [
  * Default models per role
  */
 const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string> = {
-  orchestrator: 'opus',
-  coder: 'sonnet',
-  reviewer: 'opus',
+  orchestrator: 'claude-sonnet-4-6',
+  coder: 'claude-sonnet-4-6',
+  reviewer: 'claude-sonnet-4-6',
 };
 
 /**

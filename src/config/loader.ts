@@ -161,15 +161,15 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
   ai: {
     orchestrator: {
       provider: 'claude',
-      model: 'claude-sonnet-4',
+      model: 'claude-sonnet-4-6',
     },
     coder: {
       provider: 'claude',
-      model: 'claude-sonnet-4',
+      model: 'claude-sonnet-4-6',
     },
     reviewer: {
       provider: 'claude',
-      model: 'claude-sonnet-4',
+      model: 'claude-sonnet-4-6',
     },
     review: {
       strict: true,

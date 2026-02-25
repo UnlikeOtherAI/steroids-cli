@@ -274,14 +274,21 @@ router.put('/config', (req: Request, res: Response) => {
   }
 });
 
-// Static model lists for each provider (fallback if API unavailable)
+// Claude CLI alias models — always valid regardless of API key availability
+const CLAUDE_ALIAS_MODELS: APIModel[] = [
+  { id: 'opus', name: 'Claude Opus (latest)' },
+  { id: 'sonnet', name: 'Claude Sonnet (latest)' },
+  { id: 'haiku', name: 'Claude Haiku (latest)' },
+];
+
+// Static model lists for each provider (fallback when API key present but API call fails)
 const FALLBACK_MODELS: Record<string, APIModel[]> = {
   claude: [
     { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
-    { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
-    { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-    { id: 'claude-opus-4-5', name: 'Claude Opus 4.5' },
-    { id: 'claude-sonnet-4-0', name: 'Claude Sonnet 4' },
+    { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+    { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5' },
+    { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
+    { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
   ],
   gemini: [
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
@@ -383,12 +390,14 @@ function getCodexModelsFromCache(): APIModel[] | null {
 
 /**
  * Fetch Claude models from Anthropic API
- * Note: Only works with real API keys, not CLI OAuth tokens
+ * Note: Only works with real API keys, not CLI OAuth tokens.
+ * Without an API key we return only the 3 CLI aliases (opus/sonnet/haiku) because
+ * those are always valid regardless of the installed Claude CLI version.
  */
 async function fetchClaudeModels(): Promise<{ models: APIModel[]; source: string }> {
   const apiKey = getClaudeApiKey();
   if (!apiKey) {
-    return { models: FALLBACK_MODELS.claude, source: 'fallback' };
+    return { models: CLAUDE_ALIAS_MODELS, source: 'aliases' };
   }
 
   try {

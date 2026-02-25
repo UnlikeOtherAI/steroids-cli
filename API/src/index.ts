@@ -5,9 +5,34 @@
 
 import express from 'express';
 import cors from 'cors';
+import { execSync } from 'node:child_process';
 import { realpathSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Load API keys from .zshrc if not already set in the environment.
+// The API server is a daemon and may not inherit interactive shell env vars.
+(function loadEnvFromZshrc() {
+  const vars = ['STEROIDS_ANTHROPIC', 'STEROIDS_GOOGLE', 'STEROIDS_MISTRAL', 'STEROIDS_OPENAI'];
+  const missing = vars.filter((v) => !process.env[v]);
+  if (missing.length === 0) return;
+  try {
+    const exports = missing.map((v) => `printf "${v}=%s\\n" "$${v}"`).join('; ');
+    const out = execSync(
+      `zsh -c 'source ~/.zshrc 2>/dev/null; ${exports}'`,
+      { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    for (const line of out.split('\n')) {
+      const eq = line.indexOf('=');
+      if (eq === -1) continue;
+      const key = line.slice(0, eq);
+      const val = line.slice(eq + 1).trim();
+      if (val && !process.env[key]) process.env[key] = val;
+    }
+  } catch {
+    // .zshrc not accessible or vars not defined there — continue without them
+  }
+}());
 import projectsRouter from './routes/projects.js';
 import storageRouter from './routes/storage.js';
 import activityRouter from './routes/activity.js';

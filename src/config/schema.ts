@@ -33,7 +33,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       model: {
         _description: 'Model identifier for orchestrator',
         _type: 'string',
-        _default: 'claude-sonnet-4',
+        _default: 'claude-sonnet-4-6',
       },
       cli: {
         _description: 'Path to CLI executable',
@@ -53,7 +53,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       model: {
         _description: 'Model identifier for coder',
         _type: 'string',
-        _default: 'claude-sonnet-4',
+        _default: 'claude-sonnet-4-6',
       },
       cli: {
         _description: 'Path to CLI executable',
@@ -78,7 +78,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       model: {
         _description: 'Model identifier for reviewer',
         _type: 'string',
-        _default: 'claude-sonnet-4',
+        _default: 'claude-sonnet-4-6',
       },
       cli: {
         _description: 'Path to CLI executable',
