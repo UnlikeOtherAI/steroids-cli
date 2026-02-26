@@ -4,8 +4,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, existsSync, rmSync, mkdirSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, unlinkSync, existsSync, rmSync, mkdirSync, realpathSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   BaseAIProvider,
@@ -17,9 +17,9 @@ import {
 } from './interface.js';
 
 /**
- * Available Codex models
+ * Fallback Codex models when ~/.codex/models_cache.json is unavailable
  */
-const CODEX_MODELS: ModelInfo[] = [
+const CODEX_FALLBACK_MODELS: ModelInfo[] = [
   {
     id: 'gpt-5.3-codex',
     name: 'GPT-5.3 Codex',
@@ -28,20 +28,18 @@ const CODEX_MODELS: ModelInfo[] = [
     contextWindow: 128000,
   },
   {
-    id: 'o3',
-    name: 'O3',
-    recommendedFor: ['orchestrator'],
-    supportsStreaming: true,
-    contextWindow: 128000,
-  },
-  {
-    id: 'gpt-4.1',
-    name: 'GPT-4.1',
-    recommendedFor: ['reviewer'],
+    id: 'gpt-5.3-codex-spark',
+    name: 'GPT-5.3 Codex Spark',
+    recommendedFor: ['coder', 'reviewer'],
     supportsStreaming: true,
     contextWindow: 128000,
   },
 ];
+
+/**
+ * Path to the Codex CLI model cache
+ */
+const CODEX_MODELS_CACHE_PATH = join(homedir(), '.codex', 'models_cache.json');
 
 /**
  * Default models per role
@@ -72,6 +70,34 @@ const DEFAULT_INVOCATION_TEMPLATE = 'cat {prompt_file} | {cli} exec {session_id}
 export class CodexProvider extends BaseAIProvider {
   readonly name = 'codex';
   readonly displayName = 'OpenAI (codex)';
+
+  private dynamicModels: ModelInfo[] = [];
+
+  /**
+   * Load models from the Codex CLI model cache (~/.codex/models_cache.json).
+   * Only includes models with visibility="list" (actively offered by OpenAI).
+   */
+  async initialize(): Promise<void> {
+    try {
+      if (!existsSync(CODEX_MODELS_CACHE_PATH)) return;
+      const raw = readFileSync(CODEX_MODELS_CACHE_PATH, 'utf-8');
+      const cache = JSON.parse(raw);
+      if (!cache.models || !Array.isArray(cache.models)) return;
+
+      this.dynamicModels = cache.models
+        .filter((m: any) => m.visibility === 'list')
+        .sort((a: any, b: any) => (a.priority ?? 999) - (b.priority ?? 999))
+        .map((m: any) => ({
+          id: m.slug,
+          name: m.display_name || m.slug,
+          recommendedFor: m.slug.includes('codex') ? (['coder', 'reviewer'] as const) : [],
+          supportsStreaming: true,
+          contextWindow: 128000,
+        }));
+    } catch {
+      // Cache unreadable/malformed — fall back to hardcoded list
+    }
+  }
 
   /**
    * Write prompt to a temporary file
@@ -476,14 +502,15 @@ export class CodexProvider extends BaseAIProvider {
    * List available model IDs
    */
   listModels(): string[] {
-    return CODEX_MODELS.map((m) => m.id);
+    const models = this.dynamicModels.length > 0 ? this.dynamicModels : CODEX_FALLBACK_MODELS;
+    return models.map((m) => m.id);
   }
 
   /**
    * Get detailed model information
    */
   getModelInfo(): ModelInfo[] {
-    return [...CODEX_MODELS];
+    return this.dynamicModels.length > 0 ? [...this.dynamicModels] : [...CODEX_FALLBACK_MODELS];
   }
 
   /**
