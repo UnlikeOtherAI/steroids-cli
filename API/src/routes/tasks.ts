@@ -1117,6 +1117,15 @@ router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
         {} as Record<string, number>
       );
 
+      // Pending tasks are always shown regardless of time range — a task created
+      // two weeks ago that is still pending is just as relevant as one from today.
+      if (hoursFilter) {
+        const pendingRow = db
+          .prepare(`SELECT COUNT(*) as count FROM tasks WHERE status = 'pending'`)
+          .get() as { count: number };
+        counts['pending'] = pendingRow.count;
+      }
+
       res.json({
         success: true,
         project: projectPath,

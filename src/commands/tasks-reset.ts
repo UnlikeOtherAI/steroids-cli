@@ -152,6 +152,15 @@ DESCRIPTION:
         // Insert audit log
         db.prepare(`INSERT INTO audit (task_id, from_status, to_status, actor, notes) VALUES (?, ?, 'pending', 'human:cli', 'Human-initiated bulk reset via CLI')`).run(task.id, task.status);
       }
+
+      // When doing a bulk reset, also clear failure_count on pending tasks that were
+      // previously auto-recovered from failed — they still carry failure history but
+      // are no longer in a terminal state.
+      if (values.all) {
+        db.prepare(
+          `UPDATE tasks SET failure_count = 0, last_failure_at = NULL WHERE status = 'pending' AND COALESCE(failure_count, 0) > 0`
+        ).run();
+      }
     })();
 
     for (const task of fullyValidatedTasks) {

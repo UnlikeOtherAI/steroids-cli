@@ -665,18 +665,6 @@ export const ProjectDetailPage: React.FC = () => {
               <i className="fa-solid fa-robot"></i>
               Reconfigure AI
             </button>
-            <Button
-              className="ml-auto flex flex-col items-start gap-0.5"
-              variant="accent"
-              onClick={handleResetProject}
-              disabled={!canResetProject || resetting}
-            >
-              <span className="flex items-center gap-1">
-                {resetting ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : null}
-                Reset Project
-              </span>
-              <span className="text-xs text-white/80">Failed and stale tasks</span>
-            </Button>
           </div>
 
       <div className="mb-8">
@@ -739,54 +727,68 @@ export const ProjectDetailPage: React.FC = () => {
       </div>
 
       {/* Issues */}
-      {issueRows.length > 0 && (
-        <div className="mb-8">
-          <button
-            onClick={() => setIssuesOpen(!issuesOpen)}
-            className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
-            aria-expanded={issuesOpen}
-          >
-            {issuesOpen ? (
-              <ChevronDownIcon className="w-5 h-5" />
-            ) : (
-              <ChevronRightIcon className="w-5 h-5" />
-            )}
-            <i className="fa-solid fa-bug w-5 h-5 flex items-center justify-center text-sm"></i>
-            <span>Issues</span>
-          </button>
-
-          {issuesOpen && (
-            <div className="bg-bg-surface rounded-xl p-4">
-              {issuesLoading ? (
-                <div className="flex items-center justify-center py-6">
-                  <ArrowPathIcon className="w-6 h-6 animate-spin text-text-muted" />
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {issueRows.map((item) => (
-                    <button
-                      key={item.key}
-                      onClick={() => navigateToIssue(item.singleTaskId, item.listPath)}
-                      className="w-full px-3 py-2 rounded-lg border border-border bg-bg-surface2 hover:border-accent/40 hover:bg-bg-elevated transition-colors flex items-center justify-between text-left"
-                    >
-                      <div className="flex items-center gap-2">
-                        <i className={`fa-solid ${item.icon} text-sm text-text-muted`} />
-                        <span className="text-sm font-medium text-text-primary">{item.label}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${item.badgeClasses}`}>
-                          {item.count}
-                        </span>
-                        <i className="fa-solid fa-arrow-right text-xs text-text-muted" />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+      <div className="mb-8">
+        <button
+          onClick={() => setIssuesOpen(!issuesOpen)}
+          className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
+          aria-expanded={issuesOpen}
+        >
+          {issuesOpen ? (
+            <ChevronDownIcon className="w-5 h-5" />
+          ) : (
+            <ChevronRightIcon className="w-5 h-5" />
           )}
-        </div>
-      )}
+          <i className="fa-solid fa-bug w-5 h-5 flex items-center justify-center text-sm"></i>
+          <span>Issues</span>
+        </button>
+
+        {issuesOpen && (
+          <div className="bg-bg-surface rounded-xl p-4">
+            {issuesLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <ArrowPathIcon className="w-6 h-6 animate-spin text-text-muted" />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {issueRows.length > 0 ? issueRows.map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => navigateToIssue(item.singleTaskId, item.listPath)}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-bg-surface2 hover:border-accent/40 hover:bg-bg-elevated transition-colors flex items-center justify-between text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <i className={`fa-solid ${item.icon} text-sm text-text-muted`} />
+                      <span className="text-sm font-medium text-text-primary">{item.label}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${item.badgeClasses}`}>
+                        {item.count}
+                      </span>
+                      <i className="fa-solid fa-arrow-right text-xs text-text-muted" />
+                    </div>
+                  </button>
+                )) : (
+                  <p className="text-sm text-text-muted text-center py-2">No issues detected</p>
+                )}
+                <div className="pt-2 border-t border-border mt-2">
+                  <Button
+                    className="w-full justify-center"
+                    variant="accent"
+                    onClick={handleResetProject}
+                    disabled={!canResetProject || resetting}
+                  >
+                    <span className="flex items-center gap-2">
+                      {resetting ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <i className="fa-solid fa-rotate-right text-sm" />}
+                      Reset Project
+                    </span>
+                  </Button>
+                  <p className="text-xs text-text-muted text-center mt-1.5">Resets failed, disputed and stale tasks to pending</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Storage */}
       <div className="mb-8">
