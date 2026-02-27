@@ -12,6 +12,11 @@ export default {
       {
         tsconfig: 'tsconfig.jest.json',
         useESM: true,
+        diagnostics: {
+          // TS1378: top-level await not allowed in CJS context (ts-jest outputs ESM so runtime is fine)
+          // TS151002: hybrid NodeNext module kind — ts-jest handles this correctly with useESM
+          ignoreCodes: [1378, 151002],
+        },
       },
     ],
   },

@@ -8,7 +8,7 @@
  */
 
 // @ts-nocheck
-import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach, afterEach, beforeAll } from '@jest/globals';
 
 // ── Mock functions ──────────────────────────────────────────────────────
 
@@ -18,6 +18,7 @@ const mockAutoMigrate = jest.fn().mockReturnValue({ applied: false, migrations: 
 const mockGetTask = jest.fn();
 const mockGetSection = jest.fn().mockReturnValue(null);
 const mockSelectNextTask = jest.fn();
+const mockSelectNextTaskWithLock = jest.fn();
 const mockSelectTaskBatch = jest.fn();
 const mockMarkTaskInProgress = jest.fn();
 const mockGetTaskCounts = jest.fn().mockReturnValue({
@@ -38,11 +39,22 @@ const mockExecSync = jest.fn();
 // ── Module mocks ────────────────────────────────────────────────────────
 
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
-  withGlobalDatabase: async (cb: any) => cb({ prepare: () => ({ get: () => ({}), all: () => [], run: () => ({}) }), close: () => {}, exec: () => {} } as any),
-  openGlobalDatabase: () => ({ db: {}, close: () => {} }),
+  withGlobalDatabase: async (cb: any) => cb({ prepare: () => ({ get: () => ({}), all: () => [], run: () => ({ changes: 0 }) }), close: () => {}, exec: () => {} } as any),
+  openGlobalDatabase: () => ({ db: { prepare: () => ({ get: () => undefined, all: () => [], run: () => ({ changes: 0 }) }) }, close: () => {} }),
   recordProviderBackoff: jest.fn(),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
   clearProviderBackoff: jest.fn(),
+  updateParallelSessionStatus: jest.fn(),
+  revokeWorkstreamLeasesForSession: jest.fn(),
+  listParallelSessionRunners: jest.fn().mockReturnValue([]),
+  removeParallelSessionRunner: jest.fn(),
+  recordValidationEscalation: jest.fn().mockReturnValue({ id: 1 }),
+  resolveValidationEscalationsForSession: jest.fn().mockReturnValue(0),
+  getGlobalSteroidsDir: () => '/tmp/.steroids',
+  getGlobalDbPath: () => '/tmp/.steroids/steroids.db',
+  isGlobalDbInitialized: () => true,
+  getDaemonActiveStatus: jest.fn().mockReturnValue(true),
+  setDaemonActiveStatus: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/database/connection.js', () => ({
@@ -59,6 +71,8 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   getTask: mockGetTask,
   getSection: mockGetSection,
   listTasks: mockListTasks,
+  incrementTaskFailureCount: jest.fn().mockReturnValue(1),
+  updateTaskStatus: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/orchestrator/task-selector.js', () => ({
@@ -66,6 +80,34 @@ jest.unstable_mockModule('../src/orchestrator/task-selector.js', () => ({
   selectTaskBatch: mockSelectTaskBatch,
   markTaskInProgress: mockMarkTaskInProgress,
   getTaskCounts: mockGetTaskCounts,
+  selectNextTaskWithLock: mockSelectNextTaskWithLock,
+  releaseTaskLockAfterCompletion: jest.fn(),
+}));
+
+jest.unstable_mockModule('../src/workspace/pool.js', () => ({
+  claimSlot: jest.fn().mockReturnValue(null),
+  finalizeSlotPath: jest.fn(),
+  releaseSlot: jest.fn(),
+  resolveRemoteUrl: jest.fn().mockReturnValue(''),
+  refreshSlotHeartbeat: jest.fn(),
+  updateSlotStatus: jest.fn(),
+  getSlot: jest.fn().mockReturnValue(null),
+}));
+
+jest.unstable_mockModule('../src/workspace/merge-lock.js', () => ({
+  refreshWorkspaceMergeLockHeartbeat: jest.fn(),
+  acquireWorkspaceMergeLock: jest.fn().mockResolvedValue(true),
+  releaseWorkspaceMergeLock: jest.fn(),
+}));
+
+jest.unstable_mockModule('../src/parallel/clone.js', () => ({
+  ensureWorkspaceSteroidsSymlink: jest.fn(),
+  getProjectHash: jest.fn().mockReturnValue('abc123'),
+  getDefaultWorkspaceRoot: jest.fn().mockReturnValue('/tmp/.steroids/workspaces'),
+}));
+
+jest.unstable_mockModule('../src/git/push.js', () => ({
+  pushToRemote: jest.fn().mockResolvedValue({ success: true, commitHash: 'abc123' }),
 }));
 
 jest.unstable_mockModule('../src/orchestrator/coder.js', () => ({
@@ -78,6 +120,7 @@ jest.unstable_mockModule('../src/orchestrator/reviewer.js', () => ({
 
 jest.unstable_mockModule('../src/config/loader.js', () => ({
   loadConfig: mockLoadConfig,
+  loadConfigFile: jest.fn().mockReturnValue({}),
 }));
 
 jest.unstable_mockModule('../src/runners/activity-log.js', () => ({
@@ -120,6 +163,7 @@ function setupDefaults() {
     sections: { batchMode: false, maxBatchSize: 10 },
   });
   mockGetRegisteredProject.mockReturnValue(null);
+  mockSelectNextTaskWithLock.mockReturnValue(null);
 }
 
 function makeTask(overrides = {}) {
@@ -172,7 +216,7 @@ describe('Orchestrator Loop — Credit Pause', () => {
       const task = makeTask();
       const alert = makeCreditAlert('coder');
 
-      mockSelectNextTask
+      mockSelectNextTaskWithLock
         .mockReturnValueOnce({ task, action: 'start' })
         .mockReturnValue(null);
 

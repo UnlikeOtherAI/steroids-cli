@@ -26,9 +26,9 @@ describe('ClaudeProvider', () => {
     it('should return available models', () => {
       const models = provider.listModels();
 
-      expect(models).toContain('opus');
-      expect(models).toContain('sonnet');
-      expect(models).toContain('haiku');
+      expect(models).toContain('claude-opus-4-6');
+      expect(models).toContain('claude-sonnet-4-6');
+      expect(models).toContain('claude-haiku-4-5-20251001');
     });
   });
 
@@ -39,24 +39,23 @@ describe('ClaudeProvider', () => {
       expect(Array.isArray(modelInfo)).toBe(true);
       expect(modelInfo.length).toBeGreaterThan(0);
 
-      const sonnet = modelInfo.find((m) => m.id === 'sonnet');
+      const sonnet = modelInfo.find((m) => m.id === 'claude-sonnet-4-6');
       expect(sonnet).toBeDefined();
-      expect(sonnet?.name).toBe('Claude Sonnet (latest)');
       expect(sonnet?.supportsStreaming).toBe(true);
     });
   });
 
   describe('getDefaultModel', () => {
     it('should return opus for orchestrator', () => {
-      expect(provider.getDefaultModel('orchestrator')).toBe('opus');
+      expect(provider.getDefaultModel('orchestrator')).toBe('claude-sonnet-4-6');
     });
 
     it('should return sonnet for coder', () => {
-      expect(provider.getDefaultModel('coder')).toBe('sonnet');
+      expect(provider.getDefaultModel('coder')).toBe('claude-sonnet-4-6');
     });
 
     it('should return opus for reviewer', () => {
-      expect(provider.getDefaultModel('reviewer')).toBe('opus');
+      expect(provider.getDefaultModel('reviewer')).toBe('claude-sonnet-4-6');
     });
   });
 

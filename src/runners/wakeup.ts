@@ -177,6 +177,22 @@ const global = { db: globalDb };
       // ignore lease cleanup issues in wakeup
     }
 
+    // Step 1b: Reconcile stale workspace pool slots and merge locks
+    try {
+      const { reconcileStaleWorkspaces } = await import('../workspace/reconcile.js');
+      const reconcileResult = reconcileStaleWorkspaces(global.db);
+      if (reconcileResult.resetSlots > 0 || reconcileResult.deletedLocks > 0) {
+        log(
+          `Workspace pool reconciliation: reset ${reconcileResult.resetSlots} slot(s), ` +
+          `deleted ${reconcileResult.deletedLocks} stale lock(s)`
+        );
+        // Return associated tasks to pending in their project DBs
+        // (deferred — the next loop iteration will pick them up as pending)
+      }
+    } catch {
+      // ignore workspace pool reconciliation issues in wakeup
+    }
+
     // Step 2: Clean zombie lock if present
     const lockStatus = checkLockStatus();
     if (lockStatus.isZombie && lockStatus.pid) {

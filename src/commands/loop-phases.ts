@@ -57,6 +57,15 @@ import { loadConfig, type ReviewerConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { InvokeResult } from '../providers/interface.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
+import type { PoolSlotContext } from '../workspace/types.js';
+import {
+  prepareForTask,
+  postCoderGate,
+  postReviewGate,
+  mergeToBase,
+} from '../workspace/git-lifecycle.js';
+import { updateSlotStatus, releaseSlot, getSlot, refreshSlotHeartbeat } from '../workspace/pool.js';
+import { handleMergeFailure } from '../workspace/merge-pipeline.js';
 
 export { type CoordinatorResult };
 
@@ -432,14 +441,47 @@ export async function runCoderPhase(
   coordinatorCache?: Map<string, CoordinatorResult>,
   coordinatorThresholds?: number[],
   leaseFence?: LeaseFenceContext,
-  branchName = 'main'
-): Promise<void> {
+  branchName = 'main',
+  poolSlotContext?: PoolSlotContext
+): Promise<CreditExhaustionResult | void> {
   if (!task) return;
   if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
     if (!jsonMode) {
       console.log('\n↺ Lease ownership lost before coder phase; skipping task in this runner.');
     }
     return;
+  }
+
+  // ── Pool slot: prepare workspace for task ──
+  let poolStartingSha: string | undefined;
+  let effectiveProjectPath = projectPath;
+
+  if (poolSlotContext) {
+    const prepResult = prepareForTask(
+      poolSlotContext.globalDb,
+      poolSlotContext.slot,
+      task.id,
+      projectPath
+    );
+
+    if (!prepResult.ok) {
+      if (!jsonMode) {
+        console.log(`\n✗ Workspace preparation failed: ${prepResult.reason}`);
+      }
+      if (prepResult.blocked) {
+        const { setTaskBlocked } = await import('../database/queries.js');
+        setTaskBlocked(db, task.id, 'blocked_error', prepResult.reason);
+      }
+      releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
+      return;
+    }
+
+    poolStartingSha = prepResult.startingSha;
+    effectiveProjectPath = poolSlotContext.slot.slot_path;
+
+    if (!jsonMode) {
+      console.log(`\n✓ Workspace prepared (branch: ${prepResult.taskBranch}, base: ${prepResult.baseBranch})`);
+    }
   }
 
   let coordinatorGuidance: string | undefined;
@@ -494,7 +536,7 @@ export async function runCoderPhase(
 
       coordExtra.submissionNotes = getLatestSubmissionNotes(db, task.id);
 
-      const modified = getModifiedFiles(projectPath);
+      const modified = getModifiedFiles(effectiveProjectPath);
       if (modified.length > 0) {
         coordExtra.gitDiffSummary = modified.join('\n');
       }
@@ -550,12 +592,12 @@ export async function runCoderPhase(
     console.log('\n>>> Invoking CODER...\n');
   }
 
-  const initialSha = getCurrentCommitSha(projectPath) || '';
+  const initialSha = poolStartingSha || getCurrentCommitSha(effectiveProjectPath) || '';
   const coderConfig = loadConfig(projectPath).ai?.coder as ReviewerConfig | undefined;
   const coderInvocation = await invokeWithLeaseHeartbeat(
     projectPath,
     leaseFence,
-    () => invokeCoder(task, projectPath, action, coordinatorGuidance, leaseFence?.runnerId)
+    () => invokeCoder(task, effectiveProjectPath, action, coordinatorGuidance, leaseFence?.runnerId)
   );
   if (coderInvocation.superseded || !coderInvocation.result) {
     if (!jsonMode) {
@@ -568,6 +610,20 @@ export async function runCoderPhase(
   if (coderResult.timedOut || !coderResult.success) {
     const providerName = coderConfig?.provider ?? loadConfig(projectPath).ai?.coder?.provider ?? 'unknown';
     const modelName = coderConfig?.model ?? loadConfig(projectPath).ai?.coder?.model ?? 'unknown';
+
+    // Check for credit/rate_limit exhaustion before counting as a provider failure
+    const registry = await getProviderRegistry();
+    const prov = registry.tryGet(providerName);
+    if (prov) {
+      const classified = prov.classifyResult(coderResult);
+      if (classified?.type === 'credit_exhaustion') {
+        return { action: 'pause_credit_exhaustion', provider: providerName, model: modelName, role: 'coder', message: classified.message };
+      }
+      if (classified?.type === 'rate_limit') {
+        return { action: 'rate_limit', provider: providerName, model: modelName, role: 'coder', message: classified.message, retryAfterMs: classified.retryAfterMs };
+      }
+    }
+
     const output = (coderResult.stderr || coderResult.stdout || '').trim();
     const failed = await handleProviderInvocationFailure(
       db,
@@ -590,11 +646,30 @@ export async function runCoderPhase(
 
   clearTaskFailureCount(db, task.id);
 
+  // ── Pool slot: post-coder verification gate ──
+  if (poolSlotContext && poolStartingSha) {
+    const gateResult = postCoderGate(effectiveProjectPath, poolStartingSha, task.title);
+    if (!gateResult.ok) {
+      if (!jsonMode) {
+        console.log(`\n⟳ Post-coder gate: ${gateResult.reason}. Returning to coder.`);
+      }
+      addAuditEntry(db, task.id, task.status, task.status, 'orchestrator', {
+        actorType: 'orchestrator',
+        notes: `[retry] Post-coder gate: ${gateResult.reason}`,
+      });
+      return;
+    }
+    if (gateResult.autoCommitted && !jsonMode) {
+      console.log('\n✓ Post-coder gate: auto-committed uncommitted work');
+    }
+    updateSlotStatus(poolSlotContext.globalDb, poolSlotContext.slot.id, 'awaiting_review');
+  }
+
   // STEP 2: Gather git state
-  const commits = getRecentCommits(projectPath, 5, initialSha);
-  const files_changed = getChangedFiles(projectPath);
-  const has_uncommitted = hasUncommittedChanges(projectPath);
-  const diff_summary = getDiffSummary(projectPath);
+  const commits = getRecentCommits(effectiveProjectPath, 5, initialSha);
+  const files_changed = getChangedFiles(effectiveProjectPath);
+  const has_uncommitted = hasUncommittedChanges(effectiveProjectPath);
+  const diff_summary = getDiffSummary(effectiveProjectPath);
   const hasRelevantChanges = has_uncommitted || commits.length > 0 || files_changed.length > 0;
 
   const gitState = {
@@ -836,7 +911,7 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
   switch (decision.action) {
     case 'submit':
       {
-        const submissionCommitSha = resolveCoderSubmittedCommitSha(projectPath, coderResult.stdout, {
+        const submissionCommitSha = resolveCoderSubmittedCommitSha(effectiveProjectPath, coderResult.stdout, {
           requireExplicitToken: requiresExplicitSubmissionCommit,
         });
         if (!submissionCommitSha && requiresExplicitSubmissionCommit) {
@@ -849,7 +924,7 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
           }
           break;
         }
-        if (!submissionCommitSha || !isCommitReachable(projectPath, submissionCommitSha)) {
+        if (!submissionCommitSha || !isCommitReachable(effectiveProjectPath, submissionCommitSha)) {
           updateTaskStatus(
             db,
             task.id,
@@ -887,7 +962,7 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
 
     case 'stage_commit_submit':
       if (!has_uncommitted) {
-        const submissionCommitSha = resolveCoderSubmittedCommitSha(projectPath, coderResult.stdout, {
+        const submissionCommitSha = resolveCoderSubmittedCommitSha(effectiveProjectPath, coderResult.stdout, {
           requireExplicitToken: requiresExplicitSubmissionCommit,
         });
         if (!submissionCommitSha && requiresExplicitSubmissionCommit) {
@@ -900,7 +975,7 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
           }
           break;
         }
-        if (!submissionCommitSha || !isCommitReachable(projectPath, submissionCommitSha)) {
+        if (!submissionCommitSha || !isCommitReachable(effectiveProjectPath, submissionCommitSha)) {
           updateTaskStatus(
             db,
             task.id,
@@ -951,14 +1026,14 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
       }
       // Stage all changes
       try {
-        execSync('git add -A', { cwd: projectPath, stdio: 'pipe' });
+        execSync('git add -A', { cwd: effectiveProjectPath, stdio: 'pipe' });
         const message = decision.commit_message || 'feat: implement task specification';
         execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
-          cwd: projectPath,
+          cwd: effectiveProjectPath,
           stdio: 'pipe'
         });
-        const submissionCommitSha = getCurrentCommitSha(projectPath) || undefined;
-        if (!submissionCommitSha || !isCommitReachable(projectPath, submissionCommitSha)) {
+        const submissionCommitSha = getCurrentCommitSha(effectiveProjectPath) || undefined;
+        if (!submissionCommitSha || !isCommitReachable(effectiveProjectPath, submissionCommitSha)) {
           updateTaskStatus(
             db,
             task.id,
@@ -1037,8 +1112,9 @@ export async function runReviewerPhase(
   jsonMode = false,
   coordinatorResult?: CoordinatorResult,
   branchName: string = 'main',
-  leaseFence?: LeaseFenceContext
-): Promise<void> {
+  leaseFence?: LeaseFenceContext,
+  poolSlotContext?: PoolSlotContext
+): Promise<CreditExhaustionResult | void> {
   if (!task) return;
   if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
     if (!jsonMode) {
@@ -1047,8 +1123,15 @@ export async function runReviewerPhase(
     return;
   }
 
+  // ── Pool slot: set effective path for reviewer ──
+  const effectiveProjectPath = poolSlotContext ? poolSlotContext.slot.slot_path : projectPath;
+
+  if (poolSlotContext) {
+    updateSlotStatus(poolSlotContext.globalDb, poolSlotContext.slot.id, 'review_active');
+  }
+
   const submissionResolution = resolveSubmissionCommitWithRecovery(
-    projectPath,
+    effectiveProjectPath,
     getSubmissionCommitShas(db, task.id)
   );
   if (submissionResolution.status !== 'resolved') {
@@ -1090,7 +1173,7 @@ export async function runReviewerPhase(
       () =>
         invokeReviewers(
           task,
-          projectPath,
+          effectiveProjectPath,
           reviewerConfigs,
           coordinatorResult?.guidance,
           coordinatorResult?.decision,
@@ -1156,7 +1239,7 @@ export async function runReviewerPhase(
       () =>
         invokeReviewer(
           task,
-          projectPath,
+          effectiveProjectPath,
           coordinatorResult?.guidance,
           coordinatorResult?.decision,
           undefined,
@@ -1180,33 +1263,29 @@ export async function runReviewerPhase(
         reviewerResult.model ??
         phaseConfig.ai?.reviewer?.model ??
         'unknown';
-      const output = (reviewerResult.stderr || reviewerResult.stdout || '').trim();
-      const failed = await handleProviderInvocationFailure(
-        db,
-        task.id,
-        {
-          role: 'reviewer',
-          provider: providerName,
-          model: modelName,
-          exitCode: reviewerResult.exitCode ?? 1,
-          output,
-        },
-        jsonMode
-      );
 
-      if (failed.shouldStopTask) {
-        return;
+      // Check for credit/rate_limit exhaustion before provider failure handling
+      const registry = await getProviderRegistry();
+      const prov = registry.tryGet(providerName);
+      if (prov) {
+        const classified = prov.classifyResult(reviewerResult);
+        if (classified?.type === 'credit_exhaustion') {
+          return { action: 'pause_credit_exhaustion', provider: providerName, model: modelName, role: 'reviewer', message: classified.message };
+        }
+        if (classified?.type === 'rate_limit') {
+          return { action: 'rate_limit', provider: providerName, model: modelName, role: 'reviewer', message: classified.message, retryAfterMs: classified.retryAfterMs };
+        }
       }
-      return;
+      // Non-credit/rate-limit reviewer failure: fall through to orchestrator
+    } else {
+      clearTaskFailureCount(db, task.id);
     }
-
-    clearTaskFailureCount(db, task.id);
   }
 
   // STEP 2: Gather git context
-  const commit_sha = getCurrentCommitSha(projectPath) || '';
-  const files_changed = getModifiedFiles(projectPath);
-  const diffStats = getDiffStats(projectPath);
+  const commit_sha = getCurrentCommitSha(effectiveProjectPath) || '';
+  const files_changed = getModifiedFiles(effectiveProjectPath);
+  const diffStats = getDiffStats(effectiveProjectPath);
 
   const gitContext = {
     commit_sha,
@@ -1486,22 +1565,56 @@ export async function runReviewerPhase(
 
   switch (decision.decision) {
     case 'approve':
-      approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
-      if (!jsonMode) {
-        console.log(`\n✓ Task APPROVED (confidence: ${decision.confidence})`);
-        console.log('Pushing to git...');
-      }
-      if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
-        if (!jsonMode) {
-          console.log('\n↺ Lease ownership lost before review push; skipping push in this runner.');
+      if (poolSlotContext) {
+        // ── Pool slot: post-review gate + merge pipeline ──
+        postReviewGate(effectiveProjectPath);
+
+        // Refresh slot from DB before merge
+        const freshSlot = getSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
+        if (!freshSlot) {
+          if (!jsonMode) console.log('\n✗ Pool slot disappeared during review');
+          return;
         }
-        return;
-      }
-      const pushResult = pushToRemote(projectPath, 'origin', branchName);
-      if (!jsonMode && pushResult.success) {
-        console.log(`Pushed successfully (${pushResult.commitHash})`);
-      } else if (!jsonMode) {
-        console.warn('Push failed. Will stack and retry on next completion.');
+
+        const mergeResult = mergeToBase(poolSlotContext.globalDb, freshSlot, task.id);
+
+        if (!mergeResult.ok) {
+          const failureResult = handleMergeFailure(db, poolSlotContext, task.id, mergeResult);
+          if (!jsonMode) {
+            if (failureResult.taskBlocked) {
+              console.log(`\n✗ Task BLOCKED (${failureResult.blockStatus}): ${failureResult.reason}`);
+            } else {
+              console.log(`\n⟳ Merge failed, returning to pending: ${failureResult.reason}`);
+            }
+          }
+          return;
+        }
+
+        // Merge succeeded — approve the task
+        approveTask(db, task.id, 'orchestrator', decision.notes, mergeResult.mergedSha || commitSha);
+        releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
+        if (!jsonMode) {
+          console.log(`\n✓ Task APPROVED and merged (sha: ${mergeResult.mergedSha})`);
+        }
+      } else {
+        // Legacy path: direct push
+        approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
+        if (!jsonMode) {
+          console.log(`\n✓ Task APPROVED (confidence: ${decision.confidence})`);
+          console.log('Pushing to git...');
+        }
+        if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+          if (!jsonMode) {
+            console.log('\n↺ Lease ownership lost before review push; skipping push in this runner.');
+          }
+          return;
+        }
+        const pushResult = pushToRemote(effectiveProjectPath, 'origin', branchName);
+        if (!jsonMode && pushResult.success) {
+          console.log(`Pushed successfully (${pushResult.commitHash})`);
+        } else if (!jsonMode) {
+          console.warn('Push failed. Will stack and retry on next completion.');
+        }
       }
       break;
 
@@ -1525,7 +1638,7 @@ export async function runReviewerPhase(
         }
         return;
       }
-      const disputePush = pushToRemote(projectPath, 'origin', branchName);
+      const disputePush = pushToRemote(effectiveProjectPath, 'origin', branchName);
       if (!jsonMode && disputePush.success) {
         console.log(`Pushed disputed work (${disputePush.commitHash})`);
       }

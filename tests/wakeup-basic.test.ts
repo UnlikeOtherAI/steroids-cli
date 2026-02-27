@@ -79,7 +79,7 @@ jest.unstable_mockModule('node:child_process', () => ({
 
 // Mock global-db
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
-  withGlobalDatabase: (cb: any) => cb((mockOpenGlobalDatabase() as any).db),
+  withGlobalDatabase: (cb: any) => cb(mockGlobalDb),
   openGlobalDatabase: mockOpenGlobalDatabase,
   recordProviderBackoff: jest.fn(),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
@@ -116,7 +116,7 @@ const createMockDb = () => ({
   prepare: jest.fn().mockReturnThis(),
   get: jest.fn(),
   all: jest.fn().mockReturnValue([]),
-  run: jest.fn(),
+  run: jest.fn().mockReturnValue({ changes: 0 }),
   exec: jest.fn(),
   close: jest.fn(),
   pragma: jest.fn(),
@@ -124,7 +124,6 @@ const createMockDb = () => ({
 
 const mockGlobalDb = createMockDb();
 
-// Import module under test
 const { wakeup } = await import('../src/runners/wakeup.js');
 
 describe('wakeup() - basic functionality', () => {
@@ -132,6 +131,7 @@ describe('wakeup() - basic functionality', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGlobalDb.prepare = jest.fn().mockReturnThis();
 
     mockCheckLockStatus.mockReturnValue({
       locked: false,
@@ -228,7 +228,7 @@ describe('wakeup() - basic functionality', () => {
         return {
           get: jest.fn().mockReturnValue(undefined),
           all: jest.fn().mockReturnValue([]),
-          run: jest.fn(),
+          run: jest.fn().mockReturnValue({ changes: 0 }),
         };
       }
 
@@ -236,14 +236,14 @@ describe('wakeup() - basic functionality', () => {
         return {
           get: jest.fn().mockReturnValue({ 1: 1 }),
           all: jest.fn().mockReturnValue([]),
-          run: jest.fn(),
+          run: jest.fn().mockReturnValue({ changes: 0 }),
         };
       }
 
       return {
         get: jest.fn().mockReturnValue(undefined),
         all: jest.fn().mockReturnValue([]),
-        run: jest.fn(),
+        run: jest.fn().mockReturnValue({ changes: 0 }),
       };
     });
 

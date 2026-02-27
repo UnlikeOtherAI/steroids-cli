@@ -14,8 +14,10 @@ export type TaskStatus =
   | 'completed'
   | 'disputed'
   | 'failed'
-  | 'skipped'   // Fully external setup, nothing to code
-  | 'partial';  // Some coding done, rest needs external setup
+  | 'skipped'           // Fully external setup, nothing to code
+  | 'partial'           // Some coding done, rest needs external setup
+  | 'blocked_error'     // Blocked by repeated failures (workspace pool)
+  | 'blocked_conflict'; // Blocked by merge conflicts (workspace pool)
 
 // Status markers for display
 export const STATUS_MARKERS: Record<TaskStatus, string> = {
@@ -27,6 +29,8 @@ export const STATUS_MARKERS: Record<TaskStatus, string> = {
   failed: '[F]',
   skipped: '[S]',   // Fully skipped - external setup required
   partial: '[s]',   // Partial - coded what we could, rest is external
+  blocked_error: '[B]',    // Blocked by repeated failures
+  blocked_conflict: '[C]', // Blocked by merge conflicts
 };
 
 export interface Task {
@@ -43,6 +47,8 @@ export interface Task {
   rejection_count: number;
   failure_count?: number;
   last_failure_at?: string | null;
+  conflict_count?: number;
+  blocked_reason?: string | null;
   reference_task_id?: string | null;
   reference_commit?: string | null;
   reference_commit_message?: string | null;
@@ -1598,4 +1604,67 @@ export function resolveCreditIncident(
   db.prepare(
     `UPDATE incidents SET resolved_at = datetime('now'), resolution = ? WHERE id = ?`
   ).run(resolution, incidentId);
+}
+
+// ============ Workspace Pool Task Operations ============
+
+/**
+ * Increment the conflict_count for a task and return the new value.
+ */
+export function incrementTaskConflictCount(db: Database.Database, taskId: string): number {
+  db.prepare(
+    `UPDATE tasks
+     SET conflict_count = COALESCE(conflict_count, 0) + 1,
+         updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(taskId);
+
+  const row = db
+    .prepare('SELECT conflict_count FROM tasks WHERE id = ?')
+    .get(taskId) as { conflict_count: number | null } | undefined;
+
+  return Number(row?.conflict_count ?? 0);
+}
+
+/**
+ * Mark a task as blocked with a reason.
+ */
+export function setTaskBlocked(
+  db: Database.Database,
+  taskId: string,
+  status: 'blocked_error' | 'blocked_conflict',
+  reason: string,
+  actor: string = 'orchestrator'
+): void {
+  const task = getTask(db, taskId);
+  if (!task) return;
+
+  db.prepare(
+    `UPDATE tasks
+     SET status = ?, blocked_reason = ?, updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(status, reason, taskId);
+
+  addAuditEntry(db, taskId, task.status, status, actor, reason);
+}
+
+/**
+ * Return a task to pending status, clearing blocked state.
+ */
+export function returnTaskToPending(
+  db: Database.Database,
+  taskId: string,
+  actor: string = 'orchestrator',
+  notes?: string
+): void {
+  const task = getTask(db, taskId);
+  if (!task) return;
+
+  db.prepare(
+    `UPDATE tasks
+     SET status = 'pending', blocked_reason = NULL, updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(taskId);
+
+  addAuditEntry(db, taskId, task.status, 'pending', actor, notes ?? 'Returned to pending for retry');
 }

@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     requires_promotion INTEGER NOT NULL DEFAULT 0 CHECK(requires_promotion IN (0, 1)),
     follow_up_depth INTEGER NOT NULL DEFAULT 0 CHECK(follow_up_depth >= 0),
     dedupe_key TEXT,
+    conflict_count INTEGER NOT NULL DEFAULT 0,
+    blocked_reason TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -62,6 +64,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_section ON tasks(section_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_failures ON tasks(failure_count) WHERE failure_count > 0;
+CREATE INDEX IF NOT EXISTS idx_tasks_conflict_count ON tasks(conflict_count) WHERE conflict_count > 0;
 CREATE INDEX IF NOT EXISTS idx_tasks_reference_task ON tasks(reference_task_id) WHERE reference_task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tasks_follow_up_state ON tasks(is_follow_up, requires_promotion) WHERE is_follow_up = 1;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_dedupe ON tasks(dedupe_key) WHERE dedupe_key IS NOT NULL;
@@ -251,4 +254,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (16, '016_add_invo
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (17, '017_add_invocation_runner_id', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (18, '018_expand_audit_columns', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (19, '019_add_task_start_sha', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (20, '020_add_workspace_fields', 'builtin');
 `;

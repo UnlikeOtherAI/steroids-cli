@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 19,
+  "latestDbVersion": 20,
   "migrations": [
     {
       "id": 1,
@@ -153,6 +153,14 @@
       "description": "Add start_commit_sha to tasks table to support End-State Squashing",
       "checksum": "",
       "cliVersion": "0.9.43"
+    },
+    {
+      "id": 20,
+      "name": "020_add_workspace_fields",
+      "file": "020_add_workspace_fields.sql",
+      "description": "Add conflict_count and blocked_reason to tasks for workspace pool lifecycle",
+      "checksum": "",
+      "cliVersion": "0.10.36"
     }
   ]
 }

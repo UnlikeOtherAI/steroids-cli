@@ -9,7 +9,7 @@
  */
 
 // @ts-nocheck
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach, beforeAll } from '@jest/globals';
 
 // ── Mock functions ──────────────────────────────────────────────────────
 
@@ -67,6 +67,8 @@ jest.unstable_mockModule('../src/orchestrator/invoke.js', () => ({
 
 jest.unstable_mockModule('../src/config/loader.js', () => ({
   loadConfig: mockLoadConfig,
+  loadConfigFile: jest.fn().mockReturnValue({}),
+  saveConfig: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/providers/registry.js', () => ({
@@ -87,6 +89,52 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   addAuditEntry: mockAddAuditEntry,
   getFollowUpDepth: jest.fn().mockReturnValue(0),
   createFollowUpTask: jest.fn().mockReturnValue('follow-up-1'),
+  incrementTaskFailureCount: jest.fn().mockReturnValue(1),
+  clearTaskFailureCount: jest.fn().mockReturnValue(0),
+  incrementTaskConflictCount: jest.fn().mockReturnValue(1),
+  setTaskBlocked: jest.fn(),
+  returnTaskToPending: jest.fn(),
+}));
+
+jest.unstable_mockModule('../src/runners/global-db.js', () => ({
+  withGlobalDatabase: jest.fn().mockImplementation((cb: any) => cb({ prepare: () => ({ get: () => undefined, all: () => [], run: () => ({ changes: 0 }) }) })),
+  openGlobalDatabase: jest.fn().mockReturnValue({ db: {}, close: jest.fn() }),
+  getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
+  recordProviderBackoff: jest.fn(),
+  clearProviderBackoff: jest.fn(),
+  updateParallelSessionStatus: jest.fn(),
+  revokeWorkstreamLeasesForSession: jest.fn(),
+  listParallelSessionRunners: jest.fn().mockReturnValue([]),
+  removeParallelSessionRunner: jest.fn(),
+  recordValidationEscalation: jest.fn().mockReturnValue({ id: 1 }),
+  resolveValidationEscalationsForSession: jest.fn().mockReturnValue(0),
+  getGlobalSteroidsDir: () => '/tmp/.steroids',
+  getGlobalDbPath: () => '/tmp/.steroids/steroids.db',
+  isGlobalDbInitialized: () => true,
+  getDaemonActiveStatus: jest.fn().mockReturnValue(true),
+  setDaemonActiveStatus: jest.fn(),
+}));
+
+jest.unstable_mockModule('../src/workspace/git-lifecycle.js', () => ({
+  prepareForTask: jest.fn().mockResolvedValue({ taskBranch: 'steroids/task-1', baseBranch: 'main' }),
+  postCoderGate: jest.fn().mockResolvedValue({ ok: true }),
+  postReviewGate: jest.fn().mockResolvedValue({ ok: true }),
+  mergeToBase: jest.fn().mockResolvedValue({ ok: true }),
+}));
+
+jest.unstable_mockModule('../src/workspace/pool.js', () => ({
+  claimSlot: jest.fn().mockReturnValue(null),
+  finalizeSlotPath: jest.fn(),
+  releaseSlot: jest.fn(),
+  resolveRemoteUrl: jest.fn().mockReturnValue(''),
+  refreshSlotHeartbeat: jest.fn(),
+  updateSlotStatus: jest.fn(),
+  getSlot: jest.fn().mockReturnValue(null),
+  ensureSlotClone: jest.fn(),
+}));
+
+jest.unstable_mockModule('../src/workspace/merge-pipeline.js', () => ({
+  handleMergeFailure: jest.fn().mockReturnValue({ taskBlocked: false, reason: 'test' }),
 }));
 
 jest.unstable_mockModule('../src/git/status.js', () => ({
@@ -132,7 +180,7 @@ jest.unstable_mockModule('../src/orchestrator/fallback-handler.js', () => ({
   },
 }));
 
-// ── Import module under test (after mocks) ──────────────────────────────
+// ── Import module under test ────────────────────────────────────────────
 
 const { runCoderPhase, runReviewerPhase } = await import('../src/commands/loop-phases.js');
 

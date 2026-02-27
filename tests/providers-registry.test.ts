@@ -128,7 +128,7 @@ describe('ProviderRegistry', () => {
       registry.register(provider);
 
       expect(() => {
-        registry.validateProviderModel('claude', 'sonnet');
+        registry.validateProviderModel('claude', 'claude-sonnet-4-6');
       }).not.toThrow();
     });
 

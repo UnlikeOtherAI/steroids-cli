@@ -28,6 +28,7 @@ const HELP = generateHelp({
   subcommands: [
     { name: 'list', description: 'List workspace clones for the current project' },
     { name: 'clean', description: 'Clean workspace clones for the current project' },
+    { name: 'pool', description: 'List workspace pool slots from global database' },
   ],
   options: [
     { long: 'project', short: 'p', description: 'Project directory to inspect (defaults to cwd)', values: '<path>' },
@@ -268,7 +269,7 @@ function collectWorkspaceData(
       }
 
       const name = entry.name;
-      if (!name.startsWith('ws-')) {
+      if (!name.startsWith('ws-') && !name.startsWith('pool-')) {
         continue;
       }
 
@@ -555,6 +556,87 @@ async function cleanWorkspaces(args: string[], flags: GlobalFlags): Promise<void
   }
 }
 
+async function poolWorkspaces(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'workspaces', subcommand: 'pool', flags });
+
+  const { values } = parseArgs({
+    args,
+    options: {
+      help: { type: 'boolean', short: 'h', default: false },
+      project: { type: 'string', short: 'p' },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help) {
+    console.log(HELP);
+    return;
+  }
+
+  let db: Database.Database;
+  let closeDb: () => void;
+
+  try {
+    const globalDb = openGlobalDatabase();
+    db = globalDb.db;
+    closeDb = globalDb.close;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    out.error(ErrorCode.NOT_INITIALIZED, message);
+    process.exit(getExitCode(ErrorCode.NOT_INITIALIZED));
+  }
+
+  try {
+    // Check if workspace_pool_slots table exists
+    const tableExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='workspace_pool_slots'"
+      )
+      .get() as { name: string } | undefined;
+
+    if (!tableExists) {
+      out.log('Workspace pool tables not yet created (requires global DB V19).');
+      return;
+    }
+
+    let query = 'SELECT * FROM workspace_pool_slots ORDER BY project_id, slot_index';
+    const params: string[] = [];
+
+    if (values.project) {
+      const projectPath = resolve(values.project as string);
+      const projectHash = getProjectHash(projectPath);
+      query = 'SELECT * FROM workspace_pool_slots WHERE project_id = ? ORDER BY slot_index';
+      params.push(projectHash);
+    }
+
+    const slots = db.prepare(query).all(...params) as Array<Record<string, unknown>>;
+
+    if (out.isJson()) {
+      out.success({ slots });
+      return;
+    }
+
+    if (slots.length === 0) {
+      out.log('No workspace pool slots found.');
+      return;
+    }
+
+    out.log(`Pool slots: ${slots.length}`);
+    for (const slot of slots) {
+      const status = slot.status as string;
+      const active = status !== 'idle';
+      const statusTag = active ? `[${status}]` : '[idle]';
+      out.log(
+        `  pool-${slot.slot_index}  project=${(slot.project_id as string).substring(0, 8)}  ` +
+        `${statusTag}  task=${slot.task_id ?? '—'}  runner=${slot.runner_id ?? '—'}  ` +
+        `branch=${slot.task_branch ?? '—'}`
+      );
+    }
+  } finally {
+    closeDb();
+  }
+}
+
 export async function workspacesCommand(args: string[], flags: GlobalFlags): Promise<void> {
   if (flags.help || args.length === 0 || args[0] === '-h' || args[0] === '--help') {
     console.log(HELP);
@@ -570,6 +652,9 @@ export async function workspacesCommand(args: string[], flags: GlobalFlags): Pro
       break;
     case 'clean':
       await cleanWorkspaces(subArgs, flags);
+      break;
+    case 'pool':
+      await poolWorkspaces(subArgs, flags);
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);

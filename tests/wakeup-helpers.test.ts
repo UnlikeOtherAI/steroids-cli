@@ -2,11 +2,16 @@
  * Tests for wakeup helper functions
  */
 
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, jest } from '@jest/globals';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { openDatabase, initDatabase } from '../src/database/connection.js';
+import type {
+  hasActiveRunnerForProject as HasActiveRunnerFn,
+  hasActiveParallelSessionForProject as HasActiveParallelFn,
+  checkWakeupNeeded as CheckWakeupNeededFn,
+} from '../src/runners/wakeup.js';
 
 interface TestProject {
   path: string;
@@ -72,7 +77,7 @@ const mockCheckLockStatus = jest.fn();
 
 // Mock global-db
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
-  withGlobalDatabase: (cb: any) => cb((mockOpenGlobalDatabase() as any).db),
+  withGlobalDatabase: (cb: any) => cb(mockGlobalDb),
   openGlobalDatabase: mockOpenGlobalDatabase,
   recordProviderBackoff: jest.fn(),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
@@ -117,16 +122,13 @@ const createMockDb = () => ({
 
 const mockGlobalDb = createMockDb();
 
-// Import module under test
-const {
-  hasActiveRunnerForProject,
-  hasActiveParallelSessionForProject,
-  checkWakeupNeeded,
-} = await import('../src/runners/wakeup.js');
+const { hasActiveRunnerForProject, hasActiveParallelSessionForProject, checkWakeupNeeded }
+  = await import('../src/runners/wakeup.js');
 
 describe('hasActiveRunnerForProject()', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGlobalDb.prepare = jest.fn().mockReturnThis();
 
     mockOpenGlobalDatabase.mockReturnValue({
       db: mockGlobalDb,
@@ -213,7 +215,10 @@ describe('hasActiveParallelSessionForProject()', () => {
 
   it('should return true when project has an active parallel session', () => {
     const mockGet = jest.fn().mockReturnValue({ 1: 1 });
-    const mockPrepare = jest.fn().mockReturnValue({ get: mockGet });
+    const mockPrepare = jest.fn().mockReturnValue({
+      get: mockGet,
+      run: jest.fn().mockReturnValue({ changes: 0 }),
+    });
     mockGlobalDb.prepare = mockPrepare;
 
     const result = hasActiveParallelSessionForProject('/project1');
@@ -229,7 +234,10 @@ describe('hasActiveParallelSessionForProject()', () => {
 
   it('should return false when project has no active parallel session', () => {
     const mockGet = jest.fn().mockReturnValue(undefined);
-    const mockPrepare = jest.fn().mockReturnValue({ get: mockGet });
+    const mockPrepare = jest.fn().mockReturnValue({
+      get: mockGet,
+      run: jest.fn().mockReturnValue({ changes: 0 }),
+    });
     mockGlobalDb.prepare = mockPrepare;
 
     const result = hasActiveParallelSessionForProject('/project1');

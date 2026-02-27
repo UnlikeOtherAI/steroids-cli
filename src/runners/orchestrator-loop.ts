@@ -21,10 +21,14 @@ import { invokeReviewerBatch } from '../orchestrator/reviewer.js';
 import { logActivity } from './activity-log.js';
 import { getRegisteredProject } from './projects.js';
 import { execSync } from 'node:child_process';
-import { runCoderPhase, runReviewerPhase } from '../commands/loop-phases.js';
+import { runCoderPhase, runReviewerPhase, type CreditExhaustionResult } from '../commands/loop-phases.js';
+import { handleCreditExhaustion, checkBatchCreditExhaustion } from './credit-pause.js';
 import { pushToRemote } from '../git/push.js';
-import { withGlobalDatabase } from './global-db.js';
-import { ensureWorkspaceSteroidsSymlink } from '../parallel/clone.js';
+import { withGlobalDatabase, openGlobalDatabase } from './global-db.js';
+import { ensureWorkspaceSteroidsSymlink, getProjectHash } from '../parallel/clone.js';
+import type { PoolSlotContext } from '../workspace/types.js';
+import { claimSlot, finalizeSlotPath, releaseSlot, resolveRemoteUrl, refreshSlotHeartbeat } from '../workspace/pool.js';
+import { refreshWorkspaceMergeLockHeartbeat } from '../workspace/merge-lock.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -203,6 +207,22 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           console.log('\n>>> Invoking BATCH CODER...\n');
           const batchCoderResult = await invokeCoderBatch(batch.tasks, batch.sectionName, projectPath);
 
+          // Always check for credit/rate_limit exhaustion (returns null on success)
+          const coderCreditAlert = await checkBatchCreditExhaustion(batchCoderResult, 'coder', projectPath);
+          if (coderCreditAlert) {
+            const pauseResult = await handleCreditExhaustion({
+              ...coderCreditAlert,
+              projectPath,
+              runnerId: options.runnerId ?? 'daemon',
+              db,
+              shouldStop: options.shouldStop ?? (() => false),
+              onHeartbeat: options.onHeartbeat,
+              onceMode: options.once ?? false,
+            });
+            if (!pauseResult.resolved) break;
+            continue;
+          }
+
           if (batchCoderResult.timedOut || !batchCoderResult.success) {
             const coderConfig = loadConfig(projectPath).ai?.coder;
             const providerName = coderConfig?.provider ?? 'unknown';
@@ -241,6 +261,22 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
             console.log('\n>>> Invoking BATCH REVIEWER...\n');
             const batchReviewerResult = await invokeReviewerBatch(tasksInReview, batch.sectionName, projectPath);
+
+            // Always check for credit/rate_limit exhaustion (returns null on success)
+            const reviewerCreditAlert = await checkBatchCreditExhaustion(batchReviewerResult, 'reviewer', projectPath);
+            if (reviewerCreditAlert) {
+              const pauseResult = await handleCreditExhaustion({
+                ...reviewerCreditAlert,
+                projectPath,
+                runnerId: options.runnerId ?? 'daemon',
+                db,
+                shouldStop: options.shouldStop ?? (() => false),
+                onHeartbeat: options.onHeartbeat,
+                onceMode: options.once ?? false,
+              });
+              if (!pauseResult.resolved) break;
+              continue;
+            }
 
             if (batchReviewerResult.timedOut || !batchReviewerResult.success) {
               const reviewerConfig = loadConfig(projectPath).ai?.reviewer;
@@ -393,13 +429,46 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       console.log(`Action: ${action}`);
       console.log(`Status: ${task.status}`);
 
+      // ── Workspace pool: claim slot, start heartbeat ──
+      let poolSlotCtx: PoolSlotContext | undefined;
+      let poolGlobalDb: ReturnType<typeof openGlobalDatabase> | undefined;
+
+      if (options.runnerId) {
+        try {
+          const gdb = openGlobalDatabase();
+          poolGlobalDb = gdb;
+          const projectId = getProjectHash(projectPath);
+          const remoteUrl = resolveRemoteUrl(projectPath);
+          const localOnly = remoteUrl === null;
+          const slot = claimSlot(gdb.db, projectId, options.runnerId, task.id);
+          const finalSlot = finalizeSlotPath(gdb.db, slot.id, projectPath, remoteUrl);
+
+          const heartbeatTimer = setInterval(() => {
+            try {
+              refreshSlotHeartbeat(gdb.db, finalSlot.id);
+              // Also keep merge lock alive if one is held
+              refreshWorkspaceMergeLockHeartbeat(gdb.db, projectId, options.runnerId!);
+            } catch {
+              // Tolerate heartbeat failures — reconciliation handles stale slots
+            }
+          }, 30_000);
+
+          poolSlotCtx = { globalDb: gdb.db, slot: finalSlot, heartbeatTimer, localOnly };
+        } catch (error) {
+          console.warn('Pool slot claim failed, running without pool:', (error as Error).message);
+          // Fall back to non-pool mode
+        }
+      }
+
+      let creditResult: CreditExhaustionResult | void = undefined;
+
       try {
         options.onTaskStart?.(task.id, action);
         lockHeartbeat?.start();
         if (action === 'start') {
           ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
           markTaskInProgress(db, task.id);
-          await runCoderPhase(
+          creditResult = await runCoderPhase(
             db,
             task,
             projectPath,
@@ -411,11 +480,12 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
               parallelSessionId: options.parallelSessionId,
               runnerId: options.runnerId,
             },
-            branchName
+            branchName,
+            poolSlotCtx
           );
         } else if (action === 'resume') {
           ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
-          await runCoderPhase(
+          creditResult = await runCoderPhase(
             db,
             task,
             projectPath,
@@ -427,11 +497,12 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
               parallelSessionId: options.parallelSessionId,
               runnerId: options.runnerId,
             },
-            branchName
+            branchName,
+            poolSlotCtx
           );
         } else if (action === 'review') {
           ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
-          await runReviewerPhase(
+          creditResult = await runReviewerPhase(
             db,
             task,
             projectPath,
@@ -441,13 +512,44 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             {
               parallelSessionId: options.parallelSessionId,
               runnerId: options.runnerId,
-            }
+            },
+            poolSlotCtx
           );
         }
       } finally {
+        // ── Pool cleanup: stop heartbeat, release slot ──
+        if (poolSlotCtx) {
+          if (poolSlotCtx.heartbeatTimer) {
+            clearInterval(poolSlotCtx.heartbeatTimer);
+          }
+          try {
+            releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+          } catch {
+            // Tolerate release failures — reconciliation handles cleanup
+          }
+        }
+        if (poolGlobalDb) {
+          try { poolGlobalDb.close(); } catch { /* ignore */ }
+        }
+
         if (options.runnerId) {
           releaseTaskLockAfterCompletion(db, task.id, options.runnerId, lockHeartbeat);
         }
+      }
+
+      // Handle credit exhaustion result from single-task phase
+      if (creditResult) {
+        const pauseResult = await handleCreditExhaustion({
+          ...creditResult,
+          projectPath,
+          runnerId: options.runnerId ?? 'daemon',
+          db,
+          shouldStop: options.shouldStop ?? (() => false),
+          onHeartbeat: options.onHeartbeat,
+          onceMode: options.once ?? false,
+        });
+        if (!pauseResult.resolved) break;
+        continue;
       }
 
       // Log activity if task reached terminal status

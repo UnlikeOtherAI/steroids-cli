@@ -20,7 +20,8 @@ import {
 } from '../orchestrator/task-selector.js';
 import { hasActiveRunnerForProject } from '../runners/wakeup.js';
 import { getRegisteredProject } from '../runners/projects.js';
-import { runCoderPhase, runReviewerPhase, type CoordinatorResult } from './loop-phases.js';
+import { runCoderPhase, runReviewerPhase, type CoordinatorResult, type CreditExhaustionResult } from './loop-phases.js';
+import { handleCreditExhaustion } from '../runners/credit-pause.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
@@ -367,17 +368,34 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
         action,
         status: task.status,
       });
+      let creditResult: CreditExhaustionResult | void = undefined;
       if (action === 'start') {
         // Starting a new task
         markTaskInProgress(db, task.id);
-        await runCoderPhase(db, task, projectPath, 'start', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
+        creditResult = await runCoderPhase(db, task, projectPath, 'start', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
       } else if (action === 'resume') {
         // Resuming in-progress task
-        await runCoderPhase(db, task, projectPath, 'resume', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
+        creditResult = await runCoderPhase(db, task, projectPath, 'resume', flags.json, coordinatorCache, COORDINATOR_THRESHOLDS);
       } else if (action === 'review') {
         // Task ready for review - pass coordinator guidance if available
         const cachedCoord = coordinatorCache.get(task.id);
-        await runReviewerPhase(db, task, projectPath, flags.json, cachedCoord);
+        creditResult = await runReviewerPhase(db, task, projectPath, flags.json, cachedCoord);
+      }
+
+      if (creditResult) {
+        const pauseResult = await handleCreditExhaustion({
+          ...creditResult,
+          runnerId: 'foreground',
+          db,
+          projectPath,
+          shouldStop: () => false,
+          onceMode: Boolean(values.once),
+        });
+        if (pauseResult.resolution === 'immediate_fail') {
+          process.exit(1);
+        }
+        if (!pauseResult.resolved) break;
+        continue;
       }
 
       // Check if we should continue

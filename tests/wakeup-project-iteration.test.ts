@@ -2,11 +2,12 @@
  * Multi-project iteration tests for wakeup
  */
 
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, jest } from '@jest/globals';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { openDatabase, initDatabase } from '../src/database/connection.js';
+import type { wakeup as WakeupFn } from '../src/runners/wakeup.js';
 
 interface TestProject {
   path: string;
@@ -79,7 +80,7 @@ jest.unstable_mockModule('node:child_process', () => ({
 
 // Mock global-db
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
-  withGlobalDatabase: (cb: any) => cb((mockOpenGlobalDatabase() as any).db),
+  withGlobalDatabase: (cb: any) => cb(mockGlobalDb),
   openGlobalDatabase: mockOpenGlobalDatabase,
   recordProviderBackoff: jest.fn(),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
@@ -111,6 +112,17 @@ jest.unstable_mockModule('../src/runners/lock.js', () => ({
   removeLock: mockRemoveLock,
 }));
 
+// Mock CLI entrypoint so resolveCliEntrypoint() returns process.argv[1] in test env
+jest.unstable_mockModule('../src/cli/entrypoint.js', () => ({
+  resolveCliEntrypoint: jest.fn().mockReturnValue(process.argv[1]),
+}));
+
+// Mock wakeup timing (avoids filesystem writes in tests)
+jest.unstable_mockModule('../src/runners/wakeup-timing.js', () => ({
+  recordWakeupTime: jest.fn(),
+  getLastWakeupTime: jest.fn().mockReturnValue(null),
+}));
+
 // Create mock database
 const createMockDb = () => ({
   prepare: jest.fn().mockReturnThis(),
@@ -124,14 +136,33 @@ const createMockDb = () => ({
 
 const mockGlobalDb = createMockDb();
 
-// Import module under test
 const { wakeup } = await import('../src/runners/wakeup.js');
+
+// Tracks which project paths have had a runner spawned for them.
+// Used by makeSpawnAwarePrepare() to simulate runner registration after spawn.
+const spawnedProjectPaths = new Set<string>();
+
+/**
+ * Creates a prepare mock where get(projectPath) returns { 1: 1 } only after
+ * a runner has been spawned for that project, simulating waitForRunnerRegistration.
+ */
+function makeSpawnAwarePrepare() {
+  return jest.fn().mockReturnValue({
+    get: jest.fn().mockImplementation((projectPath: any) => {
+      return spawnedProjectPaths.has(projectPath) ? { 1: 1 } : undefined;
+    }),
+    all: jest.fn().mockReturnValue([]),
+    run: jest.fn().mockReturnValue({ changes: 0 }),
+  });
+}
 
 describe('wakeup() - multi-project iteration', () => {
   let testProjects: TestProject[] = [];
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGlobalDb.prepare = jest.fn().mockReturnThis();
+    spawnedProjectPaths.clear();
 
     mockCheckLockStatus.mockReturnValue({
       locked: false,
@@ -145,9 +176,13 @@ describe('wakeup() - multi-project iteration', () => {
       close: jest.fn(),
     });
 
-    mockSpawn.mockReturnValue({
-      pid: 12345,
-      unref: jest.fn(),
+    // Track spawned project paths so waitForRunnerRegistration succeeds
+    mockSpawn.mockImplementation((_exe: any, args: any) => {
+      const projectIdx = (args as string[]).indexOf('--project');
+      if (projectIdx >= 0 && projectIdx + 1 < (args as string[]).length) {
+        spawnedProjectPaths.add((args as string[])[projectIdx + 1]);
+      }
+      return { pid: 12345, unref: jest.fn() };
     });
   });
 
@@ -169,14 +204,9 @@ describe('wakeup() - multi-project iteration', () => {
       { path: project3.path, enabled: true, name: 'Project 3' },
     ]);
 
-    // Mock hasActiveRunnerForProject to return false for all projects
-    // This function is called multiple times (once per project)
-    const mockPrepare = jest.fn().mockReturnValue({
-      get: jest.fn().mockReturnValue(undefined), // No active runners
-      all: jest.fn(),
-      run: jest.fn(),
-    });
-    mockGlobalDb.prepare = mockPrepare;
+    // Mock hasActiveRunnerForProject to return false before spawn,
+    // then { 1: 1 } after spawn for waitForRunnerRegistration
+    mockGlobalDb.prepare = makeSpawnAwarePrepare();
 
     const results = await wakeup({ quiet: true });
 
@@ -215,13 +245,9 @@ describe('wakeup() - multi-project iteration', () => {
       { path: project.path, enabled: true, name: 'Project 1' },
     ]);
 
-    // Mock hasActiveRunnerForProject to return false
-    const mockPrepare = jest.fn().mockReturnValue({
-      get: jest.fn().mockReturnValue(undefined), // No active runners
-      all: jest.fn(),
-      run: jest.fn(),
-    });
-    mockGlobalDb.prepare = mockPrepare;
+    // Mock hasActiveRunnerForProject to return false before spawn,
+    // then { 1: 1 } after spawn for waitForRunnerRegistration
+    mockGlobalDb.prepare = makeSpawnAwarePrepare();
 
     const results = await wakeup({ quiet: true });
 
@@ -249,12 +275,8 @@ describe('wakeup() - multi-project iteration', () => {
       { path: project.path, enabled: true, name: 'Project 1' },
     ]);
 
-    const mockPrepare = jest.fn().mockReturnValue({
-      get: jest.fn().mockReturnValue(undefined), // No active runners
-      all: jest.fn(),
-      run: jest.fn(),
-    });
-    mockGlobalDb.prepare = mockPrepare;
+    // Dry run: spawn is never called so get() always returns undefined (no active runners)
+    mockGlobalDb.prepare = makeSpawnAwarePrepare();
 
     const results = await wakeup({ quiet: true, dryRun: true });
 
@@ -278,12 +300,8 @@ describe('wakeup() - multi-project iteration', () => {
       { path: projectInProgress.path, enabled: true, name: 'In Progress' },
     ]);
 
-    const mockPrepare = jest.fn().mockReturnValue({
-      get: jest.fn().mockReturnValue(undefined), // No active runners
-      all: jest.fn(),
-      run: jest.fn(),
-    });
-    mockGlobalDb.prepare = mockPrepare;
+    // Track spawned paths so waitForRunnerRegistration succeeds per project
+    mockGlobalDb.prepare = makeSpawnAwarePrepare();
 
     const results = await wakeup({ quiet: true });
 

@@ -219,12 +219,15 @@ describe('orchestrator loop and runner wiring', () => {
         completed: 0,
       }),
       updateTaskStatus: jest.fn(),
+      incrementTaskFailureCount: jest.fn().mockReturnValue(1),
     }));
     jest.unstable_mockModule('../src/orchestrator/task-selector.js', () => ({
       selectNextTask: mockSelectNextTask,
       selectTaskBatch: mockSelectTaskBatch,
       markTaskInProgress: mockMarkTaskInProgress,
       getTaskCounts: mockGetTaskCounts,
+      selectNextTaskWithLock: jest.fn().mockReturnValue(null),
+      releaseTaskLockAfterCompletion: jest.fn(),
     }));
     jest.unstable_mockModule('../src/orchestrator/coder.js', () => ({
       invokeCoderBatch: mockInvokeCoderBatch,
@@ -255,6 +258,29 @@ describe('orchestrator loop and runner wiring', () => {
     jest.unstable_mockModule('../src/runners/credit-pause.js', () => ({
       handleCreditExhaustion: mockHandleCreditExhaustion,
       checkBatchCreditExhaustion: mockCheckBatchCreditExhaustion,
+    }));
+    jest.unstable_mockModule('../src/workspace/pool.js', () => ({
+      claimSlot: jest.fn().mockReturnValue(null),
+      finalizeSlotPath: jest.fn(),
+      releaseSlot: jest.fn(),
+      resolveRemoteUrl: jest.fn().mockReturnValue(''),
+      refreshSlotHeartbeat: jest.fn(),
+      updateSlotStatus: jest.fn(),
+      getSlot: jest.fn().mockReturnValue(null),
+    }));
+    jest.unstable_mockModule('../src/workspace/merge-lock.js', () => ({
+      refreshWorkspaceMergeLockHeartbeat: jest.fn(),
+      acquireWorkspaceMergeLock: jest.fn().mockReturnValue(Promise.resolve(true)),
+      releaseWorkspaceMergeLock: jest.fn(),
+    }));
+    jest.unstable_mockModule('../src/parallel/clone.js', () => ({
+      ensureWorkspaceSteroidsSymlink: jest.fn(),
+      getProjectHash: jest.fn().mockReturnValue('abc123'),
+      getDefaultWorkspaceRoot: jest.fn().mockReturnValue('/tmp/.steroids/workspaces'),
+      createIntegrationWorkspace: jest.fn(),
+    }));
+    jest.unstable_mockModule('../src/git/push.js', () => ({
+      pushToRemote: jest.fn().mockReturnValue(Promise.resolve({ success: true, commitHash: 'abc123' })),
     }));
     jest.unstable_mockModule('node:child_process', () => ({
       execSync: jest.fn(),
@@ -349,7 +375,8 @@ describe('orchestrator loop and runner wiring', () => {
       false,
       undefined,
       'steroids/ws-stream',
-      { runnerId: undefined, parallelSessionId: undefined }
+      { runnerId: undefined, parallelSessionId: undefined },
+      undefined
     );
   });
 
@@ -372,7 +399,8 @@ describe('orchestrator loop and runner wiring', () => {
       false,
       undefined,
       'main',
-      { runnerId: undefined, parallelSessionId: undefined }
+      { runnerId: undefined, parallelSessionId: undefined },
+      undefined
     );
   });
 
