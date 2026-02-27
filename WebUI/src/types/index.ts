@@ -89,6 +89,10 @@ export interface Section {
   id: string;
   name: string;
   priority: number;
+  branch: string | null;
+  auto_pr: number;
+  pr_number: number | null;
+  pr_url: string | null;
   created_at: string;
   total_tasks: number;
   pending: number;

@@ -987,6 +987,31 @@ export const ProjectDetailPage: React.FC = () => {
                               Priority: {section.priority}
                             </div>
                           )}
+                          {section.branch && (
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <span className="inline-flex items-center gap-1 text-xs text-text-muted">
+                                <i className="fa-solid fa-code-branch"></i>
+                                {section.branch}
+                              </span>
+                              {section.pr_url ? (
+                                <a
+                                  href={section.pr_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={e => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:underline"
+                                >
+                                  <i className="fa-solid fa-code-pull-request"></i>
+                                  PR #{section.pr_number}
+                                </a>
+                              ) : section.auto_pr ? (
+                                <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-700/50 dark:text-gray-400">
+                                  <i className="fa-solid fa-robot"></i>
+                                  Auto-PR
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center text-sm text-text-primary font-medium">
                           {section.total_tasks}

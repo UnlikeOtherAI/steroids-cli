@@ -176,6 +176,12 @@ This creates `.steroids/` with the database and default config.
 # Add a section (feature/phase)
 steroids sections add "Phase 1: User Authentication"
 
+# Add a section targeting a feature branch (auto-creates branch if missing)
+steroids sections add "Auth System" --branch feature/auth
+
+# Add a section with auto-PR creation when all tasks complete
+steroids sections add "Auth System" --branch feature/auth --auto-pr
+
 # Add tasks with specs
 steroids tasks add "Implement login endpoint" \
   --section <section-id> \
@@ -277,6 +283,12 @@ That's it. Open your browser at:
 |---------|-------------|
 | `steroids sections list` | List all sections |
 | `steroids sections add <name>` | Create a new section |
+| `steroids sections add <name> --branch <branch>` | Create section targeting a git branch |
+| `steroids sections add <name> --branch <branch> --auto-pr` | Create section with auto-PR on completion |
+| `steroids sections update <id> --branch <branch>` | Set or change target branch |
+| `steroids sections update <id> --auto-pr` | Enable auto-PR for an existing section |
+| `steroids sections update <id> --no-auto-pr` | Disable auto-PR |
+| `steroids sections reset-pr <id>` | Clear PR number to re-trigger auto-PR |
 | `steroids sections skip <id>` | Exclude section from runner |
 | `steroids sections unskip <id>` | Include section in runner |
 | `steroids sections priority <id> <value>` | Set section priority (0-100 or high/medium/low) |

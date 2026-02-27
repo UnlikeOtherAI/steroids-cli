@@ -853,17 +853,23 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
     }
 
     try {
-      // Check if priority column exists (older databases may not have it)
-      const hasPriority = (() => {
+      // Check which columns exist (handles older DBs missing priority/branch/pr fields)
+      const sectionCols = (() => {
         try {
           const cols = db.prepare("PRAGMA table_info(sections)").all() as Array<{ name: string }>;
-          return cols.some(c => c.name === 'priority');
+          return new Set(cols.map(c => c.name));
         } catch {
-          return false;
+          return new Set<string>();
         }
       })();
 
+      const hasPriority = sectionCols.has('priority');
+      const hasBranch = sectionCols.has('branch');
+      const hasPrFields = sectionCols.has('pr_number');
+
       const prioritySelect = hasPriority ? 's.priority,' : '50 as priority,';
+      const branchSelect = hasBranch ? 's.branch,' : 'NULL as branch,';
+      const prSelect = hasPrFields ? 's.auto_pr, s.pr_number,' : '0 as auto_pr, NULL as pr_number,';
       const orderBy = hasPriority ? 'ORDER BY s.priority DESC, s.name ASC' : 'ORDER BY s.name ASC';
 
       // Get sections with task counts by status
@@ -873,6 +879,8 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
             s.id,
             s.name,
             ${prioritySelect}
+            ${branchSelect}
+            ${prSelect}
             s.created_at,
             COUNT(t.id) as total_tasks,
             SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pending,
@@ -890,6 +898,9 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
         id: string;
         name: string;
         priority: number;
+        branch: string | null;
+        auto_pr: number;
+        pr_number: number | null;
         created_at: string;
         total_tasks: number;
         pending: number;
@@ -899,6 +910,9 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
         failed: number;
         skipped: number;
       }>;
+
+      // Derive PR URL from git remote + pr_number (GitHub-only)
+      const githubBaseUrl = getGitHubUrl(projectPath);
 
       // Also get tasks without a section (null section_id)
       const unassigned = db
@@ -927,7 +941,10 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
       res.json({
         success: true,
         project: projectPath,
-        sections,
+        sections: sections.map(s => ({
+          ...s,
+          pr_url: s.pr_number && githubBaseUrl ? `${githubBaseUrl}/pull/${s.pr_number}` : null,
+        })),
         unassigned: unassigned.total_tasks > 0 ? unassigned : null,
       });
     } finally {
