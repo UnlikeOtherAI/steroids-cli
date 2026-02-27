@@ -4,7 +4,7 @@
  */
 
 import type { Task } from '../database/queries.js';
-import { getTaskRejections, findResumableSession, invalidateSession } from '../database/queries.js';
+import { getTaskRejections, findResumableSession, invalidateSession, listTasks } from '../database/queries.js';
 import { withDatabase } from '../database/connection.js';
 import {
   generateCoderPrompt,
@@ -50,10 +50,16 @@ class CoderRunner extends BaseRunner {
 
     let rejectionHistory: ReturnType<typeof getTaskRejections> = [];
     let resumeSessionId: string | null = null;
-    
+    let sectionTasks: { id: string; title: string; status: string }[] | undefined;
+
     try {
       withDatabase(projectPath, (db) => {
         rejectionHistory = getTaskRejections(db, task.id);
+
+        if (task.section_id) {
+          const allSectionTasks = listTasks(db, { sectionId: task.section_id });
+          sectionTasks = allSectionTasks.map(t => ({ id: t.id, title: t.title, status: t.status }));
+        }
         if (rejectionHistory.length > 0) {
           console.log(`Found ${rejectionHistory.length} previous rejection(s) - coder will see full history`);
         }
@@ -81,6 +87,7 @@ class CoderRunner extends BaseRunner {
       previousStatus: task.status,
       rejectionHistory,
       coordinatorGuidance,
+      sectionTasks,
     };
 
     let prompt: string;

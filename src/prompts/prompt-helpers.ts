@@ -261,16 +261,18 @@ ${coordinatorSection}---
    - One line per reviewer checkbox item, in order:
      - \`ITEM-<n> | IMPLEMENTED | <file:line> | <what changed>\`
      - OR \`ITEM-<n> | WONT_FIX | <exceptional reason + why solution still works>\`
+     - OR \`ITEM-<n> | REVERTED | <file(s) removed or reverted to pre-task state>\`
    - \`WONT_FIX\` is a high bar and requires a concrete explanation, not a preference
+   - \`WONT_FIX\` is NOT allowed for \`[OUT_OF_SCOPE]\` items — use \`REVERTED\` instead
 
 3. Run the build and tests:
    - The project must build successfully
    - Tests must pass (if the project has tests)
 
-4. Commit your changes and output "TASK COMPLETE" - the orchestrator will submit for review
+4. Output "STATUS: REVIEW" when done — the orchestrator will submit for review. **DO NOT commit or push.**
 
 **DO NOT submit until you have addressed EVERY checkbox in the rejection notes.**
-**DO NOT run any CLI commands - the orchestrator handles all status updates.**
+**steroids CLI (read-only only):** You may run \`steroids tasks list\` or \`steroids tasks show <id>\` to understand sibling task scope. **DO NOT** run any other \`steroids\` commands — the orchestrator manages all state changes.
 
 If you believe the reviewer is wrong or the requirement is impossible, dispute:
 \`\`\`bash
@@ -312,9 +314,15 @@ export interface SectionTask {
 const MAX_SECTION_TASKS = 15;
 
 /**
- * Format other tasks in the same section for context
+ * Format other tasks in the same section for context.
+ * role='coder'    — warns coder not to implement sibling tasks' work
+ * role='reviewer' — warns reviewer to flag [OUT_OF_SCOPE] if coder did sibling work
  */
-export function formatSectionTasks(currentTaskId: string, sectionTasks?: SectionTask[]): string {
+export function formatSectionTasks(
+  currentTaskId: string,
+  sectionTasks?: SectionTask[],
+  role: 'coder' | 'reviewer' = 'reviewer'
+): string {
   if (!sectionTasks || sectionTasks.length <= 1) {
     return '';
   }
@@ -342,14 +350,32 @@ export function formatSectionTasks(currentTaskId: string, sectionTasks?: Section
 
   if (lines.length === 0) return '';
 
+  if (role === 'coder') {
+    return `
+---
+
+## Other Tasks in This Section
+
+**SCOPE BOUNDARY:** Your assignment is ONLY the current task. The following sibling tasks are handled separately — do NOT implement their work.
+
+${lines.join('\n')}
+
+If you find yourself adding code that clearly belongs to one of the sibling tasks above, STOP. Implementing out-of-scope work will result in an \`[OUT_OF_SCOPE]\` rejection and you will be required to revert those changes.
+
+`;
+  }
+
+  // reviewer
   return `
 ---
 
 ## Other Tasks in This Section
 
 **IMPORTANT:** The task you are reviewing is ONE of several tasks implementing this feature.
-Do NOT reject this task for issues that are explicitly listed as separate tasks below.
-Focus ONLY on whether THIS task's scope is correctly implemented.
+- Do NOT reject this task for issues that are explicitly covered by sibling tasks below.
+- **DO flag** with \`[OUT_OF_SCOPE]\` if the coder's diff includes changes that clearly belong to a sibling task listed below. The coder must revert out-of-scope work before approval.
+
+Focus ONLY on whether THIS task's scope is correctly implemented — no more, no less.
 
 ${lines.join('\n')}
 

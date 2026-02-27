@@ -128,6 +128,7 @@ If a previously rejected item is still unresolved in the cumulative diff, mark i
 1. Your first non-empty line MUST be an explicit decision token: \`DECISION: APPROVE|REJECT|DISPUTE|SKIP\`
 2. If REJECTing, use checkboxes for EACH actionable item.
 3. Be specific and actionable.
+4. If the diff includes ANY \`[OUT_OF_SCOPE]\` work: REJECT. This is mandatory regardless of implementation quality.
 `;
 
   return prompt;
@@ -373,6 +374,7 @@ Answer these questions:
 3. Are tests present and adequate?
 4. Does code follow AGENTS.md guidelines?
 5. Are previously rejected checklist items now resolved across the cumulative task diff?
+6. **Scope check:** Did the coder stay within this task's scope? If the diff includes changes that belong to a sibling task (see "Other Tasks in This Section"), flag each one as \`[OUT_OF_SCOPE]\`.
 
 ## Security Review
 
@@ -442,17 +444,19 @@ If there are issues that must be fixed:
 - [ ] [UNRESOLVED] src/bar.ts:15 still dereferences \`.data\` without null check (same issue from prior review; verified in current diff)
 - [ ] [NEW] Add unit test for the new \`processItem()\` function
 - [ ] [NEW] Remove unused import on line 3
+- [ ] [OUT_OF_SCOPE] Coder added API route handlers in src/api/routes.ts — those belong to sibling task "API: collections endpoints"; revert these changes
 \`\`\`
 
 **Why checkboxes?** The coder will use these to verify they've addressed EVERY issue before resubmitting. Each checkbox = one specific action.
 
 **Rules for rejection notes:**
 1. One checkbox per actionable item (not paragraphs of prose)
-2. Start each checkbox with \`[NEW]\` or \`[UNRESOLVED]\`
+2. Start each checkbox with \`[NEW]\`, \`[UNRESOLVED]\`, or \`[OUT_OF_SCOPE]\`
 3. For each \`[UNRESOLVED]\` item, include evidence of what remains broken now (file:line or concrete behavior)
-4. Include file:line references where applicable
-5. Be specific about WHAT to change, not just WHAT is wrong
-6. Group related items logically
+4. For each \`[OUT_OF_SCOPE]\` item, name the sibling task the work belongs to and instruct the coder to revert it
+5. Include file:line references where applicable
+6. Be specific about WHAT to change, not just WHAT is wrong
+7. Group related items logically
 
 This will be rejection #${task.rejection_count + 1}.
 
@@ -482,6 +486,7 @@ Use sparingly. Most issues should be resolved via reject/fix cycle.
 8. **Don't reject skips for infrastructure tasks** - Cloud SQL, GKE, etc. truly need human action
 9. **DO NOT run any \`steroids tasks\` commands** - the orchestrator handles all status updates
 10. **Review cumulative task history** - ensure prior rejection checklist items are either fixed or clearly marked unresolved with evidence
+11. **\`[OUT_OF_SCOPE]\` is a mandatory REJECT** - if the diff includes work that belongs to a sibling task, you MUST reject regardless of implementation quality. The coder must revert before approval.
 
 ---
 

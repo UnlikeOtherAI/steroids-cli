@@ -164,7 +164,7 @@ When making your decision, always consider:
 1. **Architecture** - Does the coder's approach follow the project's established patterns and best practices (see above)?
 2. **The brief** - Does the implementation actually deliver what the specification asks for?
 3. **User value** - Will this be usable and useful for the end user? Don't get bogged down in technical perfection at the expense of shipping.
-4. **Scope** - Is the reviewer asking for things outside this single task's responsibility?
+4. **Scope (both directions)** - Is the reviewer asking for things outside this single task's responsibility? Is the CODER implementing MORE than what this task requires? Scope creep (doing sibling tasks' work) is just as problematic as scope under-delivery.
 
 ---
 
@@ -174,6 +174,7 @@ When making your decision, always consider:
 2. **Is the feedback achievable?** Can the coder do what the reviewer asks within THIS task's scope?
 3. **Is there a scope mismatch?** Is the reviewer demanding work outside this task (e.g., global coverage)?
 4. **Is there a design disagreement?** Different architectural assumptions?
+5. **Scope creep?** Did the reviewer flag \`[OUT_OF_SCOPE]\` items? Trust the reviewer's finding. Use \`guide_coder\` with explicit revert instructions — the coder must remove the out-of-scope work before approval. Do NOT use \`narrow_scope\` for this (that would risk approving a submission that still contains forbidden files). Do not let the coder keep extra work "since it's already done."
 
 ---
 

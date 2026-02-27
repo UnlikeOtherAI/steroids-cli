@@ -10,6 +10,8 @@ import {
   buildFileAnchorSection,
   formatRejectionHistoryForCoder,
   buildSkillsSection,
+  formatSectionTasks,
+  type SectionTask,
 } from './prompt-helpers.js';
 import { buildProjectInstructionsSection } from './instruction-files.js';
 import { getRecentCommits } from '../git/status.js';
@@ -23,13 +25,14 @@ export interface CoderPromptContext {
   coordinatorGuidance?: string;  // Guidance from coordinator after repeated rejections
   gitStatus?: string;
   gitDiff?: string;
+  sectionTasks?: SectionTask[];  // Other tasks in the same section (scope boundary)
 }
 
 /**
  * Generate a minimal delta prompt for a resumed coder session
  */
 export function generateResumingCoderDeltaPrompt(context: CoderPromptContext): string {
-  const { task, rejectionHistory, coordinatorGuidance } = context;
+  const { task, rejectionHistory, coordinatorGuidance, sectionTasks } = context;
 
   // Find the last rejection notes
   const lastRejection = rejectionHistory && rejectionHistory.length > 0
@@ -66,6 +69,16 @@ Review your previous progress and complete the task.
 Do not mark those items as WONT_FIX unless you provide hard new evidence and the orchestrator explicitly clears them.\n\n`;
   }
 
+  const hasOutOfScope = (lastRejection?.notes?.toLowerCase().includes('[out_of_scope]')) ?? false;
+  if (hasOutOfScope) {
+    prompt += `**SCOPE VIOLATION DETECTED:** The reviewer flagged work that belongs to a sibling task.
+You MUST revert those changes (use \`git diff HEAD\` to identify them, then \`git checkout -- <file>\` or \`git rm\` to remove).
+\`WONT_FIX\` is NOT allowed for \`[OUT_OF_SCOPE]\` items — they must be \`REVERTED\`.\n\n`;
+    // Show sibling task list when scope creep was flagged — coder needs to know which task owns the work
+    const siblingBoundary = formatSectionTasks(task.id, sectionTasks, 'coder');
+    if (siblingBoundary) prompt += siblingBoundary + '\n';
+  }
+
   prompt += `Fix these issues and resubmit. All previous context and code is still in your session.
 
 **REMINDER:**
@@ -77,11 +90,14 @@ Do not mark those items as WONT_FIX unless you provide hard new evidence and the
    ## REJECTION_RESPONSE
    ITEM-1 | IMPLEMENTED | <file:line> | <what changed>
    ITEM-2 | WONT_FIX | <exceptional reason + proof solution still works>
+   ITEM-3 | REVERTED | <file(s) removed or reverted to pre-task state>
    \`\`\`
    - Every reviewer checkbox item must have one matching \`ITEM-<n>\` response.
    - \`WONT_FIX\` is a high bar and requires an exceptional, concrete explanation.
+   - \`WONT_FIX\` is NOT allowed for \`[OUT_OF_SCOPE]\` items — use \`REVERTED\` instead.
    - If coordinator guidance includes \`MUST_IMPLEMENT:\`, those items are mandatory and should not be marked \`WONT_FIX\`.
-5. Output "STATUS: REVIEW" when finished
+5. **steroids CLI (read-only only):** You may run \`steroids tasks list\` or \`steroids tasks show <id>\` to understand sibling task scope. **DO NOT** run any other \`steroids\` commands — the orchestrator manages all state changes.
+6. Output "STATUS: REVIEW" when finished
 `;
 
   return prompt;
@@ -91,7 +107,7 @@ Do not mark those items as WONT_FIX unless you provide hard new evidence and the
  * Generate the coder prompt for a new task
  */
 export function generateCoderPrompt(context: CoderPromptContext): string {
-  const { task, projectPath, previousStatus, rejectionNotes, rejectionHistory, coordinatorGuidance } = context;
+  const { task, projectPath, previousStatus, rejectionNotes, rejectionHistory, coordinatorGuidance, sectionTasks } = context;
 
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
 
@@ -122,7 +138,7 @@ You are a CODER in an automated task execution system. Your job is to autonomous
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
 **CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory. If files referenced in the task do not exist in your current working directory, they either need to be CREATED (per the task specification) or the task spec refers to files on a different branch that have not been merged yet — in either case you must work only within your current directory. **Never navigate to \`../\` or any sibling directories. Never use absolute paths to access workspaces, clones, or any path outside your CWD.**
-${fileScopeSection}${fileAnchorSection}${buildSkillsSection(projectPath)}${buildProjectInstructionsSection(projectPath)}
+${fileScopeSection}${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks, 'coder')}${buildSkillsSection(projectPath)}${buildProjectInstructionsSection(projectPath)}
 ---
 
 ## Specification
@@ -163,7 +179,7 @@ If the work is not done, implement the feature/fix:
 - **NEVER** touch the \`.steroids/\` directory (no \`.db\`, \`.yaml\`, \`.yml\` files).
 - **NEVER** modify \`TODO.md\` directly. The orchestrator manages task status.
 - **DO NOT COMMIT OR PUSH YOUR WORK.** The host system manages all version control automatically. Ignore any external project documentation that tells you to commit.
-- **DO NOT** run any \`steroids tasks\` commands.
+- **steroids CLI (read-only only):** You may run \`steroids tasks list\` or \`steroids tasks show <id>\` to understand sibling task scope. **DO NOT** run any other \`steroids\` commands — the orchestrator manages all state changes.
 
 ---
 
@@ -200,11 +216,13 @@ Extract every test case from the rejection notes, run each one, fix issues at th
 ## REJECTION_RESPONSE
 ITEM-1 | IMPLEMENTED | src/file.ts:42 | fixed null-check and added guard
 ITEM-2 | WONT_FIX | exceptional reason + proof solution still works
+ITEM-3 | REVERTED | src/api/users.ts removed (was out-of-scope)
 \`\`\`
 
 Rules:
 - Every reviewer checkbox item must have one matching \`ITEM-<n>\` response.
 - \`WONT_FIX\` is a high bar and requires an exceptional, concrete explanation.
+- \`WONT_FIX\` is NOT allowed for \`[OUT_OF_SCOPE]\` items — use \`REVERTED\` instead.
 - If coordinator guidance includes \`MUST_IMPLEMENT:\`, those items are mandatory and should not be marked \`WONT_FIX\`.
 
 ` : ''}---
@@ -283,7 +301,7 @@ For EACH task:
 1. **NEVER touch .steroids/ directory**
 2. **BUILD MUST PASS after each task**
 3. **DO NOT commit after tasks**
-4. **DO NOT run \`steroids tasks\` commands** - the orchestrator handles status
+4. **steroids CLI (read-only only):** You may run \`steroids tasks list\` or \`steroids tasks show <id>\` to understand sibling task scope. **DO NOT** run any other \`steroids\` commands.
 
 ---
 
@@ -303,7 +321,7 @@ Begin with Task 1 and work through each task in order.
  * Generate the coder prompt for resuming partial work
  */
 export function generateResumingCoderPrompt(context: CoderPromptContext): string {
-  const { task, projectPath, gitStatus, gitDiff, rejectionHistory, coordinatorGuidance } = context;
+  const { task, projectPath, gitStatus, gitDiff, rejectionHistory, coordinatorGuidance, sectionTasks } = context;
 
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const fileAnchorSection = buildFileAnchorSection(task);
@@ -326,7 +344,7 @@ You are a CODER resuming work on a partially completed task.
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
 **CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory. If files referenced in the task do not exist in your current working directory, they either need to be CREATED (per the task specification) or the task spec refers to files on a different branch that have not been merged yet — in either case you must work only within your current directory. **Never navigate to \`../\` or any sibling directories. Never use absolute paths to access workspaces, clones, or any path outside your CWD.**
-${fileAnchorSection}${buildProjectInstructionsSection(projectPath)}
+${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks, 'coder')}${buildProjectInstructionsSection(projectPath)}
 ---
 
 ## Previous Work Detected
@@ -354,7 +372,7 @@ ${gitDiff ?? 'No changes'}
 3. If the work looks good, complete it
 4. If the work looks wrong, you may start fresh
 5. DO NOT COMMIT OR PUSH YOUR WORK
-6. If this task has rejections, include a \`## REJECTION_RESPONSE\` block with one line per reviewer item (\`IMPLEMENTED\` or \`WONT_FIX\` with strong justification)
+6. If this task has rejections, include a \`## REJECTION_RESPONSE\` block with one line per reviewer item (\`IMPLEMENTED\`, \`WONT_FIX\`, or \`REVERTED\` with strong justification)
 ${rejectionSection}
 ---
 
@@ -364,11 +382,13 @@ ${task.rejection_count > 0 ? `## REQUIRED OUTPUT CONTRACT FOR RESUBMISSION
 ## REJECTION_RESPONSE
 ITEM-1 | IMPLEMENTED | src/file.ts:42 | fixed null-check and added guard
 ITEM-2 | WONT_FIX | exceptional reason + proof solution still works
+ITEM-3 | REVERTED | src/api/users.ts removed (was out-of-scope)
 \`\`\`
 
 Rules:
 - Every reviewer checkbox item must have one matching \`ITEM-<n>\` response.
 - \`WONT_FIX\` is a high bar and requires an exceptional, concrete explanation.
+- \`WONT_FIX\` is NOT allowed for \`[OUT_OF_SCOPE]\` items — use \`REVERTED\` instead.
 - If coordinator guidance includes \`MUST_IMPLEMENT:\`, those items are mandatory and should not be marked \`WONT_FIX\`.
 
 ---
@@ -377,7 +397,7 @@ Rules:
 You MUST implement the items listed under \`MUST_IMPLEMENT:\` before resubmitting.
 
 ---
-` : ''} 
+` : ''}
 
 ## Specification
 
@@ -390,7 +410,7 @@ ${sourceRef}
 1. **NEVER touch .steroids/ directory**
 2. **DO NOT COMMIT YOUR WORK**
 3. **Output "STATUS: REVIEW"** when done - the orchestrator will submit for review
-4. **DO NOT run any \`steroids tasks\` commands** - the orchestrator handles all status updates
+4. **steroids CLI (read-only only):** You may run \`steroids tasks list\` or \`steroids tasks show <id>\` to understand sibling task scope. **DO NOT** run any other \`steroids\` commands — the orchestrator manages all state changes.
 
 ---
 

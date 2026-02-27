@@ -16,8 +16,8 @@ export function buildPostReviewerPrompt(context: ReviewerContext): string {
   } = context;
 
   const duration_seconds = (duration_ms / 1000).toFixed(1);
-  const stdout_tail = stdout.slice(-2000);
-  const stderr_tail = stderr.slice(-2000);
+  const stdout_tail = stdout.slice(-5000);
+  const stderr_tail = stderr.slice(-5000);
 
   let stderrSection = '';
   if (stderr) {
@@ -51,7 +51,7 @@ You are a state machine that analyzes reviewer output and determines the next ac
 **Timed Out:** ${timed_out}
 **Duration:** ${duration_seconds}s
 
-**Output (last 2000 chars):**
+**Output (last 5000 chars):**
 \`\`\`
 ${stdout_tail}
 \`\`\`
@@ -116,6 +116,8 @@ If you cannot determine a decision, omit the DECISION line (will be treated as u
 
 Required if REJECT (specific feedback for coder). Include all issues found.
 
+**CRITICAL FOR NOTES FORMAT:** When the reviewer used checkbox format (\`- [ ] ...\`), reproduce those lines VERBATIM in NOTES. Do NOT rephrase or convert to numbered prose. Structured tags like \`[OUT_OF_SCOPE]\`, \`[UNRESOLVED]\`, and \`[NEW]\` must be preserved exactly as written.
+
 ### Follow-Up Tasks
 
 Optional (0-3 items). Use ONLY for approvals where non-blocking improvements or technical debt were identified.
@@ -136,7 +138,10 @@ CONFIDENCE: HIGH
 ### Example 2: Rejection
 
 DECISION: REJECT
-NOTES: 1. Add error handling in parseConfig(). 2. Missing test for edge case. 3. Fix type error on line 42.
+NOTES:
+- [ ] Add error handling in parseConfig() — src/config.ts:42
+- [ ] [OUT_OF_SCOPE] Added API route in src/api/users.ts belongs to sibling task "Add users API endpoint"
+- [ ] Fix type error on line 42 of src/config.ts
 CONFIDENCE: HIGH
 
 ### Example 3: Dispute (Repeated)

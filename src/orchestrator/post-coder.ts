@@ -158,11 +158,13 @@ ${filesSection}
 - The block must contain one line per rejection item using:
   - \`ITEM-<n> | IMPLEMENTED | ...\`
   - or \`ITEM-<n> | WONT_FIX | ...\`
+  - or \`ITEM-<n> | REVERTED | ...\` (for \`[OUT_OF_SCOPE]\` items that were removed)
 - If missing or clearly incomplete, return:
   - STATUS: RETRY
   - REASON: REJECTION_RESPONSE_REQUIRED: <details>
 - \`REJECTION_RESPONSE\` completeness check must use \`Open Rejection Items (latest)\` from task context
 - Require sequential responses: \`ITEM-1\` through \`ITEM-N\`
+- \`REVERTED\` responses are always valid for \`[OUT_OF_SCOPE]\` items — do NOT flag these as WONT_FIX_OVERRIDE
 
 ### 7. WONT_FIX Claims (High Priority on Rejected Tasks)
 - If task has prior rejections and coder output includes \`WONT_FIX\`, apply strict scrutiny
