@@ -180,6 +180,10 @@ jest.unstable_mockModule('../src/orchestrator/fallback-handler.js', () => ({
   },
 }));
 
+jest.unstable_mockModule('../src/git/section-pr.js', () => ({
+  checkSectionCompletionAndPR: jest.fn().mockResolvedValue(undefined),
+}));
+
 // ── Import module under test ────────────────────────────────────────────
 
 const { runCoderPhase, runReviewerPhase } = await import('../src/commands/loop-phases.js');

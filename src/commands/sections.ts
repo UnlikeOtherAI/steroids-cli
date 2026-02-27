@@ -22,6 +22,7 @@ import {
   addDependency,
   removeDependency,
   updateSection,
+  resetSectionPr,
 } from './sections-commands.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
@@ -36,7 +37,8 @@ Sections help structure large projects and track high-level progress.`,
   usage: ['steroids sections <subcommand> [options]'],
   subcommands: [
     { name: 'add', args: '<name>', description: 'Add a new section' },
-    { name: 'update', args: '<id> [--branch <name>]', description: 'Update section settings' },
+    { name: 'update', args: '<id> [options]', description: 'Update section settings (branch, auto-pr)' },
+    { name: 'reset-pr', args: '<id>', description: 'Clear PR number to re-trigger auto-PR' },
     { name: 'list', args: '[--deps]', description: 'List all sections with task counts' },
     { name: 'priority', args: '<id> <value>', description: 'Set section priority (0-100 or high/medium/low)' },
     { name: 'depends-on', args: '<id> <depends-on-id>', description: 'Add section dependency' },
@@ -57,6 +59,8 @@ Sections help structure large projects and track high-level progress.`,
     { command: 'steroids sections add "Phase 2: API" --branch feature/api', description: 'Add section with branch override' },
     { command: 'steroids sections update abc123 --branch feature/api', description: 'Set target branch for section' },
     { command: 'steroids sections update abc123 --branch default', description: 'Clear branch override (use project base)' },
+    { command: 'steroids sections update abc123 --auto-pr', description: 'Enable auto-PR on section completion' },
+    { command: 'steroids sections reset-pr abc123', description: 'Clear PR to allow re-triggering auto-PR' },
     { command: 'steroids sections list', description: 'List all sections with task counts' },
     { command: 'steroids sections list --deps', description: 'Show dependencies' },
     { command: 'steroids sections priority abc123 high', description: 'Set priority (high/medium/low)' },
@@ -108,6 +112,9 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
       break;
     case 'update':
       await updateSection(subArgs, flags);
+      break;
+    case 'reset-pr':
+      await resetSectionPr(subArgs, flags);
       break;
     case 'list':
       await listAllSections(subArgs, flags);
@@ -190,17 +197,17 @@ OPTIONS:
     }
 
     console.log('SECTIONS');
-    console.log('─'.repeat(90));
+    console.log('─'.repeat(100));
     if (values.deps) {
       console.log(
-        'ID        NAME                                      PRIORITY  TASKS  DEPENDENCIES'
+        'ID        NAME                               BRANCH              PRI  TASKS  DEPS'
       );
     } else {
       console.log(
-        'ID        NAME                                    PRIORITY  TASKS'
+        'ID        NAME                               BRANCH              PRI  TASKS'
       );
     }
-    console.log('─'.repeat(90));
+    console.log('─'.repeat(100));
 
     for (const section of sections) {
       const taskCount = getSectionTaskCount(db, section.id);
@@ -209,6 +216,13 @@ OPTIONS:
       const priority = section.priority ?? 50;
       const blocked = pendingDeps.length > 0 ? ' [BLOCKED]' : '';
 
+      // Branch display: show branch + PR info if set
+      let branchDisplay = section.branch ?? '-';
+      if (section.auto_pr) {
+        branchDisplay += section.pr_number != null ? ` PR#${section.pr_number}` : ' [auto-PR]';
+      }
+      const branchCol = branchDisplay.substring(0, 18).padEnd(18);
+
       if (values.deps) {
         const deps = getSectionDependencies(db, section.id);
         const depsDisplay = deps.length > 0
@@ -216,11 +230,11 @@ OPTIONS:
           : '-';
 
         console.log(
-          `${shortId}  ${section.name.padEnd(40)}  ${String(priority).padStart(3)}     ${String(taskCount).padStart(2)}     ${depsDisplay}${blocked}`
+          `${shortId}  ${section.name.padEnd(33)}  ${branchCol}  ${String(priority).padStart(3)}  ${String(taskCount).padStart(2)}     ${depsDisplay}${blocked}`
         );
       } else {
         console.log(
-          `${shortId}  ${section.name.padEnd(38)}  ${String(priority).padStart(3)}     ${String(taskCount).padStart(2)}${blocked}`
+          `${shortId}  ${section.name.padEnd(33)}  ${branchCol}  ${String(priority).padStart(3)}  ${String(taskCount).padStart(2)}${blocked}`
         );
       }
     }

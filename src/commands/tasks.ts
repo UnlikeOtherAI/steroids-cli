@@ -55,6 +55,8 @@ import {
   getFileLastCommit,
   getFileContentHash,
 } from '../git/status.js';
+import { checkSectionCompletionAndPR } from '../git/section-pr.js';
+import { loadConfig } from '../config/loader.js';
 
 const HELP = generateHelp({
   command: 'tasks',
@@ -1021,11 +1023,17 @@ async function checkSectionCompletion(
     return;
   }
 
-  // Check if all tasks in section are completed
+  // Section is "done" when all tasks are in terminal states AND at least one completed.
+  // Terminal states: completed, skipped, failed, disputed, blocked_error, blocked_conflict.
+  // Non-terminal (active): pending, in_progress, review, partial.
   const sectionTasks = listTasks(db, { sectionId });
-  const allCompleted = sectionTasks.every((t) => t.status === 'completed');
+  const activeCount = sectionTasks.filter(t =>
+    ['pending', 'in_progress', 'review', 'partial'].includes(t.status)
+  ).length;
+  const completedCount = sectionTasks.filter(t => t.status === 'completed').length;
+  const sectionDone = sectionTasks.length > 0 && activeCount === 0 && completedCount > 0;
 
-  if (allCompleted && sectionTasks.length > 0) {
+  if (sectionDone) {
     // Trigger section.completed hooks
     await triggerHooksSafely(
       () =>
@@ -1040,6 +1048,11 @@ async function checkSectionCompletion(
         ),
       { verbose: flags.verbose }
     );
+
+    // Auto-PR: create PR if configured (idempotent)
+    const projectPath = process.cwd();
+    const config = loadConfig(projectPath);
+    await checkSectionCompletionAndPR(db, projectPath, sectionId, config);
   }
 }
 

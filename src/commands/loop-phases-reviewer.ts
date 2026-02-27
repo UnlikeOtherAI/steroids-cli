@@ -31,6 +31,7 @@ import type { CoordinatorResult } from '../orchestrator/coordinator.js';
 import { resolveReviewerDecision } from './loop-phases-reviewer-resolution.js';
 import { loadConfig } from '../config/loader.js';
 import { resolveEffectiveBranch } from '../git/branch-resolver.js';
+import { checkSectionCompletionAndPR } from '../git/section-pr.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { PoolSlotContext } from '../workspace/types.js';
 import {
@@ -393,6 +394,8 @@ export async function runReviewerPhase(
         if (!jsonMode) {
           console.log(`\n✓ Task APPROVED and merged (sha: ${mergeResult.mergedSha})`);
         }
+        // Check if the section is now complete and create PR if auto_pr is set
+        await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
       } else {
         // Legacy path: direct push
         approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
@@ -416,6 +419,8 @@ export async function runReviewerPhase(
         } else if (!jsonMode) {
           console.warn('Push failed. Will stack and retry on next completion.');
         }
+        // Check if the section is now complete and create PR if auto_pr is set
+        await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
       }
       break;
 

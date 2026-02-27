@@ -8,10 +8,13 @@ import {
   createSection,
   getSection,
   setSectionBranch,
+  setSectionAutoPr,
+  setSectionPrNumber,
   setSectionPriority,
   addSectionDependency,
   removeSectionDependency,
 } from '../database/queries.js';
+import { isGhAvailable } from '../git/section-pr.js';
 import type { GlobalFlags } from '../cli/flags.js';
 import { createOutput } from '../cli/output.js';
 import { invalidArgumentsError, sectionNotFoundError } from '../cli/errors.js';
@@ -24,6 +27,7 @@ export async function addSection(args: string[], flags: GlobalFlags): Promise<vo
     options: {
       position: { type: 'string', short: 'p' },
       branch: { type: 'string', short: 'b' },
+      'auto-pr': { type: 'boolean', default: false },
     },
     allowPositionals: true,
   });
@@ -38,6 +42,7 @@ USAGE:
 OPTIONS:
   -p, --position <n>    Position in list (default: end)
   -b, --branch <name>   Target git branch for tasks in this section
+  --auto-pr             Create a GitHub PR when section completes (requires gh CLI)
 
 GLOBAL OPTIONS:
   -j, --json            Output as JSON
@@ -53,9 +58,14 @@ GLOBAL OPTIONS:
   const name = positionals.join(' ');
   const position = values.position ? parseInt(values.position, 10) : undefined;
   const branch = values.branch ?? null;
+  const autoPr = values['auto-pr'] ?? false;
 
   if (branch !== null && !/^[a-zA-Z0-9/_.-]+$/.test(branch)) {
     throw invalidArgumentsError('Branch name may only contain letters, numbers, /, _, ., and -');
+  }
+
+  if (autoPr && !isGhAvailable()) {
+    out.log('Warning: --auto-pr set but gh CLI not found on PATH. PR creation will be skipped at completion time.');
   }
 
   if (flags.dryRun) {
@@ -66,6 +76,9 @@ GLOBAL OPTIONS:
     if (branch !== null) {
       out.log(`  Branch: ${branch}`);
     }
+    if (autoPr) {
+      out.log('  Auto-PR: enabled');
+    }
     return;
   }
 
@@ -75,6 +88,9 @@ GLOBAL OPTIONS:
       const s = createSection(db, name, position);
       if (branch !== null) {
         setSectionBranch(db, s.id, branch);
+      }
+      if (autoPr) {
+        setSectionAutoPr(db, s.id, true);
       }
       return s;
     })();
@@ -87,6 +103,7 @@ GLOBAL OPTIONS:
           position: section.position,
           priority: section.priority,
           branch: branch,
+          auto_pr: autoPr ? 1 : 0,
           created_at: section.created_at,
         },
       });
@@ -96,6 +113,9 @@ GLOBAL OPTIONS:
       out.log(`  Position: ${section.position}`);
       if (branch !== null) {
         out.log(`  Branch: ${branch}`);
+      }
+      if (autoPr) {
+        out.log('  Auto-PR: enabled');
       }
     }
   });
@@ -329,6 +349,7 @@ export async function updateSection(args: string[], flags: GlobalFlags): Promise
     args,
     options: {
       branch: { type: 'string', short: 'b' },
+      'auto-pr': { type: 'boolean' },
     },
     allowPositionals: true,
   });
@@ -345,6 +366,8 @@ ARGUMENTS:
 
 OPTIONS:
   -b, --branch <name>   Set target git branch (use "default" to clear)
+  --auto-pr             Enable auto-PR on section completion (requires gh CLI)
+  --no-auto-pr          Disable auto-PR
 
 GLOBAL OPTIONS:
   -j, --json            Output as JSON
@@ -353,6 +376,8 @@ GLOBAL OPTIONS:
 EXAMPLES:
   steroids sections update abc123 --branch feature/my-feature
   steroids sections update abc123 --branch default
+  steroids sections update abc123 --auto-pr
+  steroids sections update abc123 --no-auto-pr
 `);
     return;
   }
@@ -363,21 +388,31 @@ EXAMPLES:
 
   const sectionIdInput = positionals[0];
   const branchInput = values.branch;
+  const autoPrInput = values['auto-pr'];
 
-  if (branchInput === undefined) {
-    throw invalidArgumentsError('At least one option required (e.g. --branch)');
+  if (branchInput === undefined && autoPrInput === undefined) {
+    throw invalidArgumentsError('At least one option required (e.g. --branch, --auto-pr)');
   }
 
   // "default" is a sentinel to clear the branch override
-  const branch = branchInput === 'default' ? null : branchInput;
+  const branch = branchInput === undefined ? undefined : (branchInput === 'default' ? null : branchInput);
 
-  if (branch !== null && !/^[a-zA-Z0-9/_.-]+$/.test(branch)) {
+  if (branch !== undefined && branch !== null && !/^[a-zA-Z0-9/_.-]+$/.test(branch)) {
     throw invalidArgumentsError('Branch name may only contain letters, numbers, /, _, ., and -');
   }
 
+  if (autoPrInput === true && !isGhAvailable()) {
+    out.log('Warning: --auto-pr set but gh CLI not found on PATH. PR creation will be skipped at completion time.');
+  }
+
   if (flags.dryRun) {
-    const display = branch === null ? '(clear override — use project base)' : branch;
-    out.log(`Would set branch to ${display} for section: ${sectionIdInput}`);
+    if (branch !== undefined) {
+      const display = branch === null ? '(clear override — use project base)' : branch;
+      out.log(`Would set branch to ${display} for section: ${sectionIdInput}`);
+    }
+    if (autoPrInput !== undefined) {
+      out.log(`Would set auto-pr to ${autoPrInput ? 'enabled' : 'disabled'} for section: ${sectionIdInput}`);
+    }
     return;
   }
 
@@ -388,23 +423,92 @@ EXAMPLES:
       throw sectionNotFoundError(sectionIdInput);
     }
 
-    setSectionBranch(db, section.id, branch);
+    if (branch !== undefined) {
+      setSectionBranch(db, section.id, branch);
+    }
+    if (autoPrInput !== undefined) {
+      setSectionAutoPr(db, section.id, autoPrInput);
+    }
 
     if (flags.json) {
       out.success({
         section: {
           id: section.id,
           name: section.name,
-          branch,
+          branch: branch !== undefined ? branch : section.branch,
+          auto_pr: autoPrInput !== undefined ? (autoPrInput ? 1 : 0) : section.auto_pr,
         },
       });
     } else {
-      if (branch === null) {
-        out.log(`Branch override cleared for section: ${section.name}`);
-        out.log('  Tasks will use the project base branch');
-      } else {
-        out.log(`Branch set to ${branch} for section: ${section.name}`);
+      if (branch !== undefined) {
+        if (branch === null) {
+          out.log(`Branch override cleared for section: ${section.name}`);
+          out.log('  Tasks will use the project base branch');
+        } else {
+          out.log(`Branch set to ${branch} for section: ${section.name}`);
+        }
       }
+      if (autoPrInput !== undefined) {
+        out.log(`Auto-PR ${autoPrInput ? 'enabled' : 'disabled'} for section: ${section.name}`);
+      }
+    }
+  });
+}
+
+export async function resetSectionPr(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'sections', subcommand: 'reset-pr', flags });
+
+  const { positionals } = parseArgs({
+    args,
+    options: {},
+    allowPositionals: true,
+  });
+
+  if (flags.help) {
+    out.log(`
+steroids sections reset-pr <section-id> - Clear PR number to allow re-triggering auto-PR
+
+USAGE:
+  steroids sections reset-pr <section-id>
+
+ARGUMENTS:
+  section-id    Section ID or prefix (min 4 chars)
+
+GLOBAL OPTIONS:
+  -j, --json    Output as JSON
+  -h, --help    Show help
+
+EXAMPLES:
+  steroids sections reset-pr abc123
+`);
+    return;
+  }
+
+  if (positionals.length === 0) {
+    throw invalidArgumentsError('Section ID required');
+  }
+
+  const sectionIdInput = positionals[0];
+
+  if (flags.dryRun) {
+    out.log(`Would clear PR number for section: ${sectionIdInput}`);
+    return;
+  }
+
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
+    const section = getSection(db, sectionIdInput);
+    if (!section) {
+      throw sectionNotFoundError(sectionIdInput);
+    }
+
+    setSectionPrNumber(db, section.id, null);
+
+    if (flags.json) {
+      out.success({ section: { id: section.id, name: section.name, pr_number: null } });
+    } else {
+      out.log(`PR number cleared for section: ${section.name}`);
+      out.log('  Auto-PR will be re-triggered on next task approval if conditions are met.');
     }
   });
 }
