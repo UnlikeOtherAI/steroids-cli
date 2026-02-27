@@ -26,6 +26,30 @@ export function closeStaleParallelSessions(
   }
 
   const whereSql = conditions.join(' AND ');
+
+  // Step 1: Mark orphaned workstreams as failed.
+  // A workstream is orphaned when it's still 'running' but its session has no alive runners
+  // (e.g. runner was killed/stopped without cleanly updating workstream status).
+  db.prepare(
+    `UPDATE workstreams
+     SET status = 'failed'
+     WHERE status NOT IN (${TERMINAL_WORKSTREAM_STATUSES})
+       AND EXISTS (
+         SELECT 1
+         FROM parallel_sessions ps
+         WHERE ps.id = workstreams.session_id
+           AND ${whereSql}
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM runners r
+         WHERE r.parallel_session_id = workstreams.session_id
+           AND r.status != 'stopped'
+           AND r.heartbeat_at > datetime('now', '-5 minutes')
+       )`
+  ).run(...params);
+
+  // Step 2: Close sessions with no active workstreams and no alive runners.
   return db
     .prepare(
       `UPDATE parallel_sessions AS ps
