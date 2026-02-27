@@ -1,0 +1,470 @@
+import { withGlobalDatabase } from '../runners/global-db.js';
+import {
+  getTask,
+  updateTaskStatus,
+  approveTask,
+  rejectTask,
+  getTaskAudit,
+  getSubmissionCommitShas,
+  getFollowUpDepth,
+  createFollowUpTask,
+  incrementTaskFailureCount,
+  clearTaskFailureCount,
+  addAuditEntry,
+} from '../database/queries.js';
+import type { openDatabase } from '../database/connection.js';
+import {
+  invokeReviewer,
+  invokeReviewers,
+  getReviewerConfigs,
+  isMultiReviewEnabled,
+  type ReviewerResult,
+} from '../orchestrator/reviewer.js';
+import { pushToRemote } from '../git/push.js';
+import {
+  getCurrentCommitSha,
+  getModifiedFiles,
+  getDiffStats,
+} from '../git/status.js';
+import { resolveSubmissionCommitWithRecovery } from '../git/submission-resolution.js';
+import type { CoordinatorResult } from '../orchestrator/coordinator.js';
+import { resolveReviewerDecision } from './loop-phases-reviewer-resolution.js';
+import { loadConfig } from '../config/loader.js';
+import { getProviderRegistry } from '../providers/registry.js';
+import type { PoolSlotContext } from '../workspace/types.js';
+import {
+  prepareForTask,
+  postCoderGate,
+  postReviewGate,
+  mergeToBase,
+} from '../workspace/git-lifecycle.js';
+import { updateSlotStatus, releaseSlot, getSlot } from '../workspace/pool.js';
+import { handleMergeFailure } from '../workspace/merge-pipeline.js';
+import {
+  LeaseFenceContext,
+  extractOutOfScopeItems,
+  refreshParallelWorkstreamLease,
+  invokeWithLeaseHeartbeat,
+  CreditExhaustionResult,
+  MAX_ORCHESTRATOR_PARSE_RETRIES,
+  REVIEWER_PARSE_FALLBACK_MARKER,
+  formatProviderFailureMessage,
+  handleProviderInvocationFailure,
+  countConsecutiveUnclearEntries,
+  countConsecutiveTaggedOrchestratorEntries,
+} from './loop-phases-helpers.js';
+
+/**
+ * Create follow-up tasks based on reviewer decision.
+ * This is extracted to keep runReviewerPhase under 500 lines.
+ */
+async function createFollowUpTasksIfNeeded(
+  db: ReturnType<typeof openDatabase>['db'],
+  task: ReturnType<typeof getTask>,
+  projectPath: string,
+  followUpTasks: Array<{ title: string; description: string }> | undefined,
+  submissionCommitSha: string,
+  jsonMode: boolean
+): Promise<void> {
+  if (!task || !followUpTasks || followUpTasks.length === 0) {
+    return;
+  }
+
+  const followUpConfig = loadConfig(projectPath);
+  const depth = getFollowUpDepth(db, task.id);
+  const maxDepth = followUpConfig.followUpTasks?.maxDepth ?? 2;
+
+  if (depth < maxDepth) {
+    for (const followUp of followUpTasks) {
+      try {
+        const nextDepth = depth + 1;
+
+        // Policy: Auto-implement depth 1 if configured.
+        // Depth 2+ always requires human promotion (approval).
+        let requiresPromotion = true;
+        if (nextDepth === 1 && followUpConfig.followUpTasks?.autoImplementDepth1) {
+          requiresPromotion = false;
+        }
+
+        const followUpId = createFollowUpTask(db, {
+          title: followUp.title,
+          description: followUp.description,
+          sectionId: task.section_id,
+          referenceTaskId: task.id,
+          referenceCommit: submissionCommitSha,
+          requiresPromotion,
+          depth: nextDepth,
+        });
+
+        if (!jsonMode) {
+          const statusLabel = requiresPromotion ? '(deferred)' : '(active)';
+          console.log(`\n+ Created follow-up task ${statusLabel}: ${followUp.title} (${followUpId.substring(0, 8)})`);
+        }
+      } catch (error) {
+        console.warn(`Failed to create follow-up task "${followUp.title}":`, error);
+      }
+    }
+  } else if (!jsonMode) {
+    console.log(`\n! Follow-up depth limit reached (${depth}), skipping new follow-ups.`);
+  }
+}
+
+export async function runReviewerPhase(
+  db: ReturnType<typeof openDatabase>['db'],
+  task: ReturnType<typeof getTask>,
+  projectPath: string,
+  jsonMode = false,
+  coordinatorResult?: CoordinatorResult,
+  branchName: string = 'main',
+  leaseFence?: LeaseFenceContext,
+  poolSlotContext?: PoolSlotContext
+): Promise<CreditExhaustionResult | void> {
+  if (!task) return;
+  if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+    if (!jsonMode) {
+      console.log('\n↺ Lease ownership lost before reviewer phase; skipping task in this runner.');
+    }
+    return;
+  }
+
+  // ── Pool slot: set effective path for reviewer ──
+  const effectiveProjectPath = poolSlotContext ? poolSlotContext.slot.slot_path : projectPath;
+
+  if (poolSlotContext) {
+    updateSlotStatus(poolSlotContext.globalDb, poolSlotContext.slot.id, 'review_active');
+  }
+
+  const submissionResolution = resolveSubmissionCommitWithRecovery(
+    effectiveProjectPath,
+    getSubmissionCommitShas(db, task.id)
+  );
+  if (submissionResolution.status !== 'resolved') {
+    const attemptsText = submissionResolution.attempts.join(' | ') || 'none';
+    updateTaskStatus(
+      db,
+      task.id,
+      'in_progress',
+      'orchestrator',
+      `[commit_recovery] Missing reachable submission hash (${submissionResolution.reason}; attempts: ${attemptsText}). ` +
+      `Treating task as resubmission. Coder must output exact line: SUBMISSION_COMMIT: <sha> for the commit that implements the task.`
+    );
+    if (!jsonMode) {
+      console.log('\n⟳ Reviewer hash missing; returning task to coder for hash resubmission');
+    }
+    return;
+  }
+  const submissionCommitSha = submissionResolution.sha;
+  const phaseConfig = loadConfig(projectPath);
+  const multiReviewEnabled = isMultiReviewEnabled(phaseConfig);
+  let effectiveMultiReviewEnabled = multiReviewEnabled;
+
+  let reviewerResult: ReviewerResult | undefined;
+  let reviewerResults: ReviewerResult[] = [];
+
+  // STEP 1: Invoke reviewer(s)
+  if (multiReviewEnabled) {
+    const reviewerConfigs = getReviewerConfigs(phaseConfig);
+    if (!jsonMode) {
+      console.log(`\n>>> Invoking ${reviewerConfigs.length} REVIEWERS in parallel...\n`);
+      if (coordinatorResult) {
+        console.log(`Coordinator guidance included (decision: ${coordinatorResult.decision})`);
+      }
+    }
+
+    const reviewerInvocation = await invokeWithLeaseHeartbeat(
+      projectPath,
+      leaseFence,
+      () =>
+        invokeReviewers(
+          task,
+          effectiveProjectPath,
+          reviewerConfigs,
+          coordinatorResult?.guidance,
+          coordinatorResult?.decision,
+          leaseFence?.runnerId
+        )
+    );
+    if (reviewerInvocation.superseded || !reviewerInvocation.result) {
+      if (!jsonMode) {
+        console.log('\n↺ Lease ownership changed during reviewer invocation; skipping post-processing in this runner.');
+      }
+      return;
+    }
+    reviewerResults = reviewerInvocation.result;
+
+    const failedReviewerIndex = reviewerResults.findIndex((res) => !res.success || res.timedOut);
+    if (failedReviewerIndex !== -1) {
+      const failedReviewer = reviewerResults[failedReviewerIndex];
+      const failedConfig = reviewerConfigs[failedReviewerIndex];
+      const providerName =
+        failedReviewer.provider ??
+        failedConfig?.provider ??
+        phaseConfig.ai?.reviewer?.provider ??
+        'unknown';
+      const modelName =
+        failedReviewer.model ??
+        failedConfig?.model ??
+        phaseConfig.ai?.reviewer?.model ??
+        'unknown';
+      const output = (failedReviewer.stderr || failedReviewer.stdout || '').trim();
+      const failed = await handleProviderInvocationFailure(
+        db,
+        task.id,
+        {
+          role: 'reviewer',
+          provider: providerName,
+          model: modelName,
+          exitCode: failedReviewer.exitCode ?? 1,
+          output,
+        },
+        jsonMode
+      );
+
+      if (failed.shouldStopTask) {
+        return;
+      }
+      return;
+    }
+
+    clearTaskFailureCount(db, task.id);
+    reviewerResult = reviewerResults[0];
+    effectiveMultiReviewEnabled = reviewerResults.length > 1;
+  } else {
+    if (!jsonMode) {
+      console.log('\n>>> Invoking REVIEWER...\n');
+      if (coordinatorResult) {
+        console.log(`Coordinator guidance included (decision: ${coordinatorResult.decision})`);
+      }
+    }
+
+    const reviewerInvocation = await invokeWithLeaseHeartbeat(
+      projectPath,
+      leaseFence,
+      () =>
+        invokeReviewer(
+          task,
+          effectiveProjectPath,
+          coordinatorResult?.guidance,
+          coordinatorResult?.decision,
+          undefined,
+          leaseFence?.runnerId
+        )
+    );
+    if (reviewerInvocation.superseded || !reviewerInvocation.result) {
+      if (!jsonMode) {
+        console.log('\n↺ Lease ownership changed during reviewer invocation; skipping post-processing in this runner.');
+      }
+      return;
+    }
+    reviewerResult = reviewerInvocation.result;
+
+    if (!reviewerResult.success || reviewerResult.timedOut) {
+      const providerName =
+        reviewerResult.provider ??
+        phaseConfig.ai?.reviewer?.provider ??
+        'unknown';
+      const modelName =
+        reviewerResult.model ??
+        phaseConfig.ai?.reviewer?.model ??
+        'unknown';
+
+      // Check for credit/rate_limit exhaustion before provider failure handling
+      const registry = await getProviderRegistry();
+      const prov = registry.tryGet(providerName);
+      if (prov) {
+        const classified = prov.classifyResult(reviewerResult);
+        if (classified?.type === 'credit_exhaustion') {
+          return { action: 'pause_credit_exhaustion', provider: providerName, model: modelName, role: 'reviewer', message: classified.message };
+        }
+        if (classified?.type === 'rate_limit') {
+          return { action: 'rate_limit', provider: providerName, model: modelName, role: 'reviewer', message: classified.message, retryAfterMs: classified.retryAfterMs };
+        }
+      }
+      // Non-credit/rate-limit reviewer failure: fall through to orchestrator
+    } else {
+      clearTaskFailureCount(db, task.id);
+    }
+  }
+
+  // STEP 2: Gather git context
+  const commit_sha = getCurrentCommitSha(effectiveProjectPath) || '';
+  const files_changed = getModifiedFiles(effectiveProjectPath);
+  const diffStats = getDiffStats(effectiveProjectPath);
+
+  const gitContext = {
+    commit_sha,
+    files_changed,
+    additions: diffStats.additions,
+    deletions: diffStats.deletions,
+  };
+
+  // STEP 3: Resolve decision and merge notes if needed
+  let decision = await resolveReviewerDecision(
+    { id: task.id, title: task.title, rejection_count: task.rejection_count },
+    projectPath,
+    reviewerResult,
+    reviewerResults,
+    effectiveMultiReviewEnabled,
+    gitContext
+  );
+
+  // STEP 4: Fallback for unclear decisions (catches ALL unclear, not just orchestrator parse failures)
+  if (decision.decision === 'unclear') {
+    const consecutiveParseFallbackRetries =
+      countConsecutiveUnclearEntries(db, task.id) + 1;
+
+    if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
+      decision = {
+        ...decision,
+        decision: 'dispute',
+        reasoning: `Orchestrator parse failed ${consecutiveParseFallbackRetries} times; escalating to dispute`,
+        notes: 'Escalated to disputed to prevent endless unclear-review retries',
+        next_status: 'disputed',
+          confidence: 'low',
+          push_to_remote: false,
+      };
+    } else {
+      decision = {
+        ...decision,
+        reasoning: `${decision.reasoning} (parse_retry ${consecutiveParseFallbackRetries}/${MAX_ORCHESTRATOR_PARSE_RETRIES})`,
+      };
+    }
+  }
+
+  // STEP 5: Log orchestrator decision for audit trail (non-transition row).
+  // Concrete status transitions are recorded by approve/reject/update calls below.
+  addAuditEntry(db, task.id, task.status, task.status, 'orchestrator', {
+    actorType: 'orchestrator',
+    notes: `[${decision.decision}] ${decision.reasoning} (confidence: ${decision.confidence})`,
+    category: 'decision',
+  });
+
+  if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+    if (!jsonMode) {
+      console.log('\n↺ Lease ownership changed before applying reviewer decision; skipping in this runner.');
+    }
+    return;
+  }
+
+  // STEP 5.5: Create follow-up tasks if any (ONLY on approval)
+  await createFollowUpTasksIfNeeded(
+    db,
+    task,
+    projectPath,
+    decision.follow_up_tasks,
+    submissionCommitSha,
+    jsonMode
+  );
+
+  // STEP 6: Execute the decision
+  const commitSha = submissionCommitSha;
+
+  switch (decision.decision) {
+    case 'approve':
+      if (poolSlotContext) {
+        // ── Pool slot: post-review gate + merge pipeline ──
+        postReviewGate(effectiveProjectPath);
+
+        // Refresh slot from DB before merge
+        const freshSlot = getSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
+        if (!freshSlot) {
+          if (!jsonMode) console.log('\n✗ Pool slot disappeared during review');
+          return;
+        }
+
+        const mergeResult = mergeToBase(poolSlotContext.globalDb, freshSlot, task.id);
+
+        if (!mergeResult.ok) {
+          const failureResult = handleMergeFailure(db, poolSlotContext, task.id, mergeResult);
+          if (!jsonMode) {
+            if (failureResult.taskBlocked) {
+              console.log(`\n✗ Task BLOCKED (${failureResult.blockStatus}): ${failureResult.reason}`);
+            } else {
+              console.log(`\n⟳ Merge failed, returning to pending: ${failureResult.reason}`);
+            }
+          }
+          return;
+        }
+
+        // Merge succeeded — approve the task
+        approveTask(db, task.id, 'orchestrator', decision.notes, mergeResult.mergedSha || commitSha);
+        releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
+        if (!jsonMode) {
+          console.log(`\n✓ Task APPROVED and merged (sha: ${mergeResult.mergedSha})`);
+        }
+      } else {
+        // Legacy path: direct push
+        approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
+        if (!jsonMode) {
+          console.log(`\n✓ Task APPROVED (confidence: ${decision.confidence})`);
+          console.log('Pushing to git...');
+        }
+        if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+          if (!jsonMode) {
+            console.log('\n↺ Lease ownership lost before review push; skipping push in this runner.');
+          }
+          return;
+        }
+        const pushResult = pushToRemote(effectiveProjectPath, 'origin', branchName);
+        if (!jsonMode && pushResult.success) {
+          console.log(`Pushed successfully (${pushResult.commitHash})`);
+        } else if (!jsonMode) {
+          console.warn('Push failed. Will stack and retry on next completion.');
+        }
+      }
+      break;
+
+    case 'reject': {
+      // Deterministically extract [OUT_OF_SCOPE] items from raw reviewer stdout.
+      // The post-reviewer LLM may rephrase or drop structured tags, so we preserve
+      // them here before they are lost. Only append if not already present.
+      const allReviewerStdout = effectiveMultiReviewEnabled
+        ? (reviewerResults ?? []).map(r => r?.stdout ?? '').join('\n')
+        : (reviewerResult?.stdout ?? '');
+      const outOfScopeItems = extractOutOfScopeItems(allReviewerStdout);
+      if (outOfScopeItems.length > 0 && !(decision.notes ?? '').toLowerCase().includes('[out_of_scope]')) {
+        decision = {
+          ...decision,
+          notes: `${decision.notes ?? ''}\n\n## Out-of-Scope Items (from reviewer)\n${outOfScopeItems.join('\n')}`
+        };
+      }
+      rejectTask(db, task.id, 'orchestrator', decision.notes, commitSha);
+      if (!jsonMode) {
+        console.log(`\n✗ Task REJECTED (${task.rejection_count + 1}/15, confidence: ${decision.confidence})`);
+        console.log('Returning to coder for fixes.');
+      }
+      break;
+    }
+
+    case 'dispute':
+      updateTaskStatus(db, task.id, 'disputed', 'orchestrator', decision.notes, commitSha);
+      if (!jsonMode) {
+        console.log(`\n! Task DISPUTED (confidence: ${decision.confidence})`);
+        console.log('Pushing current work and moving to next task.');
+      }
+      if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+        if (!jsonMode) {
+          console.log('\n↺ Lease ownership lost before dispute push; skipping push in this runner.');
+        }
+        return;
+      }
+      const disputePush = pushToRemote(effectiveProjectPath, 'origin', branchName);
+      if (!jsonMode && disputePush.success) {
+        console.log(`Pushed disputed work (${disputePush.commitHash})`);
+      }
+      break;
+
+    case 'skip':
+      updateTaskStatus(db, task.id, 'skipped', 'orchestrator', decision.notes, commitSha);
+      if (!jsonMode) {
+        console.log(`\n⏭ Task SKIPPED (confidence: ${decision.confidence})`);
+      }
+      break;
+
+    case 'unclear':
+      if (!jsonMode) {
+        console.log(`\n? Review unclear (${decision.reasoning}), will retry`);
+      }
+      break;
+  }
+}
