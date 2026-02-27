@@ -46,16 +46,16 @@ export function isHeartbeatStale(
  */
 export function findStaleRunners(
   db: Database.Database
-): Array<{ id: string; pid: number | null; heartbeat_at: string }> {
+): Array<{ id: string; pid: number | null; heartbeat_at: string; current_task_id: string | null; project_path: string | null }> {
   // Use SQLite's datetime function to avoid timestamp format mismatches
   // JavaScript ISO format ("2026-02-08T22:28:49.000Z") differs from
   // SQLite datetime format ("2026-02-08 22:33:49"), breaking string comparison
   return db
     .prepare(
-      `SELECT id, pid, heartbeat_at FROM runners
+      `SELECT id, pid, heartbeat_at, current_task_id, project_path FROM runners
        WHERE heartbeat_at < datetime('now', '-5 minutes') AND status != 'idle'`
     )
-    .all() as Array<{ id: string; pid: number | null; heartbeat_at: string }>;
+    .all() as Array<{ id: string; pid: number | null; heartbeat_at: string; current_task_id: string | null; project_path: string | null }>;
 }
 
 /**

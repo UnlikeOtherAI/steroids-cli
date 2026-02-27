@@ -139,6 +139,37 @@ const global = { db: globalDb };
         log(`Found ${staleRunners.length} stale runner(s), cleaning up...`);
         if (!dryRun) {
           for (const runner of staleRunners) {
+            // Clean up in-flight task state before removing runner row.
+            // Process is definitively dead (stale heartbeat), so the lock is deleted
+            // immediately — unlike the SIGTERM case where the lock is left in place
+            // to prevent double-execution from a still-alive process.
+            if (runner.current_task_id && runner.project_path) {
+              try {
+                const { db: projectDb, close: closeProjectDb } = openDatabase(runner.project_path);
+                try {
+                  const nowMs = Date.now();
+                  projectDb.prepare(
+                    `UPDATE task_invocations
+                     SET status = 'failed', success = 0, timed_out = 0, exit_code = 1,
+                         completed_at_ms = ?, duration_ms = ?,
+                         error = COALESCE(error, 'Runner process died (stale heartbeat).')
+                     WHERE task_id = ? AND status = 'running'`
+                  ).run(nowMs, 0, runner.current_task_id);
+                  projectDb.prepare(
+                    `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+                     WHERE id = ? AND status = 'in_progress'`
+                  ).run(runner.current_task_id);
+                  projectDb.prepare(
+                    `DELETE FROM task_locks WHERE task_id = ?`
+                  ).run(runner.current_task_id);
+                } finally {
+                  closeProjectDb();
+                }
+              } catch {
+                // Project DB errors must not block runner row cleanup.
+              }
+            }
+
             if (runner.pid) {
               killProcess(runner.pid);
             }
