@@ -20,22 +20,26 @@ import { execGit } from '../workspace/git-helpers.js';
  * task should use the project base branch (as resolved by prepareForTask).
  *
  * Resolution order:
- *   1. section.branch (Phase 2+, requires migration 021) → return it
+ *   1. section.branch (migration 021) → return it if set
  *   2. No section override → return null (caller uses project base branch)
  *
- * Phase 1: DB column doesn't exist yet; always returns null.
- * Phase 2: updated to query section.branch from DB.
- *
- * Note: config is accepted for forward compat (Phase 2 may use it for validation).
+ * Note: config is accepted for forward compat (future phases may use it for validation).
  */
 export function resolveEffectiveBranch(
-  _db: Database.Database,
-  _sectionId: string | null,
+  db: Database.Database,
+  sectionId: string | null,
   _config: SteroidsConfig
 ): string | null {
-  // Phase 2 will add: check section.branch from DB once migration 021 runs.
-  // For now, no section-level override exists.
-  return null;
+  if (!sectionId) return null;
+  try {
+    const row = db
+      .prepare('SELECT branch FROM sections WHERE id = ?')
+      .get(sectionId) as { branch: string | null } | undefined;
+    return row?.branch ?? null;
+  } catch {
+    // Section row not found or branch column missing (pre-migration DB)
+    return null;
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 20,
+  "latestDbVersion": 21,
   "migrations": [
     {
       "id": 1,
@@ -161,6 +161,14 @@
       "description": "Add conflict_count and blocked_reason to tasks for workspace pool lifecycle",
       "checksum": "",
       "cliVersion": "0.10.36"
+    },
+    {
+      "id": 21,
+      "name": "021_add_section_branch",
+      "file": "021_add_section_branch.sql",
+      "description": "Add branch column to sections table for per-section git branch targeting",
+      "checksum": "",
+      "cliVersion": "0.10.44"
     }
   ]
 }

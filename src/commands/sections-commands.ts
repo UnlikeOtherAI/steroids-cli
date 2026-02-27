@@ -7,6 +7,7 @@ import { openDatabase, withDatabase } from '../database/connection.js';
 import {
   createSection,
   getSection,
+  setSectionBranch,
   setSectionPriority,
   addSectionDependency,
   removeSectionDependency,
@@ -22,6 +23,7 @@ export async function addSection(args: string[], flags: GlobalFlags): Promise<vo
     args,
     options: {
       position: { type: 'string', short: 'p' },
+      branch: { type: 'string', short: 'b' },
     },
     allowPositionals: true,
   });
@@ -34,11 +36,12 @@ USAGE:
   steroids sections add <name> [options]
 
 OPTIONS:
-  -p, --position <n>  Position in list (default: end)
+  -p, --position <n>    Position in list (default: end)
+  -b, --branch <name>   Target git branch for tasks in this section
 
 GLOBAL OPTIONS:
-  -j, --json          Output as JSON
-  -h, --help          Show help
+  -j, --json            Output as JSON
+  -h, --help            Show help
 `);
     return;
   }
@@ -49,11 +52,19 @@ GLOBAL OPTIONS:
 
   const name = positionals.join(' ');
   const position = values.position ? parseInt(values.position, 10) : undefined;
+  const branch = values.branch ?? null;
+
+  if (branch !== null && !/^[a-zA-Z0-9/_.-]+$/.test(branch)) {
+    throw invalidArgumentsError('Branch name may only contain letters, numbers, /, _, ., and -');
+  }
 
   if (flags.dryRun) {
     out.log(`Would create section: ${name}`);
     if (position !== undefined) {
       out.log(`  Position: ${position}`);
+    }
+    if (branch !== null) {
+      out.log(`  Branch: ${branch}`);
     }
     return;
   }
@@ -62,6 +73,10 @@ GLOBAL OPTIONS:
   /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
     const section = createSection(db, name, position);
 
+    if (branch !== null) {
+      setSectionBranch(db, section.id, branch);
+    }
+
     if (flags.json) {
       out.success({
         section: {
@@ -69,6 +84,7 @@ GLOBAL OPTIONS:
           name: section.name,
           position: section.position,
           priority: section.priority,
+          branch: branch,
           created_at: section.created_at,
         },
       });
@@ -76,6 +92,9 @@ GLOBAL OPTIONS:
       out.log(`Section created: ${section.name}`);
       out.log(`  ID: ${section.id}`);
       out.log(`  Position: ${section.position}`);
+      if (branch !== null) {
+        out.log(`  Branch: ${branch}`);
+      }
     }
   });
 }
@@ -297,6 +316,93 @@ EXAMPLES:
       });
     } else {
       out.log(`Dependency removed: ${section.name} no longer depends on ${dependsOnSection.name}`);
+    }
+  });
+}
+
+export async function updateSection(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'sections', subcommand: 'update', flags });
+
+  const { values, positionals } = parseArgs({
+    args,
+    options: {
+      branch: { type: 'string', short: 'b' },
+    },
+    allowPositionals: true,
+  });
+
+  if (flags.help) {
+    out.log(`
+steroids sections update <section-id> - Update section settings
+
+USAGE:
+  steroids sections update <section-id> [options]
+
+ARGUMENTS:
+  section-id    Section ID or prefix (min 4 chars)
+
+OPTIONS:
+  -b, --branch <name>   Set target git branch (use "default" to clear)
+
+GLOBAL OPTIONS:
+  -j, --json            Output as JSON
+  -h, --help            Show help
+
+EXAMPLES:
+  steroids sections update abc123 --branch feature/my-feature
+  steroids sections update abc123 --branch default
+`);
+    return;
+  }
+
+  if (positionals.length === 0) {
+    throw invalidArgumentsError('Section ID required');
+  }
+
+  const sectionIdInput = positionals[0];
+  const branchInput = values.branch;
+
+  if (branchInput === undefined) {
+    throw invalidArgumentsError('At least one option required (e.g. --branch)');
+  }
+
+  // "default" is a sentinel to clear the branch override
+  const branch = branchInput === 'default' ? null : branchInput;
+
+  if (branch !== null && !/^[a-zA-Z0-9/_.-]+$/.test(branch)) {
+    throw invalidArgumentsError('Branch name may only contain letters, numbers, /, _, ., and -');
+  }
+
+  if (flags.dryRun) {
+    const display = branch === null ? '(clear override — use project base)' : branch;
+    out.log(`Would set branch to ${display} for section: ${sectionIdInput}`);
+    return;
+  }
+
+  const projectPath = process.cwd();
+  /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
+    const section = getSection(db, sectionIdInput);
+    if (!section) {
+      throw sectionNotFoundError(sectionIdInput);
+    }
+
+    setSectionBranch(db, section.id, branch);
+
+    if (flags.json) {
+      out.success({
+        section: {
+          id: section.id,
+          name: section.name,
+          branch,
+        },
+      });
+    } else {
+      if (branch === null) {
+        out.log(`Branch override cleared for section: ${section.name}`);
+        out.log('  Tasks will use the project base branch');
+      } else {
+        out.log(`Branch set to ${branch} for section: ${section.name}`);
+      }
     }
   });
 }

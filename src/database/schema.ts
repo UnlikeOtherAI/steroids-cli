@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS sections (
     position INTEGER NOT NULL,
     priority INTEGER DEFAULT 50,
     skipped INTEGER DEFAULT 0,
+    branch TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -255,4 +256,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (17, '017_add_invo
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (18, '018_expand_audit_columns', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (19, '019_add_task_start_sha', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (20, '020_add_workspace_fields', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (21, '021_add_section_branch', 'builtin');
 `;

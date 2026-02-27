@@ -20,7 +20,8 @@ import {
   addSection,
   setPriority,
   addDependency,
-  removeDependency
+  removeDependency,
+  updateSection,
 } from './sections-commands.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
@@ -35,6 +36,7 @@ Sections help structure large projects and track high-level progress.`,
   usage: ['steroids sections <subcommand> [options]'],
   subcommands: [
     { name: 'add', args: '<name>', description: 'Add a new section' },
+    { name: 'update', args: '<id> [--branch <name>]', description: 'Update section settings' },
     { name: 'list', args: '[--deps]', description: 'List all sections with task counts' },
     { name: 'priority', args: '<id> <value>', description: 'Set section priority (0-100 or high/medium/low)' },
     { name: 'depends-on', args: '<id> <depends-on-id>', description: 'Add section dependency' },
@@ -52,6 +54,9 @@ Sections help structure large projects and track high-level progress.`,
   ],
   examples: [
     { command: 'steroids sections add "Phase 1: Foundation"', description: 'Add new section' },
+    { command: 'steroids sections add "Phase 2: API" --branch feature/api', description: 'Add section with branch override' },
+    { command: 'steroids sections update abc123 --branch feature/api', description: 'Set target branch for section' },
+    { command: 'steroids sections update abc123 --branch default', description: 'Clear branch override (use project base)' },
     { command: 'steroids sections list', description: 'List all sections with task counts' },
     { command: 'steroids sections list --deps', description: 'Show dependencies' },
     { command: 'steroids sections priority abc123 high', description: 'Set priority (high/medium/low)' },
@@ -100,6 +105,9 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
   switch (subcommand) {
     case 'add':
       await addSection(subArgs, flags);
+      break;
+    case 'update':
+      await updateSection(subArgs, flags);
       break;
     case 'list':
       await listAllSections(subArgs, flags);

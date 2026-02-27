@@ -267,6 +267,24 @@ export function setSectionPriority(
 }
 
 /**
+ * Set or clear the target branch for a section.
+ * Pass null to clear the override (tasks use project base branch).
+ */
+export function setSectionBranch(
+  db: Database.Database,
+  sectionId: string,
+  branch: string | null
+): void {
+  const result = db
+    .prepare('UPDATE sections SET branch = ? WHERE id = ?')
+    .run(branch, sectionId);
+
+  if (result.changes === 0) {
+    throw new Error(`Section not found: ${sectionId}`);
+  }
+}
+
+/**
  * Check if adding a dependency would create a circular dependency
  * Returns true if circular dependency would be created
  */
