@@ -59,21 +59,25 @@ router.get('/runners', (_req: Request, res: Response) => {
             r.id,
             r.status,
             r.pid,
-            r.project_path,
+            r.project_path as raw_project_path,
+            COALESCE(ps.project_path, r.project_path) as project_path,
             r.parallel_session_id,
             r.current_task_id,
             r.started_at,
             r.heartbeat_at,
             r.section_id,
-            p.name as project_name
+            COALESCE(p2.name, p.name) as project_name
           FROM runners r
           LEFT JOIN projects p ON r.project_path = p.path
+          LEFT JOIN parallel_sessions ps ON r.parallel_session_id = ps.id
+          LEFT JOIN projects p2 ON ps.project_path = p2.path
           ORDER BY r.heartbeat_at DESC`
         )
         .all() as Array<{
         id: string;
         status: string;
         pid: number | null;
+        raw_project_path: string | null;
         project_path: string | null;
         parallel_session_id: string | null;
         current_task_id: string | null;
@@ -133,12 +137,14 @@ router.get('/runners/active-tasks', (_req: Request, res: Response) => {
           `SELECT
             r.id as runner_id,
             r.status,
-            r.project_path,
+            COALESCE(ps.project_path, r.project_path) as project_path,
             r.current_task_id,
             r.started_at,
-            p.name as project_name
+            COALESCE(p2.name, p.name) as project_name
           FROM runners r
           LEFT JOIN projects p ON r.project_path = p.path
+          LEFT JOIN parallel_sessions ps ON r.parallel_session_id = ps.id
+          LEFT JOIN projects p2 ON ps.project_path = p2.path
           WHERE r.current_task_id IS NOT NULL
           ORDER BY r.started_at DESC`
         )
