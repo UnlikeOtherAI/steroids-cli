@@ -52,9 +52,36 @@ OPTIONS:
 
   const runners = listRunners();
 
+  // Enrich with display labels and task titles for sorting
+  const enriched = runners.map((runner) => {
+    const displayPath = resolveDisplayProject(runner);
+    let projectName = basename(displayPath);
+    if (runner.parallel_session_id && runner.project_path) {
+      const wsMatch = runner.project_path.match(/\/(ws-[a-f0-9]+-\d+)$/);
+      const wsTag = wsMatch ? wsMatch[1] : 'parallel';
+      projectName = `${projectName} (${wsTag})`;
+    }
+    let taskTitle = '';
+    if (runner.current_task_id && runner.project_path) {
+      try {
+        withDatabase(runner.project_path, (db: any) => {
+          const task = getTask(db, runner.current_task_id as string);
+          if (task) taskTitle = task.title;
+        });
+      } catch { /* ignore */ }
+    }
+    return { runner, projectName, taskTitle };
+  });
+
+  // Sort alphabetically: project name first, then task title
+  enriched.sort((a, b) => {
+    const cmp = a.projectName.localeCompare(b.projectName);
+    return cmp !== 0 ? cmp : a.taskTitle.localeCompare(b.taskTitle);
+  });
+
   if (flags.json) {
     // For JSON output, enrich with section names
-    const enrichedRunners = runners.map((runner) => {
+    const enrichedRunners = enriched.map(({ runner }) => {
       if (!runner.section_id || !runner.project_path) {
         return runner;
       }
@@ -71,7 +98,7 @@ OPTIONS:
     return;
   }
 
-  if (runners.length === 0) {
+  if (enriched.length === 0) {
     console.log('No runners registered');
     return;
   }
@@ -81,19 +108,11 @@ OPTIONS:
   console.log('ID        STATUS      PID       PROJECT                           SECTION                           HEARTBEAT');
   console.log('─'.repeat(120));
 
-  for (const runner of runners) {
+  for (const { runner, projectName } of enriched) {
     const shortId = runner.id.substring(0, 8);
     const status = runner.status.padEnd(10);
     const pid = (runner.pid?.toString() ?? '-').padEnd(9);
-
-    const displayPath = resolveDisplayProject(runner);
-    let projectLabel = basename(displayPath);
-    if (runner.parallel_session_id && runner.project_path) {
-      const wsMatch = runner.project_path.match(/\/(ws-[a-f0-9]+-\d+)$/);
-      const wsTag = wsMatch ? wsMatch[1] : 'parallel';
-      projectLabel = `${projectLabel} (${wsTag})`;
-    }
-    const project = projectLabel.substring(0, 30).padEnd(30);
+    const project = projectName.substring(0, 30).padEnd(30);
 
     // Fetch section name if available
     let sectionDisplay = '-';
@@ -118,7 +137,7 @@ OPTIONS:
   }
 
   // Check if there are multiple projects (resolve parallel clones to originals)
-  const uniqueProjects = new Set(runners.map(r => resolveDisplayProject(r)).filter(p => p !== '-'));
+  const uniqueProjects = new Set(enriched.map(({ runner }) => resolveDisplayProject(runner)).filter(p => p !== '-'));
   if (uniqueProjects.size > 1) {
     const currentProject = process.cwd();
     console.log('');
@@ -192,9 +211,40 @@ async function runListTree(json: boolean): Promise<void> {
     }
   }
 
+  // Build sorted project list (used by both JSON and text output)
+  const projectList = Array.from(projectMap.values());
+
+  // Sort projects alphabetically by name
+  projectList.sort((a, b) => a.name.localeCompare(b.name));
+
+  // Sort runners within each project by task title
+  for (const info of projectList) {
+    info.runners.sort((a, b) => {
+      let titleA = '';
+      let titleB = '';
+      if (a.current_task_id && a.project_path) {
+        try {
+          withDatabase(a.project_path, (db: any) => {
+            const task = getTask(db, a.current_task_id as string);
+            if (task) titleA = task.title;
+          });
+        } catch { /* ignore */ }
+      }
+      if (b.current_task_id && b.project_path) {
+        try {
+          withDatabase(b.project_path, (db: any) => {
+            const task = getTask(db, b.current_task_id as string);
+            if (task) titleB = task.title;
+          });
+        } catch { /* ignore */ }
+      }
+      return titleA.localeCompare(titleB);
+    });
+  }
+
   // JSON output
   if (json) {
-    const output = Array.from(projectMap.values()).map((info) => ({
+    const output = projectList.map((info) => ({
       project: info.path,
       name: info.name,
       runners: info.runners.map((r) => ({
@@ -214,8 +264,6 @@ async function runListTree(json: boolean): Promise<void> {
     return;
   }
 
-  // Text tree view
-  const projectList = Array.from(projectMap.values());
   const currentProject = process.cwd();
 
   if (projectList.length === 0) {
