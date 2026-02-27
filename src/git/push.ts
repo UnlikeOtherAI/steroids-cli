@@ -3,7 +3,7 @@
  * Handles pushing completed work with resilience
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 export interface PushResult {
   success: boolean;
@@ -18,7 +18,7 @@ export function getCurrentCommitHash(
   projectPath: string = process.cwd()
 ): string | null {
   try {
-    return execSync('git rev-parse HEAD', {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -37,7 +37,7 @@ export function pushToRemote(
   branch: string = 'main'
 ): PushResult {
   try {
-    execSync(`git push ${remote} ${branch}`, {
+    execFileSync('git', ['push', remote, branch], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -82,7 +82,7 @@ export function getRemoteUrl(
   remote: string = 'origin'
 ): string | null {
   try {
-    return execSync(`git remote get-url ${remote}`, {
+    return execFileSync('git', ['remote', 'get-url', remote], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -99,7 +99,7 @@ export function hasRemoteTracking(
   projectPath: string = process.cwd()
 ): boolean {
   try {
-    execSync('git rev-parse --abbrev-ref --symbolic-full-name @{u}', {
+    execFileSync('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],

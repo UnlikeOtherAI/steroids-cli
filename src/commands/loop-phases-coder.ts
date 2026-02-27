@@ -22,6 +22,7 @@ import { loadConfig, type ReviewerConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { PoolSlotContext } from '../workspace/types.js';
 import { prepareForTask, postCoderGate } from '../workspace/git-lifecycle.js';
+import { resolveEffectiveBranch } from '../git/branch-resolver.js';
 import { updateSlotStatus, releaseSlot } from '../workspace/pool.js';
 import {
   LeaseFenceContext,
@@ -72,11 +73,16 @@ export async function runCoderPhase(
   let effectiveProjectPath = projectPath;
 
   if (poolSlotContext) {
+    const config = loadConfig(projectPath);
+    const sectionBranch = resolveEffectiveBranch(db, task.section_id ?? null, config);
+    const configBranch = config.git?.branch ?? null;
     const prepResult = prepareForTask(
       poolSlotContext.globalDb,
       poolSlotContext.slot,
       task.id,
-      projectPath
+      projectPath,
+      sectionBranch,  // null in Phase 1; section-specific branch in Phase 2+
+      configBranch
     );
 
     if (!prepResult.ok) {

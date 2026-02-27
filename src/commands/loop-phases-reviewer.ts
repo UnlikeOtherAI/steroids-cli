@@ -30,6 +30,7 @@ import { resolveSubmissionCommitWithRecovery } from '../git/submission-resolutio
 import type { CoordinatorResult } from '../orchestrator/coordinator.js';
 import { resolveReviewerDecision } from './loop-phases-reviewer-resolution.js';
 import { loadConfig } from '../config/loader.js';
+import { resolveEffectiveBranch } from '../git/branch-resolver.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { PoolSlotContext } from '../workspace/types.js';
 import {
@@ -405,7 +406,11 @@ export async function runReviewerPhase(
           }
           return;
         }
-        const pushResult = pushToRemote(effectiveProjectPath, 'origin', branchName);
+        const reviewerConfig = loadConfig(projectPath);
+        const legacyApproveBranch = leaseFence?.parallelSessionId
+          ? branchName
+          : (resolveEffectiveBranch(db, task.section_id ?? null, reviewerConfig) ?? reviewerConfig.git?.branch ?? 'main');
+        const pushResult = pushToRemote(effectiveProjectPath, 'origin', legacyApproveBranch);
         if (!jsonMode && pushResult.success) {
           console.log(`Pushed successfully (${pushResult.commitHash})`);
         } else if (!jsonMode) {
@@ -448,7 +453,11 @@ export async function runReviewerPhase(
         }
         return;
       }
-      const disputePush = pushToRemote(effectiveProjectPath, 'origin', branchName);
+      const disputeConfig = loadConfig(projectPath);
+      const disputeBranch = leaseFence?.parallelSessionId
+        ? branchName
+        : (resolveEffectiveBranch(db, task.section_id ?? null, disputeConfig) ?? disputeConfig.git?.branch ?? 'main');
+      const disputePush = pushToRemote(effectiveProjectPath, 'origin', disputeBranch);
       if (!jsonMode && disputePush.success) {
         console.log(`Pushed disputed work (${disputePush.commitHash})`);
       }

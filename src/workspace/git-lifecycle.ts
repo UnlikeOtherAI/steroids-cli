@@ -22,6 +22,7 @@ import {
   getStatusPorcelain,
   getLogOneline,
 } from './git-helpers.js';
+import { ensureBranchExists } from '../git/branch-resolver.js';
 import { updateSlotStatus, ensureSlotClone } from './pool.js';
 import {
   acquireWorkspaceMergeLock,
@@ -57,7 +58,9 @@ export function prepareForTask(
   globalDb: Database.Database,
   slot: PoolSlot,
   taskId: string,
-  projectPath: string
+  projectPath: string,
+  sectionBranch: string | null = null,
+  configBranch: string | null = null
 ): PrepareResult {
   const slotPath = slot.slot_path;
   let localOnly = slot.remote_url === null;
@@ -124,17 +127,32 @@ export function prepareForTask(
     }
   }
 
-  // Step 4: Resolve base branch
-  const baseBranch = resolveBaseBranch(slotPath, localOnly ? null : remote);
-  if (!baseBranch) {
+  // Step 4: Resolve project base branch (supports config.git.branch, main, master)
+  const projectBase = resolveBaseBranch(slotPath, localOnly ? null : remote, configBranch);
+  if (!projectBase) {
     return {
       ok: false,
-      reason: 'No valid base branch (neither main nor master found)',
+      reason: 'No valid base branch (neither config branch, main, nor master found)',
       blocked: true,
     };
   }
 
-  // Step 5: Reset to base
+  // Step 4b: If a section branch is set, ensure it exists in the slot and use it as target
+  let baseBranch = projectBase;
+  if (sectionBranch && !localOnly) {
+    try {
+      ensureBranchExists(slotPath, sectionBranch, projectBase, remote);
+      baseBranch = sectionBranch;
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `Failed to set up section branch '${sectionBranch}': ${error instanceof Error ? error.message : String(error)}`,
+        blocked: false,
+      };
+    }
+  }
+
+  // Step 5: Reset to effective base
   const baseRef = localOnly ? baseBranch : `${remote}/${baseBranch}`;
   execGit(slotPath, ['checkout', baseBranch], { tolerateFailure: true });
   execGit(slotPath, ['reset', '--hard', baseRef]);
@@ -161,8 +179,19 @@ export function prepareForTask(
     if (!localOnly) {
       execGit(slotPath, ['fetch', remote], { tolerateFailure: true, timeoutMs: 120_000 });
     }
+    // Re-run step 4b: section branch setup (branch must exist after re-clone + fetch)
+    if (sectionBranch && !localOnly) {
+      try {
+        ensureBranchExists(slotPath, sectionBranch, projectBase, remote);
+      } catch {
+        // Section branch setup failed after re-clone; fall back to project base.
+        // Reset baseBranch so the subsequent checkout/reset use a ref that exists.
+        baseBranch = projectBase;
+      }
+    }
+    const rebaseRef = localOnly ? baseBranch : `${remote}/${baseBranch}`;
     execGit(slotPath, ['checkout', baseBranch], { tolerateFailure: true });
-    execGit(slotPath, ['reset', '--hard', baseRef]);
+    execGit(slotPath, ['reset', '--hard', rebaseRef]);
     execGit(slotPath, ['clean', '-fd', '-e', '.steroids']);
 
     porcelain = getStatusPorcelain(slotPath);

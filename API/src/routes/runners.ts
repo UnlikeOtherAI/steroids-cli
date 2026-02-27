@@ -18,6 +18,7 @@ interface RunnerInfo {
   pid: number | null;
   project_path: string | null;
   project_name: string | null;
+  parallel_session_id: string | null;
   current_task_id: string | null;
   current_task_title: string | null;
   started_at: string | null;
@@ -59,6 +60,7 @@ router.get('/runners', (_req: Request, res: Response) => {
             r.status,
             r.pid,
             r.project_path,
+            r.parallel_session_id,
             r.current_task_id,
             r.started_at,
             r.heartbeat_at,
@@ -73,6 +75,7 @@ router.get('/runners', (_req: Request, res: Response) => {
         status: string;
         pid: number | null;
         project_path: string | null;
+        parallel_session_id: string | null;
         current_task_id: string | null;
         started_at: string | null;
         heartbeat_at: string;
@@ -86,6 +89,7 @@ router.get('/runners', (_req: Request, res: Response) => {
         pid: runner.pid,
         project_path: runner.project_path,
         project_name: runner.project_name,
+        parallel_session_id: runner.parallel_session_id,
         current_task_id: runner.current_task_id,
         current_task_title: null,
         started_at: runner.started_at,

@@ -60,8 +60,11 @@ export interface Section {
   id: string;
   name: string;
   position: number;
-  priority?: number;  // 0 = highest, 100 = lowest, 50 = default (added by migration 003)
-  skipped?: number;  // 0 = active, 1 = skipped (added by migration 003)
+  priority?: number;     // 0 = highest, 100 = lowest, 50 = default (added by migration 003)
+  skipped?: number;      // 0 = active, 1 = skipped (added by migration 008)
+  branch?: string | null;     // target branch override (added by migration 021)
+  auto_pr?: number;           // 0 = push only, 1 = create PR on completion (migration 022)
+  pr_number?: number | null;  // GitHub PR number if created (added by migration 022)
   created_at: string;
 }
 
