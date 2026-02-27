@@ -374,6 +374,17 @@ export async function runReviewerPhase(
           return;
         }
 
+        // No-op submission: coder made no new commits; work pre-existed.
+        // isNoOp was captured before the reviewer ran (from submission notes), safe from audit shadowing.
+        const isNoOp = reviewerResult?.isNoOp ?? false;
+        if (isNoOp) {
+          approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
+          releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
+          if (!jsonMode) console.log('\n✓ Task APPROVED (pre-existing work confirmed by reviewer, no merge needed)');
+          await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
+          return;
+        }
+
         const mergeResult = mergeToBase(poolSlotContext.globalDb, freshSlot, task.id);
 
         if (!mergeResult.ok) {

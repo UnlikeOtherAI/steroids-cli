@@ -144,7 +144,8 @@ export function getStatusPorcelain(cwd: string): string {
 
 /**
  * Get log entries between two refs (oneline format).
+ * Returns null if the git command fails, empty string if there are no entries.
  */
-export function getLogOneline(cwd: string, range: string): string {
-  return execGit(cwd, ['log', range, '--oneline'], { tolerateFailure: true }) || '';
+export function getLogOneline(cwd: string, range: string): string | null {
+  return execGit(cwd, ['log', range, '--oneline'], { tolerateFailure: true });
 }

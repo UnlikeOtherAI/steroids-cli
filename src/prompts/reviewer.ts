@@ -55,6 +55,8 @@ export function generateResumingReviewerDeltaPrompt(context: ReviewerPromptConte
   let prompt = `The coder has submitted a new attempt for task ${task.id}: "${task.title}".
 All previous context and your past review notes are still in your session history.
 
+If the submission notes begin with \`[NO_OP_SUBMISSION]\`, the coder made no new commits because it determined the work already existed. Verify whether the pre-existing code satisfies the task specification. Do NOT reject solely because there is no new diff.
+
 ---
 
 ## What to Review
@@ -334,6 +336,14 @@ Continue with the reachable chain and explicitly mention any uncertainty from mi
 You are a REVIEWER in an automated task execution system. Your job is to verify the coder's implementation matches the specification.
 
 **Follow the project's existing architecture.** If the coder's implementation follows the patterns already established in the codebase (as described in AGENTS.md), do not reject for architectural style differences. Focus on correctness and spec compliance.
+
+## No-op Submissions
+
+If the submission notes begin with \`[NO_OP_SUBMISSION]\`, the coder made no new commits because it determined the work already existed in the codebase. Your job is to verify whether the pre-existing code actually satisfies the task specification fully.
+
+- APPROVE if the existing code satisfies all acceptance criteria
+- REJECT with specific missing items if it does not
+- Do NOT reject solely because there is no new diff — the absence of a diff is expected
 
 ---
 

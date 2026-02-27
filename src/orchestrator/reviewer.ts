@@ -33,6 +33,8 @@ export interface ReviewerResult extends BaseRunnerResult {
   notes?: string;
   provider?: string;
   model?: string;
+  /** True when coder submitted with [NO_OP_SUBMISSION] marker (no new commits, pre-existing work). */
+  isNoOp?: boolean;
 }
 
 export type FinalDecision = 'approve' | 'reject' | 'dispute' | 'skip' | 'unclear';
@@ -128,6 +130,7 @@ export async function invokeReviewers(
         timedOut: false,
         provider: reviewerConfigs[i].provider,
         model: reviewerConfigs[i].model,
+        isNoOp: false,
       };
     }
   });
@@ -374,6 +377,7 @@ class ReviewerRunner extends BaseRunner {
         notes,
         provider: providerName,
         model: modelName,
+        isNoOp: Boolean((submissionNotes as string | null)?.startsWith('[NO_OP_SUBMISSION]')),
       };
     } finally {
       this.cleanupTempFile(promptFile);

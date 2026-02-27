@@ -1,6 +1,7 @@
 import {
   getTask,
   getTaskRejections,
+  updateTaskStatus,
   addAuditEntry,
   incrementTaskFailureCount,
   clearTaskFailureCount,
@@ -181,6 +182,23 @@ export async function runCoderPhase(
   if (poolSlotContext && poolStartingSha) {
     const gateResult = postCoderGate(effectiveProjectPath, poolStartingSha, task.title);
     if (!gateResult.ok) {
+      if (gateResult.reasonCode === 'no_new_commits') {
+        // Coder made no new commits — it determined work already pre-exists.
+        // Forward to reviewer with an explicit marker instead of retrying forever.
+        if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
+          if (!jsonMode) console.log('\n↺ Lease lost before no-op forward; skipping.');
+          return;
+        }
+        updateSlotStatus(poolSlotContext.globalDb, poolSlotContext.slot.id, 'awaiting_review');
+        updateTaskStatus(
+          db, task.id, 'review', 'orchestrator',
+          '[NO_OP_SUBMISSION] No new commits in pool workspace — reviewer to verify pre-existing work',
+          poolStartingSha
+        );
+        if (!jsonMode) console.log('\n→ No changes detected, forwarding to reviewer.');
+        return;
+      }
+      // git_error or any other failure: audit entry + retry (existing behaviour)
       if (!jsonMode) {
         console.log(`\n⟳ Post-coder gate: ${gateResult.reason}. Returning to coder.`);
       }

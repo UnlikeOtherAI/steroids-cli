@@ -39,7 +39,7 @@ export type PrepareResult =
 
 export type PostCoderResult =
   | { ok: true; autoCommitted: boolean }
-  | { ok: false; reason: string };
+  | { ok: false; reasonCode: 'no_new_commits' | 'git_error'; reason: string };
 
 export type MergeResult =
   | { ok: true; mergedSha: string }
@@ -244,8 +244,11 @@ export function postCoderGate(
 
   // Step 2: Check for any commits since task pickup
   const log = getLogOneline(slotPath, `${startingSha}..HEAD`);
-  if (!log || log.trim().length === 0) {
-    return { ok: false, reason: 'No changes detected' };
+  if (log === null) {
+    return { ok: false, reasonCode: 'git_error', reason: 'git log failed' };
+  }
+  if (log.trim().length === 0) {
+    return { ok: false, reasonCode: 'no_new_commits', reason: 'No changes detected' };
   }
 
   return { ok: true, autoCommitted };
