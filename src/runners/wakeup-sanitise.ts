@@ -271,6 +271,15 @@ function sanitiseProjectState(
              WHERE id = ? AND status = 'running'`
           )
           .run(completedAtMs, durationMs, row.id);
+        // Reset task to pending so the section is unblocked.
+        // Defense-in-depth: covers SIGKILL and crash cases where Part 1 (global-db-sessions)
+        // cleanup did not fire.
+        projectDb
+          .prepare(
+            `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+             WHERE id = ? AND status = 'in_progress'`
+          )
+          .run(row.task_id);
       }
     }
 

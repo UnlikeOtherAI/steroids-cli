@@ -4,19 +4,14 @@
 
 ## Cross-Provider Design Reviews (CRITICAL)
 
-## Provider Invocation Protocol (vibe / gemini)
+## Provider Invocation Protocol (codex)
 
 - Use non-interactive mode for scripted checks and fixes.
 - Never pass model flags or model aliases (no `--model`, `-m`, or explicit model names) unless explicitly requested.
-- Start with CLI availability checks:
-  - `vibe --help`
-  - `gemini --help`
-- Run smoke checks:
-  - `vibe -p "say hi"`
-  - `gemini -p "say hi"`
+- Start with a CLI availability check: `codex --help`
+- Run a smoke check: `codex exec "say hi"`
 - For codebase feedback or any long analysis, cap runtime at 5 minutes:
-  - `timeout 300 vibe -p "<prompt>"`
-  - `timeout 300 gemini -p "<prompt>"`
+  - `timeout 300 codex exec "<prompt>"`
 - If terminating a stuck command, only do so after sustained inactivity and effectively 0.0% CPU; do not kill active, progressing processes.
 
 **For any significant design or architectural change, you MUST get a second opinion from a different AI provider before implementation.**
@@ -31,7 +26,7 @@ This applies to:
 ### How to Conduct a Review
 
 1. **Write the design/spec first.** Complete your thinking before seeking review.
-2. **Send to a different provider.** If Claude wrote it, send to Codex or Gemini. If Codex wrote it, send to Claude or Gemini.
+2. **Send to a different provider.** If Claude wrote it, send to Codex. If Codex wrote it, send to Claude.
 3. **Strict Adversarial Persona (MANDATORY):** You must instruct the reviewer to be **adversarial**. It is not enough to check if it "works." The reviewer must explicitly look for:
    - **Technical Debt**: Are we taking shortcuts that will hurt us later?
    - **Architectural Regression**: Are we losing features (like streaming or isolation) that other providers have?
@@ -150,7 +145,7 @@ Only commit files that are **permanent and hand-authored**. The rule is simple: 
 **ALWAYS commit:**
 - Source code (`src/`, `tests/`)
 - Configuration files (`tsconfig.json`, `jest.config.js`, `.gitignore`, `package.json`)
-- Project AI config (`.gemini/settings.json`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`)
+- Project AI config (`CLAUDE.md`, `AGENTS.md`)
 - SQL migration files (`migrations/`)
 - Permanent scripts (`scripts/`) — only if they serve an ongoing purpose
 - Documentation (`docs/`, `README.md`) — only if it's permanent reference material
@@ -173,7 +168,7 @@ When in doubt: if it has a `.gitignore` entry for it already, do not commit it.
 | [AGENTS.md](./AGENTS.md) | Design reviews, agent behavior, task process |
 | [docs/](./docs/) | Feature designs and architecture documentation |
 
-Any agent (Claude, Codex, Gemini, or future providers) working on this codebase must read both CLAUDE.md and AGENTS.md as their first action.
+Any agent (Claude, Codex, or future providers) working on this codebase must read both CLAUDE.md and AGENTS.md as their first action.
 
 ---
 

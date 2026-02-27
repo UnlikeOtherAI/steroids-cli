@@ -3,6 +3,7 @@
  */
 
 import { withGlobalDatabase } from './global-db-connection';
+import { openDatabase } from '../database/connection.js';
 
 export type ParallelSessionStatus =
   | 'running'
@@ -47,13 +48,43 @@ export function updateParallelSessionStatus(
       const selfPid = process.pid;
       const runners = db
         .prepare(
-          `SELECT id, pid FROM runners
+          `SELECT id, pid, current_task_id, project_path FROM runners
            WHERE parallel_session_id = ?
              AND status != 'stopped'`
         )
-        .all(sessionId) as Array<{ id: string; pid: number | null }>;
+        .all(sessionId) as Array<{
+          id: string;
+          pid: number | null;
+          current_task_id: string | null;
+          project_path: string | null;
+        }>;
 
       for (const runner of runners) {
+        // Clean up in-flight task state before killing the runner.
+        // Reset task to pending so the section is unblocked immediately.
+        // Lock is left to expire naturally to prevent double-execution.
+        if (runner.current_task_id && runner.project_path && runner.pid !== selfPid) {
+          try {
+            const { db: projectDb, close: closeProjectDb } = openDatabase(runner.project_path);
+            try {
+              const nowMs = Date.now();
+              projectDb.prepare(
+                `UPDATE task_invocations
+                 SET status = 'failed', success = 0, timed_out = 0,
+                     exit_code = 1, completed_at_ms = ?, duration_ms = ?,
+                     error = COALESCE(error, 'Runner terminated by parallel session failure.')
+                 WHERE task_id = ? AND status = 'running'`
+              ).run(nowMs, 0, runner.current_task_id);
+              projectDb.prepare(
+                `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+                 WHERE id = ? AND status = 'in_progress'`
+              ).run(runner.current_task_id);
+            } finally {
+              closeProjectDb();
+            }
+          } catch { /* don't let project DB errors block the kill */ }
+        }
+
         if (runner.pid && runner.pid !== selfPid) {
           try { process.kill(runner.pid, 'SIGTERM'); } catch { /* already dead */ }
         }
