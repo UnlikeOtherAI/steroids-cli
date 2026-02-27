@@ -143,7 +143,12 @@ const global = { db: globalDb };
             // Process is definitively dead (stale heartbeat), so the lock is deleted
             // immediately — unlike the SIGTERM case where the lock is left in place
             // to prevent double-execution from a still-alive process.
-            if (runner.current_task_id && runner.project_path) {
+            //
+            // Skip for parallel workstream runners: their project_path is a clone path
+            // (e.g. /tmp/steroids-clones/abc123), not the canonical project path, so
+            // openDatabase would open the wrong DB or throw. Their cleanup is handled
+            // by the parallel session failure path (global-db-sessions.ts).
+            if (runner.current_task_id && runner.project_path && !runner.parallel_session_id) {
               try {
                 const { db: projectDb, close: closeProjectDb } = openDatabase(runner.project_path);
                 try {
@@ -155,9 +160,18 @@ const global = { db: globalDb };
                          error = COALESCE(error, 'Runner process died (stale heartbeat).')
                      WHERE task_id = ? AND status = 'running'`
                   ).run(nowMs, 0, runner.current_task_id);
+                  // Reset coder-phase tasks (in_progress → pending).
                   projectDb.prepare(
                     `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
                      WHERE id = ? AND status = 'in_progress'`
+                  ).run(runner.current_task_id);
+                  // Reset reviewer-phase tasks (review → in_progress) so the coder
+                  // loop re-runs and resubmits for review. Without this the invocation
+                  // is marked failed above but the task stays stuck at 'review' because
+                  // wakeup-sanitise's stale-invocation query no longer matches it.
+                  projectDb.prepare(
+                    `UPDATE tasks SET status = 'in_progress', updated_at = datetime('now')
+                     WHERE id = ? AND status = 'review'`
                   ).run(runner.current_task_id);
                   projectDb.prepare(
                     `DELETE FROM task_locks WHERE task_id = ?`
