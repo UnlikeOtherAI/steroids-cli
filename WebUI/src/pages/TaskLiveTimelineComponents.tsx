@@ -13,15 +13,58 @@ export function formatTimestampMs(ms: number): string {
   return new Date(ms).toLocaleString();
 }
 
-function getTimelineIcon(type: string): string {
+const TOOL_ICONS: Record<string, string> = {
+  Read: 'fa-file-lines',
+  Write: 'fa-file-pen',
+  Edit: 'fa-pen-to-square',
+  NotebookEdit: 'fa-pen-to-square',
+  Glob: 'fa-folder-magnifying-glass',
+  Grep: 'fa-magnifying-glass',
+  Bash: 'fa-terminal',
+  Task: 'fa-code-branch',
+  TodoWrite: 'fa-list-check',
+  TodoRead: 'fa-list-check',
+  WebFetch: 'fa-globe',
+  WebSearch: 'fa-globe',
+};
+
+function getToolIcon(cmd: string): string {
+  return TOOL_ICONS[cmd] ?? 'fa-wrench';
+}
+
+function getTimelineIcon(type: string, cmd?: string): string {
   switch (type) {
     case 'invocation.started': return 'fa-play';
     case 'invocation.completed': return 'fa-flag-checkered';
-    case 'tool': return 'fa-terminal';
+    case 'tool': return cmd ? getToolIcon(cmd) : 'fa-wrench';
     case 'output': return 'fa-align-left';
     case 'error': return 'fa-triangle-exclamation';
     default: return 'fa-circle';
   }
+}
+
+/**
+ * Extract the short, meaningful parameter for a tool call.
+ * Shows the key identifier only — never file contents, output, or long text.
+ */
+function extractToolDetail(cmd: string, input?: Record<string, unknown>): string | undefined {
+  if (!input) return undefined;
+  // File path — Read, Write, Edit, NotebookEdit, etc.
+  const filePath = input.file_path ?? input.path ?? input.notebook_path;
+  if (typeof filePath === 'string') return filePath;
+  // Pattern — Grep, Glob
+  const pattern = input.pattern ?? input.glob;
+  if (typeof pattern === 'string') return pattern;
+  // Bash — prefer human-readable description over raw command
+  if (typeof input.command === 'string') {
+    const desc = typeof input.description === 'string' ? input.description : null;
+    const raw = input.command as string;
+    return (desc ?? raw).slice(0, 120);
+  }
+  // Task (subagent) / other — show description or prompt
+  const desc = input.description ?? input.subject ?? input.prompt;
+  if (typeof desc === 'string') return String(desc).slice(0, 120);
+  return undefined;
 }
 
 function summarizeTimelineEvent(
@@ -48,7 +91,9 @@ function summarizeTimelineEvent(
     };
   }
   if (t === 'tool') {
-    return { title: 'Tool', detail: String(e.cmd ?? ''), variant: 'default' };
+    const cmd = String(e.cmd ?? 'Tool');
+    const input = e.input as Record<string, unknown> | undefined;
+    return { title: cmd, detail: extractToolDetail(cmd, input), variant: 'default' };
   }
   if (t === 'output') {
     const msg = String(e.msg ?? '');
@@ -61,17 +106,43 @@ function summarizeTimelineEvent(
   return { title: t || 'Event', variant: 'default' };
 }
 
+type DedupedEvent = TaskTimelineEvent & { _count?: number };
+
+/**
+ * Collapse consecutive identical tool events (same cmd + same detail) into one entry with a count.
+ * Input is expected to be already sorted (any order — consecutive duplicates are merged regardless).
+ */
+function deduplicateToolEvents(events: TaskTimelineEvent[]): DedupedEvent[] {
+  const result: DedupedEvent[] = [];
+  for (const e of events) {
+    const last = result[result.length - 1];
+    if (e.type === 'tool' && last?.type === 'tool' && e.cmd === last.cmd) {
+      const eDetail = extractToolDetail(String(e.cmd ?? ''), e.input as Record<string, unknown> | undefined);
+      const lastDetail = extractToolDetail(String(last.cmd ?? ''), last.input as Record<string, unknown> | undefined);
+      if (eDetail === lastDetail) {
+        last._count = (last._count ?? 1) + 1;
+        last.ts = e.ts;
+        continue;
+      }
+    }
+    result.push({ ...e });
+  }
+  return result;
+}
+
 export const LiveInvocationActivityPanel: React.FC<{
   isLive: boolean;
   streamState: StreamState;
   liveActivity: TaskTimelineEvent[];
   onClear: () => void;
 }> = ({ isLive, streamState, liveActivity, onClear }) => {
-  const orderedLiveActivity = [...liveActivity].sort((a, b) => {
-    const aTs = typeof a.ts === 'number' ? a.ts : 0;
-    const bTs = typeof b.ts === 'number' ? b.ts : 0;
-    return bTs - aTs;
-  });
+  const orderedLiveActivity = deduplicateToolEvents(
+    [...liveActivity].sort((a, b) => {
+      const aTs = typeof a.ts === 'number' ? a.ts : 0;
+      const bTs = typeof b.ts === 'number' ? b.ts : 0;
+      return bTs - aTs;
+    })
+  );
 
   return (
     <div className="card p-4 mb-6">
@@ -142,15 +213,19 @@ export const LiveInvocationActivityPanel: React.FC<{
             {orderedLiveActivity.map((e, idx) => {
               const info = summarizeTimelineEvent(e);
               const ts = typeof e.ts === 'number' ? e.ts : Date.now();
+              const count = (e as DedupedEvent)._count;
               return (
                 <div key={`${ts}-${idx}`} className="p-3 text-xs">
                   <div className="flex items-start gap-3">
                     <div className="flex-shrink-0 w-6 h-6 rounded-full bg-bg-surface flex items-center justify-center">
-                      <i className={`fa-solid ${getTimelineIcon(String(e.type))} text-text-muted text-[10px]`}></i>
+                      <i className={`fa-solid ${getTimelineIcon(String(e.type), String(e.cmd ?? ''))} text-text-muted text-[10px]`}></i>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium text-text-primary">{info.title}</span>
+                        {count && count > 1 && (
+                          <span className="text-[10px] bg-bg-surface2 text-text-muted px-1.5 py-0.5 rounded-full">×{count}</span>
+                        )}
                         {typeof e.invocationId === 'number' && (
                           <span className="text-text-muted">#{e.invocationId}</span>
                         )}
@@ -179,7 +254,7 @@ export const InvocationTimelineEventRow: React.FC<{ event: TaskTimelineEvent; ts
     <div className="p-4 border-l-4 border-border bg-bg-base">
       <div className="flex items-start gap-4">
         <div className="flex-shrink-0 w-8 h-8 rounded-full bg-bg-surface flex items-center justify-center">
-          <i className={`fa-solid ${getTimelineIcon(String(event.type))} text-text-muted text-sm`}></i>
+          <i className={`fa-solid ${getTimelineIcon(String(event.type), String(event.cmd ?? ''))} text-text-muted text-sm`}></i>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">

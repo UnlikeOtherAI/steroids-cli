@@ -22,6 +22,7 @@ const STORAGE_OPEN_COOKIE = 'steroids_pd_storage_open';
 const SECTIONS_OPEN_COOKIE = 'steroids_pd_sections_open';
 const ISSUES_OPEN_COOKIE = 'steroids_pd_issues_open';
 const STATS_HOURS_COOKIE = 'steroids_stats_hours';
+const INSTRUCTIONS_OPEN_COOKIE = 'steroids_pd_instructions_open';
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 function getCookieBoolean(name: string, defaultValue: boolean): boolean {
@@ -76,6 +77,14 @@ function StorageBar({ label, item, color, total }: {
       </div>
     </div>
   );
+}
+
+interface InstructionFile {
+  name: string;
+  key: string;
+  exists: boolean;
+  enabled: boolean;
+  content: string;
 }
 
 interface ProjectRangeStats {
@@ -137,6 +146,11 @@ export const ProjectDetailPage: React.FC = () => {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [availableSkills, setAvailableSkills] = useState<{name: string, type: string}[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
+
+  // Instructions state
+  const [instructionsOpen, setInstructionsOpen] = useState(() => getCookieBoolean(INSTRUCTIONS_OPEN_COOKIE, true));
+  const [instructions, setInstructions] = useState<InstructionFile[]>([]);
+  const [customInstructions, setCustomInstructions] = useState('');
 
   // Settings state
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -211,11 +225,13 @@ export const ProjectDetailPage: React.FC = () => {
       const failed = counts.failed ?? 0;
       const disputed = counts.disputed ?? 0;
       const total = pending + inProgress + review + completed + failed + disputed;
+      // Only terminal-state tasks count toward rate and success rate
+      const finalized = completed + failed + disputed;
       const tasksPerHour = selectedHours > 0
-        ? Math.round((total / selectedHours) * 100) / 100
+        ? Math.round((finalized / selectedHours) * 100) / 100
         : 0;
-      const successRate = total > 0
-        ? Math.round((completed / total) * 1000) / 10
+      const successRate = finalized > 0
+        ? Math.round((completed / finalized) * 1000) / 10
         : 0;
 
       setStats({
@@ -338,6 +354,55 @@ export const ProjectDetailPage: React.FC = () => {
       if (!settingsSchema) loadSettings();
     }
   }, [skillsOpen]);
+
+  const loadInstructions = async () => {
+    if (!decodedPath) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/projects/instructions?path=${encodeURIComponent(decodedPath)}`);
+      const json = await res.json();
+      if (json.success) {
+        setInstructions(json.files);
+        setCustomInstructions(json.customInstructions ?? '');
+      }
+    } catch (err) {
+      console.error('Failed to load instructions:', err);
+    }
+  };
+
+  const toggleInstruction = async (key: string, enabled: boolean) => {
+    if (!decodedPath) return;
+    setInstructions(prev => prev.map(f => f.key === key ? { ...f, enabled } : f));
+    try {
+      await fetch(`${API_BASE_URL}/api/projects/instructions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: decodedPath, key, enabled }),
+      });
+    } catch (err) {
+      console.error('Failed to toggle instruction:', err);
+      // Revert on failure
+      setInstructions(prev => prev.map(f => f.key === key ? { ...f, enabled: !enabled } : f));
+    }
+  };
+
+  const saveCustomInstructions = async (text: string) => {
+    if (!decodedPath) return;
+    try {
+      await fetch(`${API_BASE_URL}/api/projects/instructions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: decodedPath, customInstructions: text }),
+      });
+    } catch (err) {
+      console.error('Failed to save custom instructions:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (decodedPath) {
+      loadInstructions();
+    }
+  }, [decodedPath]);
 
   const loadSettings = useCallback(async () => {
     if (!decodedPath) return;
@@ -972,7 +1037,74 @@ export const ProjectDetailPage: React.FC = () => {
         )}
       </div>
 
-      
+
+      {/* Project Instructions */}
+      <div className="mb-8">
+        <button
+          onClick={() => {
+            const next = !instructionsOpen;
+            setInstructionsOpen(next);
+            setCookieBoolean(INSTRUCTIONS_OPEN_COOKIE, next);
+          }}
+          className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
+        >
+          {instructionsOpen ? (
+            <ChevronDownIcon className="w-5 h-5" />
+          ) : (
+            <ChevronRightIcon className="w-5 h-5" />
+          )}
+          <i className="fa-solid fa-file-lines w-5 h-5 flex items-center justify-center text-sm"></i>
+          <span>Project Instructions</span>
+          {instructions.filter(f => f.exists).length > 0 && (
+            <span className="text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full">
+              {instructions.filter(f => f.exists && f.enabled).length}/{instructions.filter(f => f.exists).length} active
+            </span>
+          )}
+        </button>
+
+        {instructionsOpen && (
+          <div className="bg-bg-surface rounded-lg p-6 mb-8 shadow-sm border border-border">
+            <p className="text-sm text-text-muted mb-6">
+              Checked files are force-injected into every coder and reviewer prompt. Files must exist in the project root.
+            </p>
+            <div className="space-y-3">
+              {instructions.map(file => (
+                <div key={file.key} className={`rounded-lg border p-4 ${file.exists ? 'border-border' : 'border-border opacity-40'}`}>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={file.enabled && file.exists}
+                      disabled={!file.exists}
+                      onChange={e => toggleInstruction(file.key, e.target.checked)}
+                      className="w-4 h-4 text-accent bg-bg-base border-border rounded focus:ring-accent focus:ring-2"
+                    />
+                    <span className="font-mono text-sm font-medium">{file.name}</span>
+                    {!file.exists && <span className="text-xs text-text-muted">(not found)</span>}
+                  </label>
+                  {file.exists && file.content && (
+                    <pre className="mt-3 text-xs text-text-muted bg-bg-surface2 rounded p-3 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                      {file.content.slice(0, 300)}{file.content.length > 300 ? '...' : ''}
+                    </pre>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Custom Instructions
+              </label>
+              <textarea
+                className="w-full h-32 rounded-lg border border-border bg-bg-surface2 p-3 text-sm font-mono text-text-primary resize-y"
+                placeholder="Add custom instructions injected into every prompt for this project..."
+                value={customInstructions}
+                onChange={e => setCustomInstructions(e.target.value)}
+                onBlur={() => saveCustomInstructions(customInstructions)}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Project Skills */}
       <div className="mb-8">
         <button

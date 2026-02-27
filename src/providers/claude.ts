@@ -149,6 +149,7 @@ export class ClaudeProvider extends BaseAIProvider {
   private parseStreamJsonLine(line: string): {
     text?: string;
     tool?: string;
+    input?: Record<string, unknown>;
     result?: string;
     sessionId?: string;
     tokenUsage?: TokenUsage;
@@ -161,7 +162,7 @@ export class ClaudeProvider extends BaseAIProvider {
         const parts: string[] = [];
         for (const block of event.message.content) {
           if (block.type === 'text' && block.text) parts.push(block.text);
-          if (block.type === 'tool_use') return { tool: `${block.name}`, sessionId: event.session_id };
+          if (block.type === 'tool_use') return { tool: `${block.name}`, input: block.input as Record<string, unknown>, sessionId: event.session_id };
         }
         if (parts.length > 0) return { text: parts.join(''), sessionId: event.session_id };
       }
@@ -171,9 +172,10 @@ export class ClaudeProvider extends BaseAIProvider {
         return { text: event.delta.text, sessionId: event.session_id };
       }
 
-      // Tool use events from content_block_start
+      // Tool use events from content_block_start fire before input is populated.
+      // The complete assistant message fires after with full input — use that instead.
       if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
-        return { tool: event.content_block.name, sessionId: event.session_id };
+        return { sessionId: event.session_id };
       }
 
       // Final result contains the complete text and token usage
@@ -308,7 +310,7 @@ export class ClaudeProvider extends BaseAIProvider {
             onActivity?.({ type: 'output', stream: 'stdout', msg: parsed.text });
             if (streamOutput) process.stdout.write(parsed.text);
           } else if (parsed.tool) {
-            onActivity?.({ type: 'tool', cmd: parsed.tool });
+            onActivity?.({ type: 'tool', cmd: parsed.tool, input: parsed.input });
             if (streamOutput) process.stdout.write(`[tool: ${parsed.tool}]\n`);
           }
         }

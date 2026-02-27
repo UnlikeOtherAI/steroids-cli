@@ -12,7 +12,8 @@ import type { Task, RejectionEntry } from '../database/queries.js';
 import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
-import { getAgentsMd, getSourceFileReference } from '../prompts/prompt-helpers.js';
+import { getSourceFileReference } from '../prompts/prompt-helpers.js';
+import { buildProjectInstructionsSection } from '../prompts/instruction-files.js';
 
 export interface CoordinatorContext {
   sectionTasks?: { id: string; title: string; status: string }[];
@@ -47,7 +48,7 @@ ${r.notes || '(no notes)'}
   ).join('\n---\n');
 
   // Pull in project context so coordinator understands the bigger picture
-  const agentsMd = getAgentsMd(projectPath);
+  const agentsMd = buildProjectInstructionsSection(projectPath);
   const specRef = getSourceFileReference(projectPath, task.source_file);
 
   // Build optional context sections

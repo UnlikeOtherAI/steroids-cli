@@ -684,4 +684,103 @@ router.get('/projects/logs/content', (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/projects/instructions?path=<projectPath>
+ * Returns instruction files (AGENTS.md, CLAUDE.md, GEMINI.md) with existence, enabled state, and content.
+ * Also returns customInstructions string.
+ */
+router.get('/projects/instructions', (req: Request, res: Response) => {
+  try {
+    const projectPath = req.query.path as string;
+    if (!projectPath) {
+      res.status(400).json({ success: false, error: 'Path query parameter is required' });
+      return;
+    }
+    if (!isValidProjectPath(projectPath)) {
+      res.status(403).json({ success: false, error: 'Invalid project path' });
+      return;
+    }
+
+    // Dynamically import from compiled dist to avoid circular build issues
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getInstructionFilesList, readInstructionOverrides } = require('../../../dist/prompts/instruction-files.js');
+    const files = getInstructionFilesList(projectPath);
+    const overrides = readInstructionOverrides(projectPath);
+
+    res.json({
+      success: true,
+      files,
+      customInstructions: overrides.customInstructions ?? '',
+    });
+  } catch (error) {
+    console.error('Error getting project instructions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get project instructions',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/projects/instructions
+ * Toggle a specific instruction file on/off, or save custom instructions.
+ * Body (file toggle): { path: string, key: "agentsMd" | "claudeMd" | "geminiMd", enabled: boolean }
+ * Body (custom instructions): { path: string, customInstructions: string }
+ */
+router.post('/projects/instructions', (req: Request, res: Response) => {
+  try {
+    const { path: projectPath, key, enabled, customInstructions } = req.body as {
+      path: string;
+      key?: string;
+      enabled?: boolean;
+      customInstructions?: string;
+    };
+
+    if (!projectPath) {
+      res.status(400).json({ success: false, error: 'path is required' });
+      return;
+    }
+    if (!isValidProjectPath(projectPath)) {
+      res.status(403).json({ success: false, error: 'Invalid project path' });
+      return;
+    }
+
+    const validKeys = ['agentsMd', 'claudeMd', 'geminiMd'];
+    const updatingFile = key !== undefined;
+    const updatingCustom = customInstructions !== undefined;
+
+    if (updatingFile && !validKeys.includes(key!)) {
+      res.status(400).json({ success: false, error: `key must be one of: ${validKeys.join(', ')}` });
+      return;
+    }
+    if (!updatingFile && !updatingCustom) {
+      res.status(400).json({ success: false, error: 'Provide either key+enabled or customInstructions' });
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readInstructionOverrides, writeInstructionOverrides } = require('../../../dist/prompts/instruction-files.js');
+    const overrides = readInstructionOverrides(projectPath);
+
+    if (updatingFile) {
+      overrides[key!] = enabled;
+    }
+    if (updatingCustom) {
+      overrides.customInstructions = customInstructions;
+    }
+
+    writeInstructionOverrides(projectPath, overrides);
+
+    res.json({ success: true, message: 'Instructions updated' });
+  } catch (error) {
+    console.error('Error updating project instructions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update project instructions',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 export default router;

@@ -7,6 +7,7 @@ import type { Task, RejectionEntry } from '../database/queries.js';
 import type { SteroidsConfig } from '../config/loader.js';
 import { getSourceFileReference, buildFileAnchorSection, formatSectionTasks } from './prompt-helpers.js';
 import type { SectionTask } from './prompt-helpers.js';
+import { buildProjectInstructionsSection } from './instruction-files.js';
 
 export interface ReviewerPromptContext {
   task: Task;
@@ -310,6 +311,7 @@ The coder included these notes when submitting for review:
 
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const fileAnchorSection = buildFileAnchorSection(task);
+  const instructionsSection = buildProjectInstructionsSection(projectPath);
 
   const reviewerCommands = `git show --stat ${latestSubmissionCommit}`;
   const unresolvedHistorySection =
@@ -340,7 +342,7 @@ You are a REVIEWER in an automated task execution system. Your job is to verify 
 **Title:** ${task.title}
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
-${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}${formatCoordinatorGuidance(coordinatorGuidance, coordinatorDecision)}
+${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}${formatCoordinatorGuidance(coordinatorGuidance, coordinatorDecision)}${instructionsSection}
 ## Specification
 
 ${sourceRef}

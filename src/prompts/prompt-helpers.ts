@@ -8,21 +8,16 @@ import { join } from 'node:path';
 
 import { loadConfigFile, type SteroidsConfig } from '../config/loader.js';
 import type { Task, RejectionEntry } from '../database/queries.js';
+import { buildProjectInstructionsSection } from './instruction-files.js';
+
+export { buildProjectInstructionsSection };
 
 /**
- * Read AGENTS.md content if present
+ * Read project instruction files (AGENTS.md, CLAUDE.md, GEMINI.md) if present.
+ * Thin wrapper around buildProjectInstructionsSection for backward compatibility.
  */
 export function getAgentsMd(projectPath: string): string {
-  const agentsPath = join(projectPath, 'AGENTS.md');
-  if (existsSync(agentsPath)) {
-    const content = readFileSync(agentsPath, 'utf-8');
-    // Truncate if too long (max 5000 chars per spec)
-    if (content.length > 5000) {
-      return content.substring(0, 5000) + '\n\n[Content truncated]';
-    }
-    return content;
-  }
-  return 'No AGENTS.md found. Follow standard coding practices.';
+  return buildProjectInstructionsSection(projectPath);
 }
 
 /**

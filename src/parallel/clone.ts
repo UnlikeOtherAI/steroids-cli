@@ -72,6 +72,40 @@ export class WorkspaceCloneError extends Error {
   }
 }
 
+function runGitAllowFailure(args: string[]): void {
+  try {
+    execFileSync('git', args, { stdio: ['ignore', 'ignore', 'ignore'] });
+  } catch {
+    // Best-effort hydration for optional refs.
+  }
+}
+
+function ensureMainOrMasterBranches(workspacePath: string): void {
+  // Workstream clones may be created from a non-main checked-out branch
+  // (or a prior seeded clone), so explicitly hydrate main/master refs from
+  // origin to keep downstream workspace preparation deterministic.
+  runGitAllowFailure(['-C', workspacePath, 'fetch', 'origin', 'main']);
+  runGitAllowFailure(['-C', workspacePath, 'fetch', 'origin', 'master']);
+
+  try {
+    execFileSync('git', ['-C', workspacePath, 'rev-parse', '--verify', 'refs/remotes/origin/main'], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    runGitAllowFailure(['-C', workspacePath, 'branch', '--force', 'main', 'origin/main']);
+  } catch {
+    // origin/main does not exist
+  }
+
+  try {
+    execFileSync('git', ['-C', workspacePath, 'rev-parse', '--verify', 'refs/remotes/origin/master'], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    runGitAllowFailure(['-C', workspacePath, 'branch', '--force', 'master', 'origin/master']);
+  } catch {
+    // origin/master does not exist
+  }
+}
+
 function normalizeWorkstreamDirectory(workstreamId: string): string {
   return workstreamId.startsWith('ws-') ? workstreamId : `ws-${workstreamId}`;
 }
@@ -318,6 +352,8 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
       throw new WorkspaceCloneError('Failed to reset origin after seeding clone from prior workstream', error);
     }
   }
+
+  ensureMainOrMasterBranches(workspacePath);
 
   try {
     // hardcoded command, no user input
