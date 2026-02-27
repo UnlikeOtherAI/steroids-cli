@@ -70,9 +70,10 @@ export function claimSlot(
       .prepare(
         `SELECT * FROM workspace_pool_slots
          WHERE project_id = ? AND status = 'idle'
+         ORDER BY CASE WHEN task_id = ? THEN 0 ELSE 1 END, id ASC
          LIMIT 1`
       )
-      .get(projectId) as PoolSlot | undefined;
+      .get(projectId, taskId) as PoolSlot | undefined;
 
     if (slot) {
       globalDb
@@ -121,9 +122,10 @@ export function claimSlot(
           .prepare(
             `SELECT * FROM workspace_pool_slots
              WHERE project_id = ? AND status = 'idle'
+             ORDER BY CASE WHEN task_id = ? THEN 0 ELSE 1 END, id ASC
              LIMIT 1`
           )
-          .get(projectId) as PoolSlot | undefined;
+          .get(projectId, taskId) as PoolSlot | undefined;
 
         if (slot) {
           globalDb
@@ -200,8 +202,9 @@ export function releaseSlot(globalDb: Database.Database, slotId: number): void {
 
 /**
  * Partially release a slot back to idle, preserving workspace fields
- * (task_branch, base_branch, starting_sha) so the reviewer phase can pick
- * them up in the next loop iteration without needing to re-run prepareForTask.
+ * (task_id, task_branch, base_branch, starting_sha) so the reviewer phase
+ * can reclaim this exact slot via the task-affine claimSlot SELECT.
+ * Do NOT clear task_id — it is the primary affinity key for sticky claiming.
  *
  * Only clears runner-tracking fields (runner_id, claimed_at, heartbeat_at).
  */
