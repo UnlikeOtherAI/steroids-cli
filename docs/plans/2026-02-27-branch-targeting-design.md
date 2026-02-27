@@ -144,7 +144,15 @@ This avoids threading `SteroidsConfig` through `resolveBaseBranch()`. The config
 
 **`mergeToBase()` requires no changes** — it already uses `slot.base_branch`, which will now contain the section branch when applicable.
 
-**`resolveBaseBranch()` update:** The function now accepts `configBranch: string | null = null` as a third parameter (`git-helpers.ts:79`). When `configBranch` is non-null and not `main`/`master`, it is checked first on the remote before falling back to `main` then `master`. Callers pass `config.git?.branch ?? null` as `configBranch` to `prepareForTask()`, which passes it through to `resolveBaseBranch()`. This correctly supports projects using `config.git.branch: develop` or other custom base branches.
+**`resolveBaseBranch()` — two responsibilities, now split:**
+
+This function was originally responsible for both "determine the push target" and "detect main vs master." These are different problems and must be separated:
+
+1. **Push target** (`resolveBaseBranch()`): Returns `configBranch ?? 'main'`. Config is authoritative. No git probing. If the project uses a non-default base branch, the user must set `config.git.branch` explicitly.
+
+2. **Actual repo base detection** (separate, for creating section branches from): When a section branch must be created from scratch, it must be forked from the repo's actual default branch — which may be `main` or `master`. This detection **must probe the remote** (not local refs — that was the original bug). A helper `detectRepoBase(slotPath, remote)` should probe `origin/main` then `origin/master` and return whichever exists, falling back to `'main'`. This is used exclusively inside `ensureBranchExists()` when creating the section branch in path 3 (neither remote nor local branch exists).
+
+The critical rule: `ensureBranchExists()` path 3 must create the section branch from `origin/main` OR `origin/master` — whichever actually exists on the remote — not from the `configBranch`. A section branch for `feature/auth` should always fork from the repo's real default, not from a configured target like `develop`.
 
 ### Configuration
 
@@ -322,13 +330,32 @@ export function ensureBranchExists(
     return;
   }
 
-  // 3. Neither — create from project base and push to remote
-  execGit(slotPath, ['checkout', '-B', branch, `${remote}/${baseBranch}`]);
+  // 3. Neither — detect repo default branch and create from it, then push
+  const repoBase = detectRepoBase(slotPath, remote); // probes origin/main then origin/master
+  execGit(slotPath, ['checkout', '-B', branch, `${remote}/${repoBase}`]);
   execGit(slotPath, ['push', remote, branch]);
+}
+
+/**
+ * Detect the repo's actual default branch by probing remote refs.
+ * ONLY used for "create section branch from scratch" in ensureBranchExists() path 3.
+ * Probes origin/main first, then origin/master. Falls back to 'main'.
+ * Never probes local refs — local branch state is unreliable (corrupted clones, etc.)
+ */
+function detectRepoBase(slotPath: string, remote: string): string {
+  for (const candidate of ['main', 'master']) {
+    const exists = execGit(slotPath, ['rev-parse', '--verify', `${remote}/${candidate}`], {
+      tolerateFailure: true,
+    });
+    if (exists !== null) return candidate;
+  }
+  return 'main'; // fallback if remote is unreachable
 }
 ```
 
-Edge cases: remote branch deleted externally → local branch may exist from prior run (path 2); neither exists → created fresh from project base and pushed (path 3).
+Edge cases: remote branch deleted externally → local branch may exist from prior run (path 2); neither exists → created fresh from repo default branch (main OR master — detected by probing remote refs) and pushed (path 3).
+
+**Important:** `detectRepoBase()` probes REMOTE refs only (`origin/main`, `origin/master`). Never local branches — local state can be corrupted (wrong origin, unexpected checked-out branch). This was the root cause of the original "branch not found" bug that `resolveBaseBranch()` was simplified to avoid.
 
 `execGit()` from `src/workspace/git-helpers.ts` uses `execFileSync` with an argument array — no shell injection risk. All git operations are passed as arrays, not template strings.
 
@@ -523,7 +550,7 @@ TypeScript callers would get type errors accessing `section.branch` without upda
 
 **Claude MEDIUM #5 (NEW): `resolveBaseBranch()` ignores `config.git.branch`**
 Projects using `config.git.branch: develop` would fail `prepareForTask()` because `resolveBaseBranch()` only checks `main`/`master`.
-**Decision: ADOPT.** `resolveBaseBranch()` now accepts `configBranch: string | null = null` as a third parameter and checks it on the remote first. `prepareForTask()` passes this through from the caller's `config.git?.branch ?? null`. This correctly supports non-`main`/`master` base branches like `develop`.
+**Decision: ADOPT (strengthened).** `resolveBaseBranch()` now simply returns `configBranch ?? 'main'` — no probing of the clone. The configured branch is authoritative. Auto-detection of `main`/`master` from the clone state is removed entirely: it was fragile (fails when the clone is in an unexpected state) and wrong in principle (the config is the source of truth, not the clone's checked-out refs).
 
 **Claude MEDIUM #4 (NEW): Batch mode `pushToRemote` not in audit**
 `orchestrator-loop.ts:377` has a `pushToRemote()` call in batch mode that was missing from the audit list.
