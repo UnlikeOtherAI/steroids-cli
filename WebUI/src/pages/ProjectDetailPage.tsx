@@ -296,11 +296,8 @@ export const ProjectDetailPage: React.FC = () => {
     setSectionsLoading(true);
     try {
       const response = await sectionsApi.listForProject(decodedPath);
-      // Sort sections alphabetically by name
-      const sortedSections = [...response.sections].sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-      );
-      setSections(sortedSections);
+      // Use server order (priority ASC, then name ASC)
+      setSections(response.sections);
     } catch (err) {
       console.error('Failed to load sections:', err);
     } finally {
@@ -985,6 +982,11 @@ export const ProjectDetailPage: React.FC = () => {
                           {section.priority !== 50 && (
                             <div className="text-xs text-text-muted mt-0.5">
                               Priority: {section.priority}
+                            </div>
+                          )}
+                          {section.depends_on.length > 0 && (
+                            <div className="text-xs text-text-muted mt-1 border-t border-border pt-1">
+                              Depends on: {section.depends_on.join(', ')}
                             </div>
                           )}
                           {(section.branch || section.auto_pr) && (

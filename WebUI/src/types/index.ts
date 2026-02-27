@@ -93,6 +93,7 @@ export interface Section {
   auto_pr: boolean;
   pr_number: number | null;
   pr_url: string | null;
+  depends_on: string[];
   created_at: string;
   total_tasks: number;
   pending: number;

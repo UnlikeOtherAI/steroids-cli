@@ -914,6 +914,28 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
       // Derive PR URL from git remote + pr_number (GitHub-only)
       const githubBaseUrl = getGitHubUrl(projectPath);
 
+      // Fetch all section dependencies in one query, keyed by section_id
+      // Wrapped in try/catch for older DBs that pre-date migration 004
+      const dependsBySection = new Map<string, string[]>();
+      try {
+        const deps = db.prepare(`
+          SELECT sd.section_id, s.name as depends_on_name
+          FROM section_dependencies sd
+          JOIN sections s ON sd.depends_on_section_id = s.id
+          ORDER BY s.name ASC
+        `).all() as Array<{ section_id: string; depends_on_name: string }>;
+        for (const row of deps) {
+          const existing = dependsBySection.get(row.section_id);
+          if (existing) {
+            existing.push(row.depends_on_name);
+          } else {
+            dependsBySection.set(row.section_id, [row.depends_on_name]);
+          }
+        }
+      } catch {
+        // section_dependencies table absent — leave map empty
+      }
+
       // Also get tasks without a section (null section_id)
       const unassigned = db
         .prepare(
@@ -945,6 +967,7 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
           ...s,
           auto_pr: s.auto_pr !== 0,
           pr_url: s.pr_number && githubBaseUrl ? `${githubBaseUrl}/pull/${s.pr_number}` : null,
+          depends_on: dependsBySection.get(s.id) ?? [],
         })),
         unassigned: unassigned.total_tasks > 0 ? unassigned : null,
       });
