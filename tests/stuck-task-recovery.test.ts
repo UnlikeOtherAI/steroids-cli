@@ -48,6 +48,7 @@ function setupProjectDb(): Database.Database {
     CREATE TABLE task_invocations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       task_id TEXT NOT NULL,
+      runner_id TEXT,
       role TEXT NOT NULL,
       status TEXT,
       created_at TEXT NOT NULL,

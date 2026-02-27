@@ -58,7 +58,7 @@ export interface OrphanedTaskSignal {
   failureMode: 'orphaned_task';
   taskId: string;
   title: string;
-  status: 'in_progress';
+  status: 'in_progress' | 'review';
   updatedAt: Date;
   secondsSinceUpdate: number;
   invocationCount: number;
@@ -456,6 +456,72 @@ function detectTaskSignalsInternal(
           runnerHeartbeatAt: hbAt,
           lastActivityAt,
           secondsSinceActivity,
+        });
+      }
+    }
+  }
+
+  // Dead-owner invocations: running invocations whose runner has been unregistered
+  // or whose process is dead. This closes the detection gap where a task with a running
+  // invocation from a deleted runner falls through both the orphaned detector (has running
+  // invocation count > 0) and the hanging detector (no active runner to find).
+  {
+    const emittedTaskIds = new Set([
+      ...orphanedTasks.map((s) => s.taskId),
+      ...hangingInvocations.map((s) => s.taskId),
+    ]);
+
+    const rows = projectDb
+      .prepare(
+        `SELECT i.id, i.task_id, i.runner_id, t.title, t.status, t.updated_at
+         FROM task_invocations i
+         JOIN tasks t ON t.id = i.task_id
+         WHERE i.status = 'running'
+           AND i.runner_id IS NOT NULL
+           AND t.status IN ('in_progress', 'review')`
+      )
+      .all() as Array<{
+      id: number;
+      task_id: string;
+      runner_id: string;
+      title: string;
+      status: 'in_progress' | 'review';
+      updated_at: string;
+    }>;
+
+    for (const row of rows) {
+      if (emittedTaskIds.has(row.task_id)) continue;
+
+      // Check if runner is alive via global DB
+      const runnerRow = globalDb
+        .prepare('SELECT pid FROM runners WHERE id = ?')
+        .get(row.runner_id) as { pid: number | null } | undefined;
+
+      let isOwnerDead = false;
+      if (!runnerRow) {
+        // Runner row missing = runner has been unregistered (dead).
+        // Race safety: session teardown marks invocations as 'failed' BEFORE
+        // deleting the runner row, so WHERE i.status = 'running' naturally
+        // excludes tasks mid-graceful-teardown.
+        isOwnerDead = true;
+      } else if (runnerRow.pid !== null && !isPidAlive(runnerRow.pid)) {
+        // Runner row exists but process is dead
+        isOwnerDead = true;
+      }
+
+      if (isOwnerDead) {
+        const updatedAt = parseSqliteDateTimeUtc(row.updated_at);
+        emittedTaskIds.add(row.task_id);
+        orphanedTasks.push({
+          failureMode: 'orphaned_task',
+          taskId: row.task_id,
+          title: row.title,
+          status: row.status,
+          updatedAt,
+          secondsSinceUpdate: secondsBetween(now, updatedAt),
+          invocationCount: 0,
+          lastInvocationAt: null,
+          hasActiveRunner: false,
         });
       }
     }

@@ -157,11 +157,9 @@ function sanitiseProjectState(
     hasActiveMergeLock = false;
   }
 
-  const hasActiveParallelContext = hasActiveParallelRunner || hasActiveMergeLock;
-
   const staleInvocations = projectDb
     .prepare(
-      `SELECT i.id, i.task_id, i.role, i.started_at_ms, t.status AS task_status
+      `SELECT i.id, i.task_id, i.role, i.started_at_ms, i.runner_id, t.status AS task_status
        FROM task_invocations i
        LEFT JOIN tasks t ON t.id = i.task_id
        WHERE i.status = 'running'
@@ -174,12 +172,36 @@ function sanitiseProjectState(
     task_id: string;
     role: string;
     started_at_ms: number;
+    runner_id: string | null;
     task_status: string | null;
   }>;
 
   for (const row of staleInvocations) {
-    if (activeTaskIds.has(row.task_id) || hasActiveParallelContext) {
+    if (activeTaskIds.has(row.task_id)) {
       continue;
+    }
+    // Merge locks are a hard skip — don't touch tasks during merge operations.
+    if (hasActiveMergeLock) {
+      continue;
+    }
+    // If a parallel runner is active, only skip if this invocation's runner is still alive
+    if (hasActiveParallelRunner && row.runner_id) {
+      const runnerRow = globalDb
+        .prepare('SELECT pid FROM runners WHERE id = ?')
+        .get(row.runner_id) as { pid: number | null } | undefined;
+      if (runnerRow) {
+        if (runnerRow.pid !== null) {
+          try {
+            process.kill(runnerRow.pid, 0);
+            continue; // Process alive, skip this invocation
+          } catch {
+            // Process dead, fall through to cleanup
+          }
+        } else {
+          continue; // No PID to check, assume alive (defensive)
+        }
+      }
+      // Runner row missing = runner is dead, proceed with cleanup
     }
 
     const completedAtMs = Date.now();
@@ -238,7 +260,7 @@ function sanitiseProjectState(
           )
           .run(completedAtMs, durationMs, row.id);
 
-        projectDb
+        const rejectResult = projectDb
           .prepare(
             `UPDATE tasks
              SET status = 'in_progress',
@@ -248,15 +270,20 @@ function sanitiseProjectState(
           )
           .run(row.task_id);
 
-        projectDb
-          .prepare(
-            `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
-             SELECT ?, 'review', 'in_progress', 'orchestrator', 'orchestrator',
-                    'Recovered by periodic sanitise from reviewer decision log (DECISION: REJECT).',
-                    datetime('now')
-             WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND status = 'in_progress')`
-          )
-          .run(row.task_id, row.task_id);
+        if (rejectResult.changes > 0) {
+          projectDb
+            .prepare(
+              `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
+               SELECT ?, 'review', 'in_progress', 'orchestrator', 'orchestrator',
+                      'Recovered by periodic sanitise from reviewer decision log (DECISION: REJECT).',
+                      datetime('now')
+               WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND status = 'in_progress')`
+            )
+            .run(row.task_id, row.task_id);
+          projectDb
+            .prepare('DELETE FROM task_locks WHERE task_id = ?')
+            .run(row.task_id);
+        }
       } else {
         projectDb
           .prepare(
@@ -274,12 +301,17 @@ function sanitiseProjectState(
         // Reset task to pending so the section is unblocked.
         // Defense-in-depth: covers SIGKILL and crash cases where Part 1 (global-db-sessions)
         // cleanup did not fire.
-        projectDb
+        const resetResult = projectDb
           .prepare(
             `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
              WHERE id = ? AND status = 'in_progress'`
           )
           .run(row.task_id);
+        if (resetResult.changes > 0) {
+          projectDb
+            .prepare('DELETE FROM task_locks WHERE task_id = ?')
+            .run(row.task_id);
+        }
       }
     }
 
@@ -294,12 +326,12 @@ function sanitiseProjectState(
 
   if (!dryRun) {
     const releasedTaskLocks = projectDb
-      .prepare(`DELETE FROM task_locks WHERE expires_at <= datetime('now')`)
+      .prepare(`DELETE FROM task_locks WHERE expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
       .run();
     summary.releasedTaskLocks = releasedTaskLocks.changes;
 
     const releasedSectionLocks = projectDb
-      .prepare(`DELETE FROM section_locks WHERE expires_at <= datetime('now')`)
+      .prepare(`DELETE FROM section_locks WHERE expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
       .run();
     summary.releasedSectionLocks = releasedSectionLocks.changes;
   }

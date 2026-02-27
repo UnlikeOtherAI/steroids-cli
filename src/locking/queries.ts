@@ -127,11 +127,11 @@ export function claimExpiredTaskLock(
   const result = db.prepare(
     `UPDATE task_locks
      SET runner_id = ?,
-         acquired_at = datetime('now'),
+         acquired_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
          expires_at = ?,
-         heartbeat_at = datetime('now')
+         heartbeat_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE task_id = ?
-       AND expires_at < datetime('now')`
+       AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
   ).run(runnerId, expiresAt, taskId);
 
   return result.changes > 0;
@@ -181,7 +181,7 @@ export function updateTaskLockHeartbeat(
 ): boolean {
   const result = db.prepare(
     `UPDATE task_locks
-     SET heartbeat_at = datetime('now')
+     SET heartbeat_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE task_id = ?
        AND runner_id = ?`
   ).run(taskId, runnerId);
@@ -206,7 +206,7 @@ export function extendTaskLock(
   const result = db.prepare(
     `UPDATE task_locks
      SET expires_at = ?,
-         heartbeat_at = datetime('now')
+         heartbeat_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE task_id = ?
        AND runner_id = ?`
   ).run(newExpiresAt, taskId, runnerId);
@@ -219,7 +219,11 @@ export function extendTaskLock(
  */
 export function listTaskLocks(db: Database.Database): TaskLock[] {
   return db
-    .prepare('SELECT * FROM task_locks ORDER BY acquired_at DESC')
+    .prepare(
+      `SELECT * FROM task_locks
+       WHERE expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       ORDER BY acquired_at DESC`
+    )
     .all() as TaskLock[];
 }
 
@@ -230,7 +234,7 @@ export function findExpiredTaskLocks(db: Database.Database): TaskLock[] {
   return db
     .prepare(
       `SELECT * FROM task_locks
-       WHERE expires_at < datetime('now')
+       WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        ORDER BY expires_at ASC`
     )
     .all() as TaskLock[];
@@ -242,7 +246,7 @@ export function findExpiredTaskLocks(db: Database.Database): TaskLock[] {
  */
 export function cleanupExpiredTaskLocks(db: Database.Database): number {
   const result = db.prepare(
-    `DELETE FROM task_locks WHERE expires_at < datetime('now')`
+    `DELETE FROM task_locks WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
   ).run();
 
   return result.changes;
@@ -313,10 +317,10 @@ export function claimExpiredSectionLock(
   const result = db.prepare(
     `UPDATE section_locks
      SET runner_id = ?,
-         acquired_at = datetime('now'),
+         acquired_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
          expires_at = ?
      WHERE section_id = ?
-       AND expires_at < datetime('now')`
+       AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
   ).run(runnerId, expiresAt, sectionId);
 
   return result.changes > 0;
@@ -369,7 +373,7 @@ export function findExpiredSectionLocks(db: Database.Database): SectionLock[] {
   return db
     .prepare(
       `SELECT * FROM section_locks
-       WHERE expires_at < datetime('now')
+       WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        ORDER BY expires_at ASC`
     )
     .all() as SectionLock[];
@@ -380,7 +384,7 @@ export function findExpiredSectionLocks(db: Database.Database): SectionLock[] {
  */
 export function cleanupExpiredSectionLocks(db: Database.Database): number {
   const result = db.prepare(
-    `DELETE FROM section_locks WHERE expires_at < datetime('now')`
+    `DELETE FROM section_locks WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
   ).run();
 
   return result.changes;
