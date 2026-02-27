@@ -865,7 +865,7 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
 
       const hasPriority = sectionCols.has('priority');
       const hasBranch = sectionCols.has('branch');
-      const hasPrFields = sectionCols.has('pr_number');
+      const hasPrFields = sectionCols.has('pr_number') && sectionCols.has('auto_pr');
 
       const prioritySelect = hasPriority ? 's.priority,' : '50 as priority,';
       const branchSelect = hasBranch ? 's.branch,' : 'NULL as branch,';
@@ -943,6 +943,7 @@ router.get('/projects/:projectPath(*)/sections', (req: Request, res: Response) =
         project: projectPath,
         sections: sections.map(s => ({
           ...s,
+          auto_pr: s.auto_pr !== 0,
           pr_url: s.pr_number && githubBaseUrl ? `${githubBaseUrl}/pull/${s.pr_number}` : null,
         })),
         unassigned: unassigned.total_tasks > 0 ? unassigned : null,

@@ -987,12 +987,14 @@ export const ProjectDetailPage: React.FC = () => {
                               Priority: {section.priority}
                             </div>
                           )}
-                          {section.branch && (
+                          {(section.branch || section.auto_pr) && (
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              <span className="inline-flex items-center gap-1 text-xs text-text-muted">
-                                <i className="fa-solid fa-code-branch"></i>
-                                {section.branch}
-                              </span>
+                              {section.branch && (
+                                <span className="inline-flex items-center gap-1 text-xs text-text-muted">
+                                  <i className="fa-solid fa-code-branch"></i>
+                                  {section.branch}
+                                </span>
+                              )}
                               {section.pr_url ? (
                                 <a
                                   href={section.pr_url}
@@ -1007,7 +1009,7 @@ export const ProjectDetailPage: React.FC = () => {
                               ) : section.auto_pr ? (
                                 <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-700/50 dark:text-gray-400">
                                   <i className="fa-solid fa-robot"></i>
-                                  Auto-PR
+                                  {section.branch ? 'Auto-PR' : 'Auto-PR (no branch)'}
                                 </span>
                               ) : null}
                             </div>

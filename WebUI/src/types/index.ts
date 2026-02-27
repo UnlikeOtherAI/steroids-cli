@@ -90,7 +90,7 @@ export interface Section {
   name: string;
   priority: number;
   branch: string | null;
-  auto_pr: number;
+  auto_pr: boolean;
   pr_number: number | null;
   pr_url: string | null;
   created_at: string;
