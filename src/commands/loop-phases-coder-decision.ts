@@ -175,6 +175,7 @@ export interface CoderExecutionContext {
   branchName: string;
   leaseFence?: LeaseFenceContext;
   jsonMode: boolean;
+  hasPoolSlot: boolean;
 }
 
 export interface CoderDecision {
@@ -192,7 +193,7 @@ export async function executeCoderDecision(
 ): Promise<void> {
   const {
     coderStdout, has_uncommitted, requiresExplicitSubmissionCommit,
-    effectiveProjectPath, projectPath, branchName, leaseFence, jsonMode,
+    effectiveProjectPath, projectPath, branchName, leaseFence, jsonMode, hasPoolSlot,
   } = ctx;
 
   switch (decision.action) {
@@ -224,7 +225,9 @@ export async function executeCoderDecision(
           }
           break;
         }
-        if (leaseFence?.parallelSessionId) {
+        // Skip push in pool mode: mergeToBase handles all pushing atomically.
+        // Only push in legacy workstream mode (no pool slot).
+        if (leaseFence?.parallelSessionId && !hasPoolSlot) {
           const pushResult = pushToRemote(projectPath, 'origin', branchName);
           if (!pushResult.success) {
             updateTaskStatus(
@@ -275,7 +278,9 @@ export async function executeCoderDecision(
           }
           break;
         }
-        if (leaseFence?.parallelSessionId) {
+        // Skip push in pool mode: mergeToBase handles all pushing atomically.
+        // Only push in legacy workstream mode (no pool slot).
+        if (leaseFence?.parallelSessionId && !hasPoolSlot) {
           const pushResult = pushToRemote(projectPath, 'origin', branchName);
           if (!pushResult.success) {
             updateTaskStatus(
@@ -333,7 +338,9 @@ export async function executeCoderDecision(
           }
           break;
         }
-        if (leaseFence?.parallelSessionId) {
+        // Skip push in pool mode: mergeToBase handles all pushing atomically.
+        // Only push in legacy workstream mode (no pool slot).
+        if (leaseFence?.parallelSessionId && !hasPoolSlot) {
           const pushResult = pushToRemote(projectPath, 'origin', branchName);
           if (!pushResult.success) {
             updateTaskStatus(

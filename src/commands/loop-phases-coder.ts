@@ -449,5 +449,6 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
     branchName,
     leaseFence,
     jsonMode,
+    hasPoolSlot: poolSlotContext !== undefined,
   });
 }
