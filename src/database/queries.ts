@@ -269,6 +269,10 @@ export function setSectionPriority(
 /**
  * Set or clear the target branch for a section.
  * Pass null to clear the override (tasks use project base branch).
+ *
+ * Also clears pr_number when the branch changes so that auto-PR can
+ * fire again against the new branch (stale PR numbers from the old
+ * branch would otherwise block creation forever).
  */
 export function setSectionBranch(
   db: Database.Database,
@@ -276,7 +280,7 @@ export function setSectionBranch(
   branch: string | null
 ): void {
   const result = db
-    .prepare('UPDATE sections SET branch = ? WHERE id = ?')
+    .prepare('UPDATE sections SET branch = ?, pr_number = NULL WHERE id = ?')
     .run(branch, sectionId);
 
   if (result.changes === 0) {

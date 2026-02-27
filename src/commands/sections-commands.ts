@@ -64,6 +64,9 @@ GLOBAL OPTIONS:
     throw invalidArgumentsError('Branch name may only contain letters, numbers, /, _, ., and -');
   }
 
+  if (autoPr && branch === null) {
+    out.log('Warning: --auto-pr set without --branch. Auto-PR will be skipped at completion time (no branch to target).');
+  }
   if (autoPr && !isGhAvailable()) {
     out.log('Warning: --auto-pr set but gh CLI not found on PATH. PR creation will be skipped at completion time.');
   }
@@ -350,6 +353,7 @@ export async function updateSection(args: string[], flags: GlobalFlags): Promise
     options: {
       branch: { type: 'string', short: 'b' },
       'auto-pr': { type: 'boolean' },
+      'no-auto-pr': { type: 'boolean' },
     },
     allowPositionals: true,
   });
@@ -388,10 +392,15 @@ EXAMPLES:
 
   const sectionIdInput = positionals[0];
   const branchInput = values.branch;
-  const autoPrInput = values['auto-pr'];
+  // --auto-pr and --no-auto-pr are mutually exclusive; --no-auto-pr wins if both set
+  const autoPrInput: boolean | undefined = values['no-auto-pr']
+    ? false
+    : values['auto-pr'] !== undefined
+      ? values['auto-pr']
+      : undefined;
 
   if (branchInput === undefined && autoPrInput === undefined) {
-    throw invalidArgumentsError('At least one option required (e.g. --branch, --auto-pr)');
+    throw invalidArgumentsError('At least one option required (e.g. --branch, --auto-pr, --no-auto-pr)');
   }
 
   // "default" is a sentinel to clear the branch override
@@ -428,6 +437,14 @@ EXAMPLES:
     }
     if (autoPrInput !== undefined) {
       setSectionAutoPr(db, section.id, autoPrInput);
+    }
+
+    // Warn if auto-PR enabled but no branch will be set
+    if (autoPrInput === true) {
+      const effectiveBranch = branch !== undefined ? branch : section.branch;
+      if (!effectiveBranch) {
+        out.log('Warning: --auto-pr enabled but section has no branch. Auto-PR will be skipped at completion time (no branch to target).');
+      }
     }
 
     if (flags.json) {

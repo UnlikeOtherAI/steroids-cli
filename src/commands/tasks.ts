@@ -1013,7 +1013,7 @@ async function checkSectionCompletion(
   sectionId: string | null,
   flags: GlobalFlags
 ): Promise<void> {
-  if (!sectionId || shouldSkipHooks(flags)) {
+  if (!sectionId) {
     return;
   }
 
@@ -1034,22 +1034,24 @@ async function checkSectionCompletion(
   const sectionDone = sectionTasks.length > 0 && activeCount === 0 && completedCount > 0;
 
   if (sectionDone) {
-    // Trigger section.completed hooks
-    await triggerHooksSafely(
-      () =>
-        triggerSectionCompleted(
-          {
-            id: section.id,
-            name: section.name,
-            taskCount: sectionTasks.length,
-          },
-          sectionTasks.map((t) => ({ id: t.id, title: t.title })),
-          { verbose: flags.verbose }
-        ),
-      { verbose: flags.verbose }
-    );
+    // Trigger section.completed hooks (skipped when --no-hooks)
+    if (!shouldSkipHooks(flags)) {
+      await triggerHooksSafely(
+        () =>
+          triggerSectionCompleted(
+            {
+              id: section.id,
+              name: section.name,
+              taskCount: sectionTasks.length,
+            },
+            sectionTasks.map((t) => ({ id: t.id, title: t.title })),
+            { verbose: flags.verbose }
+          ),
+        { verbose: flags.verbose }
+      );
+    }
 
-    // Auto-PR: create PR if configured (idempotent)
+    // Auto-PR: always runs regardless of --no-hooks (hooks and PRs are orthogonal)
     const projectPath = process.cwd();
     const config = loadConfig(projectPath);
     await checkSectionCompletionAndPR(db, projectPath, sectionId, config);

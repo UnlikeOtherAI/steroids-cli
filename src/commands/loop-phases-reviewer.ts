@@ -419,8 +419,11 @@ export async function runReviewerPhase(
         } else if (!jsonMode) {
           console.warn('Push failed. Will stack and retry on next completion.');
         }
-        // Check if the section is now complete and create PR if auto_pr is set
-        await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
+        // Check if the section is now complete and create PR if auto_pr is set.
+        // Only fire when push succeeded — a PR against an un-pushed branch is invalid.
+        if (pushResult.success) {
+          await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
+        }
       }
       break;
 

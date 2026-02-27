@@ -52,6 +52,9 @@ export function isGhAvailable(): boolean {
 /**
  * Look for an existing open PR for the given head branch.
  * Returns the PR number if found, or null.
+ *
+ * Uses `--jq '.[0].number // empty'` to produce empty output (not the string
+ * "null") when no PR exists, avoiding parseInt("null") → NaN.
  */
 function findExistingPr(
   projectPath: string,
@@ -64,14 +67,16 @@ function findExistingPr(
       '--head', headBranch,
       '--base', baseBranch,
       '--json', 'number',
-      '--jq', '.[0].number',
+      '--jq', '.[0].number // empty',
     ], {
       cwd: projectPath,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,
     }).trim();
-    return output ? parseInt(output, 10) : null;
+    if (!output) return null;
+    const n = parseInt(output, 10);
+    return Number.isInteger(n) && n > 0 ? n : null;
   } catch {
     return null;
   }
@@ -79,6 +84,7 @@ function findExistingPr(
 
 /**
  * Create a GitHub PR for the section branch and return its number.
+ * Uses `--json number` for deterministic structured output (not URL regex parsing).
  * Throws on failure.
  */
 function createPr(
@@ -103,6 +109,7 @@ function createPr(
     '--head', headBranch,
     '--title', `Section: ${sectionName}`,
     '--body', prBody,
+    '--json', 'number',
   ], {
     cwd: projectPath,
     encoding: 'utf-8',
@@ -110,12 +117,12 @@ function createPr(
     timeout: 60_000,
   }).trim();
 
-  // `gh pr create` outputs the PR URL on success. Extract the number from the URL.
-  const match = output.match(/\/pull\/(\d+)/);
-  if (!match) {
-    throw new Error(`gh pr create succeeded but output was unexpected: ${output}`);
+  // `gh pr create --json number` outputs `{"number": 123}`.
+  const parsed = JSON.parse(output) as { number?: number };
+  if (!parsed.number || !Number.isInteger(parsed.number)) {
+    throw new Error(`gh pr create --json number returned unexpected output: ${output}`);
   }
-  return parseInt(match[1], 10);
+  return parsed.number;
 }
 
 // ─── Core function ───────────────────────────────────────────────────────────
