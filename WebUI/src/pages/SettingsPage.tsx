@@ -309,6 +309,7 @@ export const SettingsPage: React.FC = () => {
               schema={schema}
               values={getMergedValues()}
               onChange={handleChange}
+              hideAI={true}
             />
           </div>
 
