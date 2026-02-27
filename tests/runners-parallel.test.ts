@@ -528,6 +528,109 @@ describe('launchParallelSession', () => {
   });
 });
 
+describe('closeStaleParallelSessions', () => {
+  function makeGlobalDb() {
+    const db = new Database(':memory:');
+    const schemaSql = `
+      CREATE TABLE parallel_sessions (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        project_repo_id TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT
+      );
+      CREATE TABLE workstreams (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        branch_name TEXT NOT NULL,
+        section_ids TEXT NOT NULL DEFAULT '[]',
+        clone_path TEXT,
+        status TEXT NOT NULL DEFAULT 'running',
+        runner_id TEXT,
+        claim_generation INTEGER NOT NULL DEFAULT 0,
+        lease_expires_at TEXT,
+        sealed_base_sha TEXT,
+        sealed_head_sha TEXT,
+        sealed_commit_shas TEXT,
+        completion_order INTEGER,
+        recovery_attempts INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_reconcile_action TEXT,
+        last_reconciled_at TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE runners (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL DEFAULT '',
+        pid INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'stopped',
+        heartbeat_at TEXT NOT NULL DEFAULT (datetime('now')),
+        parallel_session_id TEXT
+      );
+    `;
+    db.exec(schemaSql);
+    return db;
+  }
+
+  let closeStaleParallelSessions: (
+    db: any,
+    filters?: { projectPath?: string; projectRepoId?: string }
+  ) => number;
+
+  beforeEach(async () => {
+    const mod = await import('../src/runners/parallel-session-state.js');
+    closeStaleParallelSessions = mod.closeStaleParallelSessions;
+  });
+
+  it('marks orphaned workstreams failed and closes the session when all runners are stopped', () => {
+    const db = makeGlobalDb();
+    db.prepare('INSERT INTO parallel_sessions (id, project_path, status) VALUES (?, ?, ?)').run(
+      'sess-1', '/tmp/proj', 'running'
+    );
+    db.prepare('INSERT INTO workstreams (id, session_id, branch_name, status) VALUES (?, ?, ?, ?)').run(
+      'ws-1', 'sess-1', 'steroids/ws-1', 'running'
+    );
+    // Runner is stopped with a stale heartbeat
+    db.prepare(
+      "INSERT INTO runners (id, project_path, pid, status, heartbeat_at, parallel_session_id) VALUES (?, ?, ?, ?, datetime('now', '-10 minutes'), ?)"
+    ).run('r-1', '/tmp/proj', 1234, 'stopped', 'sess-1');
+
+    const changes = closeStaleParallelSessions(db, { projectPath: '/tmp/proj' });
+
+    expect(changes).toBe(1); // session closed
+    const ws = db.prepare('SELECT status FROM workstreams WHERE id = ?').get('ws-1') as { status: string };
+    expect(ws.status).toBe('failed');
+    const sess = db.prepare('SELECT status FROM parallel_sessions WHERE id = ?').get('sess-1') as { status: string };
+    expect(sess.status).toBe('completed');
+    db.close();
+  });
+
+  it('does NOT close session or touch workstreams when a runner is still alive', () => {
+    const db = makeGlobalDb();
+    db.prepare('INSERT INTO parallel_sessions (id, project_path, status) VALUES (?, ?, ?)').run(
+      'sess-2', '/tmp/proj2', 'running'
+    );
+    db.prepare('INSERT INTO workstreams (id, session_id, branch_name, status) VALUES (?, ?, ?, ?)').run(
+      'ws-2', 'sess-2', 'steroids/ws-2', 'running'
+    );
+    // Runner is alive with a fresh heartbeat
+    db.prepare(
+      "INSERT INTO runners (id, project_path, pid, status, heartbeat_at, parallel_session_id) VALUES (?, ?, ?, ?, datetime('now'), ?)"
+    ).run('r-2', '/tmp/proj2', 5678, 'running', 'sess-2');
+
+    const changes = closeStaleParallelSessions(db, { projectPath: '/tmp/proj2' });
+
+    expect(changes).toBe(0);
+    const ws = db.prepare('SELECT status FROM workstreams WHERE id = ?').get('ws-2') as { status: string };
+    expect(ws.status).toBe('running');
+    const sess = db.prepare('SELECT status FROM parallel_sessions WHERE id = ?').get('sess-2') as { status: string };
+    expect(sess.status).toBe('running');
+    db.close();
+  });
+});
+
 describe('spawnDetachedRunner', () => {
   it('uses ignore stdio when daemon logs are disabled', () => {
     const child = createMockProcess(4321);
