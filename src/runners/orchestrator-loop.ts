@@ -437,14 +437,15 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
         try {
           const gdb = openGlobalDatabase();
           poolGlobalDb = gdb;
-          const projectId = getProjectHash(projectPath);
-          const remoteUrl = resolveRemoteUrl(projectPath);
+          const sourceProjectPath = parallelSourceProjectPath ?? projectPath;
+          const projectId = getProjectHash(sourceProjectPath);
+          const remoteUrl = resolveRemoteUrl(sourceProjectPath);
           if (!remoteUrl) {
             console.warn(`[pool] Skipping pool mode for ${projectPath}: no remote URL detected. Pool mode requires a pushable remote.`);
             // poolSlotCtx remains undefined — falls through to non-pool (legacy) path
           } else {
             const slot = claimSlot(gdb.db, projectId, options.runnerId, task.id);
-            const finalSlot = finalizeSlotPath(gdb.db, slot.id, projectPath, remoteUrl);
+            const finalSlot = finalizeSlotPath(gdb.db, slot.id, sourceProjectPath, remoteUrl);
 
             const heartbeatTimer = setInterval(() => {
               try {
