@@ -58,7 +58,8 @@ export async function runCoderPhase(
   coordinatorThresholds?: number[],
   leaseFence?: LeaseFenceContext,
   branchName = 'main',
-  poolSlotContext?: PoolSlotContext
+  poolSlotContext?: PoolSlotContext,
+  sourceProjectPath: string = projectPath
 ): Promise<CreditExhaustionResult | void> {
   if (!task) return;
   if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
@@ -81,6 +82,7 @@ export async function runCoderPhase(
       poolSlotContext.slot,
       task.id,
       projectPath,
+      sourceProjectPath,
       sectionBranch,  // section branch if set (migration 021), null means use project base
       configBranch
     );

@@ -274,15 +274,16 @@ export function listProjectSlots(globalDb: Database.Database, projectId: string)
 
 /**
  * Ensure the slot directory exists as a full clone.
- * - If missing: full clone from projectPath (local, fast via hardlinks), then set origin to remoteUrl.
+ * - If missing: full clone from cloneSourcePath (local, fast via hardlinks), then set origin to remoteUrl.
  * - If existing: repair origin to remoteUrl if available (fixes stale/poisoned slots).
  * - If shallow: `git fetch --unshallow`.
- * - Always ensure .steroids symlink.
+ * - Always ensure .steroids symlink to sourceProjectPath.
  */
 export function ensureSlotClone(
   slot: PoolSlot,
   remoteUrl: string | null,
-  projectPath: string
+  cloneSourcePath: string,
+  sourceProjectPath: string
 ): void {
   const slotPath = slot.slot_path;
 
@@ -295,8 +296,8 @@ export function ensureSlotClone(
     // Create parent directories
     mkdirSync(resolve(slotPath, '..'), { recursive: true });
 
-    // Always clone from local projectPath for speed (hardlinks, no network).
-    execFileSync('git', ['clone', '--no-tags', projectPath, slotPath], {
+    // Always clone from local cloneSourcePath for speed (hardlinks, no network).
+    execFileSync('git', ['clone', '--no-tags', cloneSourcePath, slotPath], {
       cwd: process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 300_000,
@@ -316,6 +317,6 @@ export function ensureSlotClone(
     execGit(slotPath, ['fetch', '--unshallow'], { timeoutMs: 300_000 });
   }
 
-  // Ensure .steroids symlink points to the source project
-  ensureWorkspaceSteroidsSymlink(slotPath, projectPath);
+  // Ensure .steroids symlink points directly to the real source project.
+  ensureWorkspaceSteroidsSymlink(slotPath, sourceProjectPath);
 }

@@ -432,12 +432,12 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       // ── Workspace pool: claim slot, start heartbeat ──
       let poolSlotCtx: PoolSlotContext | undefined;
       let poolGlobalDb: ReturnType<typeof openGlobalDatabase> | undefined;
+      const sourceProjectPath = parallelSourceProjectPath ?? projectPath;
 
       if (options.runnerId) {
         try {
           const gdb = openGlobalDatabase();
           poolGlobalDb = gdb;
-          const sourceProjectPath = parallelSourceProjectPath ?? projectPath;
           const projectId = getProjectHash(sourceProjectPath);
           const remoteUrl = resolveRemoteUrl(sourceProjectPath);
           if (!remoteUrl) {
@@ -486,7 +486,8 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
               runnerId: options.runnerId,
             },
             branchName,
-            poolSlotCtx
+            poolSlotCtx,
+            sourceProjectPath
           );
         } else if (action === 'resume') {
           ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
@@ -503,7 +504,8 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
               runnerId: options.runnerId,
             },
             branchName,
-            poolSlotCtx
+            poolSlotCtx,
+            sourceProjectPath
           );
         } else if (action === 'review') {
           ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);

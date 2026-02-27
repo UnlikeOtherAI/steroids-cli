@@ -28,7 +28,6 @@ import {
   acquireWorkspaceMergeLock,
   releaseWorkspaceMergeLock,
 } from './merge-lock.js';
-import { ensureWorkspaceSteroidsSymlink } from '../parallel/clone.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Result types
@@ -59,6 +58,7 @@ export function prepareForTask(
   slot: PoolSlot,
   taskId: string,
   projectPath: string,
+  sourceProjectPath: string,
   sectionBranch: string | null = null,
   configBranch: string | null = null
 ): PrepareResult {
@@ -68,7 +68,7 @@ export function prepareForTask(
 
   // Ensure the clone exists
   try {
-    ensureSlotClone(slot, slot.remote_url, projectPath);
+    ensureSlotClone(slot, slot.remote_url, projectPath, sourceProjectPath);
   } catch (error) {
     return {
       ok: false,
@@ -159,7 +159,7 @@ export function prepareForTask(
     // Delete directory and re-clone once
     rmSync(slotPath, { recursive: true, force: true });
     try {
-      ensureSlotClone(slot, slot.remote_url, projectPath);
+      ensureSlotClone(slot, slot.remote_url, projectPath, sourceProjectPath);
     } catch (error) {
       return {
         ok: false,

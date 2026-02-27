@@ -185,7 +185,7 @@ describe('Fix 2: ensureSlotClone origin management', () => {
     const fakeRemote = 'https://github.com/example/repo.git';
     const slotPath = join(makeTempDir('slots-fix2'), 'slot-0');
 
-    ensureSlotClone(makeSlot(slotPath, fakeRemote), fakeRemote, project);
+    ensureSlotClone(makeSlot(slotPath, fakeRemote), fakeRemote, project, project);
 
     expect(existsSync(join(slotPath, '.git'))).toBe(true);
     expect(gitRun(slotPath, ['remote', 'get-url', 'origin'])).toBe(fakeRemote);
@@ -203,7 +203,7 @@ describe('Fix 2: ensureSlotClone origin management', () => {
     expect(gitRun(slotPath, ['remote', 'get-url', 'origin'])).toBe(project);
 
     const fakeRemote = 'https://github.com/example/repaired.git';
-    ensureSlotClone(makeSlot(slotPath, fakeRemote), fakeRemote, project);
+    ensureSlotClone(makeSlot(slotPath, fakeRemote), fakeRemote, project, project);
 
     expect(gitRun(slotPath, ['remote', 'get-url', 'origin'])).toBe(fakeRemote);
   });
@@ -245,7 +245,7 @@ describe('Fix 3 + merge-to-remote integration', () => {
     // Fix 3: prepareForTask detects poisoned state and resolves upstream remote
     // The clone's origin (project) points to a repo whose origin = bareRemote
     // Self-heal sets the slot origin to bareRemote and updates DB
-    const prepResult = prepareForTask(globalDb, slot, 'task-1', project);
+    const prepResult = prepareForTask(globalDb, slot, 'task-1', project, project);
     expect(prepResult.ok).toBe(true);
     if (!prepResult.ok) return;
 
