@@ -47,7 +47,7 @@ function getTimelineIcon(type: string, cmd?: string): string {
  * Extract the short, meaningful parameter for a tool call.
  * Shows the key identifier only — never file contents, output, or long text.
  */
-function extractToolDetail(cmd: string, input?: Record<string, unknown>): string | undefined {
+function extractToolDetail(_cmd: string, input?: Record<string, unknown>): string | undefined {
   if (!input) return undefined;
   // File path — Read, Write, Edit, NotebookEdit, etc.
   const filePath = input.file_path ?? input.path ?? input.notebook_path;
