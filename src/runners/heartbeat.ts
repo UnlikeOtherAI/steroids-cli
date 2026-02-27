@@ -47,13 +47,19 @@ export function isHeartbeatStale(
 export function findStaleRunners(
   db: Database.Database
 ): Array<{ id: string; pid: number | null; heartbeat_at: string; current_task_id: string | null; project_path: string | null; parallel_session_id: string | null }> {
-  // Use SQLite's datetime function to avoid timestamp format mismatches
-  // JavaScript ISO format ("2026-02-08T22:28:49.000Z") differs from
-  // SQLite datetime format ("2026-02-08 22:33:49"), breaking string comparison
+  // Use SQLite's datetime function to avoid timestamp format mismatches.
+  // JOIN with parallel_sessions to resolve the canonical project_path for
+  // parallel workstream runners, whose r.project_path is a clone workspace
+  // path that may not contain a steroids DB. COALESCE falls back to
+  // r.project_path for standalone runners (parallel_session_id IS NULL).
   return db
     .prepare(
-      `SELECT id, pid, heartbeat_at, current_task_id, project_path, parallel_session_id FROM runners
-       WHERE heartbeat_at < datetime('now', '-5 minutes') AND status != 'idle'`
+      `SELECT r.id, r.pid, r.heartbeat_at, r.current_task_id,
+              COALESCE(ps.project_path, r.project_path) AS project_path,
+              r.parallel_session_id
+       FROM runners r
+       LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
+       WHERE r.heartbeat_at < datetime('now', '-5 minutes') AND r.status != 'idle'`
     )
     .all() as Array<{ id: string; pid: number | null; heartbeat_at: string; current_task_id: string | null; project_path: string | null; parallel_session_id: string | null }>;
 }
