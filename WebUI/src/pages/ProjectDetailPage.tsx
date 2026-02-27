@@ -1366,17 +1366,28 @@ export const ProjectDetailPage: React.FC = () => {
             </Button>
           </div>
 
-          <div className="mt-10 pt-6 text-sm text-text-muted">
-            Made in Scotland with Love by{' '}
+          <div className="mt-10 pt-6 text-sm text-text-muted flex items-center gap-3">
+            <span>
+              Made in Scotland with Love by{' '}
+              <a
+                href="https://www.unlikeotherai.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent hover:text-accent/80 transition-colors"
+              >
+                Unlike Another AI
+              </a>{' '}
+              &copy; {new Date().getFullYear()}
+            </span>
             <a
-              href="https://www.unlikeotherai.com"
+              href="https://github.com/UnlikeOtherAI/steroids-cli"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-accent hover:text-accent/80 transition-colors"
+              className="text-text-muted hover:text-accent transition-colors"
+              title="View on GitHub"
             >
-              Unlike Another AI
-            </a>{' '}
-            &copy; {new Date().getFullYear()}
+              <i className="fa-brands fa-github text-base"></i>
+            </a>
           </div>
         </>
       )}

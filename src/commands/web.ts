@@ -99,6 +99,15 @@ function run(cmd: string, cwd: string): void {
   execSync(cmd, { cwd, stdio: 'inherit' });
 }
 
+/**
+ * Discard all local changes in the repo — this directory is managed and
+ * should never be hand-edited.
+ */
+function forceReset(cwd: string): void {
+  execSync('git reset --hard', { cwd, stdio: 'inherit' });
+  execSync('git clean -fd', { cwd, stdio: 'inherit' });
+}
+
 function hasRemoteTag(tag: string, cwd?: string): boolean {
   try {
     const output = execSync(`git ls-remote --tags ${REPO_URL} refs/tags/${tag}`, {
@@ -334,6 +343,7 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
               }
             } else {
               out.log(`Updating to ${expectedTag}...`);
+              forceReset(WEB_DIR);
               execSync(`git checkout ${expectedTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
               installAndBuild(out);
             }
@@ -354,6 +364,7 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
                 installAndBuild(out);
               }
             } else {
+              forceReset(WEB_DIR);
               execSync(`git checkout -B main origin/main`, { cwd: WEB_DIR, stdio: 'inherit' });
               execSync(`git pull --ff-only origin main`, { cwd: WEB_DIR, stdio: 'inherit' });
               installAndBuild(out);
@@ -374,6 +385,7 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
       }
 
       out.log('Pulling latest changes...');
+      forceReset(WEB_DIR);
       run('git pull', WEB_DIR);
 
       installAndBuild(out);
