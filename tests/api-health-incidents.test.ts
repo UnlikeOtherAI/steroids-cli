@@ -58,7 +58,7 @@ function setupProjectDb(projectPath: string): void {
 
 import { openGlobalDatabase } from '../src/runners/global-db.js';
 
-function setupGlobalDb(homeDir: string, projectPath: string): void {
+function setupGlobalDb(projectPath: string): void {
   const { db, close } = openGlobalDatabase();
   try {
     // Runner actively working on t2 with a fresh heartbeat.
@@ -74,90 +74,74 @@ function setupGlobalDb(homeDir: string, projectPath: string): void {
 describe('API health + incidents endpoints', () => {
   const originalHome = process.env.HOME;
   const originalNodeEnv = process.env.NODE_ENV;
+  let homeDir: string;
+  let projectPath: string;
+  let server: http.Server;
+  let port: number;
+
+  beforeEach(async () => {
+    process.env.NODE_ENV = 'test';
+    homeDir = createTempDir('steroids-home');
+    process.env.HOME = homeDir;
+    process.env.STEROIDS_HOME = homeDir;
+    projectPath = createTempDir('steroids-project');
+    setupProjectDb(projectPath);
+    setupGlobalDb(projectPath);
+    server = http.createServer(createApp());
+    port = await listen(server);
+  });
 
   afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     process.env.HOME = originalHome;
     process.env.NODE_ENV = originalNodeEnv;
+    delete process.env.STEROIDS_HOME;
+    await rm(projectPath, { recursive: true, force: true });
+    await rm(homeDir, { recursive: true, force: true });
   });
 
   it('GET /api/health returns summary and supports incident counts', async () => {
-    process.env.NODE_ENV = 'test';
-    const homeDir = createTempDir('steroids-home');
-    process.env.HOME = homeDir;
+    const url = `http://127.0.0.1:${port}/api/health?project=${encodeURIComponent(projectPath)}`;
+    const resp = await fetch(url);
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as any;
 
-    const projectPath = createTempDir('steroids-project');
-    setupProjectDb(projectPath);
-    setupGlobalDb(homeDir, projectPath);
-
-    const app = createApp();
-    const server = http.createServer(app);
-    const port = await listen(server);
-
-    try {
-      const url = `http://127.0.0.1:${port}/api/health?project=${encodeURIComponent(projectPath)}`;
-      const resp = await fetch(url);
-      expect(resp.status).toBe(200);
-      const body = (await resp.json()) as any;
-
-      expect(body.success).toBe(true);
-      expect(body.project).toBe(projectPath);
-      expect(body.health).toBeDefined();
-      expect(body.health.checks).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ type: 'orphaned_tasks' }),
-          expect.objectContaining({ type: 'hanging_invocations' }),
-          expect.objectContaining({ type: 'zombie_runners' }),
-          expect.objectContaining({ type: 'dead_runners' }),
-        ])
-      );
-      expect(body.health.activeIncidents).toBe(1);
-      expect(body.health.recentIncidents).toBeGreaterThanOrEqual(2);
-      // With an orphaned task and a hanging task, status should be at least degraded.
-      expect(['degraded', 'unhealthy']).toContain(body.health.status);
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await rm(projectPath, { recursive: true, force: true });
-      await rm(homeDir, { recursive: true, force: true });
-    }
+    expect(body.success).toBe(true);
+    expect(body.project).toBe(projectPath);
+    expect(body.health).toBeDefined();
+    expect(body.health.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'orphaned_tasks' }),
+        expect.objectContaining({ type: 'hanging_invocations' }),
+        expect.objectContaining({ type: 'zombie_runners' }),
+        expect.objectContaining({ type: 'dead_runners' }),
+      ])
+    );
+    expect(body.health.activeIncidents).toBe(1);
+    expect(body.health.recentIncidents).toBeGreaterThanOrEqual(2);
+    // With an orphaned task and a hanging task, status should be at least degraded.
+    expect(['degraded', 'unhealthy']).toContain(body.health.status);
   });
 
   it('GET /api/incidents lists incidents and filters by task prefix + unresolved flag', async () => {
-    process.env.NODE_ENV = 'test';
-    const homeDir = createTempDir('steroids-home');
-    process.env.HOME = homeDir;
+    const allUrl = `http://127.0.0.1:${port}/api/incidents?project=${encodeURIComponent(projectPath)}&limit=10`;
+    const allResp = await fetch(allUrl);
+    expect(allResp.status).toBe(200);
+    const allBody = (await allResp.json()) as any;
+    expect(allBody.success).toBe(true);
+    expect(allBody.total).toBe(2);
+    expect(allBody.incidents).toHaveLength(2);
 
-    const projectPath = createTempDir('steroids-project');
-    setupProjectDb(projectPath);
-    setupGlobalDb(homeDir, projectPath);
+    const taskUrl = `http://127.0.0.1:${port}/api/incidents?project=${encodeURIComponent(projectPath)}&task=t1`;
+    const taskResp = await fetch(taskUrl);
+    const taskBody = (await taskResp.json()) as any;
+    expect(taskBody.total).toBe(1);
+    expect(taskBody.incidents[0].task_id).toBe('t1');
 
-    const app = createApp();
-    const server = http.createServer(app);
-    const port = await listen(server);
-
-    try {
-      const allUrl = `http://127.0.0.1:${port}/api/incidents?project=${encodeURIComponent(projectPath)}&limit=10`;
-      const allResp = await fetch(allUrl);
-      expect(allResp.status).toBe(200);
-      const allBody = (await allResp.json()) as any;
-      expect(allBody.success).toBe(true);
-      expect(allBody.total).toBe(2);
-      expect(allBody.incidents).toHaveLength(2);
-
-      const taskUrl = `http://127.0.0.1:${port}/api/incidents?project=${encodeURIComponent(projectPath)}&task=t1`;
-      const taskResp = await fetch(taskUrl);
-      const taskBody = (await taskResp.json()) as any;
-      expect(taskBody.total).toBe(1);
-      expect(taskBody.incidents[0].task_id).toBe('t1');
-
-      const unresolvedUrl = `http://127.0.0.1:${port}/api/incidents?project=${encodeURIComponent(projectPath)}&unresolved=true`;
-      const unresolvedResp = await fetch(unresolvedUrl);
-      const unresolvedBody = (await unresolvedResp.json()) as any;
-      expect(unresolvedBody.total).toBe(1);
-      expect(unresolvedBody.incidents[0].resolved_at).toBeNull();
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await rm(projectPath, { recursive: true, force: true });
-      await rm(homeDir, { recursive: true, force: true });
-    }
+    const unresolvedUrl = `http://127.0.0.1:${port}/api/incidents?project=${encodeURIComponent(projectPath)}&unresolved=true`;
+    const unresolvedResp = await fetch(unresolvedUrl);
+    const unresolvedBody = (await unresolvedResp.json()) as any;
+    expect(unresolvedBody.total).toBe(1);
+    expect(unresolvedBody.incidents[0].resolved_at).toBeNull();
   });
 });
