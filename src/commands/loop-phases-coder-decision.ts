@@ -129,6 +129,20 @@ export async function invokeCoordinatorIfNeeded(
             notes: `[${coordResult.decision}] ${normalizedGuidance}`,
           });
 
+          // Persist coordinator guidance so it survives process restarts.
+          // Fresh coder sessions can't rely on the in-memory coordinatorCache,
+          // so we write a must_implement entry that getLatestMustImplementGuidance
+          // can retrieve. Only persist for guide_coder — override_reviewer and
+          // narrow_scope are handled elsewhere.
+          if (coordResult.decision === 'guide_coder') {
+            addAuditEntry(db, task!.id, task!.status, task!.status, 'coordinator', {
+              actorType: 'orchestrator',
+              notes: normalizedGuidance,
+              category: 'must_implement',
+              metadata: { rejection_count: task!.rejection_count },
+            });
+          }
+
           if (!jsonMode) {
             console.log(`\nCoordinator decision: ${coordResult.decision}`);
             console.log('Coordinator guidance stored for both coder and reviewer.');

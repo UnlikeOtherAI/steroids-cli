@@ -72,7 +72,13 @@ Do not mark those items as WONT_FIX unless you provide hard new evidence and the
   const hasOutOfScope = (lastRejection?.notes?.toLowerCase().includes('[out_of_scope]')) ?? false;
   if (hasOutOfScope) {
     prompt += `**SCOPE VIOLATION DETECTED:** The reviewer flagged work that belongs to a sibling task.
-You MUST revert those changes (use \`git diff HEAD\` to identify them, then \`git checkout -- <file>\` or \`git rm\` to remove).
+You MUST revert those changes. The reviewer checks the CUMULATIVE committed diff, not just your working tree.
+Run \`git log --oneline\` to find the first commit that belongs to this task, then run \`git diff --name-only <first-task-commit>^..HEAD\` to see exactly what the reviewer sees.
+For files already committed (most likely the case — check with the cumulative diff above):
+- Files INTRODUCED by this task (didn't exist at baseline): \`git rm <file>\` then commit the removal
+- Files that existed at baseline but were modified: \`git restore --source=<first-task-commit>^ -- <file>\` then commit
+For uncommitted files only: \`git restore <file>\` or \`git checkout -- <file>\`.
+Do NOT use \`git diff HEAD\` alone — that only shows unstaged changes, not committed ones. Do NOT use \`git rm --cached\` — it leaves the file in the working tree where it can be re-committed.
 \`WONT_FIX\` is NOT allowed for \`[OUT_OF_SCOPE]\` items — they must be \`REVERTED\`.\n\n`;
     // Show sibling task list when scope creep was flagged — coder needs to know which task owns the work
     const siblingBoundary = formatSectionTasks(task.id, sectionTasks, 'coder');
