@@ -92,6 +92,21 @@ router.get('/skills/:name', (req, res) => {
   }
 });
 
+router.delete('/skills/:name', (req, res) => {
+  const name = req.params.name;
+
+  try {
+    const filePath = join(getCustomSkillsDir(), `${name.replace('.md', '')}.md`);
+    if (!existsSync(filePath)) {
+      return res.status(404).json({ success: false, error: 'Custom skill not found' });
+    }
+    rmSync(filePath);
+    res.json({ success: true, message: 'Skill deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.post('/skills/:name', (req, res) => {
   const name = req.params.name;
   const { content } = req.body;

@@ -52,6 +52,7 @@ export const SkillsPage: React.FC = () => {
   const [editContent, setEditContent] = useState('');
   const [, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showMarkdownPreview, setShowMarkdownPreview] = useState(true);
 
@@ -88,6 +89,26 @@ export const SkillsPage: React.FC = () => {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const deleteSkill = async (name: string) => {
+    if (!confirm(`Delete skill "${name}"? This cannot be undone.`)) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/skills/${name}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (json.success) {
+        setSelectedSkill(null);
+        await fetchSkills();
+      } else {
+        setError(json.error);
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -217,16 +238,25 @@ export const SkillsPage: React.FC = () => {
                 <span className="text-sm text-text-secondary">{selectedSkill.type} skill</span>
               </div>
               {selectedSkill.type === 'custom' && (
-                <button
-                  onClick={() => {
-                    setEditName(selectedSkill.name);
-                    setEditContent(selectedSkill.content);
-                    setIsEditing(true);
-                }}
-                  className="px-4 py-2 bg-bg-elevated rounded-lg text-sm text-text-primary hover:shadow-card"
-                >
-                  Edit Skill
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setEditName(selectedSkill.name);
+                      setEditContent(selectedSkill.content);
+                      setIsEditing(true);
+                    }}
+                    className="px-4 py-2 bg-bg-elevated rounded-lg text-sm text-text-primary hover:shadow-card"
+                  >
+                    Edit Skill
+                  </button>
+                  <button
+                    onClick={() => deleteSkill(selectedSkill.name)}
+                    disabled={deleting}
+                    className="px-4 py-2 bg-danger-soft text-danger rounded-lg text-sm hover:bg-danger hover:text-white transition-colors disabled:opacity-50"
+                  >
+                    {deleting ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
               )}
             </div>
             <div className="p-8 flex-1 overflow-y-auto max-w-none text-text-primary">
