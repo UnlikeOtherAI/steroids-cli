@@ -271,7 +271,8 @@ export function listProjectSlots(globalDb: Database.Database, projectId: string)
 
 /**
  * Ensure the slot directory exists as a full clone.
- * - If missing: full clone from remoteUrl (or projectPath for local-only).
+ * - If missing: full clone from projectPath (local, fast via hardlinks), then set origin to remoteUrl.
+ * - If existing: repair origin to remoteUrl if available (fixes stale/poisoned slots).
  * - If shallow: `git fetch --unshallow`.
  * - Always ensure .steroids symlink.
  */
@@ -291,13 +292,20 @@ export function ensureSlotClone(
     // Create parent directories
     mkdirSync(resolve(slotPath, '..'), { recursive: true });
 
-    // Full clone — no --depth, no --single-branch
-    const cloneSource = remoteUrl ?? projectPath;
-    execFileSync('git', ['clone', '--no-tags', cloneSource, slotPath], {
+    // Always clone from local projectPath for speed (hardlinks, no network).
+    execFileSync('git', ['clone', '--no-tags', projectPath, slotPath], {
       cwd: process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 300_000, // 5 min for large repos
+      timeout: 300_000,
     });
+
+    // Then set origin to the real remote so push/verify targets the correct URL.
+    if (remoteUrl) {
+      execGit(slotPath, ['remote', 'set-url', 'origin', remoteUrl]);
+    }
+  } else if (remoteUrl) {
+    // Existing clone — ensure origin points to the real remote (repair path).
+    execGit(slotPath, ['remote', 'set-url', 'origin', remoteUrl], { tolerateFailure: true });
   }
 
   // If shallow, unshallow it

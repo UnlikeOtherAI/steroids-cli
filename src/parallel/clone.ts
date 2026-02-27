@@ -342,11 +342,24 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
   }
 
   // When seeding from a prior workstream, git sets origin to that local path.
-  // Reset it to the canonical projectPath so `git push origin` works correctly.
+  // Resolve the real remote URL from projectPath (one hop) so push targets the correct remote.
   if (options.fromPath) {
+    let originUrl = projectPath;
+    try {
+      const sourceRemote = execFileSync('git', ['remote', 'get-url', 'origin'], {
+        cwd: projectPath,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      if (sourceRemote && !sourceRemote.startsWith('/') && !sourceRemote.startsWith('.') && !sourceRemote.startsWith('~')) {
+        originUrl = sourceRemote;
+      }
+    } catch {
+      // Keep projectPath — resolveRemoteUrl will classify it correctly downstream.
+    }
     try {
       // hardcoded command, no user input
-      execFileSync('git', ['-C', workspacePath, 'remote', 'set-url', 'origin', projectPath], { stdio: 'inherit' });
+      execFileSync('git', ['-C', workspacePath, 'remote', 'set-url', 'origin', originUrl], { stdio: 'inherit' });
     } catch (error: unknown) {
       rmSync(workspacePath, { recursive: true, force: true });
       throw new WorkspaceCloneError('Failed to reset origin after seeding clone from prior workstream', error);

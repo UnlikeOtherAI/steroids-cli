@@ -439,21 +439,25 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           poolGlobalDb = gdb;
           const projectId = getProjectHash(projectPath);
           const remoteUrl = resolveRemoteUrl(projectPath);
-          const localOnly = remoteUrl === null;
-          const slot = claimSlot(gdb.db, projectId, options.runnerId, task.id);
-          const finalSlot = finalizeSlotPath(gdb.db, slot.id, projectPath, remoteUrl);
+          if (!remoteUrl) {
+            console.warn(`[pool] Skipping pool mode for ${projectPath}: no remote URL detected. Pool mode requires a pushable remote.`);
+            // poolSlotCtx remains undefined — falls through to non-pool (legacy) path
+          } else {
+            const slot = claimSlot(gdb.db, projectId, options.runnerId, task.id);
+            const finalSlot = finalizeSlotPath(gdb.db, slot.id, projectPath, remoteUrl);
 
-          const heartbeatTimer = setInterval(() => {
-            try {
-              refreshSlotHeartbeat(gdb.db, finalSlot.id);
-              // Also keep merge lock alive if one is held
-              refreshWorkspaceMergeLockHeartbeat(gdb.db, projectId, options.runnerId!);
-            } catch {
-              // Tolerate heartbeat failures — reconciliation handles stale slots
-            }
-          }, 30_000);
+            const heartbeatTimer = setInterval(() => {
+              try {
+                refreshSlotHeartbeat(gdb.db, finalSlot.id);
+                // Also keep merge lock alive if one is held
+                refreshWorkspaceMergeLockHeartbeat(gdb.db, projectId, options.runnerId!);
+              } catch {
+                // Tolerate heartbeat failures — reconciliation handles stale slots
+              }
+            }, 30_000);
 
-          poolSlotCtx = { globalDb: gdb.db, slot: finalSlot, heartbeatTimer, localOnly };
+            poolSlotCtx = { globalDb: gdb.db, slot: finalSlot, heartbeatTimer, localOnly: false };
+          }
         } catch (error) {
           console.warn('Pool slot claim failed, running without pool:', (error as Error).message);
           // Fall back to non-pool mode

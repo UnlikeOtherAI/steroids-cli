@@ -60,7 +60,7 @@ export function prepareForTask(
   projectPath: string
 ): PrepareResult {
   const slotPath = slot.slot_path;
-  const localOnly = slot.remote_url === null;
+  let localOnly = slot.remote_url === null;
   const remote = 'origin';
 
   // Ensure the clone exists
@@ -72,6 +72,36 @@ export function prepareForTask(
       reason: `Failed to ensure slot clone: ${error instanceof Error ? error.message : String(error)}`,
       blocked: true,
     };
+  }
+
+  // Self-heal: if slot has no remote_url, check if the clone's origin points to
+  // a local repo that itself has a real remote. Repair both the clone and the DB.
+  if (localOnly) {
+    const cloneOrigin = execGit(slotPath, ['remote', 'get-url', 'origin'], { tolerateFailure: true });
+    if (cloneOrigin && (cloneOrigin.startsWith('/') || cloneOrigin.startsWith('.') || cloneOrigin.startsWith('~'))) {
+      try {
+        // Normalize relative/tilde origins against slotPath before resolving.
+        const resolvedOrigin = cloneOrigin.startsWith('.')
+          ? resolve(slotPath, cloneOrigin)
+          : cloneOrigin;
+        const upstreamRemote = execFileSync('git', ['remote', 'get-url', 'origin'], {
+          cwd: resolvedOrigin,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        if (upstreamRemote && !upstreamRemote.startsWith('/') && !upstreamRemote.startsWith('.') && !upstreamRemote.startsWith('~')) {
+          // Repair: update the clone's origin and the DB record.
+          execGit(slotPath, ['remote', 'set-url', 'origin', upstreamRemote]);
+          globalDb.prepare('UPDATE workspace_pool_slots SET remote_url = ? WHERE id = ?')
+            .run(upstreamRemote, slot.id);
+          // Update in-memory slot to prevent re-clone fallback from re-poisoning.
+          slot.remote_url = upstreamRemote;
+          localOnly = false;
+        }
+      } catch {
+        // Can't resolve upstream — leave as localOnly.
+      }
+    }
   }
 
   // Step 2: Mid-rebase guard
