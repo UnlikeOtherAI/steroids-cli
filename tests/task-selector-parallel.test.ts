@@ -263,6 +263,7 @@ describe('orchestrator loop and runner wiring', () => {
       claimSlot: jest.fn().mockReturnValue(null),
       finalizeSlotPath: jest.fn(),
       releaseSlot: jest.fn(),
+      partialReleaseSlot: jest.fn(),
       resolveRemoteUrl: jest.fn().mockReturnValue(''),
       refreshSlotHeartbeat: jest.fn(),
       updateSlotStatus: jest.fn(),

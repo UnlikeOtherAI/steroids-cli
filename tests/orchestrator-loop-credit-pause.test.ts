@@ -88,6 +88,7 @@ jest.unstable_mockModule('../src/workspace/pool.js', () => ({
   claimSlot: jest.fn().mockReturnValue(null),
   finalizeSlotPath: jest.fn(),
   releaseSlot: jest.fn(),
+  partialReleaseSlot: jest.fn(),
   resolveRemoteUrl: jest.fn().mockReturnValue(''),
   refreshSlotHeartbeat: jest.fn(),
   updateSlotStatus: jest.fn(),

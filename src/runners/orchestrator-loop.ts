@@ -27,7 +27,7 @@ import { pushToRemote } from '../git/push.js';
 import { withGlobalDatabase, openGlobalDatabase } from './global-db.js';
 import { ensureWorkspaceSteroidsSymlink, getProjectHash } from '../parallel/clone.js';
 import type { PoolSlotContext } from '../workspace/types.js';
-import { claimSlot, finalizeSlotPath, releaseSlot, resolveRemoteUrl, refreshSlotHeartbeat } from '../workspace/pool.js';
+import { claimSlot, finalizeSlotPath, releaseSlot, partialReleaseSlot, resolveRemoteUrl, refreshSlotHeartbeat, getSlot } from '../workspace/pool.js';
 import { refreshWorkspaceMergeLockHeartbeat } from '../workspace/merge-lock.js';
 
 function sleep(ms: number): Promise<void> {
@@ -523,7 +523,16 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             clearInterval(poolSlotCtx.heartbeatTimer);
           }
           try {
-            releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+            // After the coder phase the slot may be in 'awaiting_review' status.
+            // Use partialReleaseSlot so task_branch/base_branch/starting_sha
+            // survive into the reviewer's claimSlot call next iteration.
+            // For all other statuses (including after reviewer merge) do a full release.
+            const currentSlot = getSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+            if (currentSlot?.status === 'awaiting_review') {
+              partialReleaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+            } else {
+              releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+            }
           } catch {
             // Tolerate release failures — reconciliation handles cleanup
           }

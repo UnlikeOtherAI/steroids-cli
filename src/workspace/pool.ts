@@ -199,6 +199,24 @@ export function releaseSlot(globalDb: Database.Database, slotId: number): void {
 }
 
 /**
+ * Partially release a slot back to idle, preserving workspace fields
+ * (task_branch, base_branch, starting_sha) so the reviewer phase can pick
+ * them up in the next loop iteration without needing to re-run prepareForTask.
+ *
+ * Only clears runner-tracking fields (runner_id, claimed_at, heartbeat_at).
+ */
+export function partialReleaseSlot(globalDb: Database.Database, slotId: number): void {
+  globalDb
+    .prepare(
+      `UPDATE workspace_pool_slots
+       SET status = 'idle', runner_id = NULL,
+           claimed_at = NULL, heartbeat_at = NULL
+       WHERE id = ?`
+    )
+    .run(slotId);
+}
+
+/**
  * Update slot status and optional fields.
  */
 export function updateSlotStatus(
