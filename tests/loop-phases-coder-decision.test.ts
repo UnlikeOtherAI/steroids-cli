@@ -153,4 +153,26 @@ describe('executeCoderDecision push behavior', () => {
       'def456'
     );
   });
+
+  it('stage_commit_submit (after auto-commit): pushes in non-pool mode', async () => {
+    await executeCoderDecision(
+      {} as never,
+      task as never,
+      { action: 'stage_commit_submit', reasoning: 'auto-commit', commit_message: 'feat: test' },
+      { ...baseContext, has_uncommitted: true, hasPoolSlot: false }
+    );
+
+    expect(mockRefreshParallelWorkstreamLease).toHaveBeenCalled();
+    expect(mockExecSync).toHaveBeenCalledTimes(2);
+    expect(mockPushToRemote).toHaveBeenCalledTimes(1);
+    expect(mockPushToRemote).toHaveBeenCalledWith('/tmp/workspace', 'origin', 'steroids/task-1');
+    expect(mockUpdateTaskStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      'task-1',
+      'review',
+      'orchestrator',
+      'Auto-committed and submitted (auto-commit)',
+      'def456'
+    );
+  });
 });
