@@ -18,12 +18,14 @@ import { execGit } from '../workspace/git-helpers.js';
  *
  * Returns the section-specific branch if one is configured, or null if the
  * task should use the project base branch (as resolved by prepareForTask).
+ * Callers must handle null explicitly — null means "use the project base branch,"
+ * not "use main."
  *
  * Resolution order:
  *   1. section.branch (migration 021) → return it if set
- *   2. No section override → return null (caller uses project base branch)
+ *   2. No section override → return null
  *
- * Note: config is accepted for forward compat (future phases may use it for validation).
+ * Note: config is accepted for forward compat (future phases may use it).
  */
 export function resolveEffectiveBranch(
   db: Database.Database,
@@ -48,7 +50,11 @@ export function resolveEffectiveBranch(
  * Resolution order:
  *   1. Remote branch exists → check out and track it
  *   2. Local branch exists → check out
- *   3. Neither → create from projectBase and push to remote
+ *   3. Neither → detect repo default branch (main or master) and create from it, then push
+ *
+ * Path 3 always forks from the repo's actual default branch (detected by probing
+ * remote refs), not from the configBranch — a section branch should fork from the
+ * real repo default regardless of what the project's push target is.
  *
  * NEVER call this on the user's projectPath — it issues git checkouts that
  * would corrupt an active working tree.
@@ -56,7 +62,7 @@ export function resolveEffectiveBranch(
 export function ensureBranchExists(
   slotPath: string,
   branch: string,
-  baseBranch: string,
+  _baseBranch: string,  // kept for API compat; path 3 uses detectRepoBase() instead
   remote: string
 ): void {
   // Check remote branch first
@@ -81,7 +87,29 @@ export function ensureBranchExists(
     return;
   }
 
-  // Create from project base and push
-  execGit(slotPath, ['checkout', '-B', branch, `${remote}/${baseBranch}`]);
+  // Neither — detect repo default and create from it, then push
+  const repoBase = detectRepoBase(slotPath, remote);
+  execGit(slotPath, ['checkout', '-B', branch, `${remote}/${repoBase}`]);
   execGit(slotPath, ['push', remote, branch]);
+}
+
+/**
+ * Detect the repo's actual default branch by probing remote refs.
+ *
+ * ONLY used for "create section branch from scratch" in ensureBranchExists() path 3.
+ * Probes origin/main first, then origin/master. Falls back to 'main'.
+ *
+ * Never probes local refs — local branch state is unreliable (corrupted clones, stale
+ * checked-out branches from prior sessions). Remote refs are the authoritative source.
+ */
+function detectRepoBase(slotPath: string, remote: string): string {
+  for (const candidate of ['main', 'master']) {
+    const exists = execGit(
+      slotPath,
+      ['rev-parse', '--verify', `${remote}/${candidate}`],
+      { tolerateFailure: true }
+    );
+    if (exists !== null) return candidate;
+  }
+  return 'main'; // fallback if remote is unreachable or uses a non-standard default
 }

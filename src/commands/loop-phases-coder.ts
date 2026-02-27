@@ -81,7 +81,7 @@ export async function runCoderPhase(
       poolSlotContext.slot,
       task.id,
       projectPath,
-      sectionBranch,  // null in Phase 1; section-specific branch in Phase 2+
+      sectionBranch,  // section branch if set (migration 021), null means use project base
       configBranch
     );
 

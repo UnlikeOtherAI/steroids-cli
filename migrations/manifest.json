@@ -1,6 +1,6 @@
 {
   "version": "0.2.1",
-  "latestDbVersion": 21,
+  "latestDbVersion": 22,
   "migrations": [
     {
       "id": 1,
@@ -167,6 +167,14 @@
       "name": "021_add_section_branch",
       "file": "021_add_section_branch.sql",
       "description": "Add branch column to sections table for per-section git branch targeting",
+      "checksum": "",
+      "cliVersion": "0.10.44"
+    },
+    {
+      "id": 22,
+      "name": "022_add_section_auto_pr",
+      "file": "022_add_section_auto_pr.sql",
+      "description": "Add auto_pr and pr_number columns to sections table for auto-PR on section completion",
       "checksum": "",
       "cliVersion": "0.10.44"
     }

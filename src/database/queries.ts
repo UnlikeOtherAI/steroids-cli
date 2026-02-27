@@ -285,6 +285,41 @@ export function setSectionBranch(
 }
 
 /**
+ * Enable or disable auto-PR for a section.
+ */
+export function setSectionAutoPr(
+  db: Database.Database,
+  sectionId: string,
+  autoPr: boolean
+): void {
+  const result = db
+    .prepare('UPDATE sections SET auto_pr = ? WHERE id = ?')
+    .run(autoPr ? 1 : 0, sectionId);
+
+  if (result.changes === 0) {
+    throw new Error(`Section not found: ${sectionId}`);
+  }
+}
+
+/**
+ * Record or clear the PR number for a section.
+ * Pass null to reset (allows re-triggering auto-PR).
+ */
+export function setSectionPrNumber(
+  db: Database.Database,
+  sectionId: string,
+  prNumber: number | null
+): void {
+  const result = db
+    .prepare('UPDATE sections SET pr_number = ? WHERE id = ?')
+    .run(prNumber, sectionId);
+
+  if (result.changes === 0) {
+    throw new Error(`Section not found: ${sectionId}`);
+  }
+}
+
+/**
  * Check if adding a dependency would create a circular dependency
  * Returns true if circular dependency would be created
  */

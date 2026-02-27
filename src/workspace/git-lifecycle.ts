@@ -127,15 +127,8 @@ export function prepareForTask(
     }
   }
 
-  // Step 4: Resolve project base branch (supports config.git.branch, main, master)
+  // Step 4: Resolve project base branch (config.git.branch, or 'main' as default)
   const projectBase = resolveBaseBranch(slotPath, localOnly ? null : remote, configBranch);
-  if (!projectBase) {
-    return {
-      ok: false,
-      reason: 'No valid base branch (neither config branch, main, nor master found)',
-      blocked: true,
-    };
-  }
 
   // Step 4b: If a section branch is set, ensure it exists in the slot and use it as target
   let baseBranch = projectBase;

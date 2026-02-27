@@ -69,41 +69,17 @@ export function abortRebase(cwd: string): void {
 /**
  * Resolve the base branch for a workspace pool slot clone.
  * Returns the branch name without `origin/` prefix.
- * For local-only mode, pass `remote = null` to check local branches.
  *
- * Resolution order:
- *   1. configBranch (from config.git.branch) — if provided and exists
- *   2. main
- *   3. master
+ * Always uses `configBranch` (from config.git.branch) when provided,
+ * defaulting to `'main'` otherwise. Never auto-detects from the clone state —
+ * the configured branch is authoritative regardless of what refs are present.
  */
 export function resolveBaseBranch(
-  cwd: string,
-  remote: string | null,
+  _cwd: string,
+  _remote: string | null,
   configBranch: string | null = null
-): string | null {
-  const prefix = remote ? `${remote}/` : '';
-
-  // Check config.git.branch first — honors the configured default even if it's
-  // 'main' or 'master', avoiding an ambiguous silent fallback.
-  if (configBranch) {
-    const configResult = execGit(cwd, ['rev-parse', '--verify', `${prefix}${configBranch}`], {
-      tolerateFailure: true,
-    });
-    if (configResult !== null) return configBranch;
-  }
-
-  // Fall back to auto-detect main then master
-  const mainResult = execGit(cwd, ['rev-parse', '--verify', `${prefix}main`], {
-    tolerateFailure: true,
-  });
-  if (mainResult !== null) return 'main';
-
-  const masterResult = execGit(cwd, ['rev-parse', '--verify', `${prefix}master`], {
-    tolerateFailure: true,
-  });
-  if (masterResult !== null) return 'master';
-
-  return null;
+): string {
+  return configBranch ?? 'main';
 }
 
 /**

@@ -71,11 +71,13 @@ GLOBAL OPTIONS:
 
   const projectPath = process.cwd();
   /* REFACTOR_MANUAL */ withDatabase(projectPath, (db: any) => {
-    const section = createSection(db, name, position);
-
-    if (branch !== null) {
-      setSectionBranch(db, section.id, branch);
-    }
+    const section = db.transaction(() => {
+      const s = createSection(db, name, position);
+      if (branch !== null) {
+        setSectionBranch(db, s.id, branch);
+      }
+      return s;
+    })();
 
     if (flags.json) {
       out.success({
