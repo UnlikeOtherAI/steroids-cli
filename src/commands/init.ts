@@ -5,7 +5,7 @@
 import { parseArgs } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { initDatabase, isInitialized, getDbPath } from '../database/connection.js';
 import type { GlobalFlags } from '../cli/flags.js';
 import { createOutput } from '../cli/output.js';
@@ -15,6 +15,7 @@ import { generateHelp } from '../cli/help.js';
 import { runAISetup } from '../config/ai-setup.js';
 import {
   getGlobalConfigPath,
+  getProjectConfigPath,
   loadConfigFile,
   saveConfig,
 } from '../config/loader.js';
@@ -86,6 +87,52 @@ function isInsideGitRepo(cwd: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Detect the default branch for the git repository (main, master, or other).
+ * Tries in order: remote HEAD symref → probe origin/main → probe origin/master →
+ * current local branch. Returns null if not in a git repo or all attempts fail.
+ */
+function detectDefaultBranch(cwd: string): string | null {
+  // 1. Ask git for the canonical remote default via symbolic-ref
+  try {
+    const out = execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+      cwd,
+      stdio: 'pipe',
+    }).toString().trim();
+    // e.g. "refs/remotes/origin/main" → "main"
+    const match = out.match(/^refs\/remotes\/origin\/(.+)$/);
+    if (match) return match[1];
+  } catch {
+    // origin/HEAD not set — common in freshly cloned or local-only repos
+  }
+
+  // 2. Probe whether origin/main or origin/master exist
+  for (const candidate of ['main', 'master']) {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', `origin/${candidate}`], {
+        cwd,
+        stdio: 'pipe',
+      });
+      return candidate;
+    } catch {
+      // not found, try next
+    }
+  }
+
+  // 3. Fall back to the current local branch name
+  try {
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd,
+      stdio: 'pipe',
+    }).toString().trim();
+    if (branch && branch !== 'HEAD') return branch;
+  } catch {
+    // detached HEAD or not a repo
+  }
+
+  return null;
 }
 
 export async function initCommand(args: string[], flags: GlobalFlags): Promise<void> {
@@ -160,6 +207,26 @@ export async function initCommand(args: string[], flags: GlobalFlags): Promise<v
     } catch (error) {
       // Don't fail init if registration fails - just log it
       out.verbose(`Warning: Failed to register project globally: ${error}`);
+    }
+  }
+
+  // Auto-detect default git branch and persist to project config (only in git repos)
+  if (inGitRepo) {
+    const detectedBranch = detectDefaultBranch(cwd);
+    if (detectedBranch) {
+      try {
+        const projectConfigPath = getProjectConfigPath(cwd);
+        const projectConfig = loadConfigFile(projectConfigPath);
+        if (!projectConfig.git?.branch) {
+          if (!projectConfig.git) projectConfig.git = {};
+          projectConfig.git.branch = detectedBranch;
+          saveConfig(projectConfig, projectConfigPath);
+          out.verbose(`Detected git base branch: ${detectedBranch}`);
+        }
+      } catch (error) {
+        // Don't fail init if branch detection config write fails
+        out.verbose(`Warning: Failed to write detected branch to config: ${error}`);
+      }
     }
   }
 
