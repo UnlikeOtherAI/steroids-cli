@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Surface "orphaned in_progress" tasks as a named issue on the project detail page and enable the reset button to reset them to pending and trigger a wakeup.
+**Goal:** Surface "orphaned in_progress" tasks as a named issue on the project detail page and enable the reset button to reset them to pending.
 
-**Architecture:** Detection is server-side (single source of truth) — the API project response gains an `orphaned_in_progress` count computed using existing `hasActiveRunnerForProject` + `hasActiveParallelSessionForProject` helpers. The UI reads this field. The reset endpoint uses the same helpers as the guard, clears task locks in a transaction, then triggers wakeup.
+**Architecture:** Detection is server-side (single source of truth) — the API project response gains an `orphaned_in_progress` count computed via inline SQL against the already-open global DB plus `hasActiveParallelSessionForProjectDb` (read-only, no write side effects). The UI reads this field. The reset endpoint uses the same inline guard, clears task locks in a transaction, and relies on the cron for runner pickup (no `wakeup()` — its blast radius covers all projects, not just one).
 
-**Tech Stack:** TypeScript, React, better-sqlite3, Express, `hasActiveRunnerForProject` + `hasActiveParallelSessionForProject` from `src/runners/wakeup-checks.ts`, existing `wakeup()` from `src/runners/wakeup.ts`
+**Tech Stack:** TypeScript, React, better-sqlite3, Express, `hasActiveParallelSessionForProjectDb` from `src/runners/parallel-session-state.ts`
 
 ---
 
@@ -15,16 +15,16 @@
 **Files:**
 - Modify: `API/src/routes/projects.ts`
 
-**Context:** `getProjectStats()` (around line 43) returns stats per project. The project response type (around line 117) needs a new optional field. Both `GET /api/projects` (line 146) and `GET /api/projects/status` (line 479) return project objects.
+**Context:** `getProjectStats()` (around line 43) returns stats per project. The project response type (around line 117) needs a new optional field. Both `GET /api/projects` (line 146) and `GET /api/projects/status` (line 479) return project objects. The register endpoint (`POST /api/projects`) also returns a project object and needs the field set to `0`.
 
-`hasActiveRunnerForProject` and `hasActiveParallelSessionForProject` are available in `src/runners/wakeup-checks.ts` — import them from `'../../../dist/runners/wakeup-checks.js'`.
+`hasActiveParallelSessionForProjectDb` is the read-only parallel-session check — it takes an existing DB connection and does NOT call `closeStaleParallelSessions`. Import it from `'../../../dist/runners/parallel-session-state.js'`. The standalone-runner check is done via inline SQL against the already-open `globalDb` (opened at the top of the route module).
 
-**Step 1: Add import for active-runner helpers**
+**Step 1: Add import for read-only parallel session helper**
 
 At the top of `API/src/routes/projects.ts`, after the existing `openGlobalDatabase` import (line 19), add:
 
 ```ts
-import { hasActiveRunnerForProject, hasActiveParallelSessionForProject } from '../../../dist/runners/wakeup-checks.js';
+import { hasActiveParallelSessionForProjectDb } from '../../../dist/runners/parallel-session-state.js';
 ```
 
 **Step 2: Add `orphaned_in_progress` to the project response type**
@@ -40,8 +40,15 @@ orphaned_in_progress: number;
 In `GET /api/projects` (line 146), where each project is assembled into the response object (look for where `runner: runnerInfo` is set, around line 185-195), add:
 
 ```ts
-const hasActiveRunner = hasActiveRunnerForProject(project.path) || hasActiveParallelSessionForProject(project.path);
-const orphanedInProgress = hasActiveRunner ? 0 : (projectStats.stats.in_progress ?? 0);
+// Inline SQL against the already-open globalDb — no extra DB connections
+const hasStandaloneRunner = globalDb.prepare(
+  `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
+   AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
+).get(project.path) !== undefined;
+const hasParallelSession = hasActiveParallelSessionForProjectDb(globalDb, project.path);
+const orphanedInProgress = (hasStandaloneRunner || hasParallelSession)
+  ? 0
+  : (projectStats.stats.in_progress ?? 0);
 ```
 
 Then include in the response object:
@@ -51,7 +58,17 @@ orphaned_in_progress: orphanedInProgress,
 
 **Step 4: Do the same in `GET /api/projects/status`**
 
-Find the equivalent spot in the `/projects/status` handler (around line 479-540). Apply the same pattern — compute `orphanedInProgress` using the same two helpers and include it in the response.
+Find the equivalent spot in the `/projects/status` handler (around line 479-540). Apply the same inline SQL pattern and include `orphaned_in_progress: orphanedInProgress` in the response.
+
+**Step 4b: Add `orphaned_in_progress: 0` to the register response**
+
+Find `POST /api/projects` (the register endpoint). Wherever it builds and returns the project object, add:
+
+```ts
+orphaned_in_progress: 0,
+```
+
+A freshly registered project has no tasks, so this is always `0`.
 
 **Step 5: Build and verify**
 
@@ -189,48 +206,38 @@ git commit -m "feat: show orphaned tasks as project issue and enable reset butto
 
 ---
 
-### Task 4: Extend the reset endpoint with lock cleanup and wakeup
+### Task 4: Extend the reset endpoint with lock cleanup
 
 **Files:**
 - Modify: `API/src/routes/projects.ts`
 
-**Step 1: Add remaining imports**
+**Step 1: Add `Database` import**
 
-Add these imports (not yet present after Task 1):
+Add this import (not yet present after Task 1):
 
 ```ts
 import Database from 'better-sqlite3';
-import { wakeup } from '../../../dist/runners/wakeup.js';
 ```
 
-**Step 2: Make reset handler async**
+(`hasActiveParallelSessionForProjectDb` was already imported in Task 1. No `wakeup` import — cron handles pickup after reset.)
 
-Find line 366:
-```ts
-router.post('/projects/reset', (req: Request, res: Response) => {
-```
+**Step 2: Add orphaned task reset after the existing CLI call**
 
-Change to:
-```ts
-router.post('/projects/reset', async (req: Request, res: Response) => {
-```
-
-**Step 3: Add orphaned task reset after the existing CLI call**
-
-Find the block ending with:
-```ts
-    execSync(`node "${cliBin}" tasks reset --all`, { cwd: validation.path, stdio: 'pipe' });
-```
-
-Immediately after it (before `res.json(...)`), insert:
+Find the block ending with the CLI invocation that resets failed/disputed tasks. Immediately after it (before `res.json(...)`), insert:
 
 ```ts
     // Extract validated path once to avoid repeated non-null assertions
     const projectPath = validation.path as string;
 
-    // Reset orphaned in_progress tasks only when no active runner or parallel session exists
-    const hasActiveRunner = hasActiveRunnerForProject(projectPath) || hasActiveParallelSessionForProject(projectPath);
-    if (!hasActiveRunner) {
+    // Guard: only reset orphaned tasks when no active runner exists
+    // Uses inline SQL against the already-open globalDb — same pattern as detection
+    const hasStandaloneRunner = globalDb.prepare(
+      `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
+       AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
+    ).get(projectPath) !== undefined;
+    const hasParallelSession = hasActiveParallelSessionForProjectDb(globalDb, projectPath);
+
+    if (!hasStandaloneRunner && !hasParallelSession) {
       const dbPath = join(projectPath, '.steroids', 'steroids.db');
       if (existsSync(dbPath)) {
         const projectDb = new Database(dbPath, { fileMustExist: true });
@@ -249,9 +256,9 @@ Immediately after it (before `res.json(...)`), insert:
         }
       }
     }
-
-    // Attempt wakeup so a runner picks up newly-pending tasks (no-op if daemon is paused)
-    await wakeup({ quiet: true });
+    // No wakeup() call — its blast radius covers ALL projects, not just this one.
+    // The cron daemon picks up newly-pending tasks on its next cycle.
+    // Users wanting immediate pickup can hit "Start Daemon."
 ```
 
 **Step 4: Write a failing unit test**
@@ -359,13 +366,13 @@ Expected: no errors.
 2. Navigate to the flatu project (which has orphaned tasks)
 3. Confirm "Orphaned tasks" issue row appears with correct count
 4. Confirm Reset button is enabled
-5. Click Reset — tasks should flip to `pending` and a runner start
+5. Click Reset — tasks should flip to `pending`; runner picks up on next cron cycle
 
 **Step 8: Commit**
 
 ```bash
 git add API/src/routes/projects.ts tests/api-orphaned-task-reset.test.ts
-git commit -m "feat: reset orphaned tasks with lock cleanup and wakeup on project reset"
+git commit -m "feat: reset orphaned in_progress tasks with lock cleanup on project reset"
 ```
 
 ---
@@ -384,5 +391,4 @@ steroids web stop && steroids web
 
 Create the GitHub release with notes:
 - Orphaned task detection in project issues (server-side, parallel-mode safe)
-- Reset button enabled for orphaned tasks; clears locks before resetting
-- Wakeup triggered after reset
+- Reset button enabled for orphaned tasks; clears task locks before resetting to pending

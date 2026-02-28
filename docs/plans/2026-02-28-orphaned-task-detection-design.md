@@ -60,29 +60,54 @@ const canResetProject = Boolean(
 );
 ```
 
+### Detection computation (server-side, read-only)
+
+`orphaned_in_progress` is computed in `GET /api/projects` using the already-open global DB — no extra connections, no write side effects:
+
+```ts
+// Using the already-open globalDb from the route's outer scope:
+const hasStandaloneRunner = globalDb.prepare(
+  `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
+   AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
+).get(project.path) !== undefined;
+
+const hasParallelSession = hasActiveParallelSessionForProjectDb(globalDb, project.path);
+// ^^ read-only variant — does NOT call closeStaleParallelSessions
+
+const orphanedInProgress = (hasStandaloneRunner || hasParallelSession)
+  ? 0
+  : (projectStats.stats.in_progress ?? 0);
+```
+
+`hasActiveParallelSessionForProjectDb` (from `src/runners/parallel-session-state.ts`) is used directly — not `hasActiveParallelSessionForProject` — because the latter calls `closeStaleParallelSessions()` which performs writes, making it unsafe for read endpoints that run on every poll cycle.
+
 ### API: Reset Endpoint
 
-`POST /api/projects/reset` (`API/src/routes/projects.ts`) gains three additions after the existing CLI call, as a single transaction:
+`POST /api/projects/reset` gains two additions after the existing CLI call:
 
-1. **Guard** — call `hasActiveRunnerForProject(path) || hasActiveParallelSessionForProject(path)`. If true, skip steps 2 and 3 (tasks are not orphaned).
+1. **Guard + reset orphaned tasks + clear locks** — uses the same read-only inline queries as detection:
+   ```ts
+   const hasActiveRunner = globalDb.prepare(
+     `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
+      AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
+   ).get(projectPath) !== undefined;
+   const hasParallelSession = hasActiveParallelSessionForProjectDb(globalDb, projectPath);
 
-2. **Reset orphaned tasks + clear locks** — in one transaction on the project DB:
-   ```sql
-   DELETE FROM task_locks WHERE task_id IN (
-     SELECT id FROM tasks WHERE status = 'in_progress'
-   );
-   UPDATE tasks SET status = 'pending', updated_at = datetime('now')
-   WHERE status = 'in_progress';
+   if (!hasActiveRunner && !hasParallelSession) {
+     // open project DB writable, in one transaction:
+     // DELETE FROM task_locks WHERE task_id IN (SELECT id FROM tasks WHERE status = 'in_progress')
+     // UPDATE tasks SET status = 'pending', updated_at = datetime('now') WHERE status = 'in_progress'
+   }
    ```
-   Lock cleanup is required — existing locks have 60-min TTL and would block new runner pickup.
+   Lock cleanup is required — 60-min TTL would block new runner pickup otherwise.
 
-3. **Trigger wakeup** — call the existing `wakeup({ quiet: true })` function. Response notes "wakeup attempted" (not guaranteed if daemon is paused).
+2. **No wakeup call.** Reset's job is to reset tasks. Runner pickup is the daemon/cron's job. The cron picks up newly-pending tasks on the next cycle. Calling `wakeup()` from a per-project reset would run the full sweep across all registered projects (cleanup, recovery, reconciliation, runner spawns) — unacceptable blast radius for a scoped user action.
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `API/src/routes/projects.ts` | Add `orphaned_in_progress` to project response; add lock+task reset + wakeup in reset endpoint |
+| `API/src/routes/projects.ts` | Add `orphaned_in_progress` to project list + status responses; add lock+task reset in reset endpoint; add `orphaned_in_progress: 0` to register response |
 | `WebUI/src/types/index.ts` | Add `orphaned_in_progress?: number` to `Project` type |
 | `WebUI/src/pages/ProjectDetailPage.tsx` | Read `project.orphaned_in_progress`, new issue row, update `canResetProject` |
 
@@ -91,17 +116,18 @@ const canResetProject = Boolean(
 - No changes to orchestrator, loop, or runner pickup logic
 - No changes to `src/runners/wakeup.ts` or `src/runners/wakeup-checks.ts`
 - No changes to the `tasks reset` CLI command
+- No wakeup call from the reset endpoint
 
 ## Edge Cases
 
 | Scenario | Handling |
 |----------|----------|
-| Runner starts between UI load and reset button click | Server-side guard uses `hasActiveRunnerForProject` + `hasActiveParallelSessionForProject`; skips reset if now active |
-| Pool/parallel mode | `hasActiveParallelSessionForProject` catches active workspace sessions; `wakeup()` already handles parallel pickup |
+| Runner starts between UI load and reset button click | Guard re-checks at reset time; skips if now active |
+| Pool/parallel mode | `hasActiveParallelSessionForProjectDb` (read-only) catches active sessions |
 | Project has both orphaned and failed tasks | Both contribute to `canResetProject`; reset handles all in one click |
 | No in_progress tasks | `orphaned_in_progress = 0`, issue row hidden |
-| Daemon paused | Wakeup exits early; response says "attempted"; user must unpause daemon separately |
-| Task has active lock from dead runner | Lock cleared in transaction before status flip; new runner can acquire immediately |
+| Task has active lock from dead runner | Lock cleared in transaction before status flip |
+| Tasks not picked up immediately after reset | Cron picks them up on next cycle; user can also hit "Start Daemon" for immediate wakeup |
 
 ---
 
@@ -178,3 +204,63 @@ Reviewed by: Codex (gpt-5.3-codex), 2026-02-28
 **Assessment:** Valid but minor. The validated path can be extracted once to avoid repeated `!` assertions.
 
 **Decision: Adopt.** Implementation plan updated accordingly.
+
+---
+
+## Cross-Provider Review (Claude + Codex parallel adversarial pass)
+
+Reviewed by: Claude (claude-sonnet-4-6) and Codex (gpt-5.3-codex) simultaneously, 2026-02-28
+
+Both reviewers worked from the same design (revised after Round 1).
+
+### Finding R2-1 — CRITICAL: `wakeup()` has global blast radius
+**Both reviewers:** `wakeup()` iterates ALL registered projects (cleanup, recovery, reconciliation, runner spawns). Calling it from a per-project reset is an unacceptable global side effect for a scoped user action.
+
+**Assessment:** Valid. `wakeup()` is designed as a system-wide sweep, not a per-project trigger.
+
+**Decision: Adopt.** Removed `wakeup()` entirely from the reset endpoint. Runner pickup relies on the cron's next cycle. Users who want immediate pickup can use "Start Daemon." Non-goals section updated.
+
+---
+
+### Finding R2-2 — HIGH: `hasActiveParallelSessionForProject()` has write side effects
+**Both reviewers:** `hasActiveParallelSessionForProject()` (from `wakeup-checks.ts`) internally calls `closeStaleParallelSessions()`, which writes to `parallel_sessions` and `workstreams`. Calling this from GET endpoints that run on every poll cycle introduces write side effects in read paths.
+
+**Assessment:** Valid. `src/runners/parallel-session-state.ts` exports `hasActiveParallelSessionForProjectDb(db, path)` — a read-only variant that takes an existing DB connection without calling `closeStaleParallelSessions`.
+
+**Decision: Adopt.** Detection computation now uses `hasActiveParallelSessionForProjectDb(globalDb, path)` directly. The reset guard uses the same.
+
+---
+
+### Finding R2-3 — HIGH: N×extra DB connections from helper imports
+**Both reviewers:** `hasActiveRunnerForProject()` opens its own global DB connection. Called per-project in a loop on every poll cycle, this creates N extra DB connections.
+
+**Assessment:** Valid. The global DB is already open in the route's outer scope.
+
+**Decision: Adopt.** Standalone runner detection is now an inline SQL query against the already-open `globalDb`. Only `hasActiveParallelSessionForProjectDb(globalDb, path)` is called — it takes the existing connection, so no extra DB opens.
+
+---
+
+### Finding R2-4 — MEDIUM: Missing `POST /api/projects` (register) coverage
+**Codex:** The register endpoint returns a project object without `orphaned_in_progress`, causing a type mismatch.
+
+**Assessment:** Valid. Register returns a project object and should include the field.
+
+**Decision: Adopt.** Register endpoint includes `orphaned_in_progress: 0` (a newly registered project has no tasks).
+
+---
+
+### Finding R2-5 — MEDIUM: TOCTOU between CLI call and orphaned guard
+**Claude:** Between the CLI `tasks reset --all` call and the orphaned guard check, a runner could start and pick up tasks, causing a double-reset.
+
+**Assessment:** Low-risk in practice. The window is milliseconds. Resetting already-pending tasks is idempotent. Fixing this requires locking that exceeds scope.
+
+**Decision: Defer.** Acceptable risk. Idempotent operations mean the worst case is a no-op double reset.
+
+---
+
+### Finding R2-6 — LOW: Raw `new Database()` without WAL pragma
+**Codex:** Opening the project DB with bare `new Database(dbPath)` defaults to DELETE journal mode while other readers use WAL.
+
+**Assessment:** Not a real risk. WAL mode is a property of the DB file, set by its first opener (runner/CLI). A subsequent opener inherits it. The brief write-only connection in reset is safe.
+
+**Decision: Reject.** No change needed.
