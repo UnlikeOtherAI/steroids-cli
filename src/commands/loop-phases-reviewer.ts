@@ -311,20 +311,43 @@ export async function runReviewerPhase(
   );
 
   // STEP 4: Fallback for unclear decisions (catches ALL unclear, not just orchestrator parse failures)
+  let disputeErrorCode: string | undefined;
   if (decision.decision === 'unclear') {
     const consecutiveParseFallbackRetries =
       countConsecutiveUnclearEntries(db, task.id) + 1;
 
     if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
-      decision = {
-        ...decision,
-        decision: 'dispute',
-        reasoning: `Orchestrator parse failed ${consecutiveParseFallbackRetries} times; escalating to dispute`,
-        notes: 'Escalated to disputed to prevent endless unclear-review retries',
-        next_status: 'disputed',
+      // Detect zero-output timeout: reviewer hung without producing any output at all.
+      // This typically means an interactive prompt (e.g. Claude Code onboarding / machine
+      // toolchain setup) is blocking the CLI process. Since stdin is closed in automated
+      // mode, the process silently hangs until the inactivity timeout fires.
+      const isZeroOutputTimeout =
+        !!reviewerResult?.timedOut &&
+        !reviewerResult?.stdout?.trim() &&
+        !reviewerResult?.stderr?.trim();
+
+      if (isZeroOutputTimeout) {
+        disputeErrorCode = 'REVIEWER_ZERO_OUTPUT_TIMEOUT';
+        decision = {
+          ...decision,
+          decision: 'dispute',
+          reasoning: `Reviewer timed out with zero output ${consecutiveParseFallbackRetries} times — the reviewer CLI is likely blocked by an interactive setup prompt (e.g. machine/toolchain configuration). Run the reviewer CLI manually once in a terminal to complete setup, then restart this task.`,
+          notes: 'REVIEWER_ZERO_OUTPUT_TIMEOUT: Reviewer process hung with no output. Cause: interactive setup prompt (e.g. Claude Code onboarding or machine toolchain) is blocking the CLI since stdin is closed in automated mode. Fix: open a terminal and run the reviewer CLI once to complete setup, then restart the task.',
+          next_status: 'disputed',
           confidence: 'low',
           push_to_remote: false,
-      };
+        };
+      } else {
+        decision = {
+          ...decision,
+          decision: 'dispute',
+          reasoning: `Orchestrator parse failed ${consecutiveParseFallbackRetries} times; escalating to dispute`,
+          notes: 'Escalated to disputed to prevent endless unclear-review retries',
+          next_status: 'disputed',
+            confidence: 'low',
+            push_to_remote: false,
+        };
+      }
     } else {
       decision = {
         ...decision,
@@ -339,6 +362,7 @@ export async function runReviewerPhase(
     actorType: 'orchestrator',
     notes: `[${decision.decision}] ${decision.reasoning} (confidence: ${decision.confidence})`,
     category: 'decision',
+    errorCode: disputeErrorCode,
   });
 
   if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {

@@ -122,7 +122,7 @@ export function buildParallelRunPlan(projectPath: string, maxClonesOverride?: nu
         `SELECT section_id as sectionId, COUNT(*) as count
          FROM tasks
          WHERE section_id IN (${sections.map(() => '?').join(',')})
-           AND status NOT IN ('completed', 'skipped', 'failed')
+           AND status NOT IN ('completed', 'skipped', 'failed', 'partial', 'blocked_error', 'blocked_conflict')
          GROUP BY section_id`
       )
       .all(...sections.map((section) => section.id)) as Array<{
