@@ -29,6 +29,9 @@ Assets/banner_no_logo.jpeg
 # Temporary files
 tmp/
 
+# Playwright MCP screenshots
+.playwright-mcp/
+
 # One-off scripts (never commit these)
 fix*.js
 refix*.js
