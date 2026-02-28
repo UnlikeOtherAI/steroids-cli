@@ -209,8 +209,22 @@ export function getSectionTaskCount(
 
 /**
  * Get dependencies for a section that have incomplete tasks
- * Returns sections that the given section depends on and have any non-completed tasks
- * (pending, in_progress, review, disputed, failed, skipped, partial)
+ * Returns sections that the given section depends on and still have tasks that are
+ * actively blocking: pending, in_progress, review, disputed, failed, blocked_error,
+ * blocked_conflict.
+ *
+ * Terminal states that do NOT block downstream sections:
+ *   - completed: done
+ *   - skipped: intentionally skipped, external setup handles the rest
+ *   - partial: coded what we could, rest is external — system is done with it
+ *   - blocked_error / blocked_conflict: pool infrastructure blocked the task;
+ *     not recoverable by the runner, so downstream should not be permanently gated.
+ *     (Human intervention is required to unblock these, but that shouldn't stop
+ *     unrelated downstream sections from starting.)
+ *
+ * Note: 'failed' is intentionally kept as blocking. Failed tasks are retriable —
+ * a human or the retry mechanism can reset them to pending. Downstream work that
+ * depends on correct upstream output should wait for that retry.
  */
 export function getPendingDependencies(
   db: Database.Database,
@@ -225,7 +239,7 @@ export function getPendingDependencies(
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.section_id = s.id
-         AND t.status != 'completed'
+         AND t.status NOT IN ('completed', 'skipped', 'partial', 'blocked_error', 'blocked_conflict')
        )
        ORDER BY s.position ASC`
     )

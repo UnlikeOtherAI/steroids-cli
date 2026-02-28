@@ -166,7 +166,7 @@ describe('Section Dependencies - Base Queries', () => {
       expect(deps[0].id).toBe(depSection.id);
     });
 
-    it('returns dependency when it has skipped tasks', () => {
+    it('returns empty array when dependency has only skipped tasks', () => {
       const depSection = createSection(db, 'Dependency Section');
       const mainSection = createSection(db, 'Main Section');
 
@@ -175,18 +175,17 @@ describe('Section Dependencies - Base Queries', () => {
         'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
       ).run(uuidv4(), mainSection.id, depSection.id);
 
-      // Add skipped task to dependency
+      // Skipped = intentionally skipped (external setup), treated as done
       createTask(db, 'Skipped Task', {
         sectionId: depSection.id,
         status: 'skipped',
       });
 
       const deps = getPendingDependencies(db, mainSection.id);
-      expect(deps.length).toBe(1);
-      expect(deps[0].id).toBe(depSection.id);
+      expect(deps).toEqual([]);
     });
 
-    it('returns dependency when it has partial tasks', () => {
+    it('returns empty array when dependency has only partial tasks', () => {
       const depSection = createSection(db, 'Dependency Section');
       const mainSection = createSection(db, 'Main Section');
 
@@ -195,15 +194,14 @@ describe('Section Dependencies - Base Queries', () => {
         'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
       ).run(uuidv4(), mainSection.id, depSection.id);
 
-      // Add partial task to dependency
+      // Partial = coded what we could, rest is external - treated as done
       createTask(db, 'Partial Task', {
         sectionId: depSection.id,
         status: 'partial',
       });
 
       const deps = getPendingDependencies(db, mainSection.id);
-      expect(deps.length).toBe(1);
-      expect(deps[0].id).toBe(depSection.id);
+      expect(deps).toEqual([]);
     });
 
     it('returns multiple dependencies when multiple have pending tasks', () => {
@@ -247,6 +245,85 @@ describe('Section Dependencies - Base Queries', () => {
       const deps = getPendingDependencies(db, mainSection.id);
       expect(deps.length).toBe(1);
       expect(deps[0].id).toBe(dep1.id);
+    });
+
+    // Mixed-status tests — verify per-task EXISTS logic holds when statuses are mixed
+
+    it('returns empty array when dependency has completed + skipped tasks (both terminal)', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      createTask(db, 'Completed Task', { sectionId: depSection.id, status: 'completed' });
+      createTask(db, 'Skipped Task', { sectionId: depSection.id, status: 'skipped' });
+
+      const deps = getPendingDependencies(db, mainSection.id);
+      expect(deps).toEqual([]);
+    });
+
+    it('returns dependency when it has pending + skipped tasks (one active task still blocks)', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      createTask(db, 'Skipped Task', { sectionId: depSection.id, status: 'skipped' });
+      createTask(db, 'Pending Task', { sectionId: depSection.id, status: 'pending' });
+
+      const deps = getPendingDependencies(db, mainSection.id);
+      expect(deps.length).toBe(1);
+      expect(deps[0].id).toBe(depSection.id);
+    });
+
+    it('returns empty array when dependency has only blocked_error tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // blocked_error: pool infrastructure blocked the task; not recoverable by runner
+      createTask(db, 'Blocked Task', { sectionId: depSection.id, status: 'blocked_error' });
+
+      const deps = getPendingDependencies(db, mainSection.id);
+      expect(deps).toEqual([]);
+    });
+
+    it('returns empty array when dependency has only blocked_conflict tasks', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // blocked_conflict: merge conflict blocked the task; not recoverable by runner
+      createTask(db, 'Conflict Task', { sectionId: depSection.id, status: 'blocked_conflict' });
+
+      const deps = getPendingDependencies(db, mainSection.id);
+      expect(deps).toEqual([]);
+    });
+
+    it('returns dependency when it has failed tasks (failed is retriable, keeps blocking)', () => {
+      const depSection = createSection(db, 'Dependency Section');
+      const mainSection = createSection(db, 'Main Section');
+
+      db.prepare(
+        'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
+      ).run(uuidv4(), mainSection.id, depSection.id);
+
+      // failed is intentionally blocking: a retry mechanism can reset it to pending
+      createTask(db, 'Failed Task', { sectionId: depSection.id, status: 'failed' });
+
+      const deps = getPendingDependencies(db, mainSection.id);
+      expect(deps.length).toBe(1);
+      expect(deps[0].id).toBe(depSection.id);
     });
   });
 
@@ -346,7 +423,7 @@ describe('Section Dependencies - Base Queries', () => {
       expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
     });
 
-    it('returns false when dependency has skipped tasks', () => {
+    it('returns true when dependency has only skipped tasks', () => {
       const depSection = createSection(db, 'Dependency Section');
       const mainSection = createSection(db, 'Main Section');
 
@@ -355,16 +432,16 @@ describe('Section Dependencies - Base Queries', () => {
         'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
       ).run(uuidv4(), mainSection.id, depSection.id);
 
-      // Add skipped task to dependency
+      // Skipped = intentionally skipped (external setup), treated as done
       createTask(db, 'Skipped Task', {
         sectionId: depSection.id,
         status: 'skipped',
       });
 
-      expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
+      expect(hasDependenciesMet(db, mainSection.id)).toBe(true);
     });
 
-    it('returns false when dependency has partial tasks', () => {
+    it('returns true when dependency has only partial tasks', () => {
       const depSection = createSection(db, 'Dependency Section');
       const mainSection = createSection(db, 'Main Section');
 
@@ -373,13 +450,13 @@ describe('Section Dependencies - Base Queries', () => {
         'INSERT INTO section_dependencies (id, section_id, depends_on_section_id) VALUES (?, ?, ?)'
       ).run(uuidv4(), mainSection.id, depSection.id);
 
-      // Add partial task to dependency
+      // Partial = coded what we could, rest is external - treated as done
       createTask(db, 'Partial Task', {
         sectionId: depSection.id,
         status: 'partial',
       });
 
-      expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
+      expect(hasDependenciesMet(db, mainSection.id)).toBe(true);
     });
 
     it('returns false when any dependency has incomplete tasks', () => {
