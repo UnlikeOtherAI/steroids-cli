@@ -586,10 +586,20 @@ export const ProjectDetailPage: React.FC = () => {
     project?.isBlocked ||
       (project?.stats?.failed ?? 0) > 0 ||
       (project?.stats?.disputed ?? 0) > 0 ||
-      (project?.stats?.skipped ?? 0) > 0
+      (project?.stats?.skipped ?? 0) > 0 ||
+      (project?.orphaned_in_progress ?? 0) > 0
   );
 
   const issueRows = [
+    {
+      key: 'orphaned',
+      label: 'Orphaned tasks',
+      count: project?.orphaned_in_progress ?? 0,
+      singleTaskId: null,
+      listPath: `/project/${encodeURIComponent(decodedPath)}/tasks?status=in_progress`,
+      icon: 'fa-circle-pause',
+      badgeClasses: 'bg-warning-soft text-warning',
+    },
     {
       key: 'failed_retries',
       label: 'Failed retries',
@@ -844,7 +854,7 @@ export const ProjectDetailPage: React.FC = () => {
                       Reset Project
                     </span>
                   </Button>
-                  <p className="text-xs text-text-muted text-center mt-1.5">Resets failed, disputed and stale tasks to pending</p>
+                  <p className="text-xs text-text-muted text-center mt-1.5">Resets failed, disputed, stale, and orphaned tasks to pending</p>
                 </div>
               </div>
             )}
