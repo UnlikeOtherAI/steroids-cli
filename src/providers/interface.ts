@@ -499,9 +499,10 @@ export abstract class BaseAIProvider implements IAIProvider {
    * @param providerDir The provider-specific config directory (e.g. '.claude', '.gemini')
    * @param authFiles Array of critical auth/config filenames to preserve (e.g. ['config.json', 'state.json'])
    * @param baseDir Optional pre-existing isolated home directory to use
+   * @param rootFiles Additional HOME-root files to symlink (e.g. ['.claude.json'])
    * @returns Path to the isolated home directory
    */
-  protected setupIsolatedHome(providerDir: string, authFiles: string[], baseDir?: string): string {
+  protected setupIsolatedHome(providerDir: string, authFiles: string[], baseDir?: string, rootFiles?: string[]): string {
     const uuid = randomUUID();
     const isolatedHome = baseDir ?? join(tmpdir(), `steroids-${this.name}-${uuid}`);
 
@@ -534,8 +535,8 @@ export abstract class BaseAIProvider implements IAIProvider {
         }
       }
 
-      // Also symlink global git config so AI tools still work
-      ['.gitconfig', '.ssh'].forEach(file => {
+      // Also symlink global git config, ssh keys, and any provider-specific root files
+      [...(rootFiles ?? []), '.gitconfig', '.ssh'].forEach(file => {
         const src = join(homedir(), file);
         const dest = join(isolatedHome, file);
         if (existsSync(src)) {

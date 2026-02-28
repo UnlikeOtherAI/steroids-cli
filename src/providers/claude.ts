@@ -219,7 +219,10 @@ export class ClaudeProvider extends BaseAIProvider {
     resumeSessionId?: string
   ): Promise<InvokeResult> {
     // Set up isolated HOME
-    const isolatedHome = this.setupIsolatedHome('.claude', ['config.json', '.credentials.json', 'settings.json']);
+    // ~/.claude.json lives at HOME root (not inside ~/.claude/) and holds onboarding/machine state.
+    // Without it, Claude Code shows a toolchain/onboarding prompt on every invocation, which hangs
+    // since stdin is closed.
+    const isolatedHome = this.setupIsolatedHome('.claude', ['config.json', '.credentials.json', 'settings.json'], undefined, ['.claude.json']);
 
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
