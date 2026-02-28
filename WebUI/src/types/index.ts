@@ -35,6 +35,7 @@ export interface Project {
     current_task_id: string | null;
     heartbeat_at: string | null;
   } | null;
+  orphaned_in_progress?: number;
 }
 
 export interface ApiResponse<T> {
