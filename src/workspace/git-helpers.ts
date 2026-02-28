@@ -29,6 +29,7 @@ export function execGit(
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: options?.timeoutMs ?? 120_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     }).trim();
   } catch (error) {
     if (options?.tolerateFailure) {

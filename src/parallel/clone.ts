@@ -74,7 +74,10 @@ export class WorkspaceCloneError extends Error {
 
 function runGitAllowFailure(args: string[]): void {
   try {
-    execFileSync('git', args, { stdio: ['ignore', 'ignore', 'ignore'] });
+    execFileSync('git', args, {
+      stdio: ['ignore', 'ignore', 'ignore'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
   } catch {
     // Best-effort hydration for optional refs.
   }
@@ -323,14 +326,14 @@ export function createWorkspaceClone(options: WorkspaceCloneOptions): WorkspaceC
 
   try {
     // hardcoded command, no user input
-    execFileSync('git', buildCloneArgs(usedLocalClone), { cwd: process.cwd(), stdio: 'inherit' });
+    execFileSync('git', buildCloneArgs(usedLocalClone), { cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
   } catch (error: unknown) {
     // If --local clone failed, retry without it (handles cross-device link on macOS APFS)
     if (usedLocalClone) {
       rmSync(workspacePath, { recursive: true, force: true });
       usedLocalClone = false;
       try {
-        execFileSync('git', buildCloneArgs(false), { cwd: process.cwd(), stdio: 'inherit' });
+        execFileSync('git', buildCloneArgs(false), { cwd: process.cwd(), stdio: 'inherit', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
       } catch (retryError: unknown) {
         rmSync(workspacePath, { recursive: true, force: true });
         throw new WorkspaceCloneError('Git clone failed', retryError);
@@ -458,12 +461,12 @@ export function createIntegrationWorkspace(options: IntegrationWorkspaceOptions)
     execFileSync(
       'git',
       ['-C', clone.workspacePath, 'fetch', remote, options.baseBranch],
-      { stdio: 'inherit' }
+      { stdio: 'inherit', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
     );
     execFileSync(
       'git',
       ['-C', clone.workspacePath, 'checkout', '-B', integrationBranchName, `${remote}/${options.baseBranch}`],
-      { stdio: 'inherit' }
+      { stdio: 'inherit', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
     );
   } catch (error) {
     rmSync(clone.workspacePath, { recursive: true, force: true });

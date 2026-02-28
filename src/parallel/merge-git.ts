@@ -27,6 +27,7 @@ export function runGitCommand(
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: timeoutMs,
       maxBuffer: options.maxBuffer,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     }).trim();
   } catch (error: unknown) {
     if (allowFailure) {

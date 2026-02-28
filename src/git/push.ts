@@ -42,6 +42,7 @@ export function pushToRemote(
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 120_000, // 2 minute timeout
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     });
 
     const commitHash = getCurrentCommitHash(projectPath);
