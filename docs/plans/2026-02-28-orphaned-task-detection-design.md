@@ -103,13 +103,18 @@ const orphanedInProgress = (hasStandaloneRunner || hasParallelSession)
 
 2. **No wakeup call.** Reset's job is to reset tasks. Runner pickup is the daemon/cron's job. The cron picks up newly-pending tasks on the next cycle. Calling `wakeup()` from a per-project reset would run the full sweep across all registered projects (cleanup, recovery, reconciliation, runner spawns) — unacceptable blast radius for a scoped user action.
 
-## Files Changed
+## Implementation Order
 
-| File | Change |
-|------|--------|
-| `API/src/routes/projects.ts` | Add `orphaned_in_progress` to project list + status responses; add lock+task reset in reset endpoint; add `orphaned_in_progress: 0` to register response |
-| `WebUI/src/types/index.ts` | Add `orphaned_in_progress?: number` to `Project` type |
-| `WebUI/src/pages/ProjectDetailPage.tsx` | Read `project.orphaned_in_progress`, new issue row, update `canResetProject` |
+Four phases, each touching 1–2 files. Each phase depends on the previous.
+
+| Phase | Files | Change |
+|-------|-------|--------|
+| 1 — API detection | `API/src/routes/projects.ts` | Add `orphaned_in_progress` field to project list, status, and register responses using inline SQL + `hasActiveParallelSessionForProjectDb` |
+| 2 — UI type | `WebUI/src/types/index.ts` | Add `orphaned_in_progress?: number` to `Project` interface |
+| 3 — UI display | `WebUI/src/pages/ProjectDetailPage.tsx` | New issue row, update `canResetProject`, update reset button label |
+| 4 — Reset logic + tests | `API/src/routes/projects.ts`, `tests/api-orphaned-task-reset.test.ts` | Guard + lock cleanup + status reset in the reset endpoint; unit test for the transaction |
+
+Full step-by-step implementation plan: `docs/plans/2026-02-28-orphaned-task-detection.md`
 
 ## Non-Goals
 

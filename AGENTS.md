@@ -1,90 +1,78 @@
 # Steroids Agent Guidelines
 
-> **IMPORTANT:** This file is a companion to [CLAUDE.md](./CLAUDE.md). You MUST read both files before starting any work. They are always linked — changes to one may require updates to the other.
+> Read CLAUDE.md and AGENTS.md before starting any work. Update both when policy changes.
 
-## Cross-Provider Design Reviews (CRITICAL)
+## Cross-Provider Reviews (CRITICAL)
 
-## Provider Invocation Protocol (codex)
+### Core Engine Functions — Mandatory Double Review
 
-- Use non-interactive mode for scripted checks and fixes.
-- Never pass model flags or model aliases (no `--model`, `-m`, or explicit model names) unless explicitly requested.
-- Start with a CLI availability check: `codex --help`
-- Run a smoke check: `codex exec "say hi"`
-- For codebase feedback or any long analysis, cap runtime at 5 minutes:
-  - `timeout 300 codex exec "<prompt>"`
-- If terminating a stuck command, only do so after sustained inactivity and effectively 0.0% CPU; do not kill active, progressing processes.
+Any change to the dispatch pipeline requires two independent adversarial reviews — Claude (`superpowers:code-reviewer`) and Codex — at both the **planning phase** (before writing code) and the **verification phase** (after tests pass).
 
-**For any significant design or architectural change, you MUST get a second opinion from a different AI provider before implementation.**
+**Functions that trigger this rule:**
 
-This applies to:
-- New features spanning 3+ files
-- Architectural changes (new tables, new API routes, new component patterns)
-- Design documents and specifications
-- Changes to the orchestrator, loop, or provider systems
-- Prompt changes (already covered in CLAUDE.md, but reinforced here)
+| Area | Files / Symbols |
+|------|----------------|
+| Dependency gating | `getPendingDependencies`, `hasDependenciesMet` — `src/database/queries.ts` |
+| Task selection | `findNextTask`, `findNextTaskSkippingLocked`, `selectNextTaskWithLock`, `selectNextTaskWithWait` — `src/orchestrator/task-selector.ts`, `src/database/queries.ts` |
+| Parallel workstream planning | `buildParallelRunPlan`, pending-work count query — `src/commands/runners-parallel.ts` |
+| Runner loop | `orchestrator-loop.ts`, `daemon.ts` — any change to when runners exit or restart |
+| Status definitions | `TaskStatus` enum — `src/database/queries.ts` — adding or redefining a status propagates to all of the above |
+| Section "done" checks | Any code that answers "is this section finished?" — must stay consistent across all call sites |
+
+**Each adversarial review must check:**
+
+1. **Status set consistency** — every "is task/section done?" check must agree on the same terminal status set across all call sites.
+2. **New status propagation** — trace any new `TaskStatus` value through all six areas above.
+3. **Wait-loop exit conditions** — every task/section state combination must result in a clean exit, not an infinite poll.
+4. **Parallel plan / dependency gate alignment** — the pending-work query and the blocking query must exclude exactly the same terminal statuses.
+5. **Rollback failure modes** — if a task is incorrectly marked terminal by a bug, document the worst-case consequence.
+
+**Core engine functions NEVER skip review regardless of change size.**
+
+### Codex Invocation Protocol
+
+- Non-interactive mode only — never use flags that trigger interactive prompts.
+- Never pass model flags or aliases unless explicitly requested.
+- Before use: `codex --help` to verify availability; `codex exec "say hi"` as a smoke check.
+- Cap long analysis runs at 5 minutes: `timeout 300 codex exec "<prompt>"`
+- Do not kill an active process; only terminate after sustained inactivity and ~0% CPU.
+
+### When to Request a Cross-Provider Review
+
+Get a second opinion from a different provider **before implementation** for: new features spanning 3+ files, architectural changes (new tables, API routes, component patterns), design documents, changes to the orchestrator or loop.
 
 ### How to Conduct a Review
 
-1. **Write the design/spec first.** Complete your thinking before seeking review.
-2. **Send to a different provider.** If Claude wrote it, send to Codex. If Codex wrote it, send to Claude.
-3. **Strict Adversarial Persona (MANDATORY):** You must instruct the reviewer to be **adversarial**. It is not enough to check if it "works." The reviewer must explicitly look for:
-   - **Technical Debt**: Are we taking shortcuts that will hurt us later?
-   - **Architectural Regression**: Are we losing features (like streaming or isolation) that other providers have?
-   - **Type Safety**: Are we using `any` or bypassing the type system?
-   - **Logic Gaps**: Does `isAvailable` actually mean the service is ready for the specific task?
-4. **Non-Interactive Mode (CRITICAL):** Reviews MUST be run in non-interactive mode (e.g., using `--print` or `--exec` flags) to ensure that output is captured correctly and the automated workflow is not blocked by interactive prompts.
-5. **The review is advisory, NOT the source of truth.** The reviewing model may be wrong, may miss context, or may over-engineer. Treat its output as additional data points, not mandates.
-6. **Assess each finding independently.** For each point the reviewer raises:
-   - Is it valid given the actual codebase? (Check the code, don't assume)
-   - Is it relevant to the current scope?
-   - Is it actionable now, or a future concern?
-   - Does it conflict with existing patterns?
-7. **Document both perspectives.** Append a "Cross-Provider Review" section to your design doc showing: the finding, your assessment, and the decision (adopt/defer/reject with reasoning).
-8. **Commit the combined document.** The review trail is valuable for future reference.
+1. Write the design/spec first — complete thinking before seeking review.
+2. Send to a different provider (Claude wrote it → Codex; Codex wrote it → Claude). Instruct the reviewer to be **adversarial**: look for technical debt, architectural regression, type safety gaps, and logic holes.
+3. Run in non-interactive mode so output is captured and the workflow isn't blocked.
+4. The review is advisory. Assess each finding independently: is it valid, relevant, actionable now? Push back with reasoning if the reviewer is wrong. Do not let reviewers push toward over-engineering.
+5. Append a "Cross-Provider Review" section to the design doc (finding → assessment → decision: adopt/defer/reject). Commit the combined document.
 
-### What NOT to Do
-
-- Do NOT blindly implement everything the reviewer suggests
-- Do NOT treat the review as a blocker — if the reviewer is unresponsive or unhelpful, proceed with your own judgment and note that review was attempted
-- Do NOT skip the review for "small" changes that turn out to be big (when in doubt, review)
-- Do NOT let a reviewer push you toward over-engineering; keep solutions minimal
-
-### When to Skip Review
-
-- Typo fixes, formatting changes, documentation-only updates
-- Bug fixes with clear root cause and minimal blast radius
-- Changes to a single file under 50 lines
-- Urgent hotfixes (review post-merge)
+**Skip review for:** typo fixes, doc-only updates, hotfixes (review post-merge), single-file changes under 50 lines — **unless they touch core engine functions.**
 
 ---
 
 ## Design Document Standards
 
-When creating design documents for new features:
+Required sections for any feature design doc:
 
-1. **Problem Statement**: What's broken or missing, and why it matters
-2. **Current Behavior**: How the system works today (with file references)
-3. **Desired Behavior**: What should happen instead
-4. **Design**: Technical approach with code sketches (not final code)
-5. **Implementation Order**: Phased plan with dependencies
-6. **Edge Cases**: Table of scenarios and their handling
-7. **Non-Goals**: Explicitly state what's out of scope
-8. **Cross-Provider Review**: Appendix with review findings and assessments
+1. **Problem Statement** — what's broken and why it matters
+2. **Current Behavior** — how the system works today (with file references)
+3. **Desired Behavior** — what should happen instead
+4. **Design** — technical approach with code sketches (not final code)
+5. **Implementation Order** — phased plan with dependencies
+6. **Edge Cases** — table of scenarios and handling
+7. **Non-Goals** — explicitly out of scope
+8. **Cross-Provider Review** — findings, assessments, decisions
 
-Design docs live in `docs/plans/` and are committed to the repo before implementation begins. When implementation is complete, move the design doc and its corresponding plan file to `docs/done/`.
+Design docs live in `docs/plans/`. Move to `docs/done/` when implementation is complete.
 
 ---
 
-## Task Creation from Design Docs
+## After Design Doc is Finalized
 
-After a design document is reviewed and finalized:
-
-1. Create steroids tasks for each implementation phase
-2. Tasks should be granular enough for a single coder session (1-3 files changed)
-3. Reference the design doc in each task description
-4. Set section and dependencies appropriately
-5. Let the runner pick up the tasks — do not implement manually unless the runner is broken
-6. When all tasks are complete, move the design doc and plan file from `docs/plans/` to `docs/done/` and commit
+When all tasks in the plan are complete, move the design doc and plan file from `docs/plans/` to `docs/done/`.
 
 ---
 
@@ -92,136 +80,67 @@ After a design document is reviewed and finalized:
 
 ### Root-Cause First (CRITICAL)
 
-When a workflow fails, do **not** patch around it with additional fallbacks before understanding the underlying defect.
-
-- Diagnose and document the actual root cause first (with concrete log/code evidence)
-- Prefer fixing the broken invariant/mechanism directly
-- Avoid layering retries/fallbacks that mask defects and create loops
-- Use fallback behavior only as a temporary containment strategy with an explicit follow-up root-cause fix task
+Do not patch around a failure before understanding the defect. Diagnose and document the root cause first (with concrete log/code evidence); fix the broken invariant directly. Fallbacks are only acceptable as temporary containment with an explicit follow-up task for the real fix.
 
 ### Determinism First (CRITICAL)
 
-**Keep the whole system deterministic without any fragile parsing.** 
-If you must implement anything that is non-deterministic (such as regex parsing of LLM string outputs, fuzzy matching, or complex nested fallback layers), you MUST put deep architectural thought into it. **Any non-deterministic architectural additions must usually be explicitly approved by the user** before implementation.
+Keep the system deterministic. Any non-deterministic addition (regex parsing of LLM output, fuzzy matching, nested fallback chains) requires deep architectural justification and usually explicit user approval before implementation.
 
 ### Simplification First (CRITICAL)
 
-Before implementing even a small patch, evaluate whether the correct fix is to simplify architecture, boundaries, or control flow instead of adding another local workaround.
-
-- Every change must include a brief global-impact check: does this reduce or increase total system complexity?
-- Prefer unifying duplicated patterns over patching each occurrence independently
-- Prefer a single source of truth for command execution paths, process launching, and cross-context behavior
-- If two code paths answer the same invariant question, they must use one shared source of truth
-- Avoid fallback/patch stacking that masks design flaws
-- If a short-term patch is unavoidable, create a follow-up simplification task with concrete scope
+Before patching, ask whether the right fix is to simplify. Every change must reduce or hold total system complexity — never increase it. Two code paths that answer the same invariant question must share one source of truth. If a short-term patch is unavoidable, create a follow-up simplification task with concrete scope.
 
 ### Documentation Alignment (CRITICAL)
 
-- Treat feature work as incomplete until relevant documentation is updated (`README.md`, `AGENTS.md`, and configuration/schema docs where applicable).
-- When adding or changing CLI flags/subcommands, update related help text in `src/commands/`.
+Feature work is incomplete until `README.md`, `AGENTS.md`, and relevant schema/config docs are updated. When adding or changing CLI flags or subcommands, update the help text in `src/commands/`.
 
 ### Command Execution Discipline (CRITICAL)
 
-- Use non-interactive command modes for scripted/automated flows whenever available.
-- For `npx` invocations in automation, use `-y`/`--yes` to avoid interactive install prompts.
+Use non-interactive modes for all scripted/automated flows. For `npx` in automation, use `-y`/`--yes`.
 
 ### Architecture and Quality Practices
 
-- Prefer existing proven patterns in this codebase over introducing new architectural models for routine problems.
-- If a file grows too large to maintain effectively, split it into focused modules.
-- For bug fixes and new logic, include targeted tests when validation is in scope.
+- Prefer proven patterns in this codebase over new architectural models for routine problems.
+- **After editing any file, check its line count — hard limits:**
+  - Source, tests, config: **500 lines**. Exceeding requires splitting into focused modules before continuing.
+  - Documentation (`.md`): **1,000 lines**. Exceeding requires a dedicated folder with `overview.md` linking to sub-files.
+- Include targeted tests for bug fixes and new logic when validation is in scope.
+- Keep work in small isolated commits and push promptly.
 
 ### What Belongs in the Repo (CRITICAL)
 
-Only commit files that are **permanent and hand-authored**. The rule is simple: if it can be generated or regenerated, it must not be committed.
+Only commit permanent, hand-authored files. If it can be regenerated, do not commit it.
 
-**NEVER commit:**
-- Build output (`dist/`, `build/`, `*.tsbuildinfo`) — regenerated by `npm run build`
-- One-off scripts (`fix*.js`, `refactor*.js`, scratch scripts used once to patch something)
-- Backup files (`*.bak`, `*.backup`, `*.before-*`, `*.orig`) — use git history instead
-- Temporary notes or scratchpad files (`memory-usage.md`, ad-hoc `.md` files)
-- Duplicate or stale copies of files already tracked elsewhere
-- Any file whose purpose is "I'll clean this up later"
+**Never commit:** build output (`dist/`, `*.tsbuildinfo`), one-off scripts, backup files (`*.bak`, `*.orig`), temporary notes, duplicate or stale copies.
 
-**ALWAYS commit:**
-- Source code (`src/`, `tests/`)
-- Configuration files (`tsconfig.json`, `jest.config.js`, `.gitignore`, `package.json`)
-- Project AI config (`CLAUDE.md`, `AGENTS.md`)
-- SQL migration files (`migrations/`)
-- Permanent scripts (`scripts/`) — only if they serve an ongoing purpose
-- Documentation (`docs/`, `README.md`) — only if it's permanent reference material
+**Always commit:** source (`src/`, `tests/`), config (`tsconfig.json`, `jest.config.js`, `.gitignore`, `package.json`), AI config (`CLAUDE.md`, `AGENTS.md`), migrations, permanent scripts, permanent docs.
 
-When in doubt: if it has a `.gitignore` entry for it already, do not commit it.
-
-### Workflow and Backups
-
-- Keep work in small, isolated commits and push promptly so remote history remains a reliable recovery point.
-
-### File References
-- Always read CLAUDE.md and AGENTS.md before starting work
-- Follow the coding standards in CLAUDE.md strictly
-- Follow the review and design process in AGENTS.md
-
-### Linked Files
-| File | Purpose |
-|------|---------|
-| [CLAUDE.md](./CLAUDE.md) | Coding standards, workflow, constraints |
-| [AGENTS.md](./AGENTS.md) | Design reviews, agent behavior, task process |
-| [docs/](./docs/) | Feature designs and architecture documentation |
-
-Any agent (Claude, Codex, or future providers) working on this codebase must read both CLAUDE.md and AGENTS.md as their first action.
+When in doubt: if it has a `.gitignore` entry, do not commit it.
 
 ---
 
-## Follow-up Tasks (Non-blocking improvements)
+## Follow-up Tasks (Non-blocking Improvements)
 
-When acting as a **REVIEWER**, if you identify improvements that are valuable but **not blocking** for the current task, you should suggest them as **Follow-up Tasks** rather than rejecting the submission.
+When reviewing, suggest valuable but non-blocking improvements as **follow-up tasks** rather than rejections.
 
-### When to create a Follow-up
-- Adding more comprehensive tests where basic tests exist
-- Minor refactors for readability
-- Documentation improvements
-- Extracting hardcoded values to config
-- Performance optimizations where current performance is acceptable
+**Create a follow-up for:** missing comprehensive tests, minor readability refactors, doc improvements, extracting hardcoded values, acceptable-performance optimizations.
 
-### When to REJECT instead
-- Missing critical functionality from task requirements
-- Security vulnerabilities
-- Data corruption risks
-- Test failures or zero test coverage
-- Required functionality not working
+**Reject instead for:** missing required functionality, security vulnerabilities, data corruption risk, test failures, zero test coverage.
 
-### Follow-up Task Requirements
-Each follow-up must include:
-1. **WHAT**: Specific work to be done (files, modules, functions)
-2. **WHY**: Reason it's needed (technical debt, missing functionality, etc.)
-3. **HOW**: Suggested approach or implementation hints
-
-**Limit:** Suggest a maximum of 3 follow-up tasks per approval. Prioritize the most impactful ones.
+Each follow-up must specify: **WHAT** (files/functions), **WHY** (technical debt or gap), **HOW** (suggested approach). Max 3 per review.
 
 ---
 
 ## Release / Publish Runbook (CRITICAL)
 
-When the user says "do a release" or "do a publish", execute this exact sequence:
+When the user says "do a release" or "do a publish":
 
-1. Commit all intended changes (only files intended for the release)
-2. Bump version (`npm version patch|minor|major`)
-3. Push commit + tags (`git push && git push --tags`)
-4. Publish to npm (`npm publish`)
-5. Create GitHub release with `gh release create v<version> --title ... --notes ...`
-6. Install latest CLI globally from npm (`npm i -g steroids-cli@latest`)
-7. Reload web assets with a clean restart:
-   - `steroids web stop`
-   - `steroids web`
-   - If UI still looks stale on versions that do not auto-rebuild web assets: `steroids web update` then `steroids web stop && steroids web`
+1. Commit all intended changes.
+2. Bump version: `npm version patch|minor|major`
+3. Push: `git push && git push --tags`
+4. Publish: `npm publish`
+5. Create GitHub release: `gh release create v<version> --title ... --notes ...` (include user-visible changes, bug fixes, and a compare link to the previous tag).
+6. Install globally: `npm i -g steroids-cli@latest`
+7. Reload web assets: `steroids web stop && steroids web` (if UI looks stale: `steroids web update` first, then restart).
 
-### Required release notes content
-- Include concrete, user-visible changes
-- Include key bug fixes and behavior changes
-- Include compare link to previous tag
-
-### Verification after install
-- `steroids --version` must match the released version
-- `steroids web` must start successfully (Web UI and API URLs printed, no startup errors)
-- If browser still shows old UI after restart, hard-refresh the page (Cmd+Shift+R) and re-run `steroids web update`
+**Verify:** `steroids --version` matches; `steroids web` starts with no errors; hard-refresh browser if UI still shows old version.
