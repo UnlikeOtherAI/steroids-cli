@@ -387,6 +387,7 @@ interface DisputePanelProps {
   status: string;
   rejectionCount: number;
   disputes: TaskDispute[];
+  auditTrail: AuditEntry[];
   restartNotes: string;
   onNotesChange: (notes: string) => void;
   onRestart: (notes: string) => void;
@@ -394,9 +395,10 @@ interface DisputePanelProps {
 }
 
 export const DisputePanel: React.FC<DisputePanelProps> = ({
-  status, rejectionCount, disputes, restartNotes, onNotesChange, onRestart, restarting,
+  status, rejectionCount, disputes, auditTrail, restartNotes, onNotesChange, onRestart, restarting,
 }) => {
   const openDisputes = disputes.filter(d => d.status === 'open');
+  const isZeroOutputTimeout = auditTrail.some(e => e.error_code === 'REVIEWER_ZERO_OUTPUT_TIMEOUT');
 
   return (
     <div className="card border-2 border-danger/30 p-5 mb-6">
@@ -405,6 +407,22 @@ export const DisputePanel: React.FC<DisputePanelProps> = ({
         {status === 'disputed' ? 'Task Disputed' : 'Task Failed'}
         {status === 'failed' && ` (${rejectionCount} rejections)`}
       </h3>
+      {isZeroOutputTimeout && (
+        <div className="mb-4 p-4 bg-warning/10 border border-warning/40 rounded-lg">
+          <div className="flex items-start gap-3">
+            <i className="fa-solid fa-terminal text-warning mt-0.5 flex-shrink-0"></i>
+            <div className="text-sm">
+              <p className="font-semibold text-warning mb-1">Reviewer CLI blocked by interactive setup prompt</p>
+              <p className="text-text-secondary mb-2">
+                The reviewer timed out with zero output on every attempt. This means the CLI is waiting
+                for interactive input it can never receive — typically a first-run machine/toolchain
+                setup prompt (e.g. Claude Code onboarding).
+              </p>
+              <p className="text-text-secondary font-medium">Fix: open a terminal and run the reviewer CLI once manually to complete setup, then restart this task.</p>
+            </div>
+          </div>
+        </div>
+      )}
       {openDisputes.length > 0 && (
         <div className="mb-4 space-y-3">
           {openDisputes.map(d => (

@@ -13,6 +13,7 @@ export interface AuditEntry {
   actor_type: 'human' | 'coder' | 'reviewer' | 'orchestrator' | null;
   model: string | null;
   notes: string | null;
+  error_code: string | null;
   commit_sha: string | null;
   created_at: string;
   duration_seconds?: number;

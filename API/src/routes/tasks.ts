@@ -38,6 +38,7 @@ interface AuditEntry {
   actor_type: string | null;
   model: string | null;
   notes: string | null;
+  error_code: string | null;
   commit_sha: string | null;
   created_at: string;
   duration_seconds?: number;
@@ -370,7 +371,7 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
       // Get audit trail
       const auditTrail = db
         .prepare(
-          `SELECT id, task_id, from_status, to_status, actor, actor_type, model, notes, commit_sha, created_at
+          `SELECT id, task_id, from_status, to_status, actor, actor_type, model, notes, error_code, commit_sha, created_at
           FROM audit
           WHERE task_id = ?
           ORDER BY created_at ASC`

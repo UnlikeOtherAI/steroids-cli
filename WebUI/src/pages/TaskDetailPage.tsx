@@ -325,6 +325,7 @@ export const TaskDetailPage: React.FC = () => {
               status={task.status}
               rejectionCount={task.rejection_count}
               disputes={task.disputes || []}
+              auditTrail={task.audit_trail || []}
               restartNotes={restartNotes}
               onNotesChange={setRestartNotes}
               onRestart={(notes) => handleRestart(notes)}
