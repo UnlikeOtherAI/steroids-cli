@@ -177,7 +177,8 @@ router.get('/projects', (req: Request, res: Response) => {
           `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
            AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
         ).get(project.path) !== undefined;
-        const hasParallelSession = hasActiveParallelSessionForProjectDb(db, project.path);
+        // Cast: DbLike's run signature uses unknown[] but better-sqlite3 uses {} — runtime-compatible
+        const hasParallelSession = hasActiveParallelSessionForProjectDb(db as never, project.path);
         const orphanedInProgress = (hasStandaloneRunner || hasParallelSession)
           ? 0
           : (liveData.stats.in_progress ?? 0);
@@ -415,7 +416,8 @@ router.post('/projects/reset', (req: Request, res: Response) => {
         `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
          AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
       ).get(projectPath) !== undefined;
-      const hasParallelSession = hasActiveParallelSessionForProjectDb(globalDb, projectPath);
+      // Cast: DbLike's run signature uses unknown[] but better-sqlite3 uses {} — runtime-compatible
+      const hasParallelSession = hasActiveParallelSessionForProjectDb(globalDb as never, projectPath);
 
       if (!hasStandaloneRunner && !hasParallelSession) {
         const dbPath = join(projectPath, '.steroids', 'steroids.db');
@@ -572,7 +574,8 @@ router.get('/projects/status', (req: Request, res: Response) => {
         `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
          AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
       ).get(path) !== undefined;
-      const hasParallelSession = hasActiveParallelSessionForProjectDb(db, path);
+      // Cast: DbLike's run signature uses unknown[] but better-sqlite3 uses {} — runtime-compatible
+      const hasParallelSession = hasActiveParallelSessionForProjectDb(db as never, path);
       const orphanedInProgress = (hasStandaloneRunner || hasParallelSession)
         ? 0
         : (liveData.stats.in_progress ?? 0);
