@@ -71,7 +71,7 @@ When creating design documents for new features:
 7. **Non-Goals**: Explicitly state what's out of scope
 8. **Cross-Provider Review**: Appendix with review findings and assessments
 
-Design docs live in `docs/` and are committed to the repo before implementation begins.
+Design docs live in `docs/plans/` and are committed to the repo before implementation begins. When implementation is complete, move the design doc and its corresponding plan file to `docs/done/`.
 
 ---
 
@@ -84,6 +84,7 @@ After a design document is reviewed and finalized:
 3. Reference the design doc in each task description
 4. Set section and dependencies appropriately
 5. Let the runner pick up the tasks — do not implement manually unless the runner is broken
+6. When all tasks are complete, move the design doc and plan file from `docs/plans/` to `docs/done/` and commit
 
 ---
 
