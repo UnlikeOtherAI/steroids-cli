@@ -226,8 +226,8 @@ import Database from 'better-sqlite3';
 Find the block ending with the CLI invocation that resets failed/disputed tasks. Immediately after it (before `res.json(...)`), insert:
 
 ```ts
-    // Extract validated path once to avoid repeated non-null assertions
-    const projectPath = validation.path as string;
+    // projectPath is already type-narrowed to string by the validation guard above
+    const projectPath = validation.path;
 
     // Guard: only reset orphaned tasks when no active runner exists
     // Uses inline SQL against the already-open globalDb — same pattern as detection
@@ -240,19 +240,21 @@ Find the block ending with the CLI invocation that resets failed/disputed tasks.
     if (!hasStandaloneRunner && !hasParallelSession) {
       const dbPath = join(projectPath, '.steroids', 'steroids.db');
       if (existsSync(dbPath)) {
-        const projectDb = new Database(dbPath, { fileMustExist: true });
+        // Declare before try so finally can safely reference it (even if constructor throws)
+        let projectDb: Database.Database | undefined;
         try {
+          projectDb = new Database(dbPath, { fileMustExist: true });
           projectDb.transaction(() => {
             // Clear locks first — 60-min TTL would block new runner pickup otherwise
-            projectDb
+            projectDb!
               .prepare(`DELETE FROM task_locks WHERE task_id IN (SELECT id FROM tasks WHERE status = 'in_progress')`)
               .run();
-            projectDb
+            projectDb!
               .prepare(`UPDATE tasks SET status = 'pending', updated_at = datetime('now') WHERE status = 'in_progress'`)
               .run();
           })();
         } finally {
-          projectDb.close();
+          projectDb?.close();
         }
       }
     }

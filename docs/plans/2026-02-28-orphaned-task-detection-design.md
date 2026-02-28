@@ -264,3 +264,101 @@ Both reviewers worked from the same design (revised after Round 1).
 **Assessment:** Not a real risk. WAL mode is a property of the DB file, set by its first opener (runner/CLI). A subsequent opener inherits it. The brief write-only connection in reset is safe.
 
 **Decision: Reject.** No change needed.
+
+---
+
+## Cross-Provider Review (Claude Round 3 — adversarial pass on revised plan)
+
+Reviewed by: Claude (claude-sonnet-4-6), 2026-02-28
+
+Review of the implementation plan after Round 2 changes were incorporated.
+
+### Finding R3-1 — CRITICAL/STALE: wakeup() blast radius
+Already resolved by Round 2 (R2-1). wakeup() removed from reset endpoint. **No action.**
+
+### Finding R3-2 — CRITICAL/STALE: hasActiveParallelSessionForProject write side effects
+Already resolved by Round 2 (R2-2). Switched to `hasActiveParallelSessionForProjectDb`. **No action.**
+
+### Finding R3-3 — HIGH: Raw `new Database()` without WAL/busy-timeout
+**Claude:** Bare `new Database(dbPath)` diverges from the `openSqliteForRead` pattern used on all read paths.
+
+**Assessment:** The existing write path in the codebase (e.g., `tasks.ts:1289`) also uses bare `new Database(dbPath)` with no `busy_timeout` — this is the established write-path pattern in the API. Our reset endpoint is a write path. Consistent with existing precedent.
+
+**Decision: Reject.** No change. Consistent with write-path convention.
+
+---
+
+### Finding R3-4 — HIGH: existsSync guard is a silent no-op
+**Claude:** If the project DB doesn't exist, reset returns `success: true` without noting orphaned reset was skipped.
+
+**Assessment:** If the DB doesn't exist, `getProjectStats()` returns empty stats — `in_progress = 0` — so `orphaned_in_progress = 0` and the reset button is not enabled for this condition. The code path is unreachable in normal usage.
+
+**Decision: Reject.** Non-issue in practice. The guard correctly protects against the unreachable path.
+
+---
+
+### Finding R3-5 — HIGH/STALE: N×extra DB connections
+Already resolved by Round 2 (R2-3). Now uses inline SQL against already-open `globalDb`. **No action.**
+
+---
+
+### Finding R3-6 — HIGH: Constructor throw before try block
+**Claude:** `const projectDb = new Database(dbPath, { fileMustExist: true })` sits outside the `try` block. If it throws (e.g., SQLITE_BUSY, corrupt file), `projectDb` is undefined and `finally` throws a ReferenceError on top of the original error.
+
+**Assessment:** Valid new finding. The fix is to declare `projectDb` as `undefined` before the try and assign inside.
+
+**Decision: Adopt.** Restructure as `let projectDb: Database.Database | undefined; try { projectDb = new Database(...); ... } finally { projectDb?.close(); }`.
+
+---
+
+### Finding R3-7 — MEDIUM: Import from dist path fragility
+**Claude:** `import from '../../../dist/runners/...'` has no type-checking across build boundaries.
+
+**Assessment:** Pre-existing pattern throughout `API/src/routes/projects.ts` (lines 18-19 already do this). Not introduced by this change.
+
+**Decision: Defer.** Pre-existing architectural issue.
+
+---
+
+### Finding R3-8 — MEDIUM: project.runner null badge for parallel-mode projects
+**Claude:** pool-mode projects will show "No Runner" badge while `orphaned_in_progress = 0` (correctly indicating active runner).
+
+**Assessment:** Pre-existing UI inconsistency not caused by this change. The orphaned detection correctly returns 0, which is correct behavior.
+
+**Decision: Defer.** Pre-existing issue. Follow-up task if desired.
+
+---
+
+### Finding R3-9 — MEDIUM: Test doesn't cover guard path
+**Claude:** The unit test only tests the SQL transaction; the `hasActiveRunner` guard has zero coverage.
+
+**Assessment:** Valid limitation, already noted in R2-7. The guard is a two-condition SQL check that is simple to reason about but not tested end-to-end.
+
+**Decision: Partially adopt.** Add a comment in the test noting the guard is not covered. Full endpoint integration testing is out of scope.
+
+---
+
+### Finding R3-10 — MEDIUM: TOCTOU via killRunnerAndRevokeLease
+**Claude:** The CLI subprocess internally calls `killRunnerAndRevokeLease`, so the runner row may still show `status='running'` when our guard reads it immediately after.
+
+**Assessment:** More specific form of R2-5 (already deferred). Window is milliseconds. The worst case is the orphaned reset is skipped on this click; user can click again.
+
+**Decision: Defer.** Same as R2-5.
+
+---
+
+### Finding R3-11 — LOW: `validation.path as string` type cast
+**Claude:** The `as string` cast bypasses type safety. The validated path should be extracted via proper type narrowing.
+
+**Assessment:** Valid. `validatePathRequest` returns `{ valid: true, path: string }` when valid, so extracting `projectPath` after the `if (!validation.valid)` guard already narrows the type. The cast is unnecessary.
+
+**Decision: Adopt.** Extract path after the existing validation guard where TypeScript already knows it's a string, eliminating the cast.
+
+---
+
+### Finding R3-12 — LOW: Deployment ordering for undefined field
+**Claude:** If server-side field is missing, `?? 0` silently hides the issue row with no error.
+
+**Assessment:** Expected behavior for optional TypeScript fields. Correct pattern for graceful degradation.
+
+**Decision: Reject.** Intended behavior.
