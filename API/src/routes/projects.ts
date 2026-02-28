@@ -17,6 +17,7 @@ import {
   getRegisteredProject,
 } from '../../../dist/runners/projects.js';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
+import { hasActiveParallelSessionForProjectDb } from '../../../dist/runners/parallel-session-state.js';
 import { isValidProjectPath, validatePathRequest } from '../utils/validation.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
 import { getCachedListStorage } from '../utils/storage-cache.js';
@@ -137,6 +138,7 @@ interface ProjectResponse {
   storage_bytes: number | null;
   storage_human: string | null;
   storage_warning: 'orange' | 'red' | null;
+  orphaned_in_progress: number;
 }
 
 /**
@@ -169,6 +171,16 @@ router.get('/projects', (req: Request, res: Response) => {
         // Lightweight storage info (non-blocking, 5-min cache)
         const storageInfo = getCachedListStorage(project.path);
 
+        // Inline SQL against the already-open db — no extra DB connections
+        const hasStandaloneRunner = db.prepare(
+          `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
+           AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
+        ).get(project.path) !== undefined;
+        const hasParallelSession = hasActiveParallelSessionForProjectDb(db, project.path);
+        const orphanedInProgress = (hasStandaloneRunner || hasParallelSession)
+          ? 0
+          : (liveData.stats.in_progress ?? 0);
+
         const response: ProjectResponse = {
           path: project.path,
           name: project.name,
@@ -192,6 +204,7 @@ router.get('/projects', (req: Request, res: Response) => {
           storage_bytes: storageInfo?.storage_bytes ?? null,
           storage_human: storageInfo?.storage_human ?? null,
           storage_warning: storageInfo?.storage_warning ?? null,
+          orphaned_in_progress: orphanedInProgress,
         };
 
         return response;
@@ -258,7 +271,7 @@ router.post('/projects', (req: Request, res: Response) => {
     res.status(201).json({
       success: true,
       message: 'Project registered successfully',
-      project,
+      project: { ...project, orphaned_in_progress: 0 },
     });
   } catch (error) {
     console.error('Error registering project:', error);
@@ -513,6 +526,16 @@ router.get('/projects/status', (req: Request, res: Response) => {
       const storageInfo = getCachedListStorage(project.path);
       const liveData = getProjectLiveData(project.path);
 
+      // Inline SQL against the already-open db — no extra DB connections
+      const hasStandaloneRunner = db.prepare(
+        `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
+         AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
+      ).get(path) !== undefined;
+      const hasParallelSession = hasActiveParallelSessionForProjectDb(db, path);
+      const orphanedInProgress = (hasStandaloneRunner || hasParallelSession)
+        ? 0
+        : (liveData.stats.in_progress ?? 0);
+
       const response: ProjectResponse = {
         path: project.path,
         name: project.name,
@@ -536,6 +559,7 @@ router.get('/projects/status', (req: Request, res: Response) => {
         storage_bytes: storageInfo?.storage_bytes ?? null,
         storage_human: storageInfo?.storage_human ?? null,
         storage_warning: storageInfo?.storage_warning ?? null,
+        orphaned_in_progress: orphanedInProgress,
       };
 
       res.json({
