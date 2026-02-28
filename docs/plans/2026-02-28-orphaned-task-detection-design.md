@@ -362,3 +362,30 @@ Already resolved by Round 2 (R2-3). Now uses inline SQL against already-open `gl
 **Assessment:** Expected behavior for optional TypeScript fields. Correct pattern for graceful degradation.
 
 **Decision: Reject.** Intended behavior.
+
+---
+
+## Cross-Provider Review (Codex Round 3 — adversarial pass on revised plan)
+
+Reviewed by: Codex (gpt-5.3-codex), 2026-02-28
+
+**Note:** This review was conducted against the pre-Round-2 plan. Codex read the old plan header which still referenced `hasActiveRunnerForProject`, `hasActiveParallelSessionForProject`, and `wakeup()`. All 5 findings are either already adopted or previously assessed.
+
+### Finding RC3-1 — CRITICAL/STALE: wakeup() global blast radius
+Already adopted in R2-1. wakeup() removed from reset endpoint. **No action.**
+
+### Finding RC3-2 — HIGH/STALE: N×connection pattern
+Already adopted in R2-3. Inline SQL against already-open globalDb. **No action.**
+
+### Finding RC3-3 — HIGH/STALE: hasActiveParallelSessionForProject write side effects
+Already adopted in R2-2. Switched to `hasActiveParallelSessionForProjectDb` (read-only). **No action.**
+
+### Finding RC3-4 — MEDIUM/STALE: POST /api/projects register endpoint coverage
+Already adopted in R2-4. Register endpoint returns `orphaned_in_progress: 0`. **No action.**
+
+### Finding RC3-5 — MEDIUM: Two divergent orphan definitions
+**Codex:** Our definition (no active runner → all in_progress orphaned) conflicts with the health endpoint's definition (timeout + invocation staleness + no active runner).
+
+**Assessment:** These are intentionally different signals for different purposes. The health endpoint uses invocation timeout signals for the monitoring view. Our detection uses the stronger "no runner present" signal for the issues panel and reset button — a user-actionable recovery path. Both are correct within their scope. Previously assessed in Round 1 Finding 4.
+
+**Decision: Reject.** Intentional divergence. Different signals, different consumers.
