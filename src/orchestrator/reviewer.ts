@@ -274,6 +274,7 @@ class ReviewerRunner extends BaseRunner {
       config,
       coordinatorGuidance,
       coordinatorDecision,
+      reviewerCustomInstructions: effectiveReviewerConfig?.customInstructions,
     };
 
     let prompt: string;
@@ -428,6 +429,7 @@ class ReviewerRunner extends BaseRunner {
       sectionName,
       taskCommits,
       config,
+      reviewerCustomInstructions: effectiveReviewerConfig?.customInstructions,
     };
 
     const prompt = generateBatchReviewerPrompt(context);

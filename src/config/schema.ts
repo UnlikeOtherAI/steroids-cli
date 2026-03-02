@@ -65,6 +65,10 @@ export const CONFIG_SCHEMA: SchemaObject = {
         _type: 'string',
         _default: 'claude-sonnet-4-6',
       },
+      customInstructions: {
+        _description: 'Extra reviewer-specific instructions appended to reviewer prompts',
+        _type: 'string',
+      },
     },
     reviewers: {
       _description: 'Multiple independent AI reviewers (all must approve)',

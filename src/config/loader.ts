@@ -18,6 +18,7 @@ export interface ReviewerConfig {
   provider?: ProviderName;
   model?: string;
   cli?: string;
+  customInstructions?: string;
 }
 
 export interface SteroidsConfig {

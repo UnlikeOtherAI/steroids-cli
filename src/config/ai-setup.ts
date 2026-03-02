@@ -306,6 +306,7 @@ function saveConfiguration(state: SetupState): void {
     partialConfig.ai!.reviewers = state.reviewers.map(r => ({
       provider: r.provider!,
       model: r.model!,
+      customInstructions: r.customInstructions,
     }));
     // Also clear singular reviewer if it exists to avoid confusion, 
     // though plural takes precedence in loader.
@@ -313,6 +314,7 @@ function saveConfiguration(state: SetupState): void {
     partialConfig.ai![role] = {
       provider: state.provider!,
       model: state.model!,
+      ...(role === 'reviewer' ? { customInstructions: config.ai?.reviewer?.customInstructions } : {}),
     };
     
     // If we are setting a single reviewer, we should clear the multi-reviewer array

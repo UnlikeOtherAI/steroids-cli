@@ -22,6 +22,22 @@ export interface ReviewerPromptContext {
   config: SteroidsConfig;  // Config for quality settings
   coordinatorGuidance?: string;  // Guidance from coordinator after repeated rejections
   coordinatorDecision?: string;  // Coordinator's decision type
+  reviewerCustomInstructions?: string;
+}
+
+function formatReviewerCustomInstructions(customInstructions?: string): string {
+  const trimmed = customInstructions?.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  return `
+---
+
+## Reviewer-Specific Custom Instructions
+
+${trimmed}
+`;
 }
 
 /**
@@ -36,6 +52,7 @@ export function generateResumingReviewerDeltaPrompt(context: ReviewerPromptConte
     submissionNotes,
     rejectionHistory,
     projectPath,
+    reviewerCustomInstructions,
   } = context;
   const submissionChain = submissionCommitHashes && submissionCommitHashes.length > 0
     ? submissionCommitHashes
@@ -64,6 +81,7 @@ If the submission notes begin with \`[NO_OP_SUBMISSION]\`, the coder made no new
 ## Specification
 
 ${sourceRef}
+${formatReviewerCustomInstructions(reviewerCustomInstructions)}
 
 ## Submission Commit Chain (Oldest -> Newest)
 
@@ -282,6 +300,7 @@ export function generateReviewerPrompt(context: ReviewerPromptContext): string {
     submissionCommitHash,
     submissionCommitHashes,
     unresolvedSubmissionCommits,
+    reviewerCustomInstructions,
   } = context;
   const submissionChain = submissionCommitHashes && submissionCommitHashes.length > 0
     ? submissionCommitHashes
@@ -315,6 +334,7 @@ The coder included these notes when submitting for review:
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const fileAnchorSection = buildFileAnchorSection(task);
   const instructionsSection = buildProjectInstructionsSection(projectPath);
+  const reviewerCustomInstructionsSection = formatReviewerCustomInstructions(reviewerCustomInstructions);
 
   const reviewerCommands = `git show --stat ${latestSubmissionCommit}`;
   const unresolvedHistorySection =
@@ -354,6 +374,7 @@ If the submission notes begin with \`[NO_OP_SUBMISSION]\`, the coder made no new
 **Rejection Count:** ${task.rejection_count}/15
 **Project:** ${projectPath}
 ${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}${formatCoordinatorGuidance(coordinatorGuidance, coordinatorDecision)}${instructionsSection}
+${reviewerCustomInstructionsSection}
 ## Specification
 
 ${sourceRef}
@@ -530,13 +551,14 @@ export interface BatchReviewerPromptContext {
   sectionName: string;
   taskCommits?: Array<{ taskId: string; commitHash: string }>;
   config: SteroidsConfig;
+  reviewerCustomInstructions?: string;
 }
 
 /**
  * Generate the reviewer prompt for a batch of tasks
  */
 export function generateBatchReviewerPrompt(context: BatchReviewerPromptContext): string {
-  const { tasks, projectPath, sectionName, config, taskCommits } = context;
+  const { tasks, projectPath, sectionName, config, taskCommits, reviewerCustomInstructions } = context;
 
   // Build task specs for each task
   const commitMap = new Map(taskCommits?.map(item => [item.taskId, item.commitHash]) ?? []);
@@ -575,6 +597,7 @@ You are a REVIEWER reviewing MULTIPLE tasks from section "${sectionName}".
 ${taskSpecs}
 
 ---
+${formatReviewerCustomInstructions(reviewerCustomInstructions)}
 
 ## Review Commands
 

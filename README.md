@@ -484,6 +484,15 @@ ai:
   reviewer:
     provider: claude
     model: claude-sonnet-4
+    customInstructions: |
+      Prioritize API contract compatibility and migration safety.
+  reviewers:                  # Optional multi-review mode
+    - provider: claude
+      model: claude-sonnet-4
+      customInstructions: "Focus on architecture and maintainability."
+    - provider: codex
+      model: gpt-5
+      customInstructions: "Focus on correctness, tests, and edge cases."
   orchestrator:               # Coordinator for breaking rejection loops
     provider: claude
     model: claude-sonnet-4
