@@ -82,52 +82,67 @@ export async function resolveReviewerDecision(
         };
       }
     } else {
-      // No merge needed (decision is Approve, Dispute, or Skip)
-      try {
-        const orchestratorOutput = await invokeMultiReviewerOrchestrator(multiContext, projectPath);
-        const handler = new OrchestrationFallbackHandler();
-        decision = handler.parseReviewerOutput(orchestratorOutput);
-      } catch (error) {
-        console.error('Multi-reviewer orchestrator failed (consensus path):', error);
+      // finalDecision is the deterministic result from resolveDecision().
+      // needsMerge:false covers: consensus (approve/skip), any-dispute, single-rejector, unclear.
+      // Note: this path does NOT populate follow_up_tasks — ReviewerResult doesn't carry them.
 
-        const handler = new OrchestrationFallbackHandler();
-        // REQUIRE UNANIMOUS CONSENSUS for the non-reject finalDecision
-        const isUnanimousConsensus =
-          reviewerResults.length > 0 &&
-          reviewerResults.every(r => {
-            if (r.decision === finalDecision) return true;
-            return handler.extractExplicitReviewerDecision(r.stdout) === finalDecision;
-          });
+      // Explicit unclear guard — resolveDecision returns unclear when: empty results,
+      // approve+skip mix, or undefined-decision mix. ReviewerResult.decision never includes
+      // 'unclear', so .find() below would always miss it.
+      if (finalDecision === 'unclear') {
+        decision = {
+          decision: 'unclear',
+          reasoning: `Multi-reviewer result is ambiguous (${reviewerResults.length} reviewers, no decisive outcome)`,
+          notes: '',
+          next_status: 'review',
+          rejection_count: task.rejection_count,
+          confidence: 'low',
+          push_to_remote: false,
+          repeated_issue: false,
+        };
+      } else {
+        const primaryResult =
+          reviewerResults.find(r => r.decision === finalDecision) ?? reviewerResults[0];
 
-        if (isUnanimousConsensus) {
-          const primaryResult =
-            reviewerResults.find(r => r.decision === finalDecision) || reviewerResults[0];
-          decision = {
-            decision: (finalDecision === 'unclear' ? 'unclear' : finalDecision) as ReviewerOrchestrationResult['decision'],
-            reasoning: `FALLBACK: Multi-reviewer orchestrator failed but all reviewers reached consensus: ${finalDecision}`,
-            notes: primaryResult?.notes || primaryResult?.stdout || 'No notes provided',
-            next_status:
-              finalDecision === 'approve' ? 'completed' :
-              finalDecision === 'reject' ? 'in_progress' :
-              finalDecision === 'dispute' ? 'disputed' :
-              finalDecision === 'skip' ? 'skipped' : 'review',
-            rejection_count: task.rejection_count,
-            confidence: 'low',
-            push_to_remote: ['approve', 'dispute', 'skip'].includes(finalDecision),
-            repeated_issue: false,
-          };
-        } else {
-          decision = {
-            decision: 'unclear',
-            reasoning: 'FALLBACK: Multi-reviewer orchestrator failed and no unanimous consensus',
-            notes: 'Review unclear, retrying',
-            next_status: 'review',
-            rejection_count: task.rejection_count,
-            confidence: 'low',
-            push_to_remote: false,
-            repeated_issue: false,
-          };
-        }
+        // For reject: parsed notes are often a weak single-line extraction; fall back to raw
+        // stdout (capped) so the coder gets the actual rejection checklist.
+        // For approve/skip/dispute: short notes or empty string is fine.
+        const notesForDecision =
+          finalDecision === 'reject'
+            ? (primaryResult?.notes && primaryResult.notes !== 'See reviewer output for details'
+                ? primaryResult.notes
+                : (primaryResult?.stdout?.slice(-3000) ?? 'See reviewer output for details'))
+            : (primaryResult?.notes ?? '');
+
+        // approve/skip = full consensus → high
+        // dispute = any-one-disputes (not all), reject = single-rejector → both medium
+        const confidenceForDecision: 'high' | 'medium' | 'low' =
+          finalDecision === 'approve' || finalDecision === 'skip' ? 'high' : 'medium';
+
+        const reasoningForDecision =
+          finalDecision === 'approve' || finalDecision === 'skip'
+            ? `All ${reviewerResults.length} reviewers agreed: ${finalDecision}`
+            : finalDecision === 'dispute'
+            ? `Reviewer escalated to dispute (${reviewerResults.length} reviewers)`
+            : `Single-rejector reject, needsMerge=false (${reviewerResults.length} reviewers)`;
+
+        const nextStatusForDecision: ReviewerOrchestrationResult['next_status'] =
+          finalDecision === 'approve' ? 'completed'   :
+          finalDecision === 'reject'  ? 'in_progress' :
+          finalDecision === 'dispute' ? 'disputed'     :
+          finalDecision === 'skip'    ? 'skipped'      : 'review';
+
+        decision = {
+          decision: finalDecision,
+          reasoning: reasoningForDecision,
+          notes: notesForDecision,
+          next_status: nextStatusForDecision,
+          rejection_count: task.rejection_count,
+          confidence: confidenceForDecision,
+          // skip does not push in the runtime switch-case; field is currently unused but set accurately
+          push_to_remote: finalDecision === 'approve' || finalDecision === 'dispute',
+          repeated_issue: false,
+        };
       }
     }
   } else {
