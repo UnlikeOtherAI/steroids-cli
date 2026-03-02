@@ -38,7 +38,9 @@ import storageRouter from './routes/storage.js';
 import activityRouter from './routes/activity.js';
 import runnersRouter from './routes/runners.js';
 import tasksRouter from './routes/tasks.js';
+import taskFeedbackRouter from './routes/task-feedback.js';
 import configRouter from './routes/config.js';
+import reviewerConfigRouter from './routes/config-reviewer.js';
 import healthRouter from './routes/health.js';
 import incidentsRouter from './routes/incidents.js';
 import skillsRouter from './routes/skills.js';
@@ -92,7 +94,9 @@ export function createApp(): express.Express {
   app.use('/api', activityRouter);
   app.use('/api', runnersRouter);
   app.use('/api', tasksRouter);
+  app.use('/api', taskFeedbackRouter);
   app.use('/api', configRouter);
+  app.use('/api', reviewerConfigRouter);
   app.use('/api', healthRouter);
   app.use('/api', incidentsRouter);
   app.use('/api', skillsRouter);
@@ -129,10 +133,14 @@ export function createApp(): express.Express {
         'GET /api/runners/active-tasks',
         'GET /api/tasks/<taskId>?project=<path>',
         'GET /api/tasks/<taskId>/logs?project=<path>',
+        'GET /api/tasks/<taskId>/feedback?project=<path>',
+        'POST /api/tasks/<taskId>/feedback',
+        'DELETE /api/tasks/<taskId>/feedback/<feedbackId>?project=<path>',
         'GET /api/config/schema',
         'GET /api/config/schema/<category>',
         'GET /api/config?scope=global|project|merged&project=<path>',
         'PUT /api/config',
+        'PUT /api/config/reviewer-custom-instructions',
         'GET /api/health?project=<path>',
         'GET /api/incidents?project=<path>&limit=<n>&task=<prefix>&unresolved=<true|false>',
         'GET /api/ai/providers',
