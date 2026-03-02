@@ -3,6 +3,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { AuditEntry, TaskDetails, TaskStatus, TaskTimelineEvent } from '../types';
 import { API_BASE_URL, tasksApi, projectsApi } from '../services/api';
 import { Badge } from '../components/atoms/Badge';
+import { UserFeedbackPanel } from '../components/molecules/UserFeedbackPanel';
 import { PageLayout } from '../components/templates/PageLayout';
 import { AuditLogRow, DisputePanel, formatDuration, formatTimestamp, InvocationsPanel } from './TaskDetailComponents';
 import { LiveInvocationActivityPanel, InvocationTimelineEventRow, StreamState } from './TaskLiveTimelineComponents';
@@ -318,6 +319,8 @@ export const TaskDetailPage: React.FC = () => {
               <div className="text-sm text-text-muted">Review Time</div>
             </div>
           </div>
+
+          <UserFeedbackPanel taskId={task.id} projectPath={projectPath} />
 
           {/* Human Intervention Panel - for failed/disputed tasks */}
           {['failed', 'disputed'].includes(task.status) && (

@@ -224,10 +224,14 @@ const AIRoleSettingsSingle: React.FC<AIRoleSettingsSingleProps> = ({
   const currentProvider = (getNestedValue(values, `${basePath}.provider`) as string) || '';
   const currentModel = (getNestedValue(values, `${basePath}.model`) as string) || '';
   const currentCli = (getNestedValue(values, `${basePath}.cli`) as string) || '';
+  const currentCustomInstructions = (getNestedValue(values, `${basePath}.customInstructions`) as string) || '';
 
   // Get global/inherited values for project scope
   const globalProvider = globalValues ? (getNestedValue(globalValues, `${basePath}.provider`) as string) || '' : '';
   const globalModel = globalValues ? (getNestedValue(globalValues, `${basePath}.model`) as string) || '' : '';
+  const globalCustomInstructions = globalValues
+    ? (getNestedValue(globalValues, `${basePath}.customInstructions`) as string) || ''
+    : '';
 
   // Check if using inherited (no value set at project level)
   const isInherited = scope === 'project' && !currentProvider;
@@ -416,6 +420,31 @@ const AIRoleSettingsSingle: React.FC<AIRoleSettingsSingleProps> = ({
               </option>
             ))}
           </select>
+        </div>
+      )}
+
+      {/* Reviewer Focus Instructions */}
+      {role === 'reviewer' && (
+        <div>
+          <label
+            htmlFor={`${basePath}-focus-instructions`}
+            className="block text-sm font-medium text-text-primary mb-1"
+          >
+            Focus Instructions
+          </label>
+          <textarea
+            id={`${basePath}-focus-instructions`}
+            value={isInherited ? globalCustomInstructions : currentCustomInstructions}
+            onChange={(e) => onChange(`${basePath}.customInstructions`, e.target.value)}
+            disabled={isInherited}
+            placeholder="Optional reviewer-specific guidance (risk focus, style requirements, priorities)."
+            className={`w-full h-28 px-3 py-2 bg-bg-surface2 border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent resize-y ${
+              isInherited ? 'opacity-60 cursor-not-allowed' : ''
+            }`}
+          />
+          <p className="mt-1 text-xs text-text-muted">
+            Added to reviewer prompts for this scope.
+          </p>
         </div>
       )}
 
