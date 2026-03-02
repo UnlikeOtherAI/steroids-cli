@@ -149,7 +149,7 @@ steroids tasks audit <id>              # view task spec, history, rejection note
 ### Add Tasks
 steroids tasks add "Title" --section <id> --source <spec-file>
 steroids tasks add "Title" --section <id> --source spec.md --file src/foo.ts --line 42
-steroids tasks add "Advisory note" --feedback
+steroids tasks feedback "Advisory note"
 
 Options:
   --section <id>     Section to add the task to (required unless --feedback)

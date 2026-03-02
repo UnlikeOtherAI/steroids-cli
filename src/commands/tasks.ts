@@ -73,6 +73,7 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { name: 'stats', description: 'Show task counts by status' },
     { name: 'show', args: '<id|title>', description: 'Show task details with invocation logs' },
     { name: 'add', args: '<title>', description: 'Add a new task' },
+    { name: 'feedback', args: '<title>', description: 'Add a feedback task to "Needs User Input"' },
     { name: 'update', args: '<id|title>', description: 'Update task status' },
     { name: 'approve', args: '<id|title>', description: 'Approve a task (mark completed)' },
     { name: 'reject', args: '<id|title>', description: 'Reject a task (back to in_progress)' },
@@ -95,7 +96,7 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { long: 'source', description: 'Specification file (add/update subcommand)', values: '<file>' },
     { long: 'file', description: 'Anchor task to a file (add/update subcommand)', values: '<path>' },
     { long: 'line', description: 'Line number in anchored file (requires --file)', values: '<number>' },
-    { long: 'feedback', description: 'Add to "Needs User Input" section (skipped, for human review)' },
+    { long: 'feedback', description: 'Add to "Needs User Input" section (add subcommand compatibility mode)' },
     { long: 'partial', description: 'Mark as partial when skipping' },
     { long: 'failed', description: 'Target all failed tasks (reset subcommand)' },
     { long: 'disputed', description: 'Target all disputed tasks (reset subcommand)' },
@@ -110,6 +111,7 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { command: 'steroids tasks --global --json', description: 'List tasks from all projects as JSON' },
     { command: 'steroids tasks add "Implement login" --section abc123 --source docs/spec.md', description: 'Add new task' },
     { command: 'steroids tasks add "Fix bug" --section abc123 --source spec.md --file src/utils.ts --line 42', description: 'Add task anchored to a file' },
+    { command: 'steroids tasks feedback "Review execSync usage in queries.ts"', description: 'Add feedback task (preferred)' },
     { command: 'steroids tasks add "Review execSync usage" --feedback', description: 'Add feedback task (skipped section)' },
     { command: 'steroids tasks update abc123 --status review', description: 'Update task status' },
     { command: 'steroids tasks update abc123 --source docs/correct-spec.md', description: 'Fix task source file' },
@@ -176,6 +178,9 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
       break;
     case 'add':
       await addTask(subArgs, flags);
+      break;
+    case 'feedback':
+      await feedbackTask(subArgs, flags);
       break;
     case 'update':
       await updateTask(subArgs, flags);
@@ -643,8 +648,14 @@ EXAMPLES:
   });
 }
 
-async function addTask(args: string[], flags: GlobalFlags): Promise<void> {
-  const out = createOutput({ command: 'tasks', subcommand: 'add', flags });
+interface AddTaskOptions {
+  subcommand?: 'add' | 'feedback';
+  forceFeedback?: boolean;
+}
+
+async function addTask(args: string[], flags: GlobalFlags, options?: AddTaskOptions): Promise<void> {
+  const subcommandName = options?.subcommand ?? 'add';
+  const out = createOutput({ command: 'tasks', subcommand: subcommandName, flags });
 
   const { values, positionals } = parseArgs({
     args,
@@ -659,7 +670,29 @@ async function addTask(args: string[], flags: GlobalFlags): Promise<void> {
     allowPositionals: true,
   });
 
+  const isFeedbackTask = Boolean(options?.forceFeedback || values.feedback);
+
   if (values.help || flags.help) {
+    if (subcommandName === 'feedback') {
+      out.log(`
+steroids tasks feedback <title> - Add a feedback task
+
+USAGE:
+  steroids tasks feedback <title> [--file <path> --line <n>]
+
+OPTIONS:
+  --file <path>         Anchor task to a committed file
+  --line <number>       Line number in the anchored file (requires --file)
+  --source <file>       Optional source/spec file to attach
+  -h, --help            Show help
+
+EXAMPLES:
+  steroids tasks feedback "Pre-existing execSync in queries.ts needs review"
+  steroids tasks feedback "Should we use Redis or in-memory cache?" --file src/cache.ts --line 12
+`);
+      return;
+    }
+
     out.log(`
 steroids tasks add <title> - Add a new task
 
@@ -691,7 +724,7 @@ EXAMPLES:
     process.exit(2);
   }
 
-  if (!values.feedback && !values.section) {
+  if (!isFeedbackTask && !values.section) {
     out.error(ErrorCode.INVALID_ARGUMENTS, '--section <id> is required (or use --feedback)', {
       usage: 'steroids tasks add <title> --section <id> --source <file>',
       hint: 'Every task must belong to a section. Use --feedback for advisory items.',
@@ -699,7 +732,7 @@ EXAMPLES:
     process.exit(2);
   }
 
-  if (!values.feedback && !values.source) {
+  if (!isFeedbackTask && !values.source) {
     out.error(ErrorCode.INVALID_ARGUMENTS, '--source <file> is required (or use --feedback)', {
       usage: 'steroids tasks add <title> --section <id> --source <file>',
       hint: 'Every task must reference a specification file. Use --feedback for advisory items.',
@@ -779,7 +812,7 @@ EXAMPLES:
   const projectPath = process.cwd();
   /* REFACTOR_MANUAL */ await withDatabase(projectPath, async (db: any) => {
     let section;
-    if (values.feedback) {
+    if (isFeedbackTask) {
       section = getOrCreateFeedbackSection(db);
     } else {
       section = getSection(db, values.section as string);
@@ -809,12 +842,12 @@ EXAMPLES:
       );
     }
 
-    out.success({ task, feedback: !!values.feedback });
+    out.success({ task, feedback: isFeedbackTask });
     if (!flags.json) {
       out.log(`Task created: ${task.title}`);
       out.log(`  ID: ${task.id}`);
       out.log(`  Status: ${task.status}`);
-      if (values.feedback) {
+      if (isFeedbackTask) {
         out.log(`  Section: Needs User Input (skipped - for human review)`);
       }
       if (task.source_file) {
@@ -827,6 +860,10 @@ EXAMPLES:
       }
     }
   });
+}
+
+async function feedbackTask(args: string[], flags: GlobalFlags): Promise<void> {
+  await addTask(args, flags, { subcommand: 'feedback', forceFeedback: true });
 }
 
 async function updateTask(args: string[], flags: GlobalFlags): Promise<void> {

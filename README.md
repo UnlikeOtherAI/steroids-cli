@@ -194,7 +194,7 @@ steroids tasks add "Fix null check in utils" \
   --file src/utils.ts --line 42
 
 # Create a feedback task for human review
-steroids tasks add "Should we use Redis or in-memory cache?" --feedback
+steroids tasks feedback "Should we use Redis or in-memory cache?"
 ```
 
 ### 4. Run the loop
@@ -269,7 +269,7 @@ That's it. Open your browser at:
 | `steroids tasks show <id>` | Show task details with invocation logs |
 | `steroids tasks add <title> --section <id> --source <file>` | Add a new task |
 | `steroids tasks add <title> ... --file <path> --line <n>` | Add task anchored to a committed file |
-| `steroids tasks add <title> --feedback` | Add feedback task (skipped section, no --section/--source needed) |
+| `steroids tasks feedback <title>` | Add feedback task (skipped section, no --section/--source needed) |
 | `steroids tasks update <id> --status review` | Submit task for review |
 | `steroids tasks approve <id> --model <model>` | Approve a task |
 | `steroids tasks reject <id> --model <model> --notes "..."` | Reject with feedback |
