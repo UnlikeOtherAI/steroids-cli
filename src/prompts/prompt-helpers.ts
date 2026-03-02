@@ -311,6 +311,41 @@ export interface SectionTask {
   status: string;
 }
 
+export interface UserFeedbackPromptContext {
+  userFeedbackSummary?: string | null;
+  userFeedbackItems?: string[];
+}
+
+/**
+ * Build a standardized user-feedback prompt section.
+ * Returns empty string when no feedback context is available.
+ */
+export function formatUserFeedbackContextSection(context: UserFeedbackPromptContext): string {
+  const summary = context.userFeedbackSummary?.trim() ?? '';
+  const items = (context.userFeedbackItems ?? [])
+    .map(item => item.trim())
+    .filter(item => item.length > 0);
+
+  if (!summary && items.length === 0) {
+    return '';
+  }
+
+  const summarySection = summary ? `### Summary\n> ${summary}\n` : '';
+  const itemsSection = items.length > 0
+    ? `### Detailed Feedback\n${items.map((item, index) => `${index + 1}. ${item}`).join('\n')}\n`
+    : '';
+
+  return `
+---
+
+## User Feedback Context (Advisory)
+
+This context comes from human user feedback related to this task.
+Use it to improve decisions while still following the task specification and project rules.
+
+${summarySection}${itemsSection}`;
+}
+
 const MAX_SECTION_TASKS = 15;
 
 /**

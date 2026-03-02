@@ -11,6 +11,7 @@ import {
   formatRejectionHistoryForCoder,
   buildSkillsSection,
   formatSectionTasks,
+  formatUserFeedbackContextSection,
   type SectionTask,
 } from './prompt-helpers.js';
 import { buildProjectInstructionsSection } from './instruction-files.js';
@@ -26,13 +27,16 @@ export interface CoderPromptContext {
   gitStatus?: string;
   gitDiff?: string;
   sectionTasks?: SectionTask[];  // Other tasks in the same section (scope boundary)
+  userFeedbackSummary?: string | null; // Human feedback summary for this task/section
+  userFeedbackItems?: string[]; // Individual user feedback notes
 }
 
 /**
  * Generate a minimal delta prompt for a resumed coder session
  */
 export function generateResumingCoderDeltaPrompt(context: CoderPromptContext): string {
-  const { task, rejectionHistory, coordinatorGuidance, sectionTasks } = context;
+  const { task, rejectionHistory, coordinatorGuidance, sectionTasks, userFeedbackSummary, userFeedbackItems } = context;
+  const userFeedbackSection = formatUserFeedbackContextSection({ userFeedbackSummary, userFeedbackItems });
 
   // Find the last rejection notes
   const lastRejection = rejectionHistory && rejectionHistory.length > 0
@@ -44,6 +48,7 @@ export function generateResumingCoderDeltaPrompt(context: CoderPromptContext): s
     return `You are resuming work on task ${task.id}: "${task.title}".
 All previous context is still in your session history.
 Review your previous progress and complete the task.
+${userFeedbackSection}
 
 **REMINDER:**
 1. BUILD MUST PASS before submitting
@@ -86,6 +91,7 @@ Do NOT use \`git diff HEAD\` alone — that only shows unstaged changes, not com
   }
 
   prompt += `Fix these issues and resubmit. All previous context and code is still in your session.
+${userFeedbackSection}
 
 **REMINDER:**
 1. Address ALL reviewer feedback
@@ -113,12 +119,23 @@ Do NOT use \`git diff HEAD\` alone — that only shows unstaged changes, not com
  * Generate the coder prompt for a new task
  */
 export function generateCoderPrompt(context: CoderPromptContext): string {
-  const { task, projectPath, previousStatus, rejectionNotes, rejectionHistory, coordinatorGuidance, sectionTasks } = context;
+  const {
+    task,
+    projectPath,
+    previousStatus,
+    rejectionNotes,
+    rejectionHistory,
+    coordinatorGuidance,
+    sectionTasks,
+    userFeedbackSummary,
+    userFeedbackItems,
+  } = context;
 
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
 
   // Build rejection section with full history and coordinator guidance
   const rejectionSection = formatRejectionHistoryForCoder(task.id, rejectionHistory, rejectionNotes, coordinatorGuidance);
+  const userFeedbackSection = formatUserFeedbackContextSection({ userFeedbackSummary, userFeedbackItems });
 
   // Build file scope section
   const fileScopeSection = buildFileScopeSection(task);
@@ -159,6 +176,7 @@ ${sourceRef}
 ${recentCommitsSection}
 
 Review relevant project files as needed for your implementation.
+${userFeedbackSection}
 ${rejectionSection}
 ---
 
@@ -246,13 +264,16 @@ export interface BatchCoderPromptContext {
   tasks: Task[];
   projectPath: string;
   sectionName: string;
+  userFeedbackSummary?: string | null; // Human feedback summary for this section
+  userFeedbackItems?: string[]; // Individual user feedback notes
 }
 
 /**
  * Generate the coder prompt for a batch of tasks
  */
 export function generateBatchCoderPrompt(context: BatchCoderPromptContext): string {
-  const { tasks, projectPath, sectionName } = context;
+  const { tasks, projectPath, sectionName, userFeedbackSummary, userFeedbackItems } = context;
+  const userFeedbackSection = formatUserFeedbackContextSection({ userFeedbackSummary, userFeedbackItems });
 
   // Build task specs for each task
   const taskSpecs = tasks.map((task, index) => {
@@ -283,6 +304,7 @@ You are a CODER assigned MULTIPLE tasks from section "${sectionName}".
 ## TASKS TO IMPLEMENT
 
 ${taskSpecs}
+${userFeedbackSection}
 
 ---
 
@@ -327,10 +349,21 @@ Begin with Task 1 and work through each task in order.
  * Generate the coder prompt for resuming partial work
  */
 export function generateResumingCoderPrompt(context: CoderPromptContext): string {
-  const { task, projectPath, gitStatus, gitDiff, rejectionHistory, coordinatorGuidance, sectionTasks } = context;
+  const {
+    task,
+    projectPath,
+    gitStatus,
+    gitDiff,
+    rejectionHistory,
+    coordinatorGuidance,
+    sectionTasks,
+    userFeedbackSummary,
+    userFeedbackItems,
+  } = context;
 
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const fileAnchorSection = buildFileAnchorSection(task);
+  const userFeedbackSection = formatUserFeedbackContextSection({ userFeedbackSummary, userFeedbackItems });
 
   // Build rejection section with full history and coordinator guidance (same as normal prompt)
   const rejectionSection = formatRejectionHistoryForCoder(task.id, rejectionHistory, undefined, coordinatorGuidance);
@@ -368,6 +401,7 @@ ${gitStatus ?? 'No uncommitted changes'}
 \`\`\`diff
 ${gitDiff ?? 'No changes'}
 \`\`\`
+${userFeedbackSection}
 
 ---
 
