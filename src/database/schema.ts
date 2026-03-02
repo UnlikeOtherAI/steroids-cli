@@ -73,6 +73,19 @@ CREATE INDEX IF NOT EXISTS idx_tasks_follow_up_state ON tasks(is_follow_up, requ
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_dedupe ON tasks(dedupe_key) WHERE dedupe_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tasks_selection_followup ON tasks(status, is_follow_up, requires_promotion);
 
+-- Task feedback (human notes to inject into future prompts)
+CREATE TABLE IF NOT EXISTS task_feedback (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    feedback TEXT NOT NULL CHECK(length(feedback) <= 8000),
+    source TEXT NOT NULL DEFAULT 'user',
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_feedback_task ON task_feedback(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_feedback_task_created ON task_feedback(task_id, created_at DESC);
+
 -- Audit trail (immutable log of status changes)
 CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -260,4 +273,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (19, '019_add_task
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (20, '020_add_workspace_fields', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (21, '021_add_section_branch', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (22, '022_add_section_auto_pr', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (23, '023_add_task_feedback', 'builtin');
 `;

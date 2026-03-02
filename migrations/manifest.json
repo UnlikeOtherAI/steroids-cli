@@ -1,6 +1,6 @@
 {
-  "version": "0.2.1",
-  "latestDbVersion": 22,
+  "version": "0.2.2",
+  "latestDbVersion": 23,
   "migrations": [
     {
       "id": 1,
@@ -177,6 +177,14 @@
       "description": "Add auto_pr and pr_number columns to sections table for auto-PR on section completion",
       "checksum": "",
       "cliVersion": "0.10.44"
+    },
+    {
+      "id": 23,
+      "name": "023_add_task_feedback",
+      "file": "023_add_task_feedback.sql",
+      "description": "Add task_feedback table for storing user feedback linked to tasks",
+      "checksum": "",
+      "cliVersion": "0.10.57"
     }
   ]
 }
