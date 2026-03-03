@@ -210,7 +210,7 @@ export function getSectionTaskCount(
 /**
  * Get dependencies for a section that have incomplete tasks
  * Returns sections that the given section depends on and still have tasks that are
- * actively blocking: pending, in_progress, review, disputed, failed, blocked_error,
+ * actively blocking: pending, in_progress, review, failed, blocked_error,
  * blocked_conflict.
  *
  * Terminal states that do NOT block downstream sections:
@@ -239,7 +239,7 @@ export function getPendingDependencies(
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.section_id = s.id
-         AND t.status NOT IN ('completed', 'skipped', 'partial', 'blocked_error', 'blocked_conflict')
+         AND t.status NOT IN ('completed', 'disputed', 'skipped', 'partial', 'blocked_error', 'blocked_conflict')
        )
        ORDER BY s.position ASC`
     )

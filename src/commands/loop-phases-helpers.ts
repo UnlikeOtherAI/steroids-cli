@@ -344,6 +344,46 @@ export function countConsecutiveTaggedOrchestratorEntries(
   return count;
 }
 
+/**
+ * Count commit-recovery attempts across a recovery episode.
+ * Unlike the generic consecutive counter, this intentionally tolerates
+ * orchestrator review submissions between attempts so retry caps cannot reset.
+ */
+export function countCommitRecoveryAttempts(
+  db: ReturnType<typeof openDatabase>['db'],
+  taskId: string
+): number {
+  const audit = getTaskAudit(db, taskId);
+  let count = 0;
+
+  for (let i = audit.length - 1; i >= 0; i--) {
+    const entry = audit[i];
+    if (entry.actor !== 'orchestrator') {
+      continue;
+    }
+
+    const notes = entry.notes ?? '';
+    if (notes.includes('[commit_recovery]')) {
+      count += 1;
+      continue;
+    }
+
+    if (entry.category === 'decision') {
+      continue;
+    }
+
+    // Recovery cycles naturally include orchestrator review submissions.
+    // Do not treat those as sequence boundaries.
+    if (entry.to_status === 'review') {
+      continue;
+    }
+
+    break;
+  }
+
+  return count;
+}
+
 export function countLatestOpenRejectionItems(notes?: string): number {
   if (!notes) return 0;
   return notes

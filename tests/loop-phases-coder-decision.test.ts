@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 const mockPushToRemote = jest.fn();
 const mockUpdateTaskStatus = jest.fn();
+const mockUpdateTaskStatusDetailed = jest.fn();
 const mockAddAuditEntry = jest.fn();
 const mockResolveCoderSubmittedCommitSha = jest.fn();
 const mockRefreshParallelWorkstreamLease = jest.fn();
@@ -24,6 +25,8 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   listTasks: jest.fn().mockReturnValue([]),
   addAuditEntry: mockAddAuditEntry,
   updateTaskStatus: mockUpdateTaskStatus,
+  updateTaskStatusDetailed: mockUpdateTaskStatusDetailed,
+  getLatestSubmissionAudit: jest.fn().mockReturnValue(null),
 }));
 
 jest.unstable_mockModule('../src/git/push.js', () => ({
@@ -34,6 +37,13 @@ jest.unstable_mockModule('../src/git/status.js', () => ({
   getCurrentCommitSha: mockGetCurrentCommitSha,
   getModifiedFiles: jest.fn().mockReturnValue([]),
   isCommitReachable: mockIsCommitReachable,
+}));
+
+jest.unstable_mockModule('../src/git/submission-durability.js', () => ({
+  getSubmissionDurableRef: jest.fn().mockImplementation((taskId) => `refs/steroids/submissions/${String(taskId)}/latest`),
+  readDurableSubmissionRef: jest.fn().mockReturnValue(null),
+  writeDurableSubmissionRef: jest.fn().mockReturnValue({ ok: true }),
+  deleteDurableSubmissionRef: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/commands/loop-phases-helpers.js', () => ({
@@ -60,6 +70,21 @@ const baseContext = {
   jsonMode: true,
 };
 
+function createDbMock() {
+  return {
+    transaction: jest.fn((fn: () => void) => fn),
+    prepare: jest.fn((sql: string) => {
+      if (sql.includes('SELECT metadata')) {
+        return { get: jest.fn().mockReturnValue(undefined) };
+      }
+      if (sql.includes('UPDATE audit')) {
+        return { run: jest.fn() };
+      }
+      return { get: jest.fn(), run: jest.fn() };
+    }),
+  };
+}
+
 describe('executeCoderDecision push behavior', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -72,8 +97,9 @@ describe('executeCoderDecision push behavior', () => {
   });
 
   it('submit: skips push in pool mode even with parallel session', async () => {
+    const db = createDbMock();
     await executeCoderDecision(
-      {} as never,
+      db as never,
       task as never,
       { action: 'submit', reasoning: 'ready' },
       { ...baseContext, hasPoolSlot: true }
@@ -91,8 +117,9 @@ describe('executeCoderDecision push behavior', () => {
   });
 
   it('submit: pushes in non-pool mode when parallel session is active', async () => {
+    const db = createDbMock();
     await executeCoderDecision(
-      {} as never,
+      db as never,
       task as never,
       { action: 'submit', reasoning: 'ready' },
       { ...baseContext, hasPoolSlot: false }
@@ -103,8 +130,9 @@ describe('executeCoderDecision push behavior', () => {
   });
 
   it('stage_commit_submit (no uncommitted): skips push in pool mode', async () => {
+    const db = createDbMock();
     await executeCoderDecision(
-      {} as never,
+      db as never,
       task as never,
       { action: 'stage_commit_submit', reasoning: 'auto', commit_message: 'feat: test' },
       { ...baseContext, has_uncommitted: false, hasPoolSlot: true }
@@ -122,8 +150,9 @@ describe('executeCoderDecision push behavior', () => {
   });
 
   it('stage_commit_submit (no uncommitted): pushes in non-pool mode', async () => {
+    const db = createDbMock();
     await executeCoderDecision(
-      {} as never,
+      db as never,
       task as never,
       { action: 'stage_commit_submit', reasoning: 'auto', commit_message: 'feat: test' },
       { ...baseContext, has_uncommitted: false, hasPoolSlot: false }
@@ -134,8 +163,9 @@ describe('executeCoderDecision push behavior', () => {
   });
 
   it('stage_commit_submit (after auto-commit): skips push in pool mode', async () => {
+    const db = createDbMock();
     await executeCoderDecision(
-      {} as never,
+      db as never,
       task as never,
       { action: 'stage_commit_submit', reasoning: 'auto-commit', commit_message: 'feat: test' },
       { ...baseContext, has_uncommitted: true, hasPoolSlot: true }
@@ -155,8 +185,9 @@ describe('executeCoderDecision push behavior', () => {
   });
 
   it('stage_commit_submit (after auto-commit): pushes in non-pool mode', async () => {
+    const db = createDbMock();
     await executeCoderDecision(
-      {} as never,
+      db as never,
       task as never,
       { action: 'stage_commit_submit', reasoning: 'auto-commit', commit_message: 'feat: test' },
       { ...baseContext, has_uncommitted: true, hasPoolSlot: false }

@@ -25,6 +25,7 @@ import {
   isCommitReachable,
 } from '../git/status.js';
 import { pushToRemote } from '../git/push.js';
+import { submitForReviewWithDurableRef } from './submission-transition.js';
 import {
   LeaseFenceContext,
   refreshParallelWorkstreamLease,
@@ -243,7 +244,27 @@ export async function executeCoderDecision(
             break;
           }
         }
-        updateTaskStatus(db, task!.id, 'review', 'orchestrator', decision.reasoning, submissionCommitSha);
+        const submitted = submitForReviewWithDurableRef(
+          db,
+          task!.id,
+          'orchestrator',
+          effectiveProjectPath,
+          submissionCommitSha,
+          decision.reasoning
+        );
+        if (!submitted.ok) {
+          updateTaskStatus(
+            db,
+            task!.id,
+            'failed',
+            'orchestrator',
+            `Task failed: durable submission write failed (${submitted.error})`
+          );
+          if (!jsonMode) {
+            console.log('\n✗ Task failed (durable submission write failed)');
+          }
+          break;
+        }
       }
       if (!jsonMode) {
         console.log(`\n✓ Coder complete, submitted to review (confidence: ${decision.confidence})`);
@@ -296,14 +317,27 @@ export async function executeCoderDecision(
             break;
           }
         }
-        updateTaskStatus(
+        const submitted = submitForReviewWithDurableRef(
           db,
           task!.id,
-          'review',
           'orchestrator',
-          'Auto-commit skipped: no uncommitted changes',
-          submissionCommitSha
+          effectiveProjectPath,
+          submissionCommitSha,
+          'Auto-commit skipped: no uncommitted changes'
         );
+        if (!submitted.ok) {
+          updateTaskStatus(
+            db,
+            task!.id,
+            'failed',
+            'orchestrator',
+            `Task failed: durable submission write failed (${submitted.error})`
+          );
+          if (!jsonMode) {
+            console.log('\n✗ Task failed (durable submission write failed)');
+          }
+          break;
+        }
         if (!jsonMode) {
           console.log('\n✓ Auto-commit skipped (no uncommitted files) and submitted to review');
         }
@@ -356,14 +390,27 @@ export async function executeCoderDecision(
             break;
           }
         }
-        updateTaskStatus(
+        const submitted = submitForReviewWithDurableRef(
           db,
           task!.id,
-          'review',
           'orchestrator',
-          `Auto-committed and submitted (${decision.reasoning})`,
-          submissionCommitSha
+          effectiveProjectPath,
+          submissionCommitSha,
+          `Auto-committed and submitted (${decision.reasoning})`
         );
+        if (!submitted.ok) {
+          updateTaskStatus(
+            db,
+            task!.id,
+            'failed',
+            'orchestrator',
+            `Task failed: durable submission write failed (${submitted.error})`
+          );
+          if (!jsonMode) {
+            console.log('\n✗ Task failed (durable submission write failed)');
+          }
+          break;
+        }
         if (!jsonMode) {
           console.log(`\n✓ Auto-committed and submitted to review (confidence: ${decision.confidence})`);
         }
