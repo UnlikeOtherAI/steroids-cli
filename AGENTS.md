@@ -94,6 +94,15 @@ Before patching, ask whether the right fix is to simplify. Every change must red
 
 Feature work is incomplete until `README.md`, `AGENTS.md`, and relevant schema/config docs are updated. When adding or changing CLI flags or subcommands, update the help text in `src/commands/`.
 
+### Prompt Composition (CRITICAL)
+
+For orchestrator-generated coder/reviewer/coordinator prompts:
+- Never inline the contents of `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or skill files.
+- Link those files only and explicitly require the agent to read them.
+- Place the specification file link near the top of the prompt.
+- Path format is strict: in-repo links use `./...`; out-of-repo links use absolute paths.
+- Do not emit placeholder text like "file not found" for linked spec/instruction/skill paths in prompt templates.
+
 ### Command Execution Discipline (CRITICAL)
 
 Use non-interactive modes for all scripted/automated flows. For `npx` in automation, use `-y`/`--yes`.

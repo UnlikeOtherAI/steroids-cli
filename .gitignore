@@ -64,3 +64,4 @@ Monitor/.build/
 # These are 16-char hex SHA1 prefix dirs containing ws-* clones
 [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/
 .worktrees/
+.ninja/

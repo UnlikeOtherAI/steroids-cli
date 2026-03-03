@@ -1,11 +1,12 @@
 /**
  * Project instruction file detection and injection
- * Handles AGENTS.md, CLAUDE.md, GEMINI.md detection and force-injection into prompts
+ * Handles AGENTS.md, CLAUDE.md, GEMINI.md detection for prompt injection
  * Per-project override state stored in .steroids/instruction-files.json
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { formatPromptPath } from './path-links.js';
 
 const OVERRIDE_FILE = '.steroids/instruction-files.json';
 const MAX_CHARS = 4000;
@@ -76,40 +77,40 @@ export function getInstructionFilesList(projectPath: string): InstructionFile[] 
 
 /**
  * Build the mandatory project instructions section for injection into prompts.
- * Reads enabled instruction files and assembles a formatted block.
+ * Lists enabled instruction file links (without inlining content).
  * Returns empty string if no instruction files are found or enabled.
  */
 export function buildProjectInstructionsSection(projectPath: string): string {
   const overrides = readInstructionOverrides(projectPath);
-  const parts: string[] = [];
+  const instructionLinks: string[] = [];
 
   for (const { key, filename } of INSTRUCTION_FILE_DEFS) {
     if (!isInstructionEnabled(overrides, key)) continue;
     const filePath = join(projectPath, filename);
     if (!existsSync(filePath)) continue;
-    try {
-      let content = readFileSync(filePath, 'utf-8').trim();
-      if (content.length > MAX_CHARS) content = content.slice(0, MAX_CHARS) + '\n\n[truncated]';
-      parts.push(`### ${filename}\n${content}`);
-    } catch {
-      // Skip unreadable files
-    }
+    instructionLinks.push(`- \`${formatPromptPath(projectPath, filePath)}\``);
   }
 
-  if (overrides.customInstructions?.trim()) {
-    parts.push(`### Custom Instructions\n${overrides.customInstructions.trim()}`);
-  }
+  const customInstructions = overrides.customInstructions?.trim() ?? '';
 
-  if (parts.length === 0) return '';
+  if (instructionLinks.length === 0 && !customInstructions) return '';
+
+  const customInstructionsSection = customInstructions
+    ? `
+### Custom Instructions
+${customInstructions}
+`
+    : '';
 
   return `
 ---
 
-## MANDATORY PROJECT INSTRUCTIONS
+## REQUIRED INSTRUCTION FILES
 
-**These instructions MUST be followed for ALL work on this project. Read and comply before writing any code.**
+You MUST read and follow these files before writing code:
 
-${parts.join('\n\n---\n\n')}
+${instructionLinks.join('\n')}
+${customInstructionsSection}
 
 ---
 `;

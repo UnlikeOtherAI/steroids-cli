@@ -1008,17 +1008,30 @@ export function getLatestSubmissionCommitSha(
 
 /**
  * Get submission commit hashes for review transitions, from newest to oldest.
+ *
+ * We scope history to the latest active task lifecycle (latest pending -> in_progress).
+ * This prevents old pre-reset submissions from polluting cumulative reviewer diffs.
  */
 export function getSubmissionCommitShas(db: Database.Database, taskId: string): string[] {
   const rows = db
     .prepare(
-      `SELECT commit_sha FROM audit
-       WHERE task_id = ?
-       AND to_status = 'review'
-       AND commit_sha IS NOT NULL
-       ORDER BY created_at DESC, id DESC`
+      `WITH latest_attempt AS (
+         SELECT COALESCE(MAX(id), 0) AS boundary_id
+         FROM audit
+         WHERE task_id = ?
+           AND from_status = 'pending'
+           AND to_status = 'in_progress'
+       )
+       SELECT a.commit_sha
+       FROM audit a
+       JOIN latest_attempt la
+       WHERE a.task_id = ?
+         AND a.to_status = 'review'
+         AND a.commit_sha IS NOT NULL
+         AND a.id > la.boundary_id
+       ORDER BY a.created_at DESC, a.id DESC`
     )
-    .all(taskId) as Array<{ commit_sha: string | null }>;
+    .all(taskId, taskId) as Array<{ commit_sha: string | null }>;
 
   return rows
     .map((row) => row.commit_sha)

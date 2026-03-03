@@ -16,6 +16,7 @@ import {
 } from './prompt-helpers.js';
 import { buildProjectInstructionsSection } from './instruction-files.js';
 import { getRecentCommits } from '../git/status.js';
+import { formatPromptPath } from './path-links.js';
 
 export interface CoderPromptContext {
   task: Task;
@@ -35,8 +36,18 @@ export interface CoderPromptContext {
  * Generate a minimal delta prompt for a resumed coder session
  */
 export function generateResumingCoderDeltaPrompt(context: CoderPromptContext): string {
-  const { task, rejectionHistory, coordinatorGuidance, sectionTasks, userFeedbackSummary, userFeedbackItems } = context;
+  const {
+    task,
+    projectPath,
+    rejectionHistory,
+    coordinatorGuidance,
+    sectionTasks,
+    userFeedbackSummary,
+    userFeedbackItems,
+  } = context;
   const userFeedbackSection = formatUserFeedbackContextSection({ userFeedbackSummary, userFeedbackItems });
+  const skillsSection = buildSkillsSection(projectPath);
+  const instructionsSection = buildProjectInstructionsSection(projectPath);
 
   // Find the last rejection notes
   const lastRejection = rejectionHistory && rejectionHistory.length > 0
@@ -49,6 +60,7 @@ export function generateResumingCoderDeltaPrompt(context: CoderPromptContext): s
 All previous context is still in your session history.
 Review your previous progress and complete the task.
 ${userFeedbackSection}
+${skillsSection}${instructionsSection}
 
 **REMINDER:**
 1. BUILD MUST PASS before submitting
@@ -92,6 +104,7 @@ Do NOT use \`git diff HEAD\` alone — that only shows unstaged changes, not com
 
   prompt += `Fix these issues and resubmit. All previous context and code is still in your session.
 ${userFeedbackSection}
+${skillsSection}${instructionsSection}
 
 **REMINDER:**
 1. Address ALL reviewer feedback
@@ -132,6 +145,9 @@ export function generateCoderPrompt(context: CoderPromptContext): string {
   } = context;
 
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
+  const sourcePathForStart = task.source_file
+    ? formatPromptPath(projectPath, task.source_file)
+    : 'the specification link above';
 
   // Build rejection section with full history and coordinator guidance
   const rejectionSection = formatRejectionHistoryForCoder(task.id, rejectionHistory, rejectionNotes, coordinatorGuidance);
@@ -154,23 +170,16 @@ You are a CODER in an automated task execution system. Your job is to autonomous
 
 ---
 
-## Task Information
-
-**Task ID:** ${task.id}
-**Title:** ${task.title}
-**Rejection Count:** ${task.rejection_count}/15
-**Project:** ${projectPath}
-**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory. If files referenced in the task do not exist in your current working directory, they either need to be CREATED (per the task specification) or the task spec refers to files on a different branch that have not been merged yet — in either case you must work only within your current directory. **Never navigate to \`../\` or any sibling directories. Never use absolute paths to access workspaces, clones, or any path outside your CWD.**
-${fileScopeSection}${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks, 'coder')}${buildSkillsSection(projectPath)}${buildProjectInstructionsSection(projectPath)}
----
-
-## Specification
+## Specification (Read First)
 
 ${sourceRef}
 
 ---
 
-## Existing Code Context
+## Task Context
+
+**CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory. If files referenced in the task do not exist in your current working directory, they either need to be CREATED (per the task specification) or the task spec refers to files on a different branch that have not been merged yet — in either case you must work only within your current directory. **Never navigate to \`../\` or any sibling directories. Never use absolute paths to access workspaces, clones, or any path outside your CWD.**
+${fileScopeSection}${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks, 'coder')}${buildSkillsSection(projectPath)}${buildProjectInstructionsSection(projectPath)}
 
 **Recent Commits in Workspace:**
 ${recentCommitsSection}
@@ -190,7 +199,7 @@ Before implementing anything, verify if the work is already done:
 
 ### 2. Implementation Phase
 If the work is not done, implement the feature/fix:
-1. **Read Project Guidelines:** Check if \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, or similar guideline files exist in the project root. If they do, READ THEM and follow their architecture and patterns.
+1. **Read Linked Guidance Files:** Follow every file listed under "Required Instruction Files" and "Assigned Skills" before coding.
 2. Read the specification carefully.
 3. Add or update tests if a test directory exists.
 
@@ -253,7 +262,7 @@ Rules:
 
 ## Start Now
 
-Begin by reading ${task.source_file ?? 'the specification above'} and implementing the task.
+Begin by reading ${sourcePathForStart} and implementing the task.
 `;
 }
 
@@ -298,6 +307,7 @@ You are a CODER assigned MULTIPLE tasks from section "${sectionName}".
 **Total Tasks:** ${tasks.length}
 **Project:** ${projectPath}
 **CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory. If files referenced in the task do not exist in your current working directory, they either need to be CREATED (per the task specification) or the task spec refers to files on a different branch that have not been merged yet — in either case you must work only within your current directory. **Never navigate to \`../\` or any sibling directories. Never use absolute paths to access workspaces, clones, or any path outside your CWD.**
+${buildSkillsSection(projectPath)}${buildProjectInstructionsSection(projectPath)}
 
 ---
 
@@ -311,7 +321,7 @@ ${userFeedbackSection}
 ## YOUR WORKFLOW
 
 For EACH task:
-1. **Read Project Guidelines:** Check if \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, or similar guideline files exist in the project root. If they do, READ THEM.
+1. **Read Linked Guidance Files:** Follow every file listed under "Required Instruction Files" and "Assigned Skills" before coding.
 2. Read the specification carefully.
 3. Implement the feature/fix.
 4. Verify tools using \`which <command>\` before relying on them. If a tool is missing, FIRST look for any alternative tools or commands available on the system.
@@ -375,15 +385,16 @@ You are a CODER resuming work on a partially completed task.
 
 ---
 
-## Task Information
+## Specification (Read First)
 
-**Task ID:** ${task.id}
-**Title:** ${task.title}
-**Status:** in_progress (resuming)
-**Rejection Count:** ${task.rejection_count}/15
-**Project:** ${projectPath}
+${sourceRef}
+
+---
+
+## Task Context
+
 **CRITICAL WORKSPACE RULE:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory. All changes MUST be made in this current directory. If files referenced in the task do not exist in your current working directory, they either need to be CREATED (per the task specification) or the task spec refers to files on a different branch that have not been merged yet — in either case you must work only within your current directory. **Never navigate to \`../\` or any sibling directories. Never use absolute paths to access workspaces, clones, or any path outside your CWD.**
-${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks, 'coder')}${buildProjectInstructionsSection(projectPath)}
+${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks, 'coder')}${buildSkillsSection(projectPath)}${buildProjectInstructionsSection(projectPath)}
 ---
 
 ## Previous Work Detected
@@ -407,7 +418,7 @@ ${userFeedbackSection}
 
 ## Your Instructions
 
-1. **Read Project Guidelines:** Check if \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, or similar guideline files exist in the project root. If they do, READ THEM.
+1. **Read Linked Guidance Files:** Follow every file listed under "Required Instruction Files" and "Assigned Skills" before coding.
 2. Review what the previous coder did
 3. If the work looks good, complete it
 4. If the work looks wrong, you may start fresh
@@ -438,12 +449,6 @@ You MUST implement the items listed under \`MUST_IMPLEMENT:\` before resubmittin
 
 ---
 ` : ''}
-
-## Specification
-
-${sourceRef}
-
----
 
 ## CRITICAL RULES
 

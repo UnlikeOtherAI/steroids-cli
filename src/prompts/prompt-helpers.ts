@@ -3,12 +3,13 @@
  * Used by coder, reviewer, and coordinator prompts
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
-import { loadConfigFile, type SteroidsConfig } from '../config/loader.js';
+import { loadConfigFile, getGlobalConfigPath, getProjectConfigPath, type SteroidsConfig } from '../config/loader.js';
 import type { Task, RejectionEntry } from '../database/queries.js';
 import { buildProjectInstructionsSection } from './instruction-files.js';
+import { formatPromptPath } from './path-links.js';
 
 export { buildProjectInstructionsSection };
 
@@ -31,11 +32,8 @@ export function getSourceFileReference(
   if (!sourceFile) {
     return 'No specification file linked.';
   }
-  const fullPath = join(projectPath, sourceFile);
-  if (!existsSync(fullPath)) {
-    return `Specification file not found: ${sourceFile}`;
-  }
-  return `Read the full specification before starting: \`${sourceFile}\``;
+  const formattedPath = formatPromptPath(projectPath, sourceFile);
+  return `Read the full specification before starting: \`${formattedPath}\``;
 }
 
 /**
@@ -419,37 +417,71 @@ ${lines.join('\n')}
 
 
 
+function addConfiguredSkills(
+  skillNames: Set<string>,
+  config: Partial<SteroidsConfig>
+): void {
+  if (!Array.isArray(config.skills)) return;
+  for (const skill of config.skills) {
+    if (typeof skill !== 'string') continue;
+    const trimmed = skill.trim();
+    if (trimmed.length > 0) skillNames.add(trimmed);
+  }
+}
+
 /**
- * Load assigned skills and return them as a formatted section containing absolute file paths.
+ * Load assigned skills and return them as file links only.
+ * Inside-project paths are emitted as ./relative/path, external paths as absolute.
  */
 export function buildSkillsSection(projectPath: string): string {
   try {
-    const fs = require('node:fs');
-    const path = require('node:path');
-    
-    // In parallel mode, projectPath is the workspace clone root
-    const skillsDir = path.join(projectPath, '.steroids', 'skills');
-    if (!fs.existsSync(skillsDir)) return '';
-    
-    const skillsFiles = fs.readdirSync(skillsDir).filter((f: string) => f.endsWith('.md'));
-    if (skillsFiles.length === 0) return '';
-    
-    const loadedSkills = skillsFiles.map((file: string) => {
-      const skillName = file.replace('.md', '');
-      const absolutePath = path.resolve(skillsDir, file);
-      const skillLink = `file://${encodeURI(absolutePath)}`;
-      return `- [${skillName}](${skillLink})`;
-    });
-    
-    return `\n---
+    const projectSkillsDir = join(projectPath, '.steroids', 'skills');
+    const globalSkillsDir = join(dirname(getGlobalConfigPath()), 'skills');
 
-## Assigned Project Skills
+    const skillNames = new Set<string>();
+    addConfiguredSkills(skillNames, loadConfigFile(getGlobalConfigPath()) as Partial<SteroidsConfig>);
+    addConfiguredSkills(skillNames, loadConfigFile(getProjectConfigPath(projectPath)) as Partial<SteroidsConfig>);
+    addConfiguredSkills(skillNames, loadConfigFile(join(projectPath, 'steroids.config.yaml')) as Partial<SteroidsConfig>);
 
-The following skills and guidelines have been explicitly assigned to this project.
-If your work is related to one of these skill areas, you MUST use the \`read_file\` tool on the linked files before proceeding.
+    const linkedPaths = new Set<string>();
 
-${loadedSkills.join('\n')}
+    // Workspace clone copy: contains both global and project-assigned skills in normal orchestrator flow.
+    if (existsSync(projectSkillsDir)) {
+      const projectSkillFiles = readdirSync(projectSkillsDir).filter(file => file.endsWith('.md'));
+      for (const file of projectSkillFiles) {
+        linkedPaths.add(join(projectSkillsDir, file));
+      }
+    }
 
+    // Backfill from configured skill names when clone hydration is incomplete.
+    for (const skillName of skillNames) {
+      const projectSkillPath = join(projectSkillsDir, `${skillName}.md`);
+      const globalSkillPath = join(globalSkillsDir, `${skillName}.md`);
+
+      if (existsSync(projectSkillPath)) {
+        linkedPaths.add(projectSkillPath);
+      } else if (existsSync(globalSkillPath)) {
+        linkedPaths.add(globalSkillPath);
+      } else {
+        // Keep the configured skill visible even if hydration failed.
+        linkedPaths.add(projectSkillPath);
+      }
+    }
+
+    if (linkedPaths.size === 0) return '';
+
+    const skillLinks = Array.from(linkedPaths)
+      .sort((a, b) => a.localeCompare(b))
+      .map(path => `- \`${formatPromptPath(projectPath, path)}\``);
+
+    return `
+---
+
+## Assigned Skills
+
+You MUST use these linked skill files when they apply to the task:
+
+${skillLinks.join('\n')}
 `;
   } catch {
     return '';

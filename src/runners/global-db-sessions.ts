@@ -62,7 +62,9 @@ export function updateParallelSessionStatus(
       for (const runner of runners) {
         // Clean up in-flight task state before killing the runner.
         // Reset task to pending so the section is unblocked immediately.
-        // Lock is left to expire naturally to prevent double-execution.
+        // Invariant: once a runner row is removed from global DB, no task lock
+        // may continue pointing at that runner ID, or task selection can stall
+        // on pending-but-locked tasks until lock TTL expiry.
         if (runner.current_task_id && runner.project_path && runner.pid !== selfPid) {
           try {
             const { db: projectDb, close: closeProjectDb } = openDatabase(runner.project_path);
@@ -79,6 +81,10 @@ export function updateParallelSessionStatus(
                 `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
                  WHERE id = ? AND status = 'in_progress'`
               ).run(runner.current_task_id);
+              projectDb.prepare(
+                `DELETE FROM task_locks
+                 WHERE runner_id = ?`
+              ).run(runner.id);
             } finally {
               closeProjectDb();
             }

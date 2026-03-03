@@ -8,6 +8,7 @@ import type { SteroidsConfig } from '../config/loader.js';
 import {
   getSourceFileReference,
   buildFileAnchorSection,
+  buildSkillsSection,
   formatSectionTasks,
   formatUserFeedbackContextSection,
 } from './prompt-helpers.js';
@@ -68,6 +69,7 @@ export function generateResumingReviewerDeltaPrompt(context: ReviewerPromptConte
     : `${oldestSubmissionCommit}^..${latestSubmissionCommit}`;
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const sectionTasksSection = formatSectionTasks(task.id, sectionTasks);
+  const skillsSection = buildSkillsSection(projectPath);
   const instructionsSection = buildProjectInstructionsSection(projectPath);
 
   // Find the last rejection notes the reviewer gave
@@ -87,7 +89,7 @@ If the submission notes begin with \`[NO_OP_SUBMISSION]\`, the coder made no new
 ## Specification
 
 ${sourceRef}
-${sectionTasksSection}
+${sectionTasksSection}${skillsSection}
 ${instructionsSection}
 ${formatReviewerCustomInstructions(reviewerCustomInstructions)}
 
@@ -216,6 +218,7 @@ The coder included these notes when submitting for review:
 
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
   const fileAnchorSection = buildFileAnchorSection(task);
+  const skillsSection = buildSkillsSection(projectPath);
   const instructionsSection = buildProjectInstructionsSection(projectPath);
   const reviewerCustomInstructionsSection = formatReviewerCustomInstructions(reviewerCustomInstructions);
 
@@ -250,17 +253,15 @@ If the submission notes begin with \`[NO_OP_SUBMISSION]\`, the coder made no new
 
 ---
 
-## Task Information
-
-**Task ID:** ${task.id}
-**Title:** ${task.title}
-**Rejection Count:** ${task.rejection_count}/15
-**Project:** ${projectPath}
-${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks)}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}${formatCoordinatorGuidance(coordinatorGuidance, coordinatorDecision)}${instructionsSection}
-${reviewerCustomInstructionsSection}
-## Specification
+## Specification (Read First)
 
 ${sourceRef}
+
+---
+
+## Task Context
+
+${fileAnchorSection}${formatSectionTasks(task.id, sectionTasks)}${skillsSection}${instructionsSection}${formatRejectionHistory(rejectionHistory)}${submissionNotesSection}${formatCoordinatorGuidance(coordinatorGuidance, coordinatorDecision)}${reviewerCustomInstructionsSection}
 
 ---
 
@@ -287,7 +288,7 @@ Answer these questions:
 1. Does the implementation match the specification?
 2. Are there bugs or logic errors?
 3. Are tests present and adequate?
-4. Does code follow AGENTS.md guidelines?
+4. Does code follow the linked instruction files and assigned skills?
 5. Are previously rejected checklist items now resolved across the cumulative task diff?
 6. **Scope check:** Did the coder stay within this task's scope? If the diff includes changes that belong to a sibling task (see "Other Tasks in This Section"), flag each one as \`[OUT_OF_SCOPE]\`.
 ${buildReviewerSecuritySection()}${getTestCoverageInstructions(config)}
@@ -327,6 +328,8 @@ export function generateBatchReviewerPrompt(context: BatchReviewerPromptContext)
     userFeedbackItems,
   } = context;
   const userFeedbackSection = formatUserFeedbackContextSection({ userFeedbackSummary, userFeedbackItems });
+  const skillsSection = buildSkillsSection(projectPath);
+  const instructionsSection = buildProjectInstructionsSection(projectPath);
 
   // Build task specs for each task
   const commitMap = new Map(taskCommits?.map(item => [item.taskId, item.commitHash]) ?? []);
@@ -357,6 +360,7 @@ You are a REVIEWER reviewing MULTIPLE tasks from section "${sectionName}".
 ## Section: ${sectionName}
 **Total Tasks:** ${tasks.length}
 **Project:** ${projectPath}
+${skillsSection}${instructionsSection}
 
 ---
 

@@ -12,7 +12,7 @@ import type { Task, RejectionEntry } from '../database/queries.js';
 import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { logInvocation } from '../providers/invocation-logger.js';
-import { getSourceFileReference } from '../prompts/prompt-helpers.js';
+import { buildSkillsSection, getSourceFileReference } from '../prompts/prompt-helpers.js';
 import { buildProjectInstructionsSection } from '../prompts/instruction-files.js';
 
 export interface CoordinatorContext {
@@ -48,7 +48,8 @@ ${r.notes || '(no notes)'}
   ).join('\n---\n');
 
   // Pull in project context so coordinator understands the bigger picture
-  const agentsMd = buildProjectInstructionsSection(projectPath);
+  const instructionFiles = buildProjectInstructionsSection(projectPath);
+  const skillsSection = buildSkillsSection(projectPath);
   const specRef = getSourceFileReference(projectPath, task.source_file);
 
   // Build optional context sections
@@ -129,25 +130,21 @@ A task has been rejected ${rejectionHistory.length} times. You MUST provide a de
 
 ---
 
-## Task Information
-
-**Task ID:** ${task.id}
-**Title:** ${task.title}
-**Rejection Count:** ${task.rejection_count}/15
-**Project:** ${projectPath}
-**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory.
-
----
-
-## Task Specification (The Brief)
+## Specification (Read First)
 
 ${specRef}
 
 ---
 
-## Project Architecture & Best Practices
+## Project Guidance
 
-${agentsMd}
+${skillsSection}${instructionFiles}
+
+---
+
+## Task Context
+
+**CRITICAL:** You are operating inside an isolated workspace clone. DO NOT change directories out of your current working directory.
 
 ---
 
