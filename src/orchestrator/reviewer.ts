@@ -27,6 +27,7 @@ import { countTokens } from '../utils/tokens.js';
 import { resolveSubmissionCommitHistoryWithRecovery, resolveSubmissionCommitWithRecovery } from '../git/submission-resolution.js';
 import { HistoryManager } from './history-manager.js';
 import { BaseRunner, type BaseRunnerResult } from './base-runner.js';
+import { parseReviewerDecisionSignal } from './reviewer-decision-parser.js';
 
 export interface ReviewerResult extends BaseRunnerResult {
   decision?: 'approve' | 'reject' | 'dispute' | 'skip';
@@ -39,44 +40,48 @@ export interface ReviewerResult extends BaseRunnerResult {
 
 export type FinalDecision = 'approve' | 'reject' | 'dispute' | 'skip' | 'unclear';
 
+export type MultiReviewRoute = 'direct' | 'local_reject_merge' | 'arbitrate';
+
 /**
  * Deterministic policy engine for multi-reviewer decisions
  */
 export function resolveDecision(
   results: ReviewerResult[],
-): { decision: FinalDecision; needsMerge: boolean } {
-  if (results.length === 0) return { decision: 'unclear', needsMerge: false };
+): { decision: FinalDecision; needsMerge: boolean; route: MultiReviewRoute } {
+  if (results.length === 0) return { decision: 'unclear', needsMerge: false, route: 'direct' };
 
-  // Use the decision matrix priority: REJECT > DISPUTE > APPROVE > SKIP
   const decisions = results.map(r => r.decision);
+  const defined = decisions.filter((d): d is Exclude<FinalDecision, 'unclear'> => d !== undefined);
+  const hasReject = defined.includes('reject');
+  const hasDispute = defined.includes('dispute');
+  const hasApprove = defined.includes('approve');
+  const hasSkip = defined.includes('skip');
+  const hasUndefined = decisions.some(d => d === undefined);
 
-  // 1. Any reject -> REJECT
-  if (decisions.some(d => d === 'reject')) {
-    const rejectorsWithNotes = results.filter(r => r.decision === 'reject' && r.notes);
-    return { decision: 'reject', needsMerge: rejectorsWithNotes.length > 1 };
+  if (!hasUndefined && defined.length > 0 && defined.every(d => d === 'approve')) {
+    return { decision: 'approve', needsMerge: false, route: 'direct' };
   }
-
-  // 2. Any dispute (with no rejections) -> DISPUTE
-  if (decisions.some(d => d === 'dispute')) {
-    return { decision: 'dispute', needsMerge: false };
+  if (!hasUndefined && defined.length > 0 && defined.every(d => d === 'skip')) {
+    return { decision: 'skip', needsMerge: false, route: 'direct' };
   }
-
-  // 3. All approve -> APPROVE
-  if (decisions.length > 0 && decisions.every(d => d === 'approve')) {
-    return { decision: 'approve', needsMerge: false };
+  if (!hasUndefined && defined.length > 0 && defined.every(d => d === 'dispute')) {
+    return { decision: 'dispute', needsMerge: false, route: 'direct' };
   }
-
-  // 4. Mix of approve/skip or all skip -> depends
-  const approvals = decisions.filter(d => d === 'approve').length;
-  if (approvals === 0) {
-    if (decisions.every(d => d === 'skip')) {
-      return { decision: 'skip', needsMerge: false };
-    }
-    return { decision: 'unclear', needsMerge: false };
+  if (!hasUndefined && !hasDispute && hasReject && defined.every(d => d === 'reject')) {
+    const rejectCount = defined.length;
+    return {
+      decision: 'reject',
+      needsMerge: rejectCount > 1,
+      route: rejectCount > 1 ? 'local_reject_merge' : 'direct',
+    };
   }
-
-  // Some approve, some skip -> not enough approvals for a definitive APPROVE in multi-review
-  return { decision: 'unclear', needsMerge: false };
+  if (!hasUndefined && !hasReject && !hasDispute && hasApprove && hasSkip) {
+    return { decision: 'unclear', needsMerge: false, route: 'arbitrate' };
+  }
+  if (hasReject || hasDispute || hasUndefined) {
+    return { decision: 'unclear', needsMerge: false, route: 'arbitrate' };
+  }
+  return { decision: 'unclear', needsMerge: false, route: 'direct' };
 }
 
 /**
@@ -138,40 +143,6 @@ export async function invokeReviewers(
 
 export interface BatchReviewerResult extends BaseRunnerResult {
   taskCount: number;
-}
-
-/**
- * Parse reviewer output for decision
- */
-function parseReviewerDecision(output: string): { decision?: 'approve' | 'reject' | 'dispute' | 'skip'; notes?: string } {
-  const tokenMap: Record<string, 'approve' | 'reject' | 'dispute' | 'skip'> = {
-    APPROVE: 'approve',
-    REJECT: 'reject',
-    DISPUTE: 'dispute',
-    SKIP: 'skip',
-  };
-
-  const explicitToken = output.match(
-    /^\s*(?:\*\*)?DECISION(?:\*\*)?\s*(?::|-)\s*(APPROVE|REJECT|DISPUTE|SKIP)\b/im
-  )?.[1]?.toUpperCase();
-
-  const firstNonEmptyLine = output.split('\n').find(line => line.trim().length > 0)?.trim();
-  const firstLineToken = firstNonEmptyLine?.match(/^(APPROVE|REJECT|DISPUTE|SKIP)\b/i)?.[1]?.toUpperCase();
-
-  const resolvedToken = explicitToken || firstLineToken;
-  if (!resolvedToken || !tokenMap[resolvedToken]) {
-    return {};
-  }
-
-  const decision = tokenMap[resolvedToken];
-  const notesMatch = output.match(/(?:notes?|reason|feedback|issues?|comments?):\s*["']?([^"'\n]+)/i);
-  const extractedNotes = notesMatch?.[1]?.trim();
-
-  if (decision === 'reject') {
-    return { decision, notes: extractedNotes || 'See reviewer output for details' };
-  }
-
-  return { decision, notes: extractedNotes };
 }
 
 class ReviewerRunner extends BaseRunner {
@@ -370,12 +341,13 @@ class ReviewerRunner extends BaseRunner {
       console.log(`Duration: ${(baseResult.duration / 1000).toFixed(1)}s`);
       console.log(`${'='.repeat(60)}\n`);
 
-      const { decision, notes } = parseReviewerDecision(baseResult.stdout);
+      const parsedDecision = parseReviewerDecisionSignal(baseResult.stdout);
+      const decision = parsedDecision.decision === 'unclear' ? undefined : parsedDecision.decision;
 
       return {
         ...baseResult,
         decision,
-        notes,
+        notes: decision === 'reject' ? 'See reviewer output for details' : undefined,
         provider: providerName,
         model: modelName,
         isNoOp: Boolean((submissionNotes as string | null)?.startsWith('[NO_OP_SUBMISSION]')),

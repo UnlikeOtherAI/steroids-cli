@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { openDatabase } from '../database/connection.js';
 import { openGlobalDatabase } from './global-db.js';
 import { loadConfig } from '../config/loader.js';
+import { parseReviewerDecisionSignal } from '../orchestrator/reviewer-decision-parser.js';
 
 export interface SanitiseSettings {
   enabled: boolean;
@@ -83,6 +84,52 @@ function markPeriodicSanitiseRun(
   ).run(getSanitiseSchemaKey(projectPath));
 }
 
+export function parseReviewerDecisionFromInvocationLogContent(
+  raw: string
+): 'approve' | 'reject' | null {
+  const stdoutMessages: string[] = [];
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        type?: string;
+        stream?: string;
+        msg?: unknown;
+      };
+      if (
+        parsed.type === 'output'
+        && parsed.stream === 'stdout'
+        && typeof parsed.msg === 'string'
+      ) {
+        stdoutMessages.push(parsed.msg);
+      }
+    } catch {
+      // Legacy/non-JSON logs are handled by fallback raw parsing below.
+    }
+  }
+
+  const parseCandidates = stdoutMessages.length > 0
+    ? [stdoutMessages.join('\n'), raw]
+    : [raw];
+
+  for (const candidate of parseCandidates) {
+    const decision = parseReviewerDecisionSignal(candidate).decision;
+    if (decision === 'approve') {
+      return 'approve';
+    }
+    if (decision === 'reject') {
+      return 'reject';
+    }
+  }
+
+  return null;
+}
+
 function parseReviewerDecisionFromLog(
   projectPath: string,
   invocationId: number
@@ -94,17 +141,10 @@ function parseReviewerDecisionFromLog(
 
   try {
     const raw = readFileSync(logPath, 'utf-8');
-    if (raw.includes('DECISION: APPROVE')) {
-      return 'approve';
-    }
-    if (raw.includes('DECISION: REJECT')) {
-      return 'reject';
-    }
+    return parseReviewerDecisionFromInvocationLogContent(raw);
   } catch {
     return null;
   }
-
-  return null;
 }
 
 function sanitiseProjectState(

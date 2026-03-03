@@ -2,6 +2,7 @@
  * Strict parser for extracting routing signals from LLM plain text output.
  * Replaces fragile JSON schema parsing.
  */
+import { parseReviewerDecisionSignal } from './reviewer-decision-parser.js';
 
 export type CoderSignal = 'review' | 'retry' | 'error' | 'unclear';
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
@@ -83,20 +84,7 @@ export class SignalParser {
    */
   public static parseReviewerSignal(output: string): ParsedReviewerOutput {
     const cleanOutput = this.stripCodeBlocks(output);
-    const lines = cleanOutput.split(/\r?\n/);
-    
-    let decision: ReviewerDecision = 'unclear';
-    
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      
-      const match = line.match(/(?:\*\*)?DECISION(?:\*\*)?:\s*(?:\*\*)?(APPROVE|REJECT|DISPUTE|SKIP)(?:\*\*)?/i);
-      if (match) {
-        decision = match[1].toLowerCase() as ReviewerDecision;
-        break;
-      }
-    }
+    const decision = parseReviewerDecisionSignal(output).decision as ReviewerDecision;
 
     const followUpTasks: { title: string; description: string }[] = [];
     const taskSectionMatch = cleanOutput.match(/###\s*Follow[- ]?Up\s*Tasks\s*([\s\S]*)/i);

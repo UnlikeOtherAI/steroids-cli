@@ -160,7 +160,7 @@ Analyze the context above and respond with the signal lines:`;
 }
 
 /**
- * Generate multi-reviewer orchestrator prompt for merging notes
+ * Generate multi-reviewer orchestrator prompt for arbitration and note consolidation
  */
 export function buildMultiReviewerOrchestratorPrompt(context: MultiReviewerContext): string {
   const {
@@ -180,8 +180,8 @@ ${r.stdout.slice(-5000)}
 
   return `# MULTI-REVIEWER ORCHESTRATOR
 
-You are receiving rejection notes from ${reviewer_results.length} independent reviewers.
-The DECISION is already REJECT. Your job is to MERGE THE NOTES into a single checklist.
+You are arbitrating ${reviewer_results.length} independent reviewer outputs for one task.
+Your job is to produce ONE final decision and notes.
 
 **CRITICAL: Your response MUST end with the required signal lines below. No JSON.**
 
@@ -208,34 +208,29 @@ ${reviewers_formatted}
 
 ---
 
-## Your Task (Review Note Merger)
+## Arbitration Rules
 
-1. Group findings by file path, then by line proximity (within 5 lines = same area).
-2. When multiple reviewers flag the same issue, consolidate and note it was caught by multiple.
-3. **Do NOT rewrite findings** -- quote the original reviewer text verbatim where possible.
-4. **Do NOT add your own findings** -- you are a grouper, not a reviewer.
-5. **Do NOT drop any finding**, even if it seems minor.
-6. If findings conflict on STYLE (not correctness), mark as [STYLE CONFLICT] and keep only the primary reviewer's preference (Reviewer 0 is primary).
-7. Order: file path -> line number.
-8. Use checkbox format for the final notes: - [ ] Finding text (Reviewer Name)
-9. **Follow-up Tasks:** If any reviewer suggested a follow-up task, consolidate and deduplicate them. Include them in the \`follow_up_tasks\` field.
-10. **Prevent Death Loops:** If the coder has made significant progress and the remaining issues are non-blocking (technical debt, missing docs, minor refactors), you are ENCOURAGED to APPROVE the current task and move the remaining issues to a FOLLOW-UP TASK. This prevents infinite rejection cycles.
+1. You must output exactly one final decision: APPROVE, REJECT, or DISPUTE.
+2. If no reviewer decision is \`dispute\` and at least one reviewer decision is \`reject\`, your decision MUST be either APPROVE or REJECT (not DISPUTE).
+3. If final decision is REJECT:
+   - merge reviewer findings into one actionable checklist,
+   - preserve structured tags (\`[OUT_OF_SCOPE]\`, \`[UNRESOLVED]\`, \`[NEW]\`) exactly,
+   - do not add new findings that were not in reviewer outputs.
+4. If final decision is APPROVE:
+   - explain why rejection findings are resolved or non-blocking.
+5. Do not infer from sentiment; use reviewer decisions and evidence.
+6. Keep notes concise and deterministic.
 
 ---
 
 ## Required Output (last lines)
 
-DECISION: REJECT
-NOTES:
-## Merged Review Findings
-### File.ts
-- [ ] Issue found (Reviewer name)
-...
+DECISION: APPROVE | REJECT | DISPUTE
+NOTES: <required; checklist required when REJECT>
+CONFIDENCE: HIGH | MEDIUM | LOW
 
 ### Follow-Up Tasks
 - **Title:** Description
-
-CONFIDENCE: HIGH | MEDIUM | LOW
 
 ---
 

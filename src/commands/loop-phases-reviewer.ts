@@ -291,14 +291,12 @@ export async function runReviewerPhase(
       countConsecutiveUnclearEntries(db, task.id) + 1;
 
     if (consecutiveParseFallbackRetries >= MAX_ORCHESTRATOR_PARSE_RETRIES) {
-      // Detect zero-output timeout: reviewer hung without producing any output at all.
-      // This typically means an interactive prompt (e.g. Claude Code onboarding / machine
-      // toolchain setup) is blocking the CLI process. Since stdin is closed in automated
-      // mode, the process silently hangs until the inactivity timeout fires.
-      const isZeroOutputTimeout =
-        !!reviewerResult?.timedOut &&
-        !reviewerResult?.stdout?.trim() &&
-        !reviewerResult?.stderr?.trim();
+      const timeoutCandidates = effectiveMultiReviewEnabled
+        ? reviewerResults
+        : (reviewerResult ? [reviewerResult] : []);
+      const isZeroOutputTimeout = timeoutCandidates.some(r =>
+        !!r?.timedOut && !r?.stdout?.trim() && !r?.stderr?.trim()
+      );
 
       if (isZeroOutputTimeout) {
         disputeErrorCode = 'REVIEWER_ZERO_OUTPUT_TIMEOUT';

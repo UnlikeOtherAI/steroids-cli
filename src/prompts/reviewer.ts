@@ -51,6 +51,7 @@ export function generateResumingReviewerDeltaPrompt(context: ReviewerPromptConte
     unresolvedSubmissionCommits,
     submissionNotes,
     rejectionHistory,
+    sectionTasks,
     projectPath,
     reviewerCustomInstructions,
     userFeedbackSummary,
@@ -66,6 +67,8 @@ export function generateResumingReviewerDeltaPrompt(context: ReviewerPromptConte
     ? latestSubmissionCommit
     : `${oldestSubmissionCommit}^..${latestSubmissionCommit}`;
   const sourceRef = getSourceFileReference(projectPath, task.source_file);
+  const sectionTasksSection = formatSectionTasks(task.id, sectionTasks);
+  const instructionsSection = buildProjectInstructionsSection(projectPath);
 
   // Find the last rejection notes the reviewer gave
   const lastRejection = rejectionHistory && rejectionHistory.length > 0
@@ -84,6 +87,8 @@ If the submission notes begin with \`[NO_OP_SUBMISSION]\`, the coder made no new
 ## Specification
 
 ${sourceRef}
+${sectionTasksSection}
+${instructionsSection}
 ${formatReviewerCustomInstructions(reviewerCustomInstructions)}
 
 ## Submission Commit Chain (Oldest -> Newest)

@@ -139,6 +139,13 @@ DECISION: APPROVE`;
       expect(SignalParser.parseReviewerSignal(output).decision).toBe('reject');
     });
 
+    it('extracts markdown heading decision token', () => {
+      const output = `---
+
+## DECISION: REJECT`;
+      expect(SignalParser.parseReviewerSignal(output).decision).toBe('reject');
+    });
+
     it('ignores decisions in code blocks', () => {
       const output = `I will output:
 \`\`\`
@@ -146,6 +153,12 @@ DECISION: APPROVE
 \`\`\`
 Wait, actually DECISION: REJECT`;
       expect(SignalParser.parseReviewerSignal(output).decision).toBe('reject');
+    });
+
+    it('ignores decisions in markdown quote lines', () => {
+      const output = `> DECISION: REJECT
+DECISION: APPROVE`;
+      expect(SignalParser.parseReviewerSignal(output).decision).toBe('approve');
     });
 
     it('extracts follow-up tasks', () => {
