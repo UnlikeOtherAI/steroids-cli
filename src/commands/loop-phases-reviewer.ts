@@ -5,7 +5,6 @@ import {
   approveTask,
   rejectTask,
   getTaskAudit,
-  getSubmissionCommitShas,
   getFollowUpDepth,
   createFollowUpTask,
   incrementTaskFailureCount,
@@ -21,12 +20,7 @@ import {
   type ReviewerResult,
 } from '../orchestrator/reviewer.js';
 import { pushToRemote } from '../git/push.js';
-import {
-  getCurrentCommitSha,
-  getModifiedFiles,
-  getDiffStats,
-} from '../git/status.js';
-import { resolveSubmissionCommitWithRecovery } from '../git/submission-resolution.js';
+import { getCurrentCommitSha, getModifiedFiles, getDiffStats } from '../git/status.js';
 import type { CoordinatorResult } from '../orchestrator/coordinator.js';
 import { resolveReviewerDecision } from './loop-phases-reviewer-resolution.js';
 import { loadConfig } from '../config/loader.js';
@@ -34,12 +28,7 @@ import { resolveEffectiveBranch } from '../git/branch-resolver.js';
 import { checkSectionCompletionAndPR } from '../git/section-pr.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { PoolSlotContext } from '../workspace/types.js';
-import {
-  prepareForTask,
-  postCoderGate,
-  postReviewGate,
-  mergeToBase,
-} from '../workspace/git-lifecycle.js';
+import { prepareForTask, postCoderGate, postReviewGate, mergeToBase } from '../workspace/git-lifecycle.js';
 import { updateSlotStatus, releaseSlot, getSlot } from '../workspace/pool.js';
 import { handleMergeFailure } from '../workspace/merge-pipeline.js';
 import {
@@ -53,8 +42,8 @@ import {
   formatProviderFailureMessage,
   handleProviderInvocationFailure,
   countConsecutiveUnclearEntries,
-  countConsecutiveTaggedOrchestratorEntries,
 } from './loop-phases-helpers.js';
+import { runReviewerSubmissionPreflight } from './reviewer-preflight.js';
 
 /**
  * Create follow-up tasks based on reviewer decision.
@@ -136,26 +125,11 @@ export async function runReviewerPhase(
     updateSlotStatus(poolSlotContext.globalDb, poolSlotContext.slot.id, 'review_active');
   }
 
-  const submissionResolution = resolveSubmissionCommitWithRecovery(
-    effectiveProjectPath,
-    getSubmissionCommitShas(db, task.id)
-  );
-  if (submissionResolution.status !== 'resolved') {
-    const attemptsText = submissionResolution.attempts.join(' | ') || 'none';
-    updateTaskStatus(
-      db,
-      task.id,
-      'in_progress',
-      'orchestrator',
-      `[commit_recovery] Missing reachable submission hash (${submissionResolution.reason}; attempts: ${attemptsText}). ` +
-      `Treating task as resubmission. Coder must output exact line: SUBMISSION_COMMIT: <sha> for the commit that implements the task.`
-    );
-    if (!jsonMode) {
-      console.log('\n⟳ Reviewer hash missing; returning task to coder for hash resubmission');
-    }
+  const preflight = runReviewerSubmissionPreflight(db, task, effectiveProjectPath, jsonMode);
+  if (!preflight.ok) {
     return;
   }
-  const submissionCommitSha = submissionResolution.sha;
+  const submissionCommitSha = preflight.submissionCommitSha;
   const phaseConfig = loadConfig(projectPath);
   const multiReviewEnabled = isMultiReviewEnabled(phaseConfig);
   let effectiveMultiReviewEnabled = multiReviewEnabled;

@@ -48,6 +48,7 @@ import {
   invokeCoordinatorIfNeeded,
   executeCoderDecision,
 } from './loop-phases-coder-decision.js';
+import { handleNoOpSubmissionInPool } from './coder-noop-submission.js';
 
 export async function runCoderPhase(
   db: ReturnType<typeof openDatabase>['db'],
@@ -183,19 +184,19 @@ export async function runCoderPhase(
     const gateResult = postCoderGate(effectiveProjectPath, poolStartingSha, task.title);
     if (!gateResult.ok) {
       if (gateResult.reasonCode === 'no_new_commits') {
-        // Coder made no new commits — it determined work already pre-exists.
-        // Forward to reviewer with an explicit marker instead of retrying forever.
-        if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
-          if (!jsonMode) console.log('\n↺ Lease lost before no-op forward; skipping.');
+        const noOpResult = handleNoOpSubmissionInPool(
+          db,
+          task,
+          projectPath,
+          effectiveProjectPath,
+          poolStartingSha,
+          poolSlotContext,
+          leaseFence,
+          jsonMode
+        );
+        if (noOpResult.handled) {
           return;
         }
-        updateSlotStatus(poolSlotContext.globalDb, poolSlotContext.slot.id, 'awaiting_review');
-        updateTaskStatus(
-          db, task.id, 'review', 'orchestrator',
-          '[NO_OP_SUBMISSION] No new commits in pool workspace — reviewer to verify pre-existing work',
-          poolStartingSha
-        );
-        if (!jsonMode) console.log('\n→ No changes detected, forwarding to reviewer.');
         return;
       }
       // git_error or any other failure: audit entry + retry (existing behaviour)

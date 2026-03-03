@@ -1,0 +1,1 @@
+export const COMMIT_RECOVERY_MAX_ATTEMPTS = 3;

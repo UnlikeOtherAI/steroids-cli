@@ -126,7 +126,7 @@ describe('Section Dependencies - Base Queries', () => {
       expect(deps[0].id).toBe(depSection.id);
     });
 
-    it('returns dependency when it has disputed tasks', () => {
+    it('does not return dependency when it has only disputed tasks', () => {
       const depSection = createSection(db, 'Dependency Section');
       const mainSection = createSection(db, 'Main Section');
 
@@ -142,8 +142,7 @@ describe('Section Dependencies - Base Queries', () => {
       });
 
       const deps = getPendingDependencies(db, mainSection.id);
-      expect(deps.length).toBe(1);
-      expect(deps[0].id).toBe(depSection.id);
+      expect(deps).toEqual([]);
     });
 
     it('returns dependency when it has failed tasks', () => {
@@ -387,7 +386,7 @@ describe('Section Dependencies - Base Queries', () => {
       expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
     });
 
-    it('returns false when dependency has disputed tasks', () => {
+    it('returns true when dependency has only disputed tasks', () => {
       const depSection = createSection(db, 'Dependency Section');
       const mainSection = createSection(db, 'Main Section');
 
@@ -402,7 +401,7 @@ describe('Section Dependencies - Base Queries', () => {
         status: 'disputed',
       });
 
-      expect(hasDependenciesMet(db, mainSection.id)).toBe(false);
+      expect(hasDependenciesMet(db, mainSection.id)).toBe(true);
     });
 
     it('returns false when dependency has failed tasks', () => {
