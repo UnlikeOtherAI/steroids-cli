@@ -11,6 +11,7 @@ import {
   BoltIcon,
   PauseIcon,
   BookOpenIcon,
+  ChartBarIcon,
 } from '@heroicons/react/24/outline';
 import { runnersApi, WakeupResult } from '../../services/api';
 import { WakeupModal } from '../molecules/WakeupModal';
@@ -48,6 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
 
   const navItems = [
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
+    { to: '/model-usage', icon: ChartBarIcon, label: 'Model Usage' },
     { to: '/runners', icon: PlayIcon, label: 'Runners' },
     { to: '/projects', icon: FolderIcon, label: 'Projects' },
     { to: '/logs', icon: DocumentTextIcon, label: 'System Logs' },

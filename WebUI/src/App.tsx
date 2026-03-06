@@ -18,6 +18,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then(({ SettingsP
 const SkillsPage = lazy(() => import('./pages/SkillsPage').then(({ SkillsPage }) => ({ default: SkillsPage })));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(({ ProjectsPage }) => ({ default: ProjectsPage })));
 const SystemLogsPage = lazy(() => import('./pages/SystemLogsPage').then(({ SystemLogsPage }) => ({ default: SystemLogsPage })));
+const ModelUsagePage = lazy(() => import('./pages/ModelUsagePage').then(({ ModelUsagePage }) => ({ default: ModelUsagePage })));
 
 function App() {
   const { selectedProject } = useProject();
@@ -76,6 +77,7 @@ function App() {
     switch (location.pathname) {
       case '/': return 'Dashboard';
       case '/projects': return 'Projects';
+      case '/model-usage': return 'Model Usage';
       case '/runners': return 'Runners';
       case '/logs': return 'System Logs';
       case '/settings': return 'Settings';
@@ -130,6 +132,7 @@ function App() {
                 path="/"
                 element={<DashboardPage project={selectedProject} />}
               />
+              <Route path="/model-usage" element={<ModelUsagePage project={selectedProject} />} />
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
               <Route path="/project/:projectPath/tasks" element={<ProjectTasksPage />} />
