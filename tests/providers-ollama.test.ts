@@ -218,4 +218,47 @@ describe('OllamaProvider', () => {
     expect(firstResult.success).toBe(true);
     expect(chatCalls).toBe(1);
   });
+
+  it('fails invocation when stream closes before done:true final chunk', async () => {
+    setLocalConnection('http://localhost:11434');
+
+    const encoder = new TextEncoder();
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/api/show')) {
+        return new Response(
+          JSON.stringify({
+            model_info: {
+              qwen2: { context_length: 8192 },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      if (url.endsWith('/api/chat')) {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode('{"message":{"content":"partial"},"done":false}\n'),
+            );
+            controller.close();
+          },
+        });
+
+        return new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'application/x-ndjson' },
+        });
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new OllamaProvider();
+    const result = await provider.invoke('incomplete stream', { model: 'qwen2.5-coder:32b' });
+
+    expect(result.success).toBe(false);
+    expect(result.stderr).toContain('done:true');
+  });
 });

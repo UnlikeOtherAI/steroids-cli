@@ -493,6 +493,7 @@ export abstract class BaseAIProvider implements IAIProvider {
       'GOOGLE_CLOUD_API_KEY',
       'MISTRAL_API_KEY',
       'HF_TOKEN',
+      'OLLAMA_API_KEY',
       'CLAUDECODE',
     ];
     for (const key of keysToStrip) {

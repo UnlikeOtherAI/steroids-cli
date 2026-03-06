@@ -163,4 +163,22 @@ describe('ClaudeProvider', () => {
       expect(provider.getInvocationTemplate()).toBe(customTemplate);
     });
   });
+
+  describe('sanitized env', () => {
+    it('strips OLLAMA_API_KEY from spawned env', () => {
+      const original = process.env.OLLAMA_API_KEY;
+      process.env.OLLAMA_API_KEY = 'ollama-secret';
+
+      try {
+        const env = (provider as any).getSanitizedCliEnv();
+        expect(env.OLLAMA_API_KEY).toBeUndefined();
+      } finally {
+        if (original === undefined) {
+          delete process.env.OLLAMA_API_KEY;
+        } else {
+          process.env.OLLAMA_API_KEY = original;
+        }
+      }
+    });
+  });
 });

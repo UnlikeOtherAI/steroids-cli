@@ -247,6 +247,17 @@ export class OllamaProvider extends BaseAIProvider {
         }
       }
 
+      if (!finalChunk?.done) {
+        return {
+          success: false,
+          exitCode: 1,
+          stdout: '',
+          stderr: 'Ollama stream ended before final done:true chunk',
+          duration: Date.now() - startTime,
+          timedOut: false,
+        };
+      }
+
       const tokenUsage = this.extractTokenUsage(finalChunk);
       return {
         success: true,
