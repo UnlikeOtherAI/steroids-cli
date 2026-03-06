@@ -72,6 +72,23 @@ describe('HuggingFaceHubClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('fetches router provider model metadata from /v1/models', async () => {
+    fetchMock.mockResolvedValueOnce(createResponse([{ id: 'org/model', providers: [] }]) as unknown as Response);
+
+    await client.listRouterModels('token-456');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://router.huggingface.co/v1/models',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Accept: 'application/json',
+          Authorization: 'Bearer token-456',
+        }),
+      })
+    );
+  });
+
   it('throws HubAPIError with status on http failure', async () => {
     fetchMock.mockResolvedValueOnce(createResponse({ error: 'bad' }, 400) as unknown as Response);
 

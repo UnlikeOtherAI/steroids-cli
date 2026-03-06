@@ -1,11 +1,11 @@
 import { Router, type Request, type Response } from 'express';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { HuggingFaceTokenAuth } from '../../../src/huggingface/auth.js';
 import { HuggingFaceModelRegistry, type HFCachedModel } from '../../../src/huggingface/model-registry.js';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 
 const router = Router();
-const auth = new HuggingFaceTokenAuth();
-const registry = new HuggingFaceModelRegistry();
 
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const searchCache = new Map<string, { expiresAt: number; models: HFCachedModel[] }>();
@@ -22,29 +22,54 @@ interface HFReadyModelRow {
   added_at: number;
 }
 
+function getAuth(): HuggingFaceTokenAuth {
+  return new HuggingFaceTokenAuth({
+    tokenFilePath: join(getSteroidsHomeDir(), 'huggingface', 'token'),
+  });
+}
+
+function getRegistry(): HuggingFaceModelRegistry {
+  return new HuggingFaceModelRegistry({
+    cacheFilePath: join(getSteroidsHomeDir(), 'huggingface', 'models.json'),
+  });
+}
+
+function getSteroidsHomeDir(): string {
+  return process.env.STEROIDS_HOME || join(homedir(), '.steroids');
+}
+
 function isAllowedRoutingPolicy(value: string): boolean {
   if (BASE_ROUTING_POLICIES.has(value)) return true;
   return /^[a-z0-9][a-z0-9-]*$/i.test(value);
 }
 
-function getModelProviderMap(models: HFCachedModel[]): Map<string, string[]> {
-  return new Map(models.map((model) => [model.id, model.providers]));
+function getModelMap(models: HFCachedModel[]): Map<string, HFCachedModel> {
+  return new Map(models.map((model) => [model.id, model]));
 }
 
-function toReadyModelResponse(row: HFReadyModelRow, providers: string[]) {
+function getRoutingPolicyOptions(providers: string[]): string[] {
+  return [...BASE_ROUTING_POLICIES, ...providers];
+}
+
+function toReadyModelResponse(row: HFReadyModelRow, model?: HFCachedModel) {
+  const providers = model?.providers ?? [];
   return {
     modelId: row.model_id,
     runtime: row.runtime,
     routingPolicy: row.routing_policy,
-    supportsTools: row.supports_tools === 1,
+    supportsTools: model?.supportsTools ?? (row.supports_tools === 1),
     available: row.available === 1,
     addedAt: row.added_at,
     providers,
-    routingPolicyOptions: [...BASE_ROUTING_POLICIES, ...providers],
+    contextLength: model?.contextLength,
+    pricing: model?.pricing,
+    providerContextLengths: model?.providerContextLengths,
+    routingPolicyOptions: getRoutingPolicyOptions(providers),
   };
 }
 
 router.get('/hf/account', async (_req: Request, res: Response) => {
+  const auth = getAuth();
   try {
     if (!auth.hasToken()) {
       res.json({
@@ -85,6 +110,7 @@ router.get('/hf/account', async (_req: Request, res: Response) => {
 });
 
 router.post('/hf/account/connect', async (req: Request, res: Response) => {
+  const auth = getAuth();
   const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
   if (!token) {
     res.status(400).json({ error: 'token is required' });
@@ -116,6 +142,7 @@ router.post('/hf/account/connect', async (req: Request, res: Response) => {
 });
 
 router.post('/hf/account/disconnect', (_req: Request, res: Response) => {
+  const auth = getAuth();
   try {
     auth.clearToken();
     res.json({ ok: true, connected: false });
@@ -128,6 +155,8 @@ router.post('/hf/account/disconnect', (_req: Request, res: Response) => {
 });
 
 router.get('/hf/models', async (req: Request, res: Response) => {
+  const auth = getAuth();
+  const registry = getRegistry();
   const query = typeof req.query.search === 'string' ? req.query.search.trim() : '';
   const token = auth.getToken() ?? undefined;
 
@@ -169,6 +198,8 @@ router.get('/hf/models', async (req: Request, res: Response) => {
 });
 
 router.get('/hf/ready-models', async (_req: Request, res: Response) => {
+  const auth = getAuth();
+  const registry = getRegistry();
   const { db, close } = openGlobalDatabase();
   try {
     const rows = db.prepare(
@@ -177,14 +208,25 @@ router.get('/hf/ready-models', async (_req: Request, res: Response) => {
        ORDER BY added_at DESC, model_id ASC`
     ).all() as HFReadyModelRow[];
 
-    const curated = await registry.getCuratedModels({ token: auth.getToken() ?? undefined }).catch(() => []);
-    const providerMap = getModelProviderMap(curated);
+    const token = auth.getToken() ?? undefined;
+    const curated = await registry.getCuratedModels({ token }).catch(() => []);
+    const modelMap = getModelMap(curated);
+    const missingModelIds = rows
+      .map((row) => row.model_id)
+      .filter((modelId) => !modelMap.has(modelId));
+
+    if (missingModelIds.length > 0) {
+      const fallbackModels = await mapWithConcurrency(missingModelIds, 4, async (modelId) => {
+        const result = await registry.searchModels(modelId, { limit: 5, token }).catch(() => []);
+        return result.find((model) => model.id === modelId) ?? null;
+      });
+      for (const model of fallbackModels) {
+        if (model) modelMap.set(model.id, model);
+      }
+    }
 
     res.json({
-      models: rows.map((row) => {
-        const providers = providerMap.get(row.model_id) ?? [];
-        return toReadyModelResponse(row, providers);
-      }),
+      models: rows.map((row) => toReadyModelResponse(row, modelMap.get(row.model_id))),
     });
   } catch (error) {
     res.status(500).json({
@@ -279,6 +321,67 @@ router.patch('/hf/ready-models', (req: Request, res: Response) => {
   }
 });
 
+router.post('/hf/ready-models/runtime', (req: Request, res: Response) => {
+  const modelId = typeof req.body?.modelId === 'string' ? req.body.modelId.trim() : '';
+  const runtime = typeof req.body?.runtime === 'string' ? req.body.runtime.trim() : '';
+  const nextRuntime = typeof req.body?.nextRuntime === 'string' ? req.body.nextRuntime.trim() : '';
+
+  if (!modelId || !runtime || !nextRuntime) {
+    res.status(400).json({ error: 'modelId, runtime, and nextRuntime are required' });
+    return;
+  }
+  if (!RUNTIME_VALUES.has(runtime) || !RUNTIME_VALUES.has(nextRuntime)) {
+    res.status(400).json({ error: 'runtime and nextRuntime must be claude-code or opencode' });
+    return;
+  }
+
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db.prepare(
+      `SELECT routing_policy, supports_tools, available, added_at
+       FROM hf_paired_models
+       WHERE model_id = ? AND runtime = ?`
+    ).get(modelId, runtime) as {
+      routing_policy: string;
+      supports_tools: number;
+      available: number;
+      added_at: number;
+    } | undefined;
+
+    if (!row) {
+      res.status(404).json({ error: 'Model pairing not found' });
+      return;
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare(
+        `INSERT INTO hf_paired_models (model_id, runtime, routing_policy, supports_tools, available, added_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(model_id, runtime)
+         DO UPDATE SET
+           routing_policy = excluded.routing_policy,
+           supports_tools = excluded.supports_tools,
+           available = excluded.available`
+      ).run(modelId, nextRuntime, row.routing_policy, row.supports_tools, row.available, row.added_at);
+
+      db.prepare(
+        `DELETE FROM hf_paired_models
+         WHERE model_id = ? AND runtime = ?`
+      ).run(modelId, runtime);
+    });
+    tx();
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to change runtime',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  } finally {
+    close();
+  }
+});
+
 router.delete('/hf/ready-models', (req: Request, res: Response) => {
   const modelId = typeof req.body?.modelId === 'string' ? req.body.modelId.trim() : '';
   const runtime = typeof req.body?.runtime === 'string' ? req.body.runtime.trim() : '';
@@ -312,3 +415,24 @@ router.delete('/hf/ready-models', (req: Request, res: Response) => {
 });
 
 export default router;
+
+async function mapWithConcurrency<T, U>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<U>
+): Promise<U[]> {
+  if (items.length === 0) return [];
+  const results: U[] = new Array(items.length);
+  let nextIndex = 0;
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const current = nextIndex++;
+      if (current >= items.length) return;
+      results[current] = await mapper(items[current], current);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}

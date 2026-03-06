@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -34,6 +34,33 @@ describe('API Hugging Face routes', () => {
     homeDir = createTempDir('steroids-home-hf-api');
     process.env.HOME = homeDir;
     process.env.STEROIDS_HOME = homeDir;
+    const hfCacheDir = join(homeDir, 'huggingface');
+    mkdirSync(hfCacheDir, { recursive: true });
+    writeFileSync(
+      join(hfCacheDir, 'models.json'),
+      JSON.stringify({
+        lastUpdated: Date.now(),
+        models: [
+          {
+            id: 'deepseek-ai/DeepSeek-V3',
+            pipelineTag: 'text-generation',
+            downloads: 1,
+            likes: 1,
+            tags: [],
+            providers: ['groq', 'novita'],
+            contextLength: 131072,
+            supportsTools: true,
+            pricing: {
+              groq: { input: 0.15, output: 0.75 },
+              novita: { input: 0.05, output: 0.25 },
+            },
+            addedAt: Date.now(),
+            source: 'search',
+          },
+        ],
+      }),
+      'utf-8'
+    );
 
     const app = createApp();
     server = http.createServer(app);
@@ -78,6 +105,8 @@ describe('API Hugging Face routes', () => {
         runtime: string;
         routingPolicy: string;
         supportsTools: boolean;
+        routingPolicyOptions?: string[];
+        contextLength?: number;
       }>;
     };
     expect(listed.models).toHaveLength(1);
@@ -87,6 +116,10 @@ describe('API Hugging Face routes', () => {
       routingPolicy: 'fastest',
       supportsTools: true,
     });
+    expect(listed.models[0].routingPolicyOptions).toEqual(
+      expect.arrayContaining(['fastest', 'cheapest', 'preferred', 'groq', 'novita'])
+    );
+    expect(listed.models[0].contextLength).toBe(131072);
 
     const updateResp = await fetch(base, {
       method: 'PATCH',
@@ -105,12 +138,29 @@ describe('API Hugging Face routes', () => {
     };
     expect(relisted.models[0].routingPolicy).toBe('cheapest');
 
+    const runtimeResp = await fetch(`${base}/runtime`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        modelId: 'deepseek-ai/DeepSeek-V3',
+        runtime: 'claude-code',
+        nextRuntime: 'opencode',
+      }),
+    });
+    expect(runtimeResp.status).toBe(200);
+
+    const afterRuntimeResp = await fetch(base);
+    const afterRuntime = await afterRuntimeResp.json() as {
+      models: Array<{ runtime: string }>;
+    };
+    expect(afterRuntime.models[0].runtime).toBe('opencode');
+
     const deleteResp = await fetch(base, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         modelId: 'deepseek-ai/DeepSeek-V3',
-        runtime: 'claude-code',
+        runtime: 'opencode',
       }),
     });
     expect(deleteResp.status).toBe(200);

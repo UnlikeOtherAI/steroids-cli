@@ -43,6 +43,26 @@ export interface HFWhoAmI {
   };
 }
 
+export interface HFRouterProviderPricing {
+  input?: number;
+  output?: number;
+}
+
+export interface HFRouterProvider {
+  provider: string;
+  status?: string;
+  context_length?: number;
+  pricing?: HFRouterProviderPricing;
+  supports_tools?: boolean;
+  supports_structured_output?: boolean;
+  is_model_author?: boolean;
+}
+
+export interface HFRouterModel {
+  id: string;
+  providers?: HFRouterProvider[];
+}
+
 export interface HFListModelsOptions {
   search?: string;
   sort?: 'downloads' | 'likes' | 'createdAt' | 'trendingScore';
@@ -67,10 +87,12 @@ type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 
 export class HuggingFaceHubClient {
   private readonly hubBaseUrl: string;
+  private readonly routerBaseUrl: string;
   private readonly fetchImpl: FetchFn;
 
-  constructor(options: { hubBaseUrl?: string; fetchImpl?: FetchFn } = {}) {
+  constructor(options: { hubBaseUrl?: string; routerBaseUrl?: string; fetchImpl?: FetchFn } = {}) {
     this.hubBaseUrl = options.hubBaseUrl ?? 'https://huggingface.co';
+    this.routerBaseUrl = options.routerBaseUrl ?? 'https://router.huggingface.co';
     this.fetchImpl = options.fetchImpl ?? ((input: string, init?: RequestInit) => fetch(input, init));
   }
 
@@ -111,6 +133,11 @@ export class HuggingFaceHubClient {
   async getWhoAmI(token: string): Promise<HFWhoAmI> {
     const url = `${this.hubBaseUrl}/api/whoami-v2`;
     return this.requestJson<HFWhoAmI>(url, token);
+  }
+
+  async listRouterModels(token?: string): Promise<HFRouterModel[]> {
+    const url = `${this.routerBaseUrl}/v1/models`;
+    return this.requestJson<HFRouterModel[]>(url, token);
   }
 
   private async requestJson<T>(url: string, token?: string): Promise<T> {

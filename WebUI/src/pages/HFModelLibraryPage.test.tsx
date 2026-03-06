@@ -33,6 +33,9 @@ describe('HFModelLibraryPage', () => {
               likes: 400,
               tags: [],
               providers: ['novita'],
+              contextLength: 131072,
+              supportsTools: true,
+              pricing: { novita: { input: 0.05, output: 0.25 } },
               addedAt: Date.now(),
               source: 'search',
             },
@@ -50,6 +53,12 @@ describe('HFModelLibraryPage', () => {
             likes: 999,
             tags: [],
             providers: ['groq', 'novita'],
+            contextLength: 131072,
+            supportsTools: true,
+            pricing: {
+              groq: { input: 0.15, output: 0.75 },
+              novita: { input: 0.05, output: 0.25 },
+            },
             addedAt: Date.now(),
             source: 'curated',
           },
@@ -71,6 +80,11 @@ describe('HFModelLibraryPage', () => {
     });
 
     expect(screen.getByText('deepseek-ai/DeepSeek-V3')).toBeInTheDocument();
+    expect(screen.getByText('Context')).toBeInTheDocument();
+    expect(screen.getByText('Tool Support')).toBeInTheDocument();
+    expect(screen.getByText(/groq \$0.15\/\$0.75/i)).toBeInTheDocument();
+    expect(screen.getByText(/novita \$0.05\/\$0.25/i)).toBeInTheDocument();
+    expect(screen.getByText('✓')).toBeInTheDocument();
   });
 
   it('falls back to remote search after debounce when curated has no local matches', async () => {
@@ -103,6 +117,7 @@ describe('HFModelLibraryPage', () => {
         modelId: 'deepseek-ai/DeepSeek-V3',
         runtime: 'claude-code',
         routingPolicy: 'fastest',
+        supportsTools: true,
       });
     });
   });

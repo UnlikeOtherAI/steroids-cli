@@ -6,6 +6,10 @@ function formatCount(value: number): string {
   return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
 }
 
+function formatPrice(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
 export function HFModelLibraryPage() {
   const [curated, setCurated] = useState<HFCachedModel[]>([]);
   const [remoteResults, setRemoteResults] = useState<HFCachedModel[]>([]);
@@ -71,11 +75,17 @@ export function HFModelLibraryPage() {
 
   const visibleModels = localMatches.length > 0 ? localMatches : remoteResults;
 
-  const handlePair = async (modelId: string, runtime: HFRuntime) => {
+  const handlePair = async (model: HFCachedModel, runtime: HFRuntime) => {
+    const modelId = model.id;
     setPairing(`${modelId}:${runtime}`);
     setError(null);
     try {
-      await huggingFaceApi.pairModel({ modelId, runtime, routingPolicy: 'fastest' });
+      await huggingFaceApi.pairModel({
+        modelId,
+        runtime,
+        routingPolicy: 'fastest',
+        supportsTools: Boolean(model.supportsTools),
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to pair model');
     } finally {
@@ -116,6 +126,8 @@ export function HFModelLibraryPage() {
                   <th className="text-left px-4 py-3">Downloads</th>
                   <th className="text-left px-4 py-3">Likes</th>
                   <th className="text-left px-4 py-3">Providers</th>
+                  <th className="text-left px-4 py-3">Context</th>
+                  <th className="text-left px-4 py-3">Tool Support</th>
                   <th className="text-left px-4 py-3">Actions</th>
                 </tr>
               </thead>
@@ -129,10 +141,23 @@ export function HFModelLibraryPage() {
                       <div className="flex flex-wrap gap-1">
                         {model.providers.length > 0
                           ? model.providers.map((provider) => (
-                              <span key={provider} className="badge-info">{provider}</span>
+                              <span key={provider} className="badge-info">
+                                {provider}
+                                {model.pricing?.[provider]
+                                  ? ` ${formatPrice(model.pricing[provider].input)}/${formatPrice(model.pricing[provider].output)}`
+                                  : ''}
+                              </span>
                             ))
                           : <span className="badge-warning">No providers</span>}
                       </div>
+                    </td>
+                    <td className="px-4 py-3 text-text-muted">
+                      {model.contextLength ? formatCount(model.contextLength) : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {model.supportsTools
+                        ? <span className="badge-success">✓</span>
+                        : <span className="badge-warning">No</span>}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
@@ -140,7 +165,7 @@ export function HFModelLibraryPage() {
                           type="button"
                           className="btn-pill"
                           disabled={pairing !== null || model.providers.length === 0}
-                          onClick={() => handlePair(model.id, 'claude-code')}
+                          onClick={() => handlePair(model, 'claude-code')}
                         >
                           {pairing === `${model.id}:claude-code` ? 'Pairing...' : 'Pair Claude Code'}
                         </button>
@@ -148,7 +173,7 @@ export function HFModelLibraryPage() {
                           type="button"
                           className="btn-pill"
                           disabled={pairing !== null || model.providers.length === 0}
-                          onClick={() => handlePair(model.id, 'opencode')}
+                          onClick={() => handlePair(model, 'opencode')}
                         >
                           {pairing === `${model.id}:opencode` ? 'Pairing...' : 'Pair OpenCode'}
                         </button>

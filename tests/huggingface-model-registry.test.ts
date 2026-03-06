@@ -22,11 +22,13 @@ describe('HuggingFaceModelRegistry', () => {
 
   const listModels = jest.fn<(options?: Record<string, unknown>) => Promise<HFModel[]>>();
   const getModel = jest.fn<(modelId: string) => Promise<HFModel>>();
+  const listRouterModels = jest.fn<(token: string) => Promise<Array<Record<string, unknown>>>>();
   let cacheDir: string;
 
   beforeEach(() => {
     listModels.mockReset();
     getModel.mockReset();
+    listRouterModels.mockReset();
     cacheDir = mkdtempSync(join(tmpdir(), 'hf-registry-'));
   });
 
@@ -56,6 +58,14 @@ describe('HuggingFaceModelRegistry', () => {
         groq: { status: 'staging' },
       },
     }));
+    listRouterModels.mockResolvedValue([
+      {
+        id: 'org/b',
+        providers: [
+          { provider: 'together', status: 'live', context_length: 131072, supports_tools: true, pricing: { input: 0.15, output: 0.75 } },
+        ],
+      },
+    ]);
 
     const registry = new HuggingFaceModelRegistry({
       client: {
@@ -63,6 +73,7 @@ describe('HuggingFaceModelRegistry', () => {
         getModel,
         searchModels: jest.fn(),
         getWhoAmI: jest.fn(),
+        listRouterModels,
       } as any,
       cacheFilePath: join(cacheDir, 'models.json'),
       curatedLimit: 3,
@@ -74,8 +85,12 @@ describe('HuggingFaceModelRegistry', () => {
     expect(models.map((m) => m.id)).toEqual(['org/b', 'org/a', 'org/c']);
     expect(models[0].providers).toEqual(['together']);
     expect(models[0].source).toBe('curated');
+    expect(models[0].contextLength).toBe(131072);
+    expect(models[0].supportsTools).toBe(true);
+    expect(models[0].pricing).toEqual({ together: { input: 0.15, output: 0.75 } });
     expect(listModels).toHaveBeenCalledTimes(4);
     expect(getModel).toHaveBeenCalledTimes(3);
+    expect(listRouterModels).toHaveBeenCalledTimes(1);
   });
 
   it('uses fresh cache instead of refetching', async () => {
@@ -95,6 +110,7 @@ describe('HuggingFaceModelRegistry', () => {
         getModel,
         searchModels: jest.fn(),
         getWhoAmI: jest.fn(),
+        listRouterModels,
       } as any,
       cacheFilePath: cachePath,
       nowFn: () => now + 1000,
@@ -117,6 +133,7 @@ describe('HuggingFaceModelRegistry', () => {
         getModel,
         searchModels: jest.fn(),
         getWhoAmI: jest.fn(),
+        listRouterModels,
       } as any,
       cacheFilePath: cachePath,
       nowFn: () => now,
@@ -149,6 +166,7 @@ describe('HuggingFaceModelRegistry', () => {
         getModel,
         searchModels: jest.fn(),
         getWhoAmI: jest.fn(),
+        listRouterModels,
       } as any,
       cacheFilePath: join(cacheDir, 'models.json'),
       nowFn: () => now,

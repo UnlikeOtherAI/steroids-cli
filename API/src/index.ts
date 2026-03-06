@@ -157,6 +157,7 @@ export function createApp(): express.Express {
         'GET /api/hf/ready-models',
         'POST /api/hf/ready-models',
         'PATCH /api/hf/ready-models',
+        'POST /api/hf/ready-models/runtime',
         'DELETE /api/hf/ready-models',
         'GET /api/credit-alerts?project=<path>',
         'POST /api/credit-alerts/<id>/dismiss',

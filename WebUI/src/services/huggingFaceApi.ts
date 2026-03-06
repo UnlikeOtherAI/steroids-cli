@@ -83,4 +83,15 @@ export const huggingFaceApi = {
       body: JSON.stringify(input),
     });
   },
+
+  async changeRuntime(input: {
+    modelId: string;
+    runtime: HFRuntime;
+    nextRuntime: HFRuntime;
+  }): Promise<void> {
+    await fetchHfJson('/api/hf/ready-models/runtime', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
 };

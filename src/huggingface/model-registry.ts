@@ -6,6 +6,8 @@ import {
   HubAPIError,
   type HFInferenceProviderInfo,
   type HFModel,
+  type HFRouterModel,
+  type HFRouterProvider,
 } from './hub-client.js';
 
 const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -20,6 +22,10 @@ export interface HFCachedModel {
   likes: number;
   tags: string[];
   providers: string[];
+  contextLength?: number;
+  pricing?: Record<string, { input: number; output: number }>;
+  supportsTools?: boolean;
+  providerContextLengths?: Record<string, number>;
   addedAt: number;
   source: HFModelSource;
 }
@@ -97,10 +103,16 @@ export class HuggingFaceModelRegistry {
     const ranked = this.rankCandidates(candidates, Boolean(trending));
     const selected = ranked.slice(0, this.curatedLimit);
 
-    const withProviders = await this.enrichProviders(selected, token);
+    const withProviders = await this.enrichProviders(selected, token, 'curated');
+    const existing = this.readCache();
+    const carried = (existing?.models ?? []).filter((model) => model.source !== 'curated');
+    const byId = new Map<string, HFCachedModel>(withProviders.map((model) => [model.id, model]));
+    for (const model of carried) {
+      if (!byId.has(model.id)) byId.set(model.id, model);
+    }
     const cachePayload: HFModelCache = {
       lastUpdated: this.nowFn(),
-      models: withProviders,
+      models: Array.from(byId.values()),
     };
     this.writeCache(cachePayload);
     return withProviders;
@@ -111,7 +123,9 @@ export class HuggingFaceModelRegistry {
       limit: options.limit ?? 20,
       token: options.token,
     });
-    return models.map((model) => this.toCachedModel(model, [], 'search'));
+    const enriched = await this.enrichProviders(models, options.token, 'search');
+    this.upsertModelsIntoCache(enriched);
+    return enriched;
   }
 
   private async fetchTrendingList(token?: string): Promise<HFModel[] | undefined> {
@@ -203,11 +217,21 @@ export class HuggingFaceModelRegistry {
     return scored.map((entry) => entry.model);
   }
 
-  private async enrichProviders(models: HFModel[], token?: string): Promise<HFCachedModel[]> {
+  private async enrichProviders(models: HFModel[], token: string | undefined, source: HFModelSource): Promise<HFCachedModel[]> {
+    const routerByModel = await this.getRouterModelMap(token);
     const mapped = await mapWithConcurrency(models, 8, async (model) => {
       const detail = await this.client.getModel(model.id, { token, expandInferenceProviders: true });
       const providers = this.extractProviders(detail.inferenceProviderMapping);
-      return this.toCachedModel({ ...model, ...detail }, providers, 'curated');
+      const providerStats = this.toProviderStats(routerByModel.get(model.id)?.providers);
+      return this.toCachedModel(
+        { ...model, ...detail },
+        providers,
+        source,
+        providerStats.contextLength,
+        providerStats.supportsTools,
+        providerStats.pricing,
+        providerStats.providerContextLengths
+      );
     });
 
     return mapped;
@@ -221,7 +245,15 @@ export class HuggingFaceModelRegistry {
       .sort((a, b) => a.localeCompare(b));
   }
 
-  private toCachedModel(model: HFModel, providers: string[], source: HFModelSource): HFCachedModel {
+  private toCachedModel(
+    model: HFModel,
+    providers: string[],
+    source: HFModelSource,
+    contextLength?: number,
+    supportsTools?: boolean,
+    pricing?: Record<string, { input: number; output: number }>,
+    providerContextLengths?: Record<string, number>
+  ): HFCachedModel {
     return {
       id: model.id,
       pipelineTag: model.pipeline_tag ?? 'text-generation',
@@ -229,8 +261,73 @@ export class HuggingFaceModelRegistry {
       likes: model.likes ?? 0,
       tags: model.tags ?? [],
       providers,
+      contextLength,
+      supportsTools,
+      pricing,
+      providerContextLengths,
       addedAt: this.nowFn(),
       source,
+    };
+  }
+
+  private async getRouterModelMap(token?: string): Promise<Map<string, HFRouterModel>> {
+    try {
+      const models = await this.client.listRouterModels(token);
+      return new Map(models.map((model) => [model.id, model]));
+    } catch {
+      return new Map();
+    }
+  }
+
+  private toProviderStats(providers?: HFRouterProvider[]): {
+    contextLength?: number;
+    supportsTools?: boolean;
+    pricing?: Record<string, { input: number; output: number }>;
+    providerContextLengths?: Record<string, number>;
+  } {
+    if (!providers || providers.length === 0) {
+      return {};
+    }
+
+    let maxContextLength: number | undefined;
+    let supportsTools = false;
+    const pricing: Record<string, { input: number; output: number }> = {};
+    const providerContextLengths: Record<string, number> = {};
+
+    for (const provider of providers) {
+      if (provider.status && provider.status !== 'live') continue;
+      const providerName = provider.provider;
+      if (!providerName) continue;
+
+      if (typeof provider.context_length === 'number' && Number.isFinite(provider.context_length)) {
+        providerContextLengths[providerName] = provider.context_length;
+        maxContextLength = maxContextLength === undefined
+          ? provider.context_length
+          : Math.max(maxContextLength, provider.context_length);
+      }
+
+      if (provider.supports_tools) {
+        supportsTools = true;
+      }
+
+      if (
+        typeof provider.pricing?.input === 'number' &&
+        Number.isFinite(provider.pricing.input) &&
+        typeof provider.pricing?.output === 'number' &&
+        Number.isFinite(provider.pricing.output)
+      ) {
+        pricing[providerName] = {
+          input: provider.pricing.input,
+          output: provider.pricing.output,
+        };
+      }
+    }
+
+    return {
+      contextLength: maxContextLength,
+      supportsTools,
+      pricing: Object.keys(pricing).length > 0 ? pricing : undefined,
+      providerContextLengths: Object.keys(providerContextLengths).length > 0 ? providerContextLengths : undefined,
     };
   }
 
@@ -263,6 +360,19 @@ export class HuggingFaceModelRegistry {
     const parentDir = dirname(this.cacheFilePath);
     mkdirSync(parentDir, { recursive: true, mode: 0o700 });
     writeFileSync(this.cacheFilePath, JSON.stringify(cache, null, 2), { mode: 0o600 });
+  }
+
+  private upsertModelsIntoCache(models: HFCachedModel[]): void {
+    if (models.length === 0) return;
+    const existing = this.readCache();
+    const byId = new Map<string, HFCachedModel>((existing?.models ?? []).map((model) => [model.id, model]));
+    for (const model of models) {
+      byId.set(model.id, model);
+    }
+    this.writeCache({
+      lastUpdated: existing?.lastUpdated ?? this.nowFn(),
+      models: Array.from(byId.values()),
+    });
   }
 }
 

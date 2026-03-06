@@ -18,6 +18,10 @@ export interface HFCachedModel {
   likes: number;
   tags: string[];
   providers: string[];
+  contextLength?: number;
+  pricing?: Record<string, { input: number; output: number }>;
+  supportsTools?: boolean;
+  providerContextLengths?: Record<string, number>;
   addedAt: number;
   source: 'curated' | 'search' | 'manual';
 }
@@ -37,6 +41,9 @@ export interface HFReadyModel {
   available: boolean;
   addedAt: number;
   providers: string[];
+  contextLength?: number;
+  pricing?: Record<string, { input: number; output: number }>;
+  providerContextLengths?: Record<string, number>;
   routingPolicyOptions: string[];
 }
 

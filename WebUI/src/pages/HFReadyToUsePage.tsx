@@ -6,6 +6,35 @@ function formatRuntime(runtime: string): string {
   return runtime === 'claude-code' ? 'Claude Code' : 'OpenCode';
 }
 
+function formatCount(value: number): string {
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
+function formatPrice(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
+function getPriceIndicator(model: HFReadyModel): string {
+  const pricing = model.pricing ?? {};
+  const current = pricing[model.routingPolicy];
+  if (current) {
+    return `${formatPrice(current.input)}/${formatPrice(current.output)}`;
+  }
+
+  const values = Object.values(pricing);
+  if (values.length === 0) return '—';
+
+  const minInput = Math.min(...values.map((entry) => entry.input));
+  const maxInput = Math.max(...values.map((entry) => entry.input));
+  const minOutput = Math.min(...values.map((entry) => entry.output));
+  const maxOutput = Math.max(...values.map((entry) => entry.output));
+
+  if (minInput === maxInput && minOutput === maxOutput) {
+    return `${formatPrice(minInput)}/${formatPrice(minOutput)}`;
+  }
+  return `${formatPrice(minInput)}-${formatPrice(maxInput)} / ${formatPrice(minOutput)}-${formatPrice(maxOutput)}`;
+}
+
 export function HFReadyToUsePage() {
   const [models, setModels] = useState<HFReadyModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +90,25 @@ export function HFReadyToUsePage() {
     }
   };
 
+  const changeRuntime = async (model: HFReadyModel, nextRuntime: 'claude-code' | 'opencode') => {
+    if (model.runtime === nextRuntime) return;
+    const key = `${model.modelId}:${model.runtime}`;
+    setUpdating(key);
+    setError(null);
+    try {
+      await huggingFaceApi.changeRuntime({
+        modelId: model.modelId,
+        runtime: model.runtime,
+        nextRuntime,
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to change runtime');
+    } finally {
+      setUpdating(null);
+    }
+  };
+
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">
       <div className="card p-6">
@@ -86,6 +134,8 @@ export function HFReadyToUsePage() {
                   <th className="text-left px-4 py-3">Model</th>
                   <th className="text-left px-4 py-3">Runtime</th>
                   <th className="text-left px-4 py-3">Routing Policy</th>
+                  <th className="text-left px-4 py-3">Price Indicator</th>
+                  <th className="text-left px-4 py-3">Context Length</th>
                   <th className="text-left px-4 py-3">Providers</th>
                   <th className="text-left px-4 py-3">Status</th>
                   <th className="text-left px-4 py-3">Actions</th>
@@ -111,6 +161,10 @@ export function HFReadyToUsePage() {
                           ))}
                         </select>
                       </td>
+                      <td className="px-4 py-3 text-text-muted">{getPriceIndicator(model)}</td>
+                      <td className="px-4 py-3 text-text-muted">
+                        {model.contextLength ? formatCount(model.contextLength) : '—'}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
                           {model.providers.length > 0
@@ -126,14 +180,25 @@ export function HFReadyToUsePage() {
                           : <span className="badge-danger">Unavailable</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          className="btn-pill"
-                          disabled={isUpdating}
-                          onClick={() => removePairing(model)}
-                        >
-                          {isUpdating ? 'Working...' : 'Remove'}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <select
+                            className="bg-bg-elevated rounded-full px-4 py-2"
+                            value={model.runtime}
+                            disabled={isUpdating}
+                            onChange={(e) => changeRuntime(model, e.target.value as 'claude-code' | 'opencode')}
+                          >
+                            <option value="claude-code">Claude Code</option>
+                            <option value="opencode">OpenCode</option>
+                          </select>
+                          <button
+                            type="button"
+                            className="btn-pill"
+                            disabled={isUpdating}
+                            onClick={() => removePairing(model)}
+                          >
+                            {isUpdating ? 'Working...' : 'Remove'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
