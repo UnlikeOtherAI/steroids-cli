@@ -27,7 +27,7 @@ function formatDuration(ms: number): string {
 
 export const ModelUsageSummary: React.FC<Props> = ({ summary }) => (
   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-    <StatTile label="Total Exec Time" value={summary.totalDurationMs > 0 ? formatDuration(summary.totalDurationMs) : '--'} />
+    <StatTile label="Total Exec Time" value={formatDuration(summary.totalDurationMs)} />
     <StatTile label="Invocations" value={summary.totalInvocations} />
     <StatTile label="Cost" value={formatUsdCost(summary.totalCostUsd)} />
     <StatTile

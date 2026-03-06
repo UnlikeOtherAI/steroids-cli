@@ -23,7 +23,7 @@ describe('ModelUsageSummary', () => {
     expect(screen.getByText('1,200 in / 300 out')).toBeInTheDocument();
   });
 
-  it('shows placeholder duration when total execution time is unavailable', () => {
+  it('renders 0s when total execution time is zero', () => {
     render(
       <ModelUsageSummary
         summary={{
@@ -36,6 +36,6 @@ describe('ModelUsageSummary', () => {
       />,
     );
 
-    expect(screen.getByText('--')).toBeInTheDocument();
+    expect(screen.getByText('0s')).toBeInTheDocument();
   });
 });
