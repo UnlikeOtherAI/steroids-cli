@@ -17,16 +17,9 @@ function formatMode(mode: OllamaConnectionMode): string {
   return mode === 'cloud' ? 'Cloud' : 'Local';
 }
 
-function formatBytes(bytes?: number): string {
-  if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let value = bytes;
-  let idx = 0;
-  while (value >= 1024 && idx < units.length - 1) {
-    value /= 1024;
-    idx += 1;
-  }
-  return `${value.toFixed(value >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+function formatVramGb(bytes?: number): string {
+  if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return '0.0 GB';
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
 }
 
 export function OllamaConnectionPage() {
@@ -244,7 +237,7 @@ export function OllamaConnectionPage() {
                 <ul className="mt-2 space-y-1">
                   {connection.loadedModels.map((model) => (
                     <li key={model.name} className="text-xs text-text-muted">
-                      {model.name} • VRAM {formatBytes(model.sizeVram)}
+                      {model.name} • VRAM {formatVramGb(model.sizeVram)}
                     </li>
                   ))}
                 </ul>
