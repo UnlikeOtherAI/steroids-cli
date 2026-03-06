@@ -71,7 +71,16 @@ describe('OllamaApiClient', () => {
     });
 
     expect(updates).toHaveLength(3);
-    expect(updates[1]).toMatchObject({ status: 'downloading', completed: 50, total: 100 });
+    expect(updates[0]).toMatchObject({ phase: 'starting', done: false, percent: null });
+    expect(updates[1]).toMatchObject({
+      status: 'downloading',
+      completed: 50,
+      total: 100,
+      percent: 50,
+      phase: 'downloading',
+      done: false,
+    });
+    expect(updates[2]).toMatchObject({ status: 'success', percent: 100, phase: 'complete', done: true });
     expect(seen).toEqual(['pulling manifest', 'downloading', 'success']);
   });
 

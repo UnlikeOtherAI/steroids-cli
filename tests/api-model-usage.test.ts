@@ -152,6 +152,13 @@ describe('API model-usage endpoint', () => {
     }, "datetime('now', '-30 hours')");
 
     ollamaServer = http.createServer((req, res) => {
+      if (req.url === '/api/pull' && req.method === 'POST') {
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.write('{"status":"pulling manifest"}\n');
+        res.write('{"status":"downloading","completed":50,"total":100}\n');
+        res.end('{"status":"success","completed":100,"total":100}\n');
+        return;
+      }
       if (req.url === '/api/ps') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
@@ -319,6 +326,25 @@ describe('API model-usage endpoint', () => {
     expect(body.by_project).toHaveLength(1);
     expect(body.by_project[0].project_path).toBe(projectOnePath);
     expect(body.ollama).toBeUndefined();
+  });
+
+  it('streams ollama model pull progress to the UI endpoint', async () => {
+    const resp = await fetch(
+      `http://127.0.0.1:${port}/api/ollama/pull-stream?model=${encodeURIComponent('qwen2.5-coder:32b')}`,
+    );
+    expect(resp.status).toBe(200);
+
+    const text = await resp.text();
+    const updates = text
+      .trim()
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line));
+
+    expect(updates).toHaveLength(3);
+    expect(updates[0]).toMatchObject({ status: 'pulling manifest', phase: 'starting', done: false });
+    expect(updates[1]).toMatchObject({ status: 'downloading', percent: 50, phase: 'downloading', done: false });
+    expect(updates[2]).toMatchObject({ status: 'success', percent: 100, phase: 'complete', done: true });
   });
 });
 

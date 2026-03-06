@@ -48,6 +48,7 @@ import skillsRouter from './routes/skills.js';
 import { creditAlertRoutes } from './routes/credit-alerts.js';
 import modelUsageRouter from './routes/model-usage.js';
 import huggingFaceRouter from './routes/huggingface.js';
+import ollamaRouter from './routes/ollama.js';
 
 const PORT = process.env.PORT || 3501;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -106,6 +107,7 @@ export function createApp(): express.Express {
   app.use('/api', skillsRouter);
   app.use('/api', modelUsageRouter);
   app.use('/api', huggingFaceRouter);
+  app.use('/api', ollamaRouter);
   app.use('/api/credit-alerts', creditAlertRoutes);
 
   // Health check
@@ -152,6 +154,7 @@ export function createApp(): express.Express {
         'GET /api/ai/providers',
         'GET /api/ai/models/<provider>',
         'GET /api/model-usage?project=<path>&hours=<hours>',
+        'GET /api/ollama/pull-stream?model=<model>',
         'GET /api/hf/account',
         'GET /api/hf/usage',
         'POST /api/hf/account/connect',

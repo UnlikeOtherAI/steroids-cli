@@ -79,4 +79,41 @@ describe('modelUsageApi', () => {
       expect.anything()
     );
   });
+
+  it('streams pull progress updates from NDJSON endpoint', async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('{"status":"pulling","percent":10}\n'));
+        controller.enqueue(encoder.encode('{"status":"success","percent":100,"done":true}\n'));
+        controller.close();
+      },
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body,
+    });
+
+    const seen: Array<{ status: string; percent?: number; done?: boolean }> = [];
+    await modelUsageApi.streamOllamaPull('qwen2.5-coder:32b', (progress) => {
+      seen.push({
+        status: progress.status,
+        percent: progress.percent ?? undefined,
+        done: progress.done,
+      });
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${API_BASE_URL}/api/ollama/pull-stream?model=${encodeURIComponent('qwen2.5-coder:32b')}`,
+      expect.objectContaining({
+        method: 'GET',
+      }),
+    );
+    expect(seen).toEqual([
+      { status: 'pulling', percent: 10, done: undefined },
+      { status: 'success', percent: 100, done: true },
+    ]);
+  });
 });

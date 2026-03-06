@@ -8,6 +8,11 @@ export interface OllamaClientConfig {
   timeoutMs?: number;
 }
 
+interface RequestOptions {
+  timeoutMs?: number;
+  operation?: string;
+}
+
 export interface OllamaVersionResponse {
   version: string;
 }
@@ -72,6 +77,9 @@ export interface OllamaPullProgress {
   total?: number;
   completed?: number;
   error?: string;
+  percent?: number | null;
+  phase?: 'starting' | 'downloading' | 'verifying' | 'complete' | 'error' | 'unknown';
+  done?: boolean;
 }
 
 export interface OllamaChatMessage {
@@ -188,6 +196,7 @@ export class OllamaApiClient {
   async pullModel(
     name: string,
     onProgress?: (progress: OllamaPullProgress) => void,
+    options?: { timeoutMs?: number },
   ): Promise<OllamaPullProgress[]> {
     const response = await this.requestRaw('/api/pull', {
       method: 'POST',
@@ -195,6 +204,9 @@ export class OllamaApiClient {
       headers: {
         'Content-Type': 'application/json',
       },
+    }, {
+      timeoutMs: options?.timeoutMs,
+      operation: 'pull model',
     });
 
     if (!response.body) {
@@ -220,7 +232,7 @@ export class OllamaApiClient {
     buffer = this.consumePullBuffer(buffer, updates, onProgress);
     const tail = buffer.trim();
     if (tail) {
-      const progress = JSON.parse(tail) as OllamaPullProgress;
+      const progress = this.normalizePullProgress(JSON.parse(tail) as OllamaPullProgress);
       updates.push(progress);
       onProgress?.(progress);
     }
@@ -274,7 +286,7 @@ export class OllamaApiClient {
         continue;
       }
 
-      const progress = JSON.parse(line) as OllamaPullProgress;
+      const progress = this.normalizePullProgress(JSON.parse(line) as OllamaPullProgress);
       updates.push(progress);
       onProgress?.(progress);
     }
@@ -282,14 +294,48 @@ export class OllamaApiClient {
     return buffer;
   }
 
-  private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.requestRaw(path, init);
+  private normalizePullProgress(progress: OllamaPullProgress): OllamaPullProgress {
+    const total = typeof progress.total === 'number' && Number.isFinite(progress.total) && progress.total > 0
+      ? progress.total
+      : null;
+    const completed = typeof progress.completed === 'number' && Number.isFinite(progress.completed)
+      ? Math.max(0, progress.completed)
+      : null;
+    const percent = total !== null && completed !== null
+      ? Math.max(0, Math.min(100, Math.round((completed / total) * 100)))
+      : null;
+    const status = (progress.status || '').toLowerCase();
+    const done = status.includes('success') || status.includes('complete') || status.includes('finished');
+    const phase: OllamaPullProgress['phase'] = progress.error
+      ? 'error'
+      : done
+        ? 'complete'
+        : status.includes('download')
+          ? 'downloading'
+          : status.includes('verify') || status.includes('digest')
+            ? 'verifying'
+            : status.includes('pull') || status.includes('resolve')
+              ? 'starting'
+              : 'unknown';
+
+    return {
+      ...progress,
+      percent,
+      phase,
+      done,
+    };
+  }
+
+  private async requestJson<T>(path: string, init?: RequestInit, requestOptions?: RequestOptions): Promise<T> {
+    const response = await this.requestRaw(path, init, requestOptions);
     return response.json() as Promise<T>;
   }
 
-  private async requestRaw(path: string, init: RequestInit = {}): Promise<Response> {
+  private async requestRaw(path: string, init: RequestInit = {}, requestOptions: RequestOptions = {}): Promise<Response> {
     const url = buildUrl(this.endpoint, path);
     const headers = new Headers(init.headers);
+    const timeoutMs = requestOptions.timeoutMs ?? this.timeoutMs;
+    const operation = requestOptions.operation ?? 'request';
 
     if (this.apiKey) {
       headers.set('Authorization', `Bearer ${this.apiKey}`);
@@ -300,7 +346,7 @@ export class OllamaApiClient {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(url, {
@@ -326,7 +372,7 @@ export class OllamaApiClient {
       }
 
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Ollama API request timed out after ${this.timeoutMs}ms`);
+        throw new Error(`Ollama API ${operation} timed out after ${timeoutMs}ms`);
       }
 
       throw error;
