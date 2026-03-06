@@ -3,6 +3,7 @@
  */
 
 export * from './activity';
+export * from './modelUsage';
 export * from './runner';
 export * from './task';
 
