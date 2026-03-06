@@ -12,6 +12,7 @@ import {
   PauseIcon,
   BookOpenIcon,
   ChartBarIcon,
+  CpuChipIcon,
 } from '@heroicons/react/24/outline';
 import { runnersApi, WakeupResult } from '../../services/api';
 import { WakeupModal } from '../molecules/WakeupModal';
@@ -55,6 +56,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     { to: '/logs', icon: DocumentTextIcon, label: 'System Logs' },
     { to: '/skills', icon: BookOpenIcon, label: 'Skills' },
     { to: '/settings', icon: Cog6ToothIcon, label: 'Settings' },
+  ];
+
+  const hfItems = [
+    { to: '/hf/account', label: 'Account' },
+    { to: '/hf/models', label: 'Model Library' },
+    { to: '/hf/ready', label: 'Ready to Use' },
   ];
 
   const fetchCronStatus = useCallback(async () => {
@@ -140,6 +147,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
             }
           >
             <item.icon className="w-5 h-5" />
+            <span>{item.label}</span>
+          </NavLink>
+        ))}
+        <div className="px-6 pt-4 pb-2 text-xs uppercase tracking-wide text-text-inverse/60 flex items-center gap-2">
+          <CpuChipIcon className="w-4 h-4" />
+          Hugging Face
+        </div>
+        {hfItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            onClick={onClose}
+            className={({ isActive }) => (
+              isActive ? 'sidebar-item-active ml-4' : 'sidebar-item ml-4'
+            )}
+          >
             <span>{item.label}</span>
           </NavLink>
         ))}

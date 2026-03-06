@@ -46,6 +46,7 @@ import incidentsRouter from './routes/incidents.js';
 import skillsRouter from './routes/skills.js';
 import { creditAlertRoutes } from './routes/credit-alerts.js';
 import modelUsageRouter from './routes/model-usage.js';
+import huggingFaceRouter from './routes/huggingface.js';
 
 const PORT = process.env.PORT || 3501;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -102,6 +103,7 @@ export function createApp(): express.Express {
   app.use('/api', incidentsRouter);
   app.use('/api', skillsRouter);
   app.use('/api', modelUsageRouter);
+  app.use('/api', huggingFaceRouter);
   app.use('/api/credit-alerts', creditAlertRoutes);
 
   // Health check
@@ -148,6 +150,14 @@ export function createApp(): express.Express {
         'GET /api/ai/providers',
         'GET /api/ai/models/<provider>',
         'GET /api/model-usage?project=<path>&hours=<hours>',
+        'GET /api/hf/account',
+        'POST /api/hf/account/connect',
+        'POST /api/hf/account/disconnect',
+        'GET /api/hf/models?search=<query>',
+        'GET /api/hf/ready-models',
+        'POST /api/hf/ready-models',
+        'PATCH /api/hf/ready-models',
+        'DELETE /api/hf/ready-models',
         'GET /api/credit-alerts?project=<path>',
         'POST /api/credit-alerts/<id>/dismiss',
         'POST /api/credit-alerts/<id>/retry',

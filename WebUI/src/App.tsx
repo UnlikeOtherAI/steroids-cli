@@ -19,6 +19,9 @@ const SkillsPage = lazy(() => import('./pages/SkillsPage').then(({ SkillsPage })
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(({ ProjectsPage }) => ({ default: ProjectsPage })));
 const SystemLogsPage = lazy(() => import('./pages/SystemLogsPage').then(({ SystemLogsPage }) => ({ default: SystemLogsPage })));
 const ModelUsagePage = lazy(() => import('./pages/ModelUsagePage').then(({ ModelUsagePage }) => ({ default: ModelUsagePage })));
+const HFAccountPage = lazy(() => import('./pages/HFAccountPage').then(({ HFAccountPage }) => ({ default: HFAccountPage })));
+const HFModelLibraryPage = lazy(() => import('./pages/HFModelLibraryPage').then(({ HFModelLibraryPage }) => ({ default: HFModelLibraryPage })));
+const HFReadyToUsePage = lazy(() => import('./pages/HFReadyToUsePage').then(({ HFReadyToUsePage }) => ({ default: HFReadyToUsePage })));
 
 function App() {
   const { selectedProject } = useProject();
@@ -74,6 +77,9 @@ function App() {
     if (location.pathname.includes('/tasks') && location.pathname.startsWith('/project/')) return 'Project Tasks';
     if (location.pathname.startsWith('/project/')) return 'Project Details';
     if (location.pathname.startsWith('/task/')) return 'Task Details';
+    if (location.pathname === '/hf/account') return 'Hugging Face Account';
+    if (location.pathname === '/hf/models') return 'Hugging Face Model Library';
+    if (location.pathname === '/hf/ready') return 'Hugging Face Ready to Use';
     switch (location.pathname) {
       case '/': return 'Dashboard';
       case '/projects': return 'Projects';
@@ -142,6 +148,9 @@ function App() {
               <Route path="/logs" element={<SystemLogsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/skills" element={<SkillsPage />} />
+              <Route path="/hf/account" element={<HFAccountPage />} />
+              <Route path="/hf/models" element={<HFModelLibraryPage />} />
+              <Route path="/hf/ready" element={<HFReadyToUsePage />} />
             </Routes>
           </Suspense>
         </AppShell>
