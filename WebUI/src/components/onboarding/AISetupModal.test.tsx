@@ -141,4 +141,84 @@ describe('AISetupModal project inheritance', () => {
       expect(onComplete).toHaveBeenCalled();
     });
   });
+
+  it('renders grouped HF model options and saves hf selection for a role', async () => {
+    mockAiApi.getProviders.mockResolvedValueOnce([
+      { id: 'claude', name: 'Claude', installed: true },
+      { id: 'codex', name: 'Codex', installed: true },
+      { id: 'hf', name: 'Hugging Face', installed: true },
+    ]);
+    mockAiApi.getModels.mockImplementation(async (provider: string) => {
+      if (provider === 'hf') {
+        return {
+          success: true,
+          provider,
+          source: 'ready-models',
+          models: [
+            {
+              id: 'deepseek-ai/DeepSeek-V3',
+              name: 'deepseek-ai/DeepSeek-V3',
+              runtime: 'claude-code',
+              groupLabel: 'Claude Code (Hugging Face)',
+            },
+            {
+              id: 'Qwen/Qwen2.5-Coder-32B-Instruct',
+              name: 'Qwen/Qwen2.5-Coder-32B-Instruct',
+              runtime: 'opencode',
+              groupLabel: 'OpenCode (Hugging Face)',
+            },
+          ],
+        };
+      }
+      return {
+        success: true,
+        provider,
+        source: 'cache',
+        models: [
+          { id: provider === 'codex' ? 'gpt-5.3-codex' : 'claude-sonnet-4-6', name: 'Default Model' },
+        ],
+      };
+    });
+
+    const user = userEvent.setup();
+    const onComplete = vi.fn();
+    const { container } = render(
+      <AISetupModal
+        onComplete={onComplete}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText('Loading providers...')).not.toBeInTheDocument();
+    });
+
+    const selects = screen.getAllByRole('combobox');
+    const orchestratorProvider = selects[0] as HTMLSelectElement;
+    const orchestratorModel = selects[1] as HTMLSelectElement;
+
+    await user.selectOptions(orchestratorProvider, 'hf');
+    await waitFor(() => {
+      const claudeGroup = container.querySelector('optgroup[label="Claude Code (Hugging Face)"]');
+      const opencodeGroup = container.querySelector('optgroup[label="OpenCode (Hugging Face)"]');
+      expect(claudeGroup).not.toBeNull();
+      expect(opencodeGroup).not.toBeNull();
+    });
+
+    await user.selectOptions(orchestratorModel, 'deepseek-ai/DeepSeek-V3');
+
+    const saveButton = screen.getByRole('button', { name: /Save & Continue/i });
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(mockConfigApi.setConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'ai.orchestrator.provider': 'hf',
+          'ai.orchestrator.model': 'deepseek-ai/DeepSeek-V3',
+        }),
+        'global',
+        undefined
+      );
+      expect(onComplete).toHaveBeenCalled();
+    });
+  });
 });

@@ -82,6 +82,70 @@ describe('API Hugging Face routes', () => {
     expect(body.connected).toBe(false);
   });
 
+  it('exposes hf provider and grouped hf model picker options', async () => {
+    const providersResp = await fetch(`http://127.0.0.1:${port}/api/ai/providers`);
+    expect(providersResp.status).toBe(200);
+    const providersBody = await providersResp.json() as {
+      success: boolean;
+      providers: Array<{ id: string; installed: boolean }>;
+    };
+    expect(providersBody.success).toBe(true);
+    expect(providersBody.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'hf', installed: true }),
+      ])
+    );
+
+    const base = `http://127.0.0.1:${port}/api/hf/ready-models`;
+    await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        modelId: 'deepseek-ai/DeepSeek-V3',
+        runtime: 'claude-code',
+        routingPolicy: 'fastest',
+        supportsTools: true,
+      }),
+    });
+    await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        modelId: 'Qwen/Qwen2.5-Coder-32B-Instruct',
+        runtime: 'opencode',
+        routingPolicy: 'fastest',
+        supportsTools: true,
+      }),
+    });
+
+    const modelsResp = await fetch(`http://127.0.0.1:${port}/api/ai/models/hf`);
+    expect(modelsResp.status).toBe(200);
+    const modelsBody = await modelsResp.json() as {
+      success: boolean;
+      provider: string;
+      source: string;
+      models: Array<{ id: string; runtime: string; groupLabel: string }>;
+    };
+
+    expect(modelsBody.success).toBe(true);
+    expect(modelsBody.provider).toBe('hf');
+    expect(modelsBody.source).toBe('ready-models');
+    expect(modelsBody.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'deepseek-ai/DeepSeek-V3',
+          runtime: 'claude-code',
+          groupLabel: 'Claude Code (Hugging Face)',
+        }),
+        expect.objectContaining({
+          id: 'Qwen/Qwen2.5-Coder-32B-Instruct',
+          runtime: 'opencode',
+          groupLabel: 'OpenCode (Hugging Face)',
+        }),
+      ])
+    );
+  });
+
   it('creates, updates, lists, and deletes ready-to-use model pairings', async () => {
     const base = `http://127.0.0.1:${port}/api/hf/ready-models`;
 

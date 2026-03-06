@@ -39,6 +39,7 @@ import activityRouter from './routes/activity.js';
 import runnersRouter from './routes/runners.js';
 import tasksRouter from './routes/tasks.js';
 import taskFeedbackRouter from './routes/task-feedback.js';
+import aiModelPickerRouter from './routes/ai-model-picker.js';
 import configRouter from './routes/config.js';
 import reviewerConfigRouter from './routes/config-reviewer.js';
 import healthRouter from './routes/health.js';
@@ -97,6 +98,7 @@ export function createApp(): express.Express {
   app.use('/api', runnersRouter);
   app.use('/api', tasksRouter);
   app.use('/api', taskFeedbackRouter);
+  app.use('/api', aiModelPickerRouter);
   app.use('/api', configRouter);
   app.use('/api', reviewerConfigRouter);
   app.use('/api', healthRouter);

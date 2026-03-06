@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { aiApi, configApi, AIProvider, AIModel } from '../../services/api';
+import { AISetupRoleSelector } from './AISetupRoleSelector';
 
 interface AISetupModalProps {
   onComplete: () => void;
@@ -26,34 +27,6 @@ function hasProviderAndModel(value: unknown): value is Required<InheritedRoleCon
   const role = value as InheritedRoleConfig;
   return Boolean(role.provider && role.model);
 }
-
-// Installation commands for each provider
-const INSTALL_COMMANDS: Record<string, { command: string; description: string }> = {
-  claude: {
-    command: 'npm install -g @anthropic-ai/claude-code',
-    description: 'Install the Claude CLI to use Anthropic models.',
-  },
-  gemini: {
-    command: 'npm install -g @google/gemini-cli',
-    description: 'Install the Gemini CLI to use Google models.',
-  },
-  codex: {
-    command: 'npm install -g @openai/codex',
-    description: 'Install the Codex CLI to use OpenAI models.',
-  },
-  mistral: {
-    command: 'uv tool install mistral-vibe',
-    description: 'Install the Vibe CLI to use Mistral models.',
-  },
-};
-
-// API key environment variable names
-const API_KEY_ENV_VARS: Record<string, string> = {
-  claude: 'STEROIDS_ANTHROPIC',
-  gemini: 'STEROIDS_GOOGLE',
-  codex: 'STEROIDS_OPENAI',
-  mistral: 'STEROIDS_MISTRAL',
-};
 
 export const AISetupModal: React.FC<AISetupModalProps> = ({
   onComplete,
@@ -300,8 +273,6 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     }
   };
 
-  const getProviderById = (id: string) => providers.find(p => p.id === id);
-
   // Check if all fields are complete for validation
   const isFormComplete = (() => {
     const orchestratorReady = normalizeRoleConfig(orchestrator, 'orchestrator').valid;
@@ -314,151 +285,6 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
 
     return normalizeRoleConfig(reviewer, 'reviewer').valid;
   })();
-
-  const renderRoleSelector = (
-    label: string,
-    icon: string,
-    config: RoleConfig,
-    onProviderChange: (role: any, provider: string) => void,
-    _onModelChange: (val: any) => void,
-    role: any
-  ) => {
-    const selectedProvider = getProviderById(config.provider);
-    const isNotInstalled = selectedProvider && !selectedProvider.installed;
-    const needsApiKey = selectedProvider?.installed && modelSources[config.provider] === 'fallback';
-    const installInfo = INSTALL_COMMANDS[config.provider];
-    const envVar = API_KEY_ENV_VARS[config.provider];
-
-    const inheritedValue = getInheritedValue(role);
-    const isInherited = isProjectLevel && !config.provider && hasProviderAndModel(inheritedValue);
-
-    return (
-      <div className={`bg-bg-base rounded-lg p-4 border border-border ${isInherited ? 'opacity-75 relative' : ''}`}>
-        <div className="flex items-center gap-2 mb-3">
-          <i className={`fa-solid ${icon} text-accent`}></i>
-          <span className="font-medium text-text-primary">{label}</span>
-          {isInherited && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-info-soft text-info border border-info/30">
-              Inherited
-            </span>
-          )}
-          {isProjectLevel && !isInherited && config.provider && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-success-soft text-success border border-success/30">
-              Project Override
-            </span>
-          )}
-        </div>
-
-        {/* Provider and Model Selection */}
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <label className="block text-xs text-text-secondary mb-1">Provider</label>
-            <select
-              value={config.provider}
-              onChange={(e) => onProviderChange(role, e.target.value)}
-              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent"
-            >
-              {isInherited && (
-                <option value="">(Inherited)</option>
-              )}
-              {!isInherited && (
-                <option value="">Select provider...</option>
-              )}
-              {providers.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name}{!p.installed ? ' (not installed)' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs text-text-secondary">
-                Model
-                {modelSources[config.provider] && (
-                  <span className="ml-1 text-text-secondary/60">
-                    ({modelSources[config.provider] === 'cache' ? 'CLI' :
-                      modelSources[config.provider] === 'api' ? 'API' : 'static'})
-                  </span>
-                )}
-              </label>
-              {config.provider && !isNotInstalled && modelSources[config.provider] !== 'fallback' && (
-                <button
-                  onClick={() => refreshModels(config.provider)}
-                  disabled={refreshingProvider === config.provider}
-                  className="p-1 text-text-muted hover:text-accent disabled:opacity-50 transition-colors"
-                  title="Refresh models"
-                >
-                  <i className={`fa-solid fa-arrows-rotate ${refreshingProvider === config.provider ? 'animate-spin' : ''}`}></i>
-                </button>
-              )}
-            </div>
-            <select
-              value={isInherited ? inheritedValue?.model || '' : config.model}
-              onChange={(e) => _onModelChange(e.target.value)}
-              disabled={isInherited}
-              className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isInherited ? (
-                <option value={inheritedValue?.model || ''}>
-                  {inheritedValue?.model || '(inherited from global)'}
-                </option>
-              ) : (
-                <>
-                  <option value="">Select model...</option>
-                  {(models[config.provider] || []).map(m => (
-                    <option key={m.id} value={m.id}>{m.name || m.id}</option>
-                  ))}
-                </>
-              )}
-            </select>
-          </div>
-        </div>
-
-        {/* Not Installed Warning */}
-        {isNotInstalled && installInfo && (
-          <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg">
-            <div className="flex items-start gap-2 text-warning text-sm mb-2">
-              <i className="fa-solid fa-triangle-exclamation mt-0.5"></i>
-              <span>{installInfo.description}</span>
-            </div>
-            <div className="relative">
-              <code className="block bg-bg-surface text-text-primary text-xs p-2 pr-10 rounded font-mono overflow-x-auto">
-                {installInfo.command}
-              </code>
-              <button
-                onClick={() => copyToClipboard(installInfo.command, `${label}-install`)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
-              >
-                <i className={`fa-solid ${copiedCommand === `${label}-install` ? 'fa-check text-success' : 'fa-copy'}`}></i>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Needs API Key Warning */}
-        {needsApiKey && envVar && (
-          <div className="p-3 bg-info/10 border border-info/30 rounded-lg">
-            <div className="flex items-start gap-2 text-info text-sm mb-2">
-              <i className="fa-solid fa-key mt-0.5"></i>
-              <span>Set API key for dynamic models:</span>
-            </div>
-            <div className="relative">
-              <code className="block bg-bg-surface text-text-primary text-xs p-2 pr-10 rounded font-mono overflow-x-auto">
-                export {envVar}="your-api-key"
-              </code>
-              <button
-                onClick={() => copyToClipboard(`export ${envVar}="your-api-key"`, `${label}-env`)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-accent transition-colors"
-              >
-                <i className={`fa-solid ${copiedCommand === `${label}-env` ? 'fa-check text-success' : 'fa-copy'}`}></i>
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -491,8 +317,40 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
             </div>
           ) : (
             <div className="space-y-4">
-              {renderRoleSelector('Orchestrator', 'fa-sitemap', orchestrator, handleProviderChange, (m) => setOrchestrator(prev => ({...prev, model: m})), 'orchestrator')}
-              {renderRoleSelector('Coder', 'fa-code', coder, handleProviderChange, (m) => setCoder(prev => ({...prev, model: m})), 'coder')}
+              <AISetupRoleSelector
+                label="Orchestrator"
+                icon="fa-sitemap"
+                config={orchestrator}
+                providers={providers}
+                modelsByProvider={models}
+                modelSources={modelSources}
+                copiedCommand={copiedCommand}
+                refreshingProvider={refreshingProvider}
+                isProjectLevel={isProjectLevel}
+                isInherited={Boolean(isProjectLevel && !orchestrator.provider && hasProviderAndModel(getInheritedValue('orchestrator')))}
+                inheritedModel={getInheritedValue('orchestrator')?.model}
+                onProviderChange={(providerId) => handleProviderChange('orchestrator', providerId)}
+                onModelChange={(m) => setOrchestrator(prev => ({ ...prev, model: m }))}
+                onRefreshModels={refreshModels}
+                onCopyToClipboard={copyToClipboard}
+              />
+              <AISetupRoleSelector
+                label="Coder"
+                icon="fa-code"
+                config={coder}
+                providers={providers}
+                modelsByProvider={models}
+                modelSources={modelSources}
+                copiedCommand={copiedCommand}
+                refreshingProvider={refreshingProvider}
+                isProjectLevel={isProjectLevel}
+                isInherited={Boolean(isProjectLevel && !coder.provider && hasProviderAndModel(getInheritedValue('coder')))}
+                inheritedModel={getInheritedValue('coder')?.model}
+                onProviderChange={(providerId) => handleProviderChange('coder', providerId)}
+                onModelChange={(m) => setCoder(prev => ({ ...prev, model: m }))}
+                onRefreshModels={refreshModels}
+                onCopyToClipboard={copyToClipboard}
+              />
               
               <div className="border-t border-border pt-4">
                 <div className="flex items-center justify-between mb-2">
@@ -520,11 +378,27 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                   <div className="space-y-3">
                     {reviewers.map((r, i) => (
                       <div key={i} className="relative">
-                        {renderRoleSelector(`Reviewer ${i+1}`, 'fa-user-check', r, handleProviderChange, (m) => {
-                          const next = [...reviewers];
-                          next[i].model = m;
-                          setReviewers(next);
-                        }, i)}
+                        <AISetupRoleSelector
+                          label={`Reviewer ${i + 1}`}
+                          icon="fa-user-check"
+                          config={r}
+                          providers={providers}
+                          modelsByProvider={models}
+                          modelSources={modelSources}
+                          copiedCommand={copiedCommand}
+                          refreshingProvider={refreshingProvider}
+                          isProjectLevel={isProjectLevel}
+                          isInherited={Boolean(isProjectLevel && !r.provider && hasProviderAndModel(getInheritedValue(i)))}
+                          inheritedModel={getInheritedValue(i)?.model}
+                          onProviderChange={(providerId) => handleProviderChange(i, providerId)}
+                          onModelChange={(m) => {
+                            const next = [...reviewers];
+                            next[i].model = m;
+                            setReviewers(next);
+                          }}
+                          onRefreshModels={refreshModels}
+                          onCopyToClipboard={copyToClipboard}
+                        />
                         {reviewers.length > 2 && (
                           <button 
                             onClick={() => setReviewers(reviewers.filter((_, idx) => idx !== i))}
@@ -543,7 +417,23 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                     </button>
                   </div>
                 ) : (
-                  renderRoleSelector('Reviewer', 'fa-magnifying-glass', reviewer, handleProviderChange, (m) => setReviewer(prev => ({...prev, model: m})), 'reviewer')
+                  <AISetupRoleSelector
+                    label="Reviewer"
+                    icon="fa-magnifying-glass"
+                    config={reviewer}
+                    providers={providers}
+                    modelsByProvider={models}
+                    modelSources={modelSources}
+                    copiedCommand={copiedCommand}
+                    refreshingProvider={refreshingProvider}
+                    isProjectLevel={isProjectLevel}
+                    isInherited={Boolean(isProjectLevel && !reviewer.provider && hasProviderAndModel(getInheritedValue('reviewer')))}
+                    inheritedModel={getInheritedValue('reviewer')?.model}
+                    onProviderChange={(providerId) => handleProviderChange('reviewer', providerId)}
+                    onModelChange={(m) => setReviewer(prev => ({ ...prev, model: m }))}
+                    onRefreshModels={refreshModels}
+                    onCopyToClipboard={copyToClipboard}
+                  />
                 )}
               </div>
 
