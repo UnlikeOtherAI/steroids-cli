@@ -22,6 +22,11 @@ const ModelUsagePage = lazy(() => import('./pages/ModelUsagePage').then(({ Model
 const HFAccountPage = lazy(() => import('./pages/HFAccountPage').then(({ HFAccountPage }) => ({ default: HFAccountPage })));
 const HFModelLibraryPage = lazy(() => import('./pages/HFModelLibraryPage').then(({ HFModelLibraryPage }) => ({ default: HFModelLibraryPage })));
 const HFReadyToUsePage = lazy(() => import('./pages/HFReadyToUsePage').then(({ HFReadyToUsePage }) => ({ default: HFReadyToUsePage })));
+const OllamaConnectionPage = lazy(() => import('./pages/OllamaConnectionPage').then(({ OllamaConnectionPage }) => ({ default: OllamaConnectionPage })));
+const OllamaInstalledModelsPage = lazy(() => import('./pages/OllamaInstalledModelsPage').then(({ OllamaInstalledModelsPage }) => ({ default: OllamaInstalledModelsPage })));
+const OllamaModelLibraryPage = lazy(() => import('./pages/OllamaModelLibraryPage').then(({ OllamaModelLibraryPage }) => ({ default: OllamaModelLibraryPage })));
+const OllamaReadyToUsePage = lazy(() => import('./pages/OllamaReadyToUsePage').then(({ OllamaReadyToUsePage }) => ({ default: OllamaReadyToUsePage })));
+const OllamaAccountPage = lazy(() => import('./pages/OllamaAccountPage').then(({ OllamaAccountPage }) => ({ default: OllamaAccountPage })));
 
 function App() {
   const { selectedProject } = useProject();
@@ -80,6 +85,11 @@ function App() {
     if (location.pathname === '/hf/account') return 'Hugging Face Account';
     if (location.pathname === '/hf/models') return 'Hugging Face Model Library';
     if (location.pathname === '/hf/ready') return 'Hugging Face Ready to Use';
+    if (location.pathname === '/ollama/connection') return 'Ollama Connection';
+    if (location.pathname === '/ollama/installed') return 'Ollama Installed Models';
+    if (location.pathname === '/ollama/library') return 'Ollama Model Library';
+    if (location.pathname === '/ollama/ready') return 'Ollama Ready to Use';
+    if (location.pathname === '/ollama/account') return 'Ollama Account';
     switch (location.pathname) {
       case '/': return 'Dashboard';
       case '/projects': return 'Projects';
@@ -151,6 +161,11 @@ function App() {
               <Route path="/hf/account" element={<HFAccountPage />} />
               <Route path="/hf/models" element={<HFModelLibraryPage />} />
               <Route path="/hf/ready" element={<HFReadyToUsePage />} />
+              <Route path="/ollama/connection" element={<OllamaConnectionPage />} />
+              <Route path="/ollama/installed" element={<OllamaInstalledModelsPage />} />
+              <Route path="/ollama/library" element={<OllamaModelLibraryPage />} />
+              <Route path="/ollama/ready" element={<OllamaReadyToUsePage />} />
+              <Route path="/ollama/account" element={<OllamaAccountPage />} />
             </Routes>
           </Suspense>
         </AppShell>

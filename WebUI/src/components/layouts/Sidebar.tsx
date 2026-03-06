@@ -64,6 +64,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     { to: '/hf/ready', label: 'Ready to Use' },
   ];
 
+  const ollamaItems = [
+    { to: '/ollama/connection', label: 'Connection' },
+    { to: '/ollama/installed', label: 'Installed Models' },
+    { to: '/ollama/library', label: 'Model Library' },
+    { to: '/ollama/ready', label: 'Ready to Use' },
+    { to: '/ollama/account', label: 'Account' },
+  ];
+
   const fetchCronStatus = useCallback(async () => {
     try {
       const response = await runnersApi.getCronStatus();
@@ -155,6 +163,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           Hugging Face
         </div>
         {hfItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            onClick={onClose}
+            className={({ isActive }) => (
+              isActive ? 'sidebar-item-active ml-4' : 'sidebar-item ml-4'
+            )}
+          >
+            <span>{item.label}</span>
+          </NavLink>
+        ))}
+        <div className="px-6 pt-4 pb-2 text-xs uppercase tracking-wide text-text-inverse/60 flex items-center gap-2">
+          <CpuChipIcon className="w-4 h-4" />
+          Ollama
+        </div>
+        {ollamaItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

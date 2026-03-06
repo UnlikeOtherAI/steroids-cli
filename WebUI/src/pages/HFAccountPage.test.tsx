@@ -7,6 +7,7 @@ import * as hfApiModule from '../services/huggingFaceApi';
 vi.mock('../services/huggingFaceApi', () => ({
   huggingFaceApi: {
     getAccount: vi.fn(),
+    getUsage: vi.fn(),
     connect: vi.fn(),
     disconnect: vi.fn(),
   },
@@ -14,6 +15,7 @@ vi.mock('../services/huggingFaceApi', () => ({
 
 const mockApi = hfApiModule.huggingFaceApi as unknown as {
   getAccount: ReturnType<typeof vi.fn>;
+  getUsage: ReturnType<typeof vi.fn>;
   connect: ReturnType<typeof vi.fn>;
   disconnect: ReturnType<typeof vi.fn>;
 };
@@ -21,8 +23,19 @@ const mockApi = hfApiModule.huggingFaceApi as unknown as {
 describe('HFAccountPage', () => {
   beforeEach(() => {
     mockApi.getAccount.mockReset();
+    mockApi.getUsage.mockReset();
     mockApi.connect.mockReset();
     mockApi.disconnect.mockReset();
+    mockApi.getUsage.mockResolvedValue({
+      today: {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        requests: 0,
+        estimatedCostUsd: 0,
+      },
+      byModel7d: [],
+    });
     mockApi.connect.mockResolvedValue(undefined);
     mockApi.disconnect.mockResolvedValue(undefined);
   });

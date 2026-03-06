@@ -5,6 +5,7 @@
 export * from './activity';
 export * from './huggingFace';
 export * from './modelUsage';
+export * from './ollama';
 export * from './runner';
 export * from './task';
 
