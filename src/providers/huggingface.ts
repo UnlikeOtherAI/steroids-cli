@@ -211,6 +211,7 @@ export class HuggingFaceProvider extends BaseAIProvider {
     let rawBuffer = '';
     let stdout = '';
     let tokenUsage: TokenUsage | undefined;
+    let seenDone = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -226,6 +227,7 @@ export class HuggingFaceProvider extends BaseAIProvider {
 
         const eventResult = this.handleSSEEvent(event);
         if (eventResult.done) {
+          seenDone = true;
           return {
             success: true,
             exitCode: 0,
@@ -255,6 +257,18 @@ export class HuggingFaceProvider extends BaseAIProvider {
           tokenUsage = eventResult.usage;
         }
       }
+    }
+
+    if (!seenDone) {
+      return {
+        success: false,
+        exitCode: 1,
+        stdout,
+        stderr: 'Hugging Face SSE stream ended before [DONE]',
+        duration: Date.now() - startedAt,
+        timedOut: false,
+        tokenUsage,
+      };
     }
 
     return {

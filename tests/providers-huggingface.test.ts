@@ -98,4 +98,26 @@ describe('HuggingFaceProvider', () => {
     expect(result.stdout).toBe('partial');
     expect(result.stderr).toContain('insufficient credits');
   });
+
+  it('fails when stream closes without [DONE] sentinel', async () => {
+    const provider = new HuggingFaceProvider({
+      auth: { getToken: () => 'hf_test' },
+      fetchImpl: async () =>
+        new Response(
+          createSSEStream([
+            'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+          ]),
+          { status: 200 }
+        ),
+    });
+
+    const result = await provider.invoke('hello', {
+      model: 'deepseek-ai/DeepSeek-V3',
+      streamOutput: false,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.stdout).toBe('partial');
+    expect(result.stderr).toContain('before [DONE]');
+  });
 });
