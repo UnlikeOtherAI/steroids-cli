@@ -9,6 +9,7 @@ import {
   createFollowUpTask,
   incrementTaskFailureCount,
   clearTaskFailureCount,
+  clearMergeFailureCount,
   addAuditEntry,
 } from '../database/queries.js';
 import type { openDatabase } from '../database/connection.js';
@@ -395,7 +396,8 @@ export async function runReviewerPhase(
           return;
         }
 
-        // Merge succeeded — approve the task
+        // Merge succeeded — clear merge failure counter and approve the task
+        clearMergeFailureCount(db, task.id);
         approveTask(db, task.id, 'orchestrator', decision.notes, mergeResult.mergedSha || commitSha);
         releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
         if (!jsonMode) {

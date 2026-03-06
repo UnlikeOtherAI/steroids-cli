@@ -64,7 +64,7 @@ class CoderRunner extends BaseRunner {
           console.log(`Found ${rejectionHistory.length} previous rejection(s) - coder will see full history`);
         }
 
-        if (coderConfig?.provider && coderConfig?.model) {
+        if (coderConfig?.provider && coderConfig.provider !== 'claude' && coderConfig?.model) {
           resumeSessionId = findResumableSession(
             db,
             task.id,

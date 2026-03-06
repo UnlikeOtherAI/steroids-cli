@@ -44,7 +44,7 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 ## 2. CLI & Backend Recovery Mechanisms
 
 ### 2.1. Task State Synchronization (CLI Reset Command)
-*   **Command Structure:** Add a new CLI subcommand `steroids tasks reset`. It must accept granular scoping flags: `--failed` (all failed), `--disputed` (all disputed), `--all` (both), or accept a specific `taskId`.
+*   **Command Structure:** Add a new CLI subcommand `steroids tasks reset`. It must accept granular scoping flags: `--failed` (all failed), `--disputed` (all disputed), `--blocked` (all blocked_error/blocked_conflict), `--all` (all three), or accept a specific `taskId`.
 *   **Atomic Database Transaction:** The reset operation must be executed as a single SQLite transaction to prevent partial state corruption. The transaction must perform the following:
     1.  **Tasks Table:** Update the target tasks to `status = 'pending'`, `rejection_count = 0`, and `failure_count = 0`.
     2.  **Disputes Table:** Auto-resolve any `open` disputes tied to these tasks. Set `status = 'resolved'`, `resolution = 'custom'`, and `resolution_notes = 'Bulk reset via CLI'`.
@@ -57,8 +57,8 @@ Enhance the system's ability to cleanly recover from stuck, failed, or orphaned 
 *   **Untracked Dependency Validation:** The pre-flight check must also account for untracked but necessary files left in the workspace from recent uncommitted upstream tasks, ensuring the runner has a functionally complete environment.
 
 ### Acceptance Criteria (Section 2)
-- [x] A new CLI command `steroids tasks reset` is available and accepts `--failed`, `--disputed`, `--all`, or a positional `<taskId>` argument. It operates on the current working directory's project.
-- [x] Running the reset command executes an atomic transaction that sets targeted task `status` to `pending` and resets both `rejection_count` and `failure_count` to 0.
+- [x] A new CLI command `steroids tasks reset` is available and accepts `--failed`, `--disputed`, `--blocked`, `--all`, or a positional `<taskId>` argument. It operates on the current working directory's project.
+- [x] Running the reset command executes an atomic transaction that sets targeted task `status` to `pending` and resets `rejection_count`, `failure_count`, and `merge_failure_count` to 0.
 - [x] The reset command automatically resolves any open disputes attached to the targeted tasks with the resolution text "Bulk reset via CLI".
 - [x] The reset command clears any existing `task_locks` for the targeted tasks.
 - [x] A detailed audit log entry is successfully recorded documenting the manual bulk reset.

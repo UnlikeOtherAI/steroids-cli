@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     follow_up_depth INTEGER NOT NULL DEFAULT 0 CHECK(follow_up_depth >= 0),
     dedupe_key TEXT,
     conflict_count INTEGER NOT NULL DEFAULT 0,
+    merge_failure_count INTEGER NOT NULL DEFAULT 0,
     blocked_reason TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -68,6 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_section ON tasks(section_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_failures ON tasks(failure_count) WHERE failure_count > 0;
 CREATE INDEX IF NOT EXISTS idx_tasks_conflict_count ON tasks(conflict_count) WHERE conflict_count > 0;
+CREATE INDEX IF NOT EXISTS idx_tasks_merge_failures ON tasks(merge_failure_count) WHERE merge_failure_count > 0;
 CREATE INDEX IF NOT EXISTS idx_tasks_reference_task ON tasks(reference_task_id) WHERE reference_task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tasks_follow_up_state ON tasks(is_follow_up, requires_promotion) WHERE is_follow_up = 1;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_dedupe ON tasks(dedupe_key) WHERE dedupe_key IS NOT NULL;
@@ -274,4 +276,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (20, '020_add_work
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (21, '021_add_section_branch', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (22, '022_add_section_auto_pr', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (23, '023_add_task_feedback', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (24, '024_add_merge_failure_count', 'builtin');
 `;

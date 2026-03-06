@@ -91,6 +91,7 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   createFollowUpTask: jest.fn().mockReturnValue('follow-up-1'),
   incrementTaskFailureCount: jest.fn().mockReturnValue(1),
   clearTaskFailureCount: jest.fn().mockReturnValue(0),
+  clearMergeFailureCount: jest.fn(),
   incrementTaskConflictCount: jest.fn().mockReturnValue(1),
   setTaskBlocked: jest.fn(),
   returnTaskToPending: jest.fn(),

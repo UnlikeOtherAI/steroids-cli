@@ -18,25 +18,28 @@ export async function resetTaskCmd(args: string[], flags: GlobalFlags): Promise<
       help: { type: 'boolean', short: 'h', default: false },
       failed: { type: 'boolean', default: false },
       disputed: { type: 'boolean', default: false },
+      blocked: { type: 'boolean', default: false },
       all: { type: 'boolean', default: false },
     },
     allowPositionals: true,
   });
 
-  if (values.help || flags.help || (positionals.length === 0 && !values.failed && !values.disputed && !values.all)) {
+  if (values.help || flags.help || (positionals.length === 0 && !values.failed && !values.disputed && !values.blocked && !values.all)) {
     out.log(`
-steroids tasks reset [<id|title>] [options] - Reset failed/disputed tasks to pending
+steroids tasks reset [<id|title>] [options] - Reset failed/disputed/blocked tasks to pending
 
 USAGE:
   steroids tasks reset <id|title>
   steroids tasks reset --failed
   steroids tasks reset --disputed
+  steroids tasks reset --blocked
   steroids tasks reset --all
 
 OPTIONS:
   --failed          Reset all failed tasks
   --disputed        Reset all disputed tasks
-  --all             Reset all failed and disputed tasks
+  --blocked         Reset all blocked tasks (blocked_error and blocked_conflict)
+  --all             Reset all failed, disputed, and blocked tasks
   -h, --help        Show help
 
 DESCRIPTION:
@@ -66,6 +69,10 @@ DESCRIPTION:
       }
       if (values.all || values.disputed) {
         tasksToReset.push(...listTasks(db, { status: 'disputed' }));
+      }
+      if (values.all || values.blocked) {
+        tasksToReset.push(...listTasks(db, { status: 'blocked_error' }));
+        tasksToReset.push(...listTasks(db, { status: 'blocked_conflict' }));
       }
       
       // Deduplicate in case
@@ -140,8 +147,13 @@ DESCRIPTION:
     // 3. Atomic Database Transaction across ALL validated tasks
     db.transaction(() => {
       for (const task of fullyValidatedTasks) {
-        // Update task status
-        db.prepare(`UPDATE tasks SET status = 'pending', rejection_count = 0, failure_count = 0 WHERE id = ?`).run(task.id);
+        // Update task status — clear all failure/rejection counters
+        // Also clear conflict_count when resetting blocked_conflict tasks
+        db.prepare(
+          `UPDATE tasks SET status = 'pending', rejection_count = 0, failure_count = 0, merge_failure_count = 0,
+           conflict_count = CASE WHEN ? = 'blocked_conflict' THEN 0 ELSE conflict_count END
+           WHERE id = ?`
+        ).run(task.status, task.id);
 
         // Auto-resolve open disputes
         db.prepare(`UPDATE disputes SET status = 'resolved', resolution = 'custom', resolution_notes = 'Bulk reset via CLI', resolved_at = datetime('now') WHERE task_id = ? AND status = 'open'`).run(task.id);
@@ -158,7 +170,7 @@ DESCRIPTION:
       // are no longer in a terminal state.
       if (values.all) {
         db.prepare(
-          `UPDATE tasks SET failure_count = 0, last_failure_at = NULL WHERE status = 'pending' AND COALESCE(failure_count, 0) > 0`
+          `UPDATE tasks SET failure_count = 0, merge_failure_count = 0, last_failure_at = NULL WHERE status = 'pending' AND (COALESCE(failure_count, 0) > 0 OR COALESCE(merge_failure_count, 0) > 0)`
         ).run();
       }
     })();

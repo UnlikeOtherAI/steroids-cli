@@ -18,6 +18,7 @@ import {
   updateTaskStatus,
   resetRejectionCount,
   resetTaskFailureCount,
+  clearMergeFailureCount,
   approveTask,
   rejectTask,
   getTaskAudit,
@@ -1011,6 +1012,7 @@ EXAMPLES:
             ? `Failure count reset during manual restart: ${values.notes}`
             : 'Failure count reset during manual restart'
         );
+        clearMergeFailureCount(db, task.id);
       }
     }
 

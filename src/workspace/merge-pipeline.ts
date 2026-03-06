@@ -9,14 +9,14 @@ import type { PoolSlotContext } from './types.js';
 import type { MergeResult } from './git-lifecycle.js';
 import {
   incrementTaskConflictCount,
-  incrementTaskFailureCount,
+  incrementMergeFailureCount,
   setTaskBlocked,
   returnTaskToPending,
 } from '../database/queries.js';
 import { releaseSlot } from './pool.js';
 
 const MAX_CONFLICT_COUNT = 3;
-const MAX_FAILURE_COUNT = 5;
+const MAX_MERGE_FAILURE_COUNT = 3;
 
 export interface MergeFailureResult {
   taskBlocked: boolean;
@@ -36,6 +36,21 @@ export function handleMergeFailure(
 ): MergeFailureResult {
   // Release the pool slot back to idle
   releaseSlot(ctx.globalDb, ctx.slot.id);
+
+  // Infrastructure failure (e.g. missing remote base branch) — block immediately
+  if (mergeResult.infrastructure) {
+    setTaskBlocked(
+      projectDb,
+      taskId,
+      'blocked_error',
+      `Infrastructure failure: ${mergeResult.reason}`
+    );
+    return {
+      taskBlocked: true,
+      blockStatus: 'blocked_error',
+      reason: `Blocked: ${mergeResult.reason}`,
+    };
+  }
 
   if (mergeResult.conflict) {
     // Rebase conflict path
@@ -68,20 +83,20 @@ export function handleMergeFailure(
     };
   }
 
-  // General failure (push failure, ff-only failure, etc.)
-  const failureCount = incrementTaskFailureCount(projectDb, taskId);
+  // General merge failure (push failure, ff-only failure, etc.)
+  const mergeFailureCount = incrementMergeFailureCount(projectDb, taskId);
 
-  if (failureCount >= MAX_FAILURE_COUNT) {
+  if (mergeFailureCount >= MAX_MERGE_FAILURE_COUNT) {
     setTaskBlocked(
       projectDb,
       taskId,
       'blocked_error',
-      `Merge pipeline failed ${failureCount} times: ${mergeResult.reason}`
+      `Merge pipeline failed ${mergeFailureCount} times: ${mergeResult.reason}`
     );
     return {
       taskBlocked: true,
       blockStatus: 'blocked_error',
-      reason: `Blocked after ${failureCount} merge failures`,
+      reason: `Blocked after ${mergeFailureCount} merge failures`,
     };
   }
 
@@ -90,10 +105,10 @@ export function handleMergeFailure(
     projectDb,
     taskId,
     'orchestrator',
-    `Merge failure (attempt ${failureCount}/${MAX_FAILURE_COUNT}): ${mergeResult.reason}`
+    `Merge failure (attempt ${mergeFailureCount}/${MAX_MERGE_FAILURE_COUNT}): ${mergeResult.reason}`
   );
   return {
     taskBlocked: false,
-    reason: `Merge failure (attempt ${failureCount}/${MAX_FAILURE_COUNT})`,
+    reason: `Merge failure (attempt ${mergeFailureCount}/${MAX_MERGE_FAILURE_COUNT})`,
   };
 }

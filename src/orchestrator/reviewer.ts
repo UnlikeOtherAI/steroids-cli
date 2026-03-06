@@ -212,7 +212,7 @@ class ReviewerRunner extends BaseRunner {
           console.log(`Warning: ${unresolvedSubmissionCommits.length} historical submission commit(s) unresolved`);
         }
 
-        if (effectiveReviewerConfig?.provider && effectiveReviewerConfig?.model) {
+        if (effectiveReviewerConfig?.provider && effectiveReviewerConfig.provider !== 'claude' && effectiveReviewerConfig?.model) {
           resumeSessionId = findResumableSession(
             db,
             task.id,

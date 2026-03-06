@@ -48,6 +48,7 @@ export interface Task {
   failure_count?: number;
   last_failure_at?: string | null;
   conflict_count?: number;
+  merge_failure_count?: number;
   blocked_reason?: string | null;
   reference_task_id?: string | null;
   reference_commit?: string | null;
@@ -1711,6 +1712,30 @@ export function incrementTaskConflictCount(db: Database.Database, taskId: string
     .get(taskId) as { conflict_count: number | null } | undefined;
 
   return Number(row?.conflict_count ?? 0);
+}
+
+export function incrementMergeFailureCount(db: Database.Database, taskId: string): number {
+  db.prepare(
+    `UPDATE tasks
+     SET merge_failure_count = COALESCE(merge_failure_count, 0) + 1,
+         updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(taskId);
+
+  const row = db
+    .prepare('SELECT merge_failure_count FROM tasks WHERE id = ?')
+    .get(taskId) as { merge_failure_count: number | null } | undefined;
+
+  return Number(row?.merge_failure_count ?? 0);
+}
+
+export function clearMergeFailureCount(db: Database.Database, taskId: string): void {
+  db.prepare(
+    `UPDATE tasks
+     SET merge_failure_count = 0,
+         updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(taskId);
 }
 
 /**

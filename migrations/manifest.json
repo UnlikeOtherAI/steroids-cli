@@ -1,6 +1,6 @@
 {
   "version": "0.2.2",
-  "latestDbVersion": 23,
+  "latestDbVersion": 24,
   "migrations": [
     {
       "id": 1,
@@ -185,6 +185,14 @@
       "description": "Add task_feedback table for storing user feedback linked to tasks",
       "checksum": "",
       "cliVersion": "0.10.57"
+    },
+    {
+      "id": 24,
+      "name": "024_add_merge_failure_count",
+      "file": "024_add_merge_failure_count.sql",
+      "description": "Add merge_failure_count to tasks for dedicated merge failure tracking",
+      "checksum": "",
+      "cliVersion": "0.10.61"
     }
   ]
 }

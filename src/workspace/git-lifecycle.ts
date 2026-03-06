@@ -43,7 +43,28 @@ export type PostCoderResult =
 
 export type MergeResult =
   | { ok: true; mergedSha: string }
-  | { ok: false; reason: string; conflict: boolean };
+  | { ok: false; reason: string; conflict: boolean; infrastructure?: boolean };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Verify that the effective base ref exists in local ref store.
+ * Caller must ensure a fetch has been done before calling this.
+ * Returns 'ok' when the ref exists or when localOnly (no remote to validate).
+ */
+export function verifyBaseRef(
+  slotPath: string,
+  baseBranch: string,
+  localOnly: boolean
+): 'ok' | 'missing' {
+  if (localOnly) return 'ok';
+  const result = execGit(slotPath, ['rev-parse', '--verify', `refs/remotes/origin/${baseBranch}`], {
+    tolerateFailure: true,
+  });
+  return result ? 'ok' : 'missing';
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 1: Task Pickup — Clean Slate
@@ -145,6 +166,15 @@ export function prepareForTask(
     }
   }
 
+  // Step 4c: Verify remote base branch exists in local refs (after fetch)
+  if (verifyBaseRef(slotPath, baseBranch, localOnly) === 'missing') {
+    return {
+      ok: false,
+      reason: `Remote base branch '${baseBranch}' does not exist on origin`,
+      blocked: true,
+    };
+  }
+
   // Step 5: Reset to effective base
   const baseRef = localOnly ? baseBranch : `${remote}/${baseBranch}`;
   execGit(slotPath, ['checkout', baseBranch], { tolerateFailure: true });
@@ -203,9 +233,16 @@ export function prepareForTask(
     return { ok: false, reason: 'Cannot determine HEAD sha', blocked: true };
   }
 
-  // Step 9: Create task branch (-B handles reruns)
+  // Step 9: Checkout task branch — preserve existing commits if branch exists
   const taskBranch = `steroids/task-${taskId}`;
-  execGit(slotPath, ['checkout', '-B', taskBranch]);
+  const branchExists = execGit(slotPath, ['rev-parse', '--verify', taskBranch], {
+    tolerateFailure: true,
+  });
+  if (branchExists) {
+    execGit(slotPath, ['checkout', taskBranch]);
+  } else {
+    execGit(slotPath, ['checkout', '-B', taskBranch]);
+  }
 
   // Step 10: Update DB
   updateSlotStatus(globalDb, slot.id, 'coder_active', {
@@ -320,9 +357,25 @@ export function mergeToBase(
   try {
     // Step 4: Fetch base (skip for local-only)
     if (!localOnly) {
-      execGit(slotPath, ['fetch', remote, baseBranch], {
+      const fetchResult = execGit(slotPath, ['fetch', remote], {
+        tolerateFailure: true,
         timeoutMs: 120_000,
       });
+      if (fetchResult === null) {
+        // Transient fetch failure — existing retry path
+        releaseWorkspaceMergeLock(globalDb, slot.project_id);
+        return { ok: false, reason: 'git fetch origin failed during merge', conflict: false };
+      }
+      // Verify base branch exists after successful fetch
+      if (verifyBaseRef(slotPath, baseBranch, localOnly) === 'missing') {
+        releaseWorkspaceMergeLock(globalDb, slot.project_id);
+        return {
+          ok: false,
+          reason: `Remote base branch '${baseBranch}' does not exist on origin`,
+          conflict: false,
+          infrastructure: true,
+        };
+      }
     }
 
     // Step 5: Rebase task branch onto base
