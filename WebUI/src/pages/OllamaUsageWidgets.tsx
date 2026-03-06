@@ -43,6 +43,18 @@ function formatUnloadEta(seconds: number | null): string {
   return `${mins}m ${secs}s`;
 }
 
+function getRuntimeErrorMessage(errorCode?: string): string {
+  if (!errorCode) {
+    return 'Runtime status unavailable.';
+  }
+
+  if (errorCode === 'ollama_unavailable') {
+    return 'Unable to connect to Ollama. Start Ollama or check the configured endpoint.';
+  }
+
+  return `Runtime status unavailable: ${errorCode}`;
+}
+
 export const OllamaUsageWidgets: React.FC<Props> = ({ ollama }) => {
   const [pullModelName, setPullModelName] = useState('');
   const [pulling, setPulling] = useState(false);
@@ -169,7 +181,7 @@ export const OllamaUsageWidgets: React.FC<Props> = ({ ollama }) => {
       </div>
 
       {ollama.runtime.error && (
-        <div className="text-xs text-warning mb-3">Runtime status unavailable: {ollama.runtime.error}</div>
+        <div className="text-xs text-warning mb-3">{getRuntimeErrorMessage(ollama.runtime.error)}</div>
       )}
 
       {ollama.runtime.models.length > 0 && (

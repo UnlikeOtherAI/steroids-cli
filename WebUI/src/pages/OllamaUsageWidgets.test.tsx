@@ -68,6 +68,38 @@ describe('OllamaUsageWidgets', () => {
     expect(screen.getByText(/unload in 2m 0s/)).toBeInTheDocument();
   });
 
+  it('translates runtime connection error token into actionable copy', () => {
+    render(
+      <OllamaUsageWidgets
+        ollama={{
+          usage: {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            requests: 0,
+            avg_tokens_per_second: null,
+          },
+          by_model: [],
+          runtime: {
+            connected: false,
+            endpoint: 'http://localhost:11434',
+            mode: 'local',
+            loaded_models: 0,
+            total_vram_bytes: 0,
+            total_ram_bytes: 0,
+            models: [],
+            error: 'ollama_unavailable',
+          },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText('Unable to connect to Ollama. Start Ollama or check the configured endpoint.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Runtime status unavailable: ollama_unavailable/)).not.toBeInTheDocument();
+  });
+
   it('renders streamed pull progress bar while model download is active', async () => {
     const streamMock = vi.mocked(modelUsageApi.pullModel);
     streamMock.mockImplementation(async (_model, onProgress) => {
