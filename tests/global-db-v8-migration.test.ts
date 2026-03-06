@@ -128,6 +128,13 @@ function getColumn(
   return column;
 }
 
+function getTableSql(db: Database.Database, tableName: string): string {
+  const ddl = db
+    .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`)
+    .get(tableName) as { sql: string } | undefined;
+  return ddl?.sql ?? '';
+}
+
 describe('global db schema v8 migration', () => {
   const originalHome = process.env.HOME;
   const originalSteroidsHome = process.env.STEROIDS_HOME;
@@ -261,7 +268,7 @@ describe('global db schema v8 migration', () => {
     const { db, close } = openGlobalDatabase();
 
     try {
-      expect(getGlobalSchemaVersion(db)).toBe('19');
+      expect(getGlobalSchemaVersion(db)).toBe('20');
       const sessionCount = db.prepare('SELECT COUNT(*) as count FROM parallel_sessions').get() as {
         count: number;
       };
@@ -280,7 +287,7 @@ describe('global db schema v8 migration', () => {
     const { db, close } = openGlobalDatabase();
 
     try {
-      expect(getGlobalSchemaVersion(db)).toBe('19');
+      expect(getGlobalSchemaVersion(db)).toBe('20');
       const parallelSessionsColumns = getColumns(db, 'parallel_sessions');
       expect(parallelSessionsColumns.length).toBeGreaterThan(0);
       const runnersColumns = getColumns(db, 'runners');
@@ -290,6 +297,23 @@ describe('global db schema v8 migration', () => {
           .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='workstreams'`)
           .get(),
       ).toBeDefined();
+    } finally {
+      close();
+    }
+  });
+
+  it('creates hf and ollama usage tables with pairing uniqueness constraints', () => {
+    createLegacyGlobalDb(homeDir, 7);
+    const { db, close } = openGlobalDatabase();
+
+    try {
+      expect(getColumns(db, 'hf_usage').length).toBeGreaterThan(0);
+      expect(getColumns(db, 'ollama_usage').length).toBeGreaterThan(0);
+      expect(getColumns(db, 'hf_paired_models').length).toBeGreaterThan(0);
+      expect(getColumns(db, 'ollama_paired_models').length).toBeGreaterThan(0);
+
+      expect(getTableSql(db, 'hf_paired_models')).toContain('UNIQUE(model_id, runtime)');
+      expect(getTableSql(db, 'ollama_paired_models')).toContain('UNIQUE(model_name, runtime, endpoint)');
     } finally {
       close();
     }

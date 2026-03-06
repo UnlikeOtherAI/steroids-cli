@@ -25,6 +25,7 @@ export {
   GLOBAL_SCHEMA_V16_SQL,
   GLOBAL_SCHEMA_V17_SQL,
   GLOBAL_SCHEMA_V18_SQL,
+  GLOBAL_SCHEMA_V20_SQL,
   GLOBAL_SCHEMA_VERSION,
   applyGlobalSchemaV9,
   applyGlobalSchemaV10,
@@ -36,6 +37,7 @@ export {
   applyGlobalSchemaV16,
   applyGlobalSchemaV17,
   applyGlobalSchemaV18,
+  applyGlobalSchemaV20,
 } from './global-db-schema';
 
 // Connection management

@@ -4,6 +4,21 @@
  */
 
 import Database from 'better-sqlite3';
+import {
+  GLOBAL_SCHEMA_V17_SQL,
+  GLOBAL_SCHEMA_V18_SQL,
+  GLOBAL_SCHEMA_V19_SQL,
+  GLOBAL_SCHEMA_V20_SQL,
+  GLOBAL_SCHEMA_VERSION,
+} from './global-db-schema-migrations-v17-v20.js';
+
+export {
+  GLOBAL_SCHEMA_V17_SQL,
+  GLOBAL_SCHEMA_V18_SQL,
+  GLOBAL_SCHEMA_V19_SQL,
+  GLOBAL_SCHEMA_V20_SQL,
+  GLOBAL_SCHEMA_VERSION,
+} from './global-db-schema-migrations-v17-v20.js';
 
 /**
  * Schema for global database (runners and locks)
@@ -253,59 +268,13 @@ export const GLOBAL_SCHEMA_V16_SQL = `
   );
 `;
 
-export const GLOBAL_SCHEMA_V17_SQL = `
--- Add hibernation fields to projects table
--- Note: These columns are deprecated in V18 but kept here for schema history.
-ALTER TABLE projects ADD COLUMN hibernating_until TEXT;
-ALTER TABLE projects ADD COLUMN hibernation_tier INTEGER DEFAULT 0;
-`;
-
-export const GLOBAL_SCHEMA_V18_SQL = `
--- Drop project hibernation fields and add provider backoff reason_type
-ALTER TABLE projects DROP COLUMN hibernating_until;
-ALTER TABLE projects DROP COLUMN hibernation_tier;
-ALTER TABLE provider_backoffs ADD COLUMN reason_type TEXT;
-`;
-
-export const GLOBAL_SCHEMA_V19_SQL = `
--- Workspace pool slots for deterministic git lifecycle
-CREATE TABLE IF NOT EXISTS workspace_pool_slots (
-  id             INTEGER PRIMARY KEY,
-  project_id     TEXT NOT NULL,
-  slot_index     INTEGER NOT NULL,
-  slot_path      TEXT NOT NULL,
-  remote_url     TEXT,
-  runner_id      TEXT,
-  task_id        TEXT,
-  base_branch    TEXT,
-  task_branch    TEXT,
-  starting_sha   TEXT,
-  status         TEXT NOT NULL DEFAULT 'idle',
-  claimed_at     INTEGER,
-  heartbeat_at   INTEGER,
-  UNIQUE(project_id, slot_index)
-);
-
-CREATE INDEX IF NOT EXISTS idx_workspace_pool_slots_project
-ON workspace_pool_slots(project_id, status);
-
--- Workspace merge locks for serializing merge-to-base operations
-CREATE TABLE IF NOT EXISTS workspace_merge_locks (
-  id             INTEGER PRIMARY KEY,
-  project_id     TEXT NOT NULL UNIQUE,
-  runner_id      TEXT NOT NULL,
-  slot_id        INTEGER NOT NULL,
-  acquired_at    INTEGER NOT NULL,
-  heartbeat_at   INTEGER NOT NULL,
-  FOREIGN KEY (slot_id) REFERENCES workspace_pool_slots(id)
-);
-`;
-
 export function applyGlobalSchemaV19(db: Database.Database): void {
   db.exec(GLOBAL_SCHEMA_V19_SQL);
 }
 
-export const GLOBAL_SCHEMA_VERSION = '19';
+export function applyGlobalSchemaV20(db: Database.Database): void {
+  db.exec(GLOBAL_SCHEMA_V20_SQL);
+}
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
   const columns = db

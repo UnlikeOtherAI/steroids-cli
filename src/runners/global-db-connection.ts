@@ -27,6 +27,7 @@ import {
   applyGlobalSchemaV17,
   applyGlobalSchemaV18,
   applyGlobalSchemaV19,
+  applyGlobalSchemaV20,
 } from './global-db-schema';
 
 const STEROIDS_DIR = '.steroids';
@@ -105,6 +106,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     applyGlobalSchemaV17(db);
     applyGlobalSchemaV18(db);
     applyGlobalSchemaV19(db);
+    applyGlobalSchemaV20(db);
 
     db.prepare('INSERT OR REPLACE INTO _global_schema (key, value) VALUES (?, ?)')
       .run('version', GLOBAL_SCHEMA_VERSION);
@@ -248,9 +250,15 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
       GLOBAL_SCHEMA_VERSION,
       'version'
     );
-  }
-  else if (currentVersion === '18') {
+  } else if (currentVersion === '18') {
     applyGlobalSchemaV19(db);
+    applyGlobalSchemaV20(db);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '19') {
+    applyGlobalSchemaV20(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -267,6 +275,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   applyGlobalSchemaV16(db);
   applyGlobalSchemaV17(db);
   applyGlobalSchemaV19(db);
+  applyGlobalSchemaV20(db);
   db.prepare(
     `INSERT INTO _global_schema (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
