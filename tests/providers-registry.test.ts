@@ -157,6 +157,7 @@ describe('ProviderRegistry', () => {
       expect(defaultRegistry.has('codex')).toBe(true);
       expect(defaultRegistry.has('gemini')).toBe(true);
       expect(defaultRegistry.has('openai')).toBe(true);
+      expect(defaultRegistry.has('hf')).toBe(true);
     });
   });
 });

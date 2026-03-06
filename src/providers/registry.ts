@@ -11,6 +11,7 @@ import { MistralProvider } from './mistral.js';
 import { OpenAIProvider } from './openai.js';
 import { MiniMaxProvider } from './minimax.js';
 import { OllamaProvider } from './ollama.js';
+import { HuggingFaceProvider } from './huggingface.js';
 
 /**
  * Provider availability status
@@ -189,6 +190,7 @@ export async function createDefaultRegistry(): Promise<ProviderRegistry> {
     new OpenAIProvider(),
     new MiniMaxProvider(),
     new OllamaProvider(),
+    new HuggingFaceProvider(),
   ];
 
   for (const provider of providers) {

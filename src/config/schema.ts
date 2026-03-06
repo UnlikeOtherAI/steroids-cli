@@ -27,7 +27,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       provider: {
         _description: 'AI provider for orchestrator',
         _type: 'string',
-        _options: ['claude', 'gemini', 'openai', 'codex', 'mistral', 'minimax', 'ollama'] as const,
+        _options: ['claude', 'gemini', 'openai', 'codex', 'mistral', 'minimax', 'ollama', 'hf'] as const,
         _default: 'claude',
       },
       model: {
@@ -42,7 +42,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       provider: {
         _description: 'AI provider for coder',
         _type: 'string',
-        _options: ['claude', 'gemini', 'openai', 'codex', 'mistral', 'minimax', 'ollama'] as const,
+        _options: ['claude', 'gemini', 'openai', 'codex', 'mistral', 'minimax', 'ollama', 'hf'] as const,
         _default: 'claude',
       },
       model: {
@@ -57,7 +57,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       provider: {
         _description: 'AI provider for reviewer',
         _type: 'string',
-        _options: ['claude', 'gemini', 'openai', 'codex', 'mistral', 'minimax', 'ollama'] as const,
+        _options: ['claude', 'gemini', 'openai', 'codex', 'mistral', 'minimax', 'ollama', 'hf'] as const,
         _default: 'claude',
       },
       model: {

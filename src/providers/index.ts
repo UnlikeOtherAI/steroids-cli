@@ -29,6 +29,9 @@ export { MistralProvider, createMistralProvider } from './mistral.js';
 // OpenAI provider
 export { OpenAIProvider, createOpenAIProvider } from './openai.js';
 
+// Hugging Face provider
+export { HuggingFaceProvider, createHuggingFaceProvider } from './huggingface.js';
+
 // Registry
 export {
   type ProviderStatus,

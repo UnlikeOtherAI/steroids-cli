@@ -21,7 +21,7 @@ import {
   type ProviderName,
 } from './loader.js';
 
-type Provider = ProviderName;
+type Provider = Exclude<ProviderName, 'hf'>;
 type Role = 'orchestrator' | 'coder' | 'reviewer';
 
 interface SetupState {
