@@ -406,10 +406,7 @@ router.get('/model-usage', async (req: Request, res: Response) => {
         ...project.totals,
       }))
       .sort((a, b) => b.totalTokens - a.totalTokens || b.invocations - a.invocations);
-    const ollamaUsage = getOllamaUsageSummary(hours);
-    const ollamaRuntime = await getOllamaRuntimeStatus();
-
-    res.json({
+    const responseBody: Record<string, unknown> = {
       success: true,
       hours,
       stats: totals,
@@ -419,12 +416,21 @@ router.get('/model-usage', async (req: Request, res: Response) => {
         ...m.stats,
       })),
       by_project: byProject,
-      ollama: {
+    };
+
+    // Keep project-scoped responses deterministic: only aggregate global Ollama status
+    // when no project filter is requested.
+    if (!projectPath) {
+      const ollamaUsage = getOllamaUsageSummary(hours);
+      const ollamaRuntime = await getOllamaRuntimeStatus();
+      responseBody.ollama = {
         usage: ollamaUsage.summary,
         by_model: ollamaUsage.byModel,
         runtime: ollamaRuntime,
-      },
-    });
+      };
+    }
+
+    res.json(responseBody);
   } catch (error) {
     console.error('Error getting model usage:', error);
     res.status(500).json({

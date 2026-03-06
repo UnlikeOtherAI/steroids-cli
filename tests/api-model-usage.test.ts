@@ -255,6 +255,7 @@ describe('API model-usage endpoint', () => {
       totalTokens: 110,
     });
     expect(body.by_model).toHaveLength(2);
+    expect(body.ollama).toBeUndefined();
   });
 
   it('filters by hours lookback window', async () => {
@@ -306,6 +307,18 @@ describe('API model-usage endpoint', () => {
       vram_bytes: 8000000000,
       ram_bytes: 2000000000,
     });
+  });
+
+  it('omits global ollama widgets payload when project filter is applied', async () => {
+    const url = `http://127.0.0.1:${port}/api/model-usage?project=${encodeURIComponent(projectOnePath)}`;
+    const resp = await fetch(url);
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as any;
+
+    expect(body.success).toBe(true);
+    expect(body.by_project).toHaveLength(1);
+    expect(body.by_project[0].project_path).toBe(projectOnePath);
+    expect(body.ollama).toBeUndefined();
   });
 });
 
