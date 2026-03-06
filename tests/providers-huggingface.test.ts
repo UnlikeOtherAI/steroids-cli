@@ -140,6 +140,91 @@ describe('HuggingFaceProvider', () => {
     expect(result.stderr).toContain('gated model access denied');
   });
 
+  it('classifies gated-model denials as non-retryable auth errors', () => {
+    const provider = new HuggingFaceProvider({
+      auth: { getToken: () => 'hf_test' },
+    });
+
+    const classification = provider.classifyResult({
+      success: false,
+      exitCode: 403,
+      stdout: '',
+      stderr: 'Hugging Face sse error: gated model access denied. Request model access and verify token read/inference scopes.',
+      duration: 10,
+      timedOut: false,
+    });
+
+    expect(classification).toEqual({
+      type: 'auth_error',
+      message: 'Gated model access denied',
+      retryable: false,
+    });
+  });
+
+  it('classifies provider outages as non-retryable failures', () => {
+    const provider = new HuggingFaceProvider({
+      auth: { getToken: () => 'hf_test' },
+    });
+
+    const classification = provider.classifyResult({
+      success: false,
+      exitCode: 503,
+      stdout: '',
+      stderr: 'Hugging Face http error: provider outage or temporary unavailability (503).',
+      duration: 10,
+      timedOut: false,
+    });
+
+    expect(classification).toEqual({
+      type: 'unknown',
+      message: 'Provider outage or temporary unavailability',
+      retryable: false,
+    });
+  });
+
+  it('classifies HF 429 rate limits as retryable', () => {
+    const provider = new HuggingFaceProvider({
+      auth: { getToken: () => 'hf_test' },
+    });
+
+    const classification = provider.classifyResult({
+      success: false,
+      exitCode: 429,
+      stdout: '',
+      stderr: 'Hugging Face http error: rate limit exceeded (429). Retry after a short backoff.',
+      duration: 10,
+      timedOut: false,
+    });
+
+    expect(classification).toEqual({
+      type: 'rate_limit',
+      message: 'Provider is overloaded or rate limited',
+      retryable: true,
+      retryAfterMs: 60000,
+    });
+  });
+
+  it('classifies HF 402 credit exhaustion as non-retryable', () => {
+    const provider = new HuggingFaceProvider({
+      auth: { getToken: () => 'hf_test' },
+    });
+
+    const classification = provider.classifyResult({
+      success: false,
+      exitCode: 402,
+      stdout: '',
+      stderr: 'Hugging Face http error: credits exhausted. Add credits in https://huggingface.co/settings/billing.',
+      duration: 10,
+      timedOut: false,
+    });
+
+    expect(classification).toMatchObject({
+      type: 'credit_exhaustion',
+      retryable: false,
+    });
+    expect(classification?.message).toContain('credits exhausted');
+  });
+
   it('fails when stream closes without [DONE] sentinel', async () => {
     const provider = new HuggingFaceProvider({
       auth: { getToken: () => 'hf_test' },

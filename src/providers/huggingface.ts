@@ -6,6 +6,7 @@
 import {
   BaseAIProvider,
   type InvokeOptions,
+  type ProviderError,
   type InvokeResult,
   type ModelInfo,
   type TokenUsage,
@@ -128,6 +129,38 @@ export class HuggingFaceProvider extends BaseAIProvider {
 
   getDefaultInvocationTemplate(): string {
     return '';
+  }
+
+  classifyError(exitCode: number, stderr: string): ProviderError | null {
+    if (exitCode === 0) {
+      return null;
+    }
+
+    const lower = stderr.toLowerCase();
+
+    if (
+      lower.includes('gated model access denied') ||
+      ((/\b401\b|\b403\b/.test(stderr)) && /gated|forbidden|access denied|request model access/.test(lower))
+    ) {
+      return {
+        type: 'auth_error',
+        message: 'Gated model access denied',
+        retryable: false,
+      };
+    }
+
+    if (
+      lower.includes('provider outage') ||
+      ((/\b503\b/.test(stderr)) && /unavailable|outage|overloaded|capacity|temporary/.test(lower))
+    ) {
+      return {
+        type: 'unknown',
+        message: 'Provider outage or temporary unavailability',
+        retryable: false,
+      };
+    }
+
+    return super.classifyError(exitCode, stderr);
   }
 
   async invoke(prompt: string, options: InvokeOptions): Promise<InvokeResult> {
