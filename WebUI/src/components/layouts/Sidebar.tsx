@@ -13,6 +13,8 @@ import {
   BookOpenIcon,
   ChartBarIcon,
   CpuChipIcon,
+  ServerIcon,
+  ChevronDownIcon,
 } from '@heroicons/react/24/outline';
 import { runnersApi, WakeupResult } from '../../services/api';
 import { WakeupModal } from '../molecules/WakeupModal';
@@ -47,6 +49,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   const [loading, setLoading] = useState(false);
   const [wakeupLoading, setWakeupLoading] = useState(false);
   const [wakeupResults, setWakeupResults] = useState<WakeupResult[] | null>(null);
+  const [hfOpen, setHfOpen] = useState(false);
+  const [ollamaOpen, setOllamaOpen] = useState(false);
 
   const navItems = [
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
@@ -62,6 +66,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     { to: '/hf/account', label: 'Account' },
     { to: '/hf/models', label: 'Model Library' },
     { to: '/hf/ready', label: 'Ready to Use' },
+  ];
+
+  const ollamaItems = [
+    { to: '/ollama/connection', label: 'Connection' },
+    { to: '/ollama/models', label: 'Model Library' },
+    { to: '/ollama/ready', label: 'Ready to Use' },
   ];
 
   const fetchCronStatus = useCallback(async () => {
@@ -150,11 +160,37 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
             <span>{item.label}</span>
           </NavLink>
         ))}
-        <div className="px-6 pt-4 pb-2 text-xs uppercase tracking-wide text-text-inverse/60 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setHfOpen((v) => !v)}
+          className="w-full px-6 pt-4 pb-2 text-xs uppercase tracking-wide text-text-inverse/60 flex items-center gap-2 hover:text-text-inverse/80 transition-colors"
+        >
           <CpuChipIcon className="w-4 h-4" />
           Hugging Face
-        </div>
-        {hfItems.map((item) => (
+          <ChevronDownIcon className={`w-3 h-3 ml-auto transition-transform ${hfOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {hfOpen && hfItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            onClick={onClose}
+            className={({ isActive }) => (
+              isActive ? 'sidebar-item-active ml-4' : 'sidebar-item ml-4'
+            )}
+          >
+            <span>{item.label}</span>
+          </NavLink>
+        ))}
+        <button
+          type="button"
+          onClick={() => setOllamaOpen((v) => !v)}
+          className="w-full px-6 pt-4 pb-2 text-xs uppercase tracking-wide text-text-inverse/60 flex items-center gap-2 hover:text-text-inverse/80 transition-colors"
+        >
+          <ServerIcon className="w-4 h-4" />
+          Ollama
+          <ChevronDownIcon className={`w-3 h-3 ml-auto transition-transform ${ollamaOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {ollamaOpen && ollamaItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

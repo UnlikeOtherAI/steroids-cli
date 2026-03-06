@@ -1,9 +1,9 @@
 import { Router, type Request, type Response } from 'express';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { HuggingFaceTokenAuth } from '../../../src/huggingface/auth.js';
-import { HuggingFaceModelRegistry, type HFCachedModel } from '../../../src/huggingface/model-registry.js';
-import { HuggingFaceUsageMetrics } from '../../../src/huggingface/metrics.js';
+import { HuggingFaceTokenAuth } from '../../../dist/huggingface/auth.js';
+import { HuggingFaceModelRegistry, type HFCachedModel } from '../../../dist/huggingface/model-registry.js';
+import { HuggingFaceUsageMetrics } from '../../../dist/huggingface/metrics.js';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 
 const router = Router();

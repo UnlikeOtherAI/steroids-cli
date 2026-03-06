@@ -7,8 +7,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { getRegisteredProjects } from '../../../dist/runners/projects.js';
-import { createOllamaApiClient, getResolvedConnectionConfig } from '../../../src/ollama/connection.js';
-import { openGlobalDatabase } from '../../../src/runners/global-db-connection.js';
+import { createOllamaApiClient, getResolvedConnectionConfig } from '../../../dist/ollama/connection.js';
+import { openGlobalDatabase } from '../../../dist/runners/global-db-connection.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
 
 const router = Router();

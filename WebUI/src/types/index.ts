@@ -4,6 +4,7 @@
 
 export * from './activity';
 export * from './huggingFace';
+export * from './ollama';
 export * from './modelUsage';
 export * from './runner';
 export * from './task';
