@@ -89,7 +89,7 @@ export const AISetupRoleSelector: React.FC<AISetupRoleSelectorProps> = ({
   const envVar = API_KEY_ENV_VARS[config.provider];
   const providerModels = modelsByProvider[config.provider] || [];
   const groupedModels = getGroupedModels(providerModels);
-  const showGroupedHFModels = config.provider === 'hf' && groupedModels.length > 0;
+  const showGroupedModels = (config.provider === 'hf' || config.provider === 'ollama') && groupedModels.length > 0;
 
   return (
     <div className={`bg-bg-base rounded-lg p-4 border border-border ${isInherited ? 'opacity-75 relative' : ''}`}>
@@ -162,7 +162,7 @@ export const AISetupRoleSelector: React.FC<AISetupRoleSelectorProps> = ({
             ) : (
               <>
                 <option value="">Select model...</option>
-                {showGroupedHFModels
+                {showGroupedModels
                   ? groupedModels.map((group) => (
                       <optgroup key={group.label} label={group.label}>
                         {group.items.map((m) => (

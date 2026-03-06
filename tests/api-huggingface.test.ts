@@ -4,6 +4,7 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createApp } from '../API/src/index.js';
+import { openGlobalDatabase } from '../dist/runners/global-db.js';
 
 function listen(server: http.Server): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -82,7 +83,7 @@ describe('API Hugging Face routes', () => {
     expect(body.connected).toBe(false);
   });
 
-  it('exposes hf provider and grouped hf model picker options', async () => {
+  it('exposes hf and ollama providers with grouped ready-model picker options', async () => {
     const providersResp = await fetch(`http://127.0.0.1:${port}/api/ai/providers`);
     expect(providersResp.status).toBe(200);
     const providersBody = await providersResp.json() as {
@@ -93,6 +94,7 @@ describe('API Hugging Face routes', () => {
     expect(providersBody.providers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'hf', installed: true }),
+        expect.objectContaining({ id: 'ollama', installed: true }),
       ])
     );
 
@@ -141,6 +143,47 @@ describe('API Hugging Face routes', () => {
           id: 'Qwen/Qwen2.5-Coder-32B-Instruct',
           runtime: 'opencode',
           groupLabel: 'OpenCode (Hugging Face)',
+        }),
+      ])
+    );
+
+    const { db, close } = openGlobalDatabase();
+    try {
+      db.prepare(
+        `INSERT INTO ollama_paired_models (model_name, runtime, endpoint, supports_tools, available, added_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('deepseek-coder-v2:33b', 'claude-code', 'http://localhost:11434', 1, 1, Date.now());
+      db.prepare(
+        `INSERT INTO ollama_paired_models (model_name, runtime, endpoint, supports_tools, available, added_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('qwen2.5-coder:32b', 'opencode', 'http://localhost:11434', 1, 1, Date.now() - 1);
+    } finally {
+      close();
+    }
+
+    const ollamaModelsResp = await fetch(`http://127.0.0.1:${port}/api/ai/models/ollama`);
+    expect(ollamaModelsResp.status).toBe(200);
+    const ollamaModelsBody = await ollamaModelsResp.json() as {
+      success: boolean;
+      provider: string;
+      source: string;
+      models: Array<{ id: string; runtime: string; groupLabel: string }>;
+    };
+
+    expect(ollamaModelsBody.success).toBe(true);
+    expect(ollamaModelsBody.provider).toBe('ollama');
+    expect(ollamaModelsBody.source).toBe('ready-models');
+    expect(ollamaModelsBody.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'deepseek-coder-v2:33b',
+          runtime: 'claude-code',
+          groupLabel: 'Claude Code (Ollama)',
+        }),
+        expect.objectContaining({
+          id: 'qwen2.5-coder:32b',
+          runtime: 'opencode',
+          groupLabel: 'OpenCode (Ollama)',
         }),
       ])
     );
