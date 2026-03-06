@@ -17,6 +17,18 @@ function formatMode(mode: OllamaConnectionMode): string {
   return mode === 'cloud' ? 'Cloud' : 'Local';
 }
 
+function formatBytes(bytes?: number): string {
+  if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  return `${value.toFixed(value >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
 export function OllamaConnectionPage() {
   const [connection, setConnection] = useState<OllamaConnectionStatus | null>(null);
   const [form, setForm] = useState<FormState>({
@@ -228,6 +240,17 @@ export function OllamaConnectionPage() {
             <div>
               <p className="text-text-muted">Loaded Models</p>
               <p className="font-semibold text-text-primary">{loadedModelsCount}</p>
+              {connection.loadedModels.length > 0 ? (
+                <ul className="mt-2 space-y-1">
+                  {connection.loadedModels.map((model) => (
+                    <li key={model.name} className="text-xs text-text-muted">
+                      {model.name} • VRAM {formatBytes(model.sizeVram)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-xs text-text-muted">No models currently loaded in memory.</p>
+              )}
             </div>
           </div>
         </div>

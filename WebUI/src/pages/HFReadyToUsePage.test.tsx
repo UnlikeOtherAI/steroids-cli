@@ -58,7 +58,7 @@ describe('HFReadyToUsePage', () => {
       expect(mockApi.getReadyModels).toHaveBeenCalledTimes(1);
     });
 
-    expect(await screen.findByText('deepseek-ai/DeepSeek-V3')).toBeInTheDocument();
+    expect(screen.getByText('deepseek-ai/DeepSeek-V3')).toBeInTheDocument();
     expect(screen.getAllByText('Claude Code').length).toBeGreaterThan(0);
     expect(screen.getByText('Price Indicator')).toBeInTheDocument();
     expect(screen.getByText('Context Length')).toBeInTheDocument();

@@ -82,7 +82,7 @@ export const ollamaApi = {
   },
 
   async pullModel(modelName: string): Promise<void> {
-    await fetchOllamaJson('/api/ollama/models/pull', {
+    await fetchOllamaJson('/api/ollama/pull', {
       method: 'POST',
       body: JSON.stringify({ modelName }),
     });
