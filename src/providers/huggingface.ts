@@ -169,11 +169,16 @@ export class HuggingFaceProvider extends BaseAIProvider {
 
       if (!response.ok) {
         const errorText = await safeReadText(response);
+        const mappedError = mapHfRouterError({
+          status: response.status,
+          statusText: response.statusText,
+          bodyText: errorText,
+        });
         return {
           success: false,
           exitCode: response.status,
           stdout: '',
-          stderr: errorText || `Hugging Face router error (${response.status})`,
+          stderr: mappedError,
           duration: Date.now() - startedAt,
           timedOut: false,
         };
@@ -300,15 +305,28 @@ export class HuggingFaceProvider extends BaseAIProvider {
 
     if (event.event === 'error') {
       const parsed = safeParseJson<OpenAISSEChunk>(event.data);
+      const code = parsed?.error?.code;
       const message = parsed?.error?.message ?? event.data;
-      return { error: `Hugging Face SSE error: ${message}` };
+      return {
+        error: mapHfRouterError({
+          status: codeToStatusCode(code),
+          bodyText: message,
+          source: 'sse',
+        }),
+      };
     }
 
     const chunk = safeParseJson<OpenAISSEChunk>(event.data);
     if (!chunk) return {};
 
     if (chunk.error?.message) {
-      return { error: `Hugging Face SSE error: ${chunk.error.message}` };
+      return {
+        error: mapHfRouterError({
+          status: codeToStatusCode(chunk.error.code),
+          bodyText: chunk.error.message,
+          source: 'sse',
+        }),
+      };
     }
 
     const text =
@@ -386,4 +404,54 @@ async function safeReadText(response: Response): Promise<string> {
 
 export function createHuggingFaceProvider(): HuggingFaceProvider {
   return new HuggingFaceProvider();
+}
+
+function mapHfRouterError(input: {
+  status?: number;
+  statusText?: string;
+  bodyText?: string;
+  source?: 'http' | 'sse';
+}): string {
+  const source = input.source ?? 'http';
+  const status = input.status;
+  const statusText = input.statusText ?? '';
+  const bodyText = (input.bodyText ?? '').trim();
+  const message = `${status ?? ''} ${statusText} ${bodyText}`.toLowerCase();
+
+  if (status === 402 || /insufficient|credit|quota|payment required/.test(message)) {
+    return `Hugging Face ${source} error: credits exhausted. Add credits in https://huggingface.co/settings/billing.`;
+  }
+
+  if (status === 429 || /rate.?limit|too many requests/.test(message)) {
+    return `Hugging Face ${source} error: rate limit exceeded (429). Retry after a short backoff.`;
+  }
+
+  if (
+    status === 401 ||
+    status === 403 ||
+    /gated|access denied|forbidden|not authorized|authorization required|request access/.test(message)
+  ) {
+    return `Hugging Face ${source} error: gated model access denied. Request model access and verify token read/inference scopes.`;
+  }
+
+  if (status === 503 || /unavailable|overloaded|provider down|capacity/.test(message)) {
+    return `Hugging Face ${source} error: provider outage or temporary unavailability (503).`;
+  }
+
+  if (bodyText) {
+    return `Hugging Face ${source} error (${status ?? 'unknown'}): ${bodyText}`;
+  }
+
+  return `Hugging Face ${source} error (${status ?? 'unknown'})`;
+}
+
+function codeToStatusCode(code: string | number | undefined): number | undefined {
+  if (typeof code === 'number' && Number.isFinite(code)) {
+    return code;
+  }
+  if (typeof code === 'string') {
+    const parsed = Number.parseInt(code, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }

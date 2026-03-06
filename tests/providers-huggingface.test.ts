@@ -100,7 +100,44 @@ describe('HuggingFaceProvider', () => {
 
     expect(result.success).toBe(false);
     expect(result.stdout).toBe('partial');
-    expect(result.stderr).toContain('insufficient credits');
+    expect(result.stderr).toContain('credits exhausted');
+  });
+
+  it('returns explicit rate-limit errors for HTTP 429 responses', async () => {
+    const provider = new HuggingFaceProvider({
+      auth: { getToken: () => 'hf_test' },
+      fetchImpl: async () => new Response('too many requests', { status: 429, statusText: 'Too Many Requests' }),
+    });
+
+    const result = await provider.invoke('hello', {
+      model: 'deepseek-ai/DeepSeek-V3',
+      streamOutput: false,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.exitCode).toBe(429);
+    expect(result.stderr).toContain('rate limit exceeded');
+  });
+
+  it('returns explicit gated-model errors for SSE access-denied events', async () => {
+    const provider = new HuggingFaceProvider({
+      auth: { getToken: () => 'hf_test' },
+      fetchImpl: async () =>
+        new Response(
+          createSSEStream([
+            'event: error\ndata: {"error":{"code":403,"message":"This model is gated. Request access first."}}\n\n',
+          ]),
+          { status: 200 }
+        ),
+    });
+
+    const result = await provider.invoke('hello', {
+      model: 'deepseek-ai/DeepSeek-V3',
+      streamOutput: false,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.stderr).toContain('gated model access denied');
   });
 
   it('fails when stream closes without [DONE] sentinel', async () => {

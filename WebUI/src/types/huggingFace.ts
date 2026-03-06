@@ -27,12 +27,22 @@ export interface HFCachedModel {
   likes: number;
   tags: string[];
   providers: string[];
+  providerDetails?: HFProviderDetail[];
   contextLength?: number;
   pricing?: Record<string, { input: number; output: number }>;
   supportsTools?: boolean;
   providerContextLengths?: Record<string, number>;
   addedAt: number;
   source: 'curated' | 'search' | 'manual';
+}
+
+export interface HFProviderDetail {
+  provider: string;
+  contextLength?: number;
+  pricing?: { input: number; output: number };
+  supportsTools?: boolean;
+  supportsStructuredOutput?: boolean;
+  isModelAuthor?: boolean;
 }
 
 export interface HFModelListResponse {

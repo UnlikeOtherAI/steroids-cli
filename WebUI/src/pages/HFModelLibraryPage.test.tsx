@@ -33,6 +33,16 @@ describe('HFModelLibraryPage', () => {
               likes: 400,
               tags: [],
               providers: ['novita'],
+              providerDetails: [
+                {
+                  provider: 'novita',
+                  contextLength: 131072,
+                  pricing: { input: 0.05, output: 0.25 },
+                  supportsTools: true,
+                  supportsStructuredOutput: true,
+                  isModelAuthor: false,
+                },
+              ],
               contextLength: 131072,
               supportsTools: true,
               pricing: { novita: { input: 0.05, output: 0.25 } },
@@ -53,6 +63,24 @@ describe('HFModelLibraryPage', () => {
             likes: 999,
             tags: [],
             providers: ['groq', 'novita'],
+            providerDetails: [
+              {
+                provider: 'groq',
+                contextLength: 131072,
+                pricing: { input: 0.15, output: 0.75 },
+                supportsTools: true,
+                supportsStructuredOutput: false,
+                isModelAuthor: false,
+              },
+              {
+                provider: 'novita',
+                contextLength: 131072,
+                pricing: { input: 0.05, output: 0.25 },
+                supportsTools: true,
+                supportsStructuredOutput: true,
+                isModelAuthor: false,
+              },
+            ],
             contextLength: 131072,
             supportsTools: true,
             pricing: {
@@ -117,6 +145,40 @@ describe('HFModelLibraryPage', () => {
         modelId: 'deepseek-ai/DeepSeek-V3',
         runtime: 'claude-code',
         routingPolicy: 'fastest',
+        supportsTools: true,
+      });
+    });
+  });
+
+  it('shows provider comparison panel when expanded', async () => {
+    const user = userEvent.setup();
+    render(<HFModelLibraryPage />);
+
+    await screen.findByText('deepseek-ai/DeepSeek-V3');
+    await user.click(screen.getByRole('button', { name: 'Compare Providers' }));
+
+    expect(screen.getByText('Structured')).toBeInTheDocument();
+    expect(screen.getByText('Author')).toBeInTheDocument();
+    expect(screen.getAllByText('novita').length).toBeGreaterThan(0);
+    expect(screen.getByText('$0.25')).toBeInTheDocument();
+  });
+
+  it('uses selected routing policy when pairing', async () => {
+    const user = userEvent.setup();
+    render(<HFModelLibraryPage />);
+
+    await screen.findByText('deepseek-ai/DeepSeek-V3');
+    await user.selectOptions(
+      screen.getByLabelText('Routing policy for deepseek-ai/DeepSeek-V3'),
+      'novita'
+    );
+    await user.click(screen.getByRole('button', { name: 'Pair Claude Code' }));
+
+    await waitFor(() => {
+      expect(mockApi.pairModel).toHaveBeenCalledWith({
+        modelId: 'deepseek-ai/DeepSeek-V3',
+        runtime: 'claude-code',
+        routingPolicy: 'novita',
         supportsTools: true,
       });
     });

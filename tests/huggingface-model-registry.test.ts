@@ -88,6 +88,16 @@ describe('HuggingFaceModelRegistry', () => {
     expect(models[0].contextLength).toBe(131072);
     expect(models[0].supportsTools).toBe(true);
     expect(models[0].pricing).toEqual({ together: { input: 0.15, output: 0.75 } });
+    expect(models[0].providerDetails).toEqual([
+      {
+        provider: 'together',
+        contextLength: 131072,
+        pricing: { input: 0.15, output: 0.75 },
+        supportsTools: true,
+        supportsStructuredOutput: undefined,
+        isModelAuthor: undefined,
+      },
+    ]);
     expect(listModels).toHaveBeenCalledTimes(4);
     expect(getModel).toHaveBeenCalledTimes(3);
     expect(listRouterModels).toHaveBeenCalledTimes(1);
@@ -120,6 +130,36 @@ describe('HuggingFaceModelRegistry', () => {
     expect(models.map((m) => m.id)).toEqual(['org/cached']);
     expect(listModels).not.toHaveBeenCalled();
     expect(getModel).not.toHaveBeenCalled();
+  });
+
+  it('auto-refreshes cache when older than 24 hours', async () => {
+    const cachePath = join(cacheDir, 'models.json');
+    const twentyFourHoursAndOneMs = (24 * 60 * 60 * 1000) + 1;
+    writeFileSync(
+      cachePath,
+      JSON.stringify({
+        lastUpdated: now,
+        models: [{ id: 'org/cached', pipelineTag: 'text-generation', downloads: 1, likes: 1, tags: [], providers: [], addedAt: now, source: 'curated' }],
+      }),
+      'utf-8'
+    );
+
+    listModels.mockResolvedValue([]);
+
+    const registry = new HuggingFaceModelRegistry({
+      client: {
+        listModels,
+        getModel,
+        searchModels: jest.fn(),
+        getWhoAmI: jest.fn(),
+        listRouterModels,
+      } as any,
+      cacheFilePath: cachePath,
+      nowFn: () => now + twentyFourHoursAndOneMs,
+    });
+
+    await registry.getCuratedModels();
+    expect(listModels).toHaveBeenCalled();
   });
 
   it('deletes corrupted cache and rebuilds on demand', async () => {

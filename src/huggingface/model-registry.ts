@@ -22,12 +22,22 @@ export interface HFCachedModel {
   likes: number;
   tags: string[];
   providers: string[];
+  providerDetails?: HFProviderDetail[];
   contextLength?: number;
   pricing?: Record<string, { input: number; output: number }>;
   supportsTools?: boolean;
   providerContextLengths?: Record<string, number>;
   addedAt: number;
   source: HFModelSource;
+}
+
+export interface HFProviderDetail {
+  provider: string;
+  contextLength?: number;
+  pricing?: { input: number; output: number };
+  supportsTools?: boolean;
+  supportsStructuredOutput?: boolean;
+  isModelAuthor?: boolean;
 }
 
 export interface HFModelCache {
@@ -233,6 +243,7 @@ export class HuggingFaceModelRegistry {
         { ...model, ...detail },
         providers,
         source,
+        providerStats.providerDetails,
         providerStats.contextLength,
         providerStats.supportsTools,
         providerStats.pricing,
@@ -255,6 +266,7 @@ export class HuggingFaceModelRegistry {
     model: HFModel,
     providers: string[],
     source: HFModelSource,
+    providerDetails?: HFProviderDetail[],
     contextLength?: number,
     supportsTools?: boolean,
     pricing?: Record<string, { input: number; output: number }>,
@@ -267,6 +279,7 @@ export class HuggingFaceModelRegistry {
       likes: model.likes ?? 0,
       tags: model.tags ?? [],
       providers,
+      providerDetails,
       contextLength,
       supportsTools,
       pricing,
@@ -286,6 +299,7 @@ export class HuggingFaceModelRegistry {
   }
 
   private toProviderStats(providers?: HFRouterProvider[]): {
+    providerDetails?: HFProviderDetail[];
     contextLength?: number;
     supportsTools?: boolean;
     pricing?: Record<string, { input: number; output: number }>;
@@ -299,6 +313,7 @@ export class HuggingFaceModelRegistry {
     let supportsTools = false;
     const pricing: Record<string, { input: number; output: number }> = {};
     const providerContextLengths: Record<string, number> = {};
+    const providerDetails: HFProviderDetail[] = [];
 
     for (const provider of providers) {
       if (provider.status && provider.status !== 'live') continue;
@@ -327,9 +342,21 @@ export class HuggingFaceModelRegistry {
           output: provider.pricing.output,
         };
       }
+
+      providerDetails.push({
+        provider: providerName,
+        contextLength: provider.context_length,
+        pricing: pricing[providerName],
+        supportsTools: provider.supports_tools,
+        supportsStructuredOutput: provider.supports_structured_output,
+        isModelAuthor: provider.is_model_author,
+      });
     }
 
+    providerDetails.sort((a, b) => a.provider.localeCompare(b.provider));
+
     return {
+      providerDetails: providerDetails.length > 0 ? providerDetails : undefined,
       contextLength: maxContextLength,
       supportsTools,
       pricing: Object.keys(pricing).length > 0 ? pricing : undefined,
