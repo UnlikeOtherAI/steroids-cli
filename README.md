@@ -242,6 +242,7 @@ That's it. Open your browser at:
 - **Runner status** — Active daemons with heartbeat monitoring
 - **Audit trails** — Full history of every task state change
 - **Configuration** — Edit project settings from the browser
+- **Model Usage analytics** — Per-model token totals, Ollama timing throughput (`tok/s`), and live VRAM/auto-unload runtime status
 
 ---
 

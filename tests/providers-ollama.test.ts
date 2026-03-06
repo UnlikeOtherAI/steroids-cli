@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { setCloudConnection, setLocalConnection } from '../src/ollama/connection.js';
+import { openGlobalDatabase } from '../src/runners/global-db-connection.js';
 import { OllamaProvider } from '../src/providers/ollama.js';
 
 describe('OllamaProvider', () => {
@@ -126,7 +127,7 @@ describe('OllamaProvider', () => {
               encoder.encode('{"message":{"content":"hello "},"done":false}\n'),
             );
             controller.enqueue(
-              encoder.encode('{"message":{"content":"world"},"done":true,"prompt_eval_count":12,"eval_count":4}\n'),
+              encoder.encode('{"message":{"content":"world"},"done":true,"prompt_eval_count":12,"eval_count":4,"total_duration":2000000000,"load_duration":500000000,"prompt_eval_duration":300000000,"eval_duration":1000000000}\n'),
             );
             controller.close();
           },
@@ -154,6 +155,23 @@ describe('OllamaProvider', () => {
       outputTokens: 4,
     });
     expect(events.length).toBeGreaterThan(0);
+
+    const { db, close } = openGlobalDatabase();
+    try {
+      const usage = db.prepare(
+        `SELECT model, prompt_tokens, completion_tokens, total_duration_ns, tokens_per_second
+         FROM ollama_usage
+         ORDER BY id DESC
+         LIMIT 1`
+      ).get() as any;
+      expect(usage.model).toBe('qwen2.5-coder:32b');
+      expect(usage.prompt_tokens).toBe(12);
+      expect(usage.completion_tokens).toBe(4);
+      expect(usage.total_duration_ns).toBe(2000000000);
+      expect(usage.tokens_per_second).toBe(4);
+    } finally {
+      close();
+    }
 
     const chatCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/chat'));
     expect(chatCall).toBeDefined();

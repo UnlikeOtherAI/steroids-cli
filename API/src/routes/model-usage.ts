@@ -7,6 +7,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { getRegisteredProjects } from '../../../dist/runners/projects.js';
+import { createOllamaApiClient, getResolvedConnectionConfig } from '../../../src/ollama/connection.js';
+import { openGlobalDatabase } from '../../../src/runners/global-db-connection.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
 
 const router = Router();
@@ -39,6 +41,39 @@ interface ModelAggregate {
   provider: string;
   model: string;
   stats: TokenUsage;
+}
+
+interface OllamaUsageSummary {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  requests: number;
+  avg_tokens_per_second: number | null;
+}
+
+interface OllamaUsageByModel extends OllamaUsageSummary {
+  model: string;
+}
+
+interface OllamaRuntimeModelStatus {
+  name: string;
+  size_bytes: number;
+  vram_bytes: number;
+  ram_bytes: number;
+  context_length: number | null;
+  expires_at: string | null;
+  unload_in_seconds: number | null;
+}
+
+interface OllamaRuntimeStatus {
+  connected: boolean;
+  endpoint: string;
+  mode: 'local' | 'cloud';
+  loaded_models: number;
+  total_vram_bytes: number;
+  total_ram_bytes: number;
+  models: OllamaRuntimeModelStatus[];
+  error?: string;
 }
 
 function emptyUsage(): TokenUsage {
@@ -166,13 +201,156 @@ function getProjectUsage(projectPath: string, projectName: string | null, hours:
   return result;
 }
 
+function getOllamaUsageSummary(hours: number): {
+  summary: OllamaUsageSummary;
+  byModel: OllamaUsageByModel[];
+} {
+  const summary: OllamaUsageSummary = {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+    requests: 0,
+    avg_tokens_per_second: null,
+  };
+
+  const { db, close } = openGlobalDatabase();
+  try {
+    const cutoffMs = Date.now() - (hours * 60 * 60 * 1000);
+    const summaryRow = db.prepare(
+      `SELECT
+         COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+         COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+         COUNT(*) AS requests,
+         AVG(tokens_per_second) AS avg_tokens_per_second
+       FROM ollama_usage
+       WHERE created_at >= ?`
+    ).get(cutoffMs) as {
+      prompt_tokens: number;
+      completion_tokens: number;
+      requests: number;
+      avg_tokens_per_second: number | null;
+    };
+
+    summary.prompt_tokens = Number(summaryRow.prompt_tokens ?? 0);
+    summary.completion_tokens = Number(summaryRow.completion_tokens ?? 0);
+    summary.total_tokens = summary.prompt_tokens + summary.completion_tokens;
+    summary.requests = Number(summaryRow.requests ?? 0);
+    summary.avg_tokens_per_second =
+      typeof summaryRow.avg_tokens_per_second === 'number' && Number.isFinite(summaryRow.avg_tokens_per_second)
+      ? summaryRow.avg_tokens_per_second
+      : null;
+
+    const byModel = db.prepare(
+      `SELECT
+         model,
+         COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+         COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+         COUNT(*) AS requests,
+         AVG(tokens_per_second) AS avg_tokens_per_second
+       FROM ollama_usage
+       WHERE created_at >= ?
+       GROUP BY model
+       ORDER BY (COALESCE(SUM(prompt_tokens), 0) + COALESCE(SUM(completion_tokens), 0)) DESC, COUNT(*) DESC`
+    ).all(cutoffMs) as Array<{
+      model: string;
+      prompt_tokens: number;
+      completion_tokens: number;
+      requests: number;
+      avg_tokens_per_second: number | null;
+    }>;
+
+    return {
+      summary,
+      byModel: byModel.map((row) => {
+        const promptTokens = Number(row.prompt_tokens ?? 0);
+        const completionTokens = Number(row.completion_tokens ?? 0);
+        return {
+          model: row.model,
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens,
+          requests: Number(row.requests ?? 0),
+          avg_tokens_per_second:
+            typeof row.avg_tokens_per_second === 'number' && Number.isFinite(row.avg_tokens_per_second)
+            ? row.avg_tokens_per_second
+            : null,
+        };
+      }),
+    };
+  } catch {
+    return {
+      summary,
+      byModel: [],
+    };
+  } finally {
+    close();
+  }
+}
+
+async function getOllamaRuntimeStatus(): Promise<OllamaRuntimeStatus> {
+  const resolvedConfig = getResolvedConnectionConfig();
+  const fallback: OllamaRuntimeStatus = {
+    connected: false,
+    endpoint: resolvedConfig.endpoint,
+    mode: resolvedConfig.mode,
+    loaded_models: 0,
+    total_vram_bytes: 0,
+    total_ram_bytes: 0,
+    models: [],
+  };
+
+  try {
+    const client = createOllamaApiClient(resolvedConfig);
+    const response = await client.listRunningModels();
+    const now = Date.now();
+
+    const models = response.models.map((model) => {
+      const expiresAt = model.expires_at ?? null;
+      const unloadEpoch = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+      const unloadInSeconds = Number.isFinite(unloadEpoch)
+        ? Math.max(0, Math.round((unloadEpoch - now) / 1000))
+        : null;
+      const sizeBytes = typeof model.size === 'number' && Number.isFinite(model.size) ? model.size : 0;
+      const vramBytes = typeof model.size_vram === 'number' && Number.isFinite(model.size_vram) ? model.size_vram : 0;
+
+      return {
+        name: model.name,
+        size_bytes: sizeBytes,
+        vram_bytes: vramBytes,
+        ram_bytes: Math.max(0, sizeBytes - vramBytes),
+        context_length:
+          typeof model.context_length === 'number' && Number.isFinite(model.context_length)
+            ? model.context_length
+            : null,
+        expires_at: expiresAt,
+        unload_in_seconds: unloadInSeconds,
+      };
+    });
+
+    return {
+      connected: true,
+      endpoint: resolvedConfig.endpoint,
+      mode: resolvedConfig.mode,
+      loaded_models: models.length,
+      total_vram_bytes: models.reduce((sum, model) => sum + model.vram_bytes, 0),
+      total_ram_bytes: models.reduce((sum, model) => sum + model.ram_bytes, 0),
+      models,
+    };
+  } catch (error) {
+    return {
+      ...fallback,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 /**
  * GET /api/model-usage
  * Query params:
  *   - project: string (optional) - aggregate only one project if provided
  *   - hours: number (optional, default: 24) - lookback window
  */
-router.get('/model-usage', (req: Request, res: Response) => {
+router.get('/model-usage', async (req: Request, res: Response) => {
   try {
     const projectPath = req.query.project as string | undefined;
     const hoursParam = req.query.hours as string | undefined;
@@ -228,6 +406,8 @@ router.get('/model-usage', (req: Request, res: Response) => {
         ...project.totals,
       }))
       .sort((a, b) => b.totalTokens - a.totalTokens || b.invocations - a.invocations);
+    const ollamaUsage = getOllamaUsageSummary(hours);
+    const ollamaRuntime = await getOllamaRuntimeStatus();
 
     res.json({
       success: true,
@@ -239,6 +419,11 @@ router.get('/model-usage', (req: Request, res: Response) => {
         ...m.stats,
       })),
       by_project: byProject,
+      ollama: {
+        usage: ollamaUsage.summary,
+        by_model: ollamaUsage.byModel,
+        runtime: ollamaRuntime,
+      },
     });
   } catch (error) {
     console.error('Error getting model usage:', error);

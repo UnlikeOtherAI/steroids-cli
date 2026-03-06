@@ -76,8 +76,12 @@ function setupGlobalDb(projects: Array<{ path: string; name: string }>): void {
 describe('API model-usage endpoint', () => {
   const originalHome = process.env.HOME;
   const originalNodeEnv = process.env.NODE_ENV;
+  const originalOllamaHost = process.env.STEROIDS_OLLAMA_HOST;
+  const originalOllamaPort = process.env.STEROIDS_OLLAMA_PORT;
   let server: http.Server;
+  let ollamaServer: http.Server;
   let port: number;
+  let ollamaPort: number;
   let projectOnePath: string;
   let projectTwoPath: string;
   let homeDir: string;
@@ -97,6 +101,22 @@ describe('API model-usage endpoint', () => {
       { path: projectOnePath, name: 'Project One' },
       { path: projectTwoPath, name: 'Project Two' },
     ]);
+    addOllamaUsage({
+      model: 'qwen2.5-coder:32b',
+      endpoint: 'http://127.0.0.1:11434',
+      role: 'coder',
+      promptTokens: 70,
+      completionTokens: 30,
+      tokensPerSecond: 40,
+    });
+    addOllamaUsage({
+      model: 'qwen2.5-coder:32b',
+      endpoint: 'http://127.0.0.1:11434',
+      role: 'reviewer',
+      promptTokens: 30,
+      completionTokens: 20,
+      tokensPerSecond: 20,
+    });
 
     addInvocation(projectOnePath, 'claude', 'claude-3-7-sonnet', {
       inputTokens: 100,
@@ -131,6 +151,30 @@ describe('API model-usage endpoint', () => {
       totalCostUsd: 9.99,
     }, "datetime('now', '-30 hours')");
 
+    ollamaServer = http.createServer((req, res) => {
+      if (req.url === '/api/ps') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          models: [
+            {
+              name: 'qwen2.5-coder:32b',
+              size: 10_000_000_000,
+              size_vram: 8_000_000_000,
+              digest: 'sha256:test',
+              context_length: 32768,
+              expires_at: '2999-01-01T00:00:00Z',
+            },
+          ],
+        }));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    ollamaPort = await listen(ollamaServer);
+    process.env.STEROIDS_OLLAMA_HOST = '127.0.0.1';
+    process.env.STEROIDS_OLLAMA_PORT = String(ollamaPort);
+
     const app = createApp();
     server = http.createServer(app);
     port = await listen(server);
@@ -139,8 +183,13 @@ describe('API model-usage endpoint', () => {
   afterEach(async () => {
     process.env.HOME = originalHome;
     process.env.NODE_ENV = originalNodeEnv;
+    if (originalOllamaHost === undefined) delete process.env.STEROIDS_OLLAMA_HOST;
+    else process.env.STEROIDS_OLLAMA_HOST = originalOllamaHost;
+    if (originalOllamaPort === undefined) delete process.env.STEROIDS_OLLAMA_PORT;
+    else process.env.STEROIDS_OLLAMA_PORT = originalOllamaPort;
     delete process.env.STEROIDS_HOME;
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => ollamaServer.close(() => resolve()));
     await rm(projectOnePath, { recursive: true, force: true });
     await rm(projectTwoPath, { recursive: true, force: true });
     await rm(homeDir, { recursive: true, force: true });
@@ -227,4 +276,68 @@ describe('API model-usage endpoint', () => {
     expect(body.success).toBe(false);
     expect(body.error).toContain('Invalid hours parameter');
   });
+
+  it('includes ollama usage throughput and runtime vram status', async () => {
+    const resp = await fetch(`http://127.0.0.1:${port}/api/model-usage`);
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as any;
+
+    expect(body.ollama).toBeTruthy();
+    expect(body.ollama.usage).toMatchObject({
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      total_tokens: 150,
+      requests: 2,
+    });
+    expect(body.ollama.usage.avg_tokens_per_second).toBeCloseTo(30, 6);
+    expect(body.ollama.by_model[0]).toMatchObject({
+      model: 'qwen2.5-coder:32b',
+      total_tokens: 150,
+      requests: 2,
+    });
+    expect(body.ollama.runtime).toMatchObject({
+      connected: true,
+      loaded_models: 1,
+      total_vram_bytes: 8000000000,
+      total_ram_bytes: 2000000000,
+    });
+    expect(body.ollama.runtime.models[0]).toMatchObject({
+      name: 'qwen2.5-coder:32b',
+      vram_bytes: 8000000000,
+      ram_bytes: 2000000000,
+    });
+  });
 });
+
+function addOllamaUsage(input: {
+  model: string;
+  endpoint: string;
+  role: 'coder' | 'reviewer' | 'orchestrator';
+  promptTokens: number;
+  completionTokens: number;
+  tokensPerSecond: number;
+}): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare(
+      `INSERT INTO ollama_usage (
+         model, endpoint, role, prompt_tokens, completion_tokens, total_duration_ns,
+         load_duration_ns, prompt_eval_duration_ns, eval_duration_ns, tokens_per_second, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      input.model,
+      input.endpoint,
+      input.role,
+      input.promptTokens,
+      input.completionTokens,
+      2_000_000_000,
+      200_000_000,
+      300_000_000,
+      800_000_000,
+      input.tokensPerSecond,
+      Date.now(),
+    );
+  } finally {
+    close();
+  }
+}

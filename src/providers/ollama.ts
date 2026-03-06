@@ -27,6 +27,7 @@ import {
   OLLAMA_FALLBACK_MODELS,
   recommendRoles,
 } from './ollama-utils.js';
+import { buildOllamaTokenMetrics, recordOllamaUsage } from '../ollama/metrics.js';
 
 const DEFAULT_TIMEOUT_MS = 900_000;
 const DEFAULT_LOCAL_MAX_CONCURRENT = 1;
@@ -259,6 +260,25 @@ export class OllamaProvider extends BaseAIProvider {
       }
 
       const tokenUsage = this.extractTokenUsage(finalChunk);
+      const ollamaMetrics = buildOllamaTokenMetrics(finalChunk, endpointConfig.endpoint);
+      if (tokenUsage && ollamaMetrics) {
+        try {
+          recordOllamaUsage({
+            model,
+            endpoint: endpointConfig.endpoint,
+            role: options.role ?? 'coder',
+            promptTokens: tokenUsage.inputTokens,
+            completionTokens: tokenUsage.outputTokens,
+            totalDurationNs: ollamaMetrics.totalDurationNs,
+            loadDurationNs: ollamaMetrics.loadDurationNs,
+            promptEvalDurationNs: ollamaMetrics.promptEvalDurationNs,
+            evalDurationNs: ollamaMetrics.evalDurationNs,
+            tokensPerSecond: ollamaMetrics.tokensPerSecond,
+          });
+        } catch {
+          // Best-effort metrics write should never fail request handling.
+        }
+      }
       return {
         success: true,
         exitCode: 0,
@@ -348,6 +368,7 @@ export class OllamaProvider extends BaseAIProvider {
     if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number') {
       return undefined;
     }
+
     return {
       inputTokens,
       outputTokens,

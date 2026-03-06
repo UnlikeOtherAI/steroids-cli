@@ -5,6 +5,7 @@ import { useProject } from '../contexts/ProjectContext';
 import { modelUsageApi } from '../services/modelUsageApi';
 import { ModelUsageCard, ModelUsageCardEntry } from './ModelUsageCard';
 import { ModelUsageSummary, ModelUsageSummaryData } from './ModelUsageSummary';
+import { OllamaUsageWidgets } from './OllamaUsageWidgets';
 
 interface Props {
   project?: Project | null;
@@ -74,6 +75,7 @@ function normalizeResponse(response: ModelUsageResponse): {
   summary: ModelUsageSummaryData;
   models: ModelUsageCardEntry[];
   skippedProjects: number;
+  ollama: ModelUsageResponse['ollama'];
 } {
   const maybeDetailed = response as unknown as Partial<DetailedModelResponse>;
 
@@ -108,6 +110,7 @@ function normalizeResponse(response: ModelUsageResponse): {
         totalCostUsd: entry.total_cost_usd,
       })),
       skippedProjects: maybeDetailed.skipped_projects ?? 0,
+      ollama: response.ollama,
     };
   }
 
@@ -121,6 +124,7 @@ function normalizeResponse(response: ModelUsageResponse): {
     },
     models: response.by_model.map(toFallbackEntry),
     skippedProjects: 0,
+    ollama: response.ollama,
   };
 }
 
@@ -169,6 +173,8 @@ export const ModelUsagePage: React.FC<Props> = ({ project }) => {
       )}
 
       {error && <div className="text-center py-4 text-danger">{error}</div>}
+
+      {normalized?.ollama && <OllamaUsageWidgets ollama={normalized.ollama} />}
 
       {normalized && <ModelUsageSummary summary={normalized.summary} />}
 

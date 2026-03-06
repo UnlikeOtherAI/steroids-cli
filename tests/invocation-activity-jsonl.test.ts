@@ -13,9 +13,13 @@ function parseJsonl(filePath: string): any[] {
 
 describe('Invocation activity logs (JSONL)', () => {
   let projectPath: string;
+  let globalHome: string;
   const taskId = 'task-1';
+  const originalSteroidsHome = process.env.STEROIDS_HOME;
 
   beforeEach(() => {
+    globalHome = mkdtempSync(join(tmpdir(), 'steroids-home-'));
+    process.env.STEROIDS_HOME = globalHome;
     projectPath = mkdtempSync(join(tmpdir(), 'steroids-proj-'));
     const { db, close } = initDatabase(projectPath);
     try {
@@ -27,6 +31,12 @@ describe('Invocation activity logs (JSONL)', () => {
 
   afterEach(() => {
     rmSync(projectPath, { recursive: true, force: true });
+    rmSync(globalHome, { recursive: true, force: true });
+    if (originalSteroidsHome === undefined) {
+      delete process.env.STEROIDS_HOME;
+    } else {
+      process.env.STEROIDS_HOME = originalSteroidsHome;
+    }
   });
 
   it('creates .steroids/invocations/<id>.log and updates DB on success', async () => {
@@ -133,4 +143,3 @@ describe('Invocation activity logs (JSONL)', () => {
     }
   });
 });
-
