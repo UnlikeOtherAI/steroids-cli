@@ -144,6 +144,12 @@ describe('Credit Exhaustion Detection', () => {
       const err = provider.classifyError(1, 'unknown random error');
       expect(err?.type).toBe('unknown');
     });
+
+    it('model does not support tool calling -> model_capability_error', () => {
+      const err = provider.classifyError(1, 'This model does not support tool calling');
+      expect(err?.type).toBe('model_capability_error');
+      expect(err?.retryable).toBe(false);
+    });
   });
 
   // === classifyResult() (spec #17–#20) ===

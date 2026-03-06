@@ -101,6 +101,7 @@ export type ProviderErrorType =
   | 'model_not_found'
   | 'context_exceeded'
   | 'credit_exhaustion'
+  | 'model_capability_error'
   | 'subprocess_hung'
   | 'safety_violation'
   | 'policy_violation'
@@ -371,6 +372,14 @@ export abstract class BaseAIProvider implements IAIProvider {
       return {
         type: 'context_exceeded',
         message: 'Context limit exceeded',
+        retryable: false,
+      };
+    }
+
+    if (/does not support tool|tool.?calling.+not supported|missing required tool call|function.?calling.+not supported/i.test(stderr)) {
+      return {
+        type: 'model_capability_error',
+        message: 'Model capability mismatch',
         retryable: false,
       };
     }
