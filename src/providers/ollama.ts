@@ -1,285 +1,448 @@
 /**
  * Ollama Provider
- * Implementation for Ollama local API
- * http://localhost:11434
+ * Native /api/chat inference with NDJSON streaming, plus /v1/models discovery.
  */
 
-import { request } from 'node:http';
+import { TextDecoder } from 'node:util';
+import { loadConfig } from '../config/loader.js';
+import {
+  createOllamaApiClient,
+  getCloudApiKey,
+  getResolvedConnectionConfig,
+  type OllamaConnectionMode,
+} from '../ollama/connection.js';
 import {
   BaseAIProvider,
   type InvokeOptions,
   type InvokeResult,
   type ModelInfo,
+  type ProviderError,
   type TokenUsage,
 } from './interface.js';
+import {
+  EndpointSemaphore,
+  type SemaphoreRelease,
+  extractContextLength,
+  normalizePositiveInt,
+  OLLAMA_FALLBACK_MODELS,
+  recommendRoles,
+} from './ollama-utils.js';
 
-/**
- * Static list of common Ollama models (fallback if local Ollama not reachable)
- */
-const OLLAMA_FALLBACK_MODELS: ModelInfo[] = [
-  {
-    id: 'llama3',
-    name: 'Llama 3',
-    recommendedFor: ['coder', 'reviewer'],
-    supportsStreaming: true,
-  },
-  {
-    id: 'codellama',
-    name: 'CodeLlama',
-    recommendedFor: ['coder'],
-    supportsStreaming: true,
-  },
-  {
-    id: 'deepseek-coder-v2',
-    name: 'DeepSeek Coder V2',
-    recommendedFor: ['coder'],
-    supportsStreaming: true,
-  },
-];
+const DEFAULT_TIMEOUT_MS = 900_000;
+const DEFAULT_LOCAL_MAX_CONCURRENT = 1;
+const DEFAULT_CLOUD_MAX_CONCURRENT = 3;
+const DEFAULT_QUEUE_TIMEOUT_MS = 120_000;
+const DEFAULT_NUM_CTX = 32_768;
+const MIN_NUM_CTX = 8_192;
+const MAX_ERROR_BODY = 4_000;
 
-/**
- * Default models per role
- */
 const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string> = {
-  orchestrator: 'llama3',
-  coder: 'deepseek-coder-v2',
-  reviewer: 'llama3',
+  orchestrator: 'llama3.3:70b',
+  coder: 'qwen2.5-coder:32b',
+  reviewer: 'llama3.3:70b',
 };
+
+interface EndpointConfig {
+  endpoint: string;
+  mode: OllamaConnectionMode;
+  apiKey?: string;
+  maxConcurrent: number;
+  queueTimeoutMs: number;
+}
+
+interface OllamaStreamChunk {
+  message?: {
+    role?: string;
+    content?: string;
+    tool_calls?: unknown[];
+  };
+  done?: boolean;
+  error?: string;
+  prompt_eval_count?: number;
+  eval_count?: number;
+  total_duration?: number;
+  load_duration?: number;
+  prompt_eval_duration?: number;
+  eval_duration?: number;
+}
 
 /**
  * Ollama AI Provider implementation
  */
 export class OllamaProvider extends BaseAIProvider {
   readonly name = 'ollama';
-  readonly displayName = 'Ollama (local)';
+  readonly displayName = 'Ollama';
 
-  private host: string;
-  private port: number;
   private dynamicModels: ModelInfo[] = [];
+  private modelContextCache: Map<string, number> = new Map();
+  private static semaphores: Map<string, EndpointSemaphore> = new Map();
 
-  constructor() {
-    super();
-    this.host = process.env.STEROIDS_OLLAMA_HOST || 'localhost';
-    this.port = parseInt(process.env.STEROIDS_OLLAMA_PORT || '11434', 10);
-  }
-
-  /**
-   * Check if Ollama is running by calling its API
-   */
   async isAvailable(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const options = {
-        hostname: this.host,
-        port: this.port,
-        path: '/api/tags',
-        method: 'GET',
-      };
-
-      const req = request(options, (res) => {
-        if (res.statusCode === 200) {
-          resolve(true);
-        } else {
-          resolve(false);
-        }
-      });
-
-      req.on('error', () => resolve(false));
-      req.end();
-
-      // Short timeout for availability check
-      setTimeout(() => {
-        req.destroy();
-        resolve(false);
-      }, 2000);
-    });
+    try {
+      const client = createOllamaApiClient(getResolvedConnectionConfig());
+      await client.listInstalledModels();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  /**
-   * Fetch available models from local Ollama service
-   */
   async initialize(): Promise<void> {
-    return new Promise((resolve) => {
-      const options = {
-        hostname: this.host,
-        port: this.port,
-        path: '/api/tags',
-        method: 'GET',
-      };
-
-      const req = request(options, (res) => {
-        let body = '';
-        res.on('data', (chunk) => body += chunk);
-        res.on('end', () => {
-          try {
-            const data = JSON.parse(body);
-            if (data.models && Array.isArray(data.models)) {
-              this.dynamicModels = data.models.map((m: any) => ({
-                id: m.name,
-                name: m.name,
-                recommendedFor: m.name.toLowerCase().includes('coder') ? ['coder'] : [],
-                supportsStreaming: true,
-              }));
-            }
-            resolve();
-          } catch {
-            resolve();
-          }
-        });
-      });
-
-      req.on('error', () => resolve());
-      req.end();
-
-      // Timeout for initialization
-      setTimeout(() => {
-        req.destroy();
-        resolve();
-      }, 5000);
-    });
+    await this.fetchModels();
   }
 
-  /**
-   * Invoke Ollama chat API
-   */
+  async fetchModels(): Promise<void> {
+    const client = createOllamaApiClient(getResolvedConnectionConfig());
+
+    try {
+      const result = await client.listOpenAIModels();
+      const models = result.data ?? [];
+
+      this.dynamicModels = models.map((model) => {
+        const id = model.id;
+        return {
+          id,
+          name: id,
+          recommendedFor: recommendRoles(id),
+          supportsStreaming: true,
+          contextWindow: this.modelContextCache.get(id) ?? DEFAULT_NUM_CTX,
+        };
+      });
+    } catch {
+      try {
+        const tags = await client.listInstalledModels();
+        this.dynamicModels = (tags.models ?? []).map((model) => ({
+          id: model.name,
+          name: model.name,
+          recommendedFor: recommendRoles(model.name),
+          supportsStreaming: true,
+          contextWindow: this.modelContextCache.get(model.name) ?? DEFAULT_NUM_CTX,
+        }));
+      } catch {
+        this.dynamicModels = [];
+      }
+    }
+  }
+
   async invoke(prompt: string, options: InvokeOptions): Promise<InvokeResult> {
     const startTime = Date.now();
-    const model = options.model;
+    const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     const onActivity = options.onActivity;
+    const model = options.model;
+    const endpointConfig = this.resolveEndpointConfig();
 
-    return new Promise((resolve) => {
-      const postData = JSON.stringify({
-        model: model,
+    let release: SemaphoreRelease | undefined;
+    try {
+      release = await this.acquireEndpointSlot(endpointConfig);
+    } catch (error) {
+      return {
+        success: false,
+        exitCode: 1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : 'All Ollama slots busy',
+        duration: Date.now() - startTime,
+        timedOut: true,
+      };
+    }
+
+    const controller = new AbortController();
+    const requestTimeout = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      const numCtx = await this.resolveContextWindow(model, endpointConfig);
+      const payload = {
+        model,
         messages: [{ role: 'user', content: prompt }],
-        stream: false, // For simplicity initially, can implement streaming later
-      });
-
-      const requestOptions = {
-        hostname: this.host,
-        port: this.port,
-        path: '/api/chat',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+        stream: true,
+        options: {
+          temperature: 0.8,
+          top_p: 0.9,
+          num_predict: -1,
+          num_ctx: numCtx,
+          seed: 0,
         },
       };
 
-      const req = request(requestOptions, (res) => {
-        let responseBody = '';
-
-        res.on('data', (chunk) => {
-          responseBody += chunk;
-        });
-
-        res.on('end', () => {
-          const duration = Date.now() - startTime;
-          try {
-            const result = JSON.parse(responseBody);
-
-            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-              const content = result.message?.content || '';
-              // Ollama usually returns token counts in response
-              const usage: TokenUsage | undefined = result.prompt_eval_count ? {
-                inputTokens: result.prompt_eval_count,
-                outputTokens: result.eval_count,
-              } : undefined;
-
-              resolve({
-                success: true,
-                exitCode: 0,
-                stdout: content,
-                stderr: '',
-                duration,
-                timedOut: false,
-                tokenUsage: usage,
-              });
-            } else {
-              resolve({
-                success: false,
-                exitCode: res.statusCode || 1,
-                stdout: '',
-                stderr: responseBody,
-                duration,
-                timedOut: false,
-              });
-            }
-          } catch (e) {
-            resolve({
-              success: false,
-              exitCode: 1,
-              stdout: '',
-              stderr: `Failed to parse Ollama response: ${e}
-
-Raw response: ${responseBody}`,
-              duration,
-              timedOut: false,
-            });
-          }
-        });
+      const response = await fetch(`${endpointConfig.endpoint}/api/chat`, {
+        method: 'POST',
+        headers: this.buildHeaders(endpointConfig.apiKey),
+        body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
-      req.on('error', (e) => {
-        resolve({
+      if (!response.ok) {
+        const errorBody = (await response.text()).slice(0, MAX_ERROR_BODY);
+        return {
+          success: false,
+          exitCode: response.status || 1,
+          stdout: '',
+          stderr: errorBody || `Ollama API request failed: ${response.status}`,
+          duration: Date.now() - startTime,
+          timedOut: false,
+        };
+      }
+
+      if (!response.body) {
+        return {
           success: false,
           exitCode: 1,
           stdout: '',
-          stderr: `Ollama request error: ${e.message}`,
+          stderr: 'Ollama response did not include a body stream',
           duration: Date.now() - startTime,
           timedOut: false,
-        });
-      });
-
-      req.write(postData);
-      req.end();
-
-      if (options.timeout) {
-        setTimeout(() => {
-          req.destroy();
-          resolve({
-            success: false,
-            exitCode: 1,
-            stdout: '',
-            stderr: 'Ollama request timed out',
-            duration: Date.now() - startTime,
-            timedOut: true,
-          });
-        }, options.timeout);
+        };
       }
-    });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let stdout = '';
+      let finalChunk: OllamaStreamChunk | undefined;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const consumed = this.consumeBuffer(buffer, (chunk) => {
+          if (chunk.error) {
+            throw new Error(chunk.error);
+          }
+
+          const delta = chunk.message?.content ?? '';
+          if (delta) {
+            stdout += delta;
+            onActivity?.({
+              type: 'output',
+              text: delta,
+            });
+          }
+
+          if (chunk.done) {
+            finalChunk = chunk;
+          }
+        });
+        buffer = consumed;
+      }
+
+      buffer += decoder.decode();
+      const tail = buffer.trim();
+      if (tail) {
+        const chunk = JSON.parse(tail) as OllamaStreamChunk;
+        if (chunk.error) {
+          throw new Error(chunk.error);
+        }
+        const delta = chunk.message?.content ?? '';
+        if (delta) {
+          stdout += delta;
+          onActivity?.({
+            type: 'output',
+            text: delta,
+          });
+        }
+        if (chunk.done) {
+          finalChunk = chunk;
+        }
+      }
+
+      const tokenUsage = this.extractTokenUsage(finalChunk);
+      return {
+        success: true,
+        exitCode: 0,
+        stdout,
+        stderr: '',
+        duration: Date.now() - startTime,
+        timedOut: false,
+        tokenUsage,
+      };
+    } catch (error) {
+      const timedOut = this.isAbortError(error);
+      return {
+        success: false,
+        exitCode: 1,
+        stdout: '',
+        stderr: this.mapInvocationError(error, timeout),
+        duration: Date.now() - startTime,
+        timedOut,
+      };
+    } finally {
+      clearTimeout(requestTimeout);
+      release();
+    }
   }
 
-  /**
-   * List models (prefers dynamic, fallbacks to static)
-   */
   listModels(): string[] {
     const models = this.dynamicModels.length > 0 ? this.dynamicModels : OLLAMA_FALLBACK_MODELS;
-    return models.map((m) => m.id);
+    return models.map((model) => model.id);
   }
 
-  /**
-   * Get model info
-   */
   getModelInfo(): ModelInfo[] {
-    return this.dynamicModels.length > 0 ? [...this.dynamicModels] : [...OLLAMA_FALLBACK_MODELS];
+    if (this.dynamicModels.length > 0) {
+      return [...this.dynamicModels];
+    }
+    return [...OLLAMA_FALLBACK_MODELS];
   }
 
-  /**
-   * Get default model
-   */
   getDefaultModel(role: 'orchestrator' | 'coder' | 'reviewer'): string {
     return DEFAULT_MODELS[role];
   }
 
-  /**
-   * API-only provider
-   */
   getDefaultInvocationTemplate(): string {
     return '';
   }
+
+  override classifyError(exitCode: number, stderr: string): ProviderError | null {
+    const lowered = stderr.toLowerCase();
+    if (exitCode !== 0 && (lowered.includes('out of memory') || lowered.includes('insufficient memory'))) {
+      return {
+        type: 'unknown',
+        message: 'Ollama out of memory',
+        retryable: false,
+      };
+    }
+    return super.classifyError(exitCode, stderr);
+  }
+
+  static resetSemaphoresForTests(): void {
+    this.semaphores.clear();
+  }
+
+  private consumeBuffer(buffer: string, onChunk: (chunk: OllamaStreamChunk) => void): string {
+    let working = buffer;
+    while (true) {
+      const newlineIndex = working.indexOf('\n');
+      if (newlineIndex === -1) {
+        break;
+      }
+
+      const line = working.slice(0, newlineIndex).trim();
+      working = working.slice(newlineIndex + 1);
+
+      if (!line) {
+        continue;
+      }
+
+      const chunk = JSON.parse(line) as OllamaStreamChunk;
+      onChunk(chunk);
+    }
+
+    return working;
+  }
+
+  private extractTokenUsage(chunk?: OllamaStreamChunk): TokenUsage | undefined {
+    const inputTokens = chunk?.prompt_eval_count;
+    const outputTokens = chunk?.eval_count;
+    if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number') {
+      return undefined;
+    }
+    return {
+      inputTokens,
+      outputTokens,
+    };
+  }
+
+  private resolveEndpointConfig(): EndpointConfig {
+    const resolved = getResolvedConnectionConfig();
+    const configured = this.readProviderConfig();
+    const maxConcurrent =
+      normalizePositiveInt(configured.maxConcurrent) ??
+      (resolved.mode === 'cloud' ? DEFAULT_CLOUD_MAX_CONCURRENT : DEFAULT_LOCAL_MAX_CONCURRENT);
+    const queueTimeoutMs =
+      normalizePositiveInt(configured.queueTimeoutMs) ??
+      DEFAULT_QUEUE_TIMEOUT_MS;
+
+    return {
+      endpoint: resolved.endpoint,
+      mode: resolved.mode,
+      apiKey: resolved.mode === 'cloud' ? getCloudApiKey() : undefined,
+      maxConcurrent,
+      queueTimeoutMs,
+    };
+  }
+
+  private readProviderConfig(): { maxConcurrent?: number; queueTimeoutMs?: number } {
+    const config = loadConfig() as { ollama?: { maxConcurrent?: number; queueTimeoutMs?: number } };
+
+    const envMaxConcurrent = normalizePositiveInt(process.env.STEROIDS_OLLAMA_MAX_CONCURRENT);
+    const envQueueTimeoutMs = normalizePositiveInt(process.env.STEROIDS_OLLAMA_QUEUE_TIMEOUT_MS);
+
+    return {
+      maxConcurrent: envMaxConcurrent ?? config.ollama?.maxConcurrent,
+      queueTimeoutMs: envQueueTimeoutMs ?? config.ollama?.queueTimeoutMs,
+    };
+  }
+
+  private acquireEndpointSlot(config: EndpointConfig): Promise<SemaphoreRelease> {
+    const key = config.endpoint;
+    const existing = OllamaProvider.semaphores.get(key);
+    if (existing) {
+      existing.setMaxConcurrent(config.maxConcurrent);
+      return existing.acquire(config.queueTimeoutMs);
+    }
+
+    const semaphore = new EndpointSemaphore(config.maxConcurrent);
+    OllamaProvider.semaphores.set(key, semaphore);
+    return semaphore.acquire(config.queueTimeoutMs);
+  }
+
+  private buildHeaders(apiKey?: string): Headers {
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+      Accept: 'application/x-ndjson, application/json',
+    });
+    if (apiKey) {
+      headers.set('Authorization', `Bearer ${apiKey}`);
+    }
+    return headers;
+  }
+
+  private async resolveContextWindow(model: string, config: EndpointConfig): Promise<number> {
+    const cached = this.modelContextCache.get(model);
+    if (cached) {
+      return cached;
+    }
+
+    let contextWindow = DEFAULT_NUM_CTX;
+    try {
+      const client = createOllamaApiClient({
+        endpoint: config.endpoint,
+        mode: config.mode,
+        cloudTier: null,
+      });
+      const details = await client.showModel(model);
+      const fromModelInfo = extractContextLength(details.model_info);
+      if (fromModelInfo) {
+        contextWindow = Math.max(MIN_NUM_CTX, fromModelInfo);
+      }
+    } catch {
+      // Fall back to sane default when metadata lookup fails.
+    }
+
+    this.modelContextCache.set(model, contextWindow);
+    return contextWindow;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError';
+  }
+
+  private mapInvocationError(error: unknown, timeoutMs: number): string {
+    if (this.isAbortError(error)) {
+      return `Ollama request timed out after ${timeoutMs}ms`;
+    }
+
+    if (error instanceof Error) {
+      if (error.message.toLowerCase().includes('econnrefused')) {
+        return `Ollama connection refused: ${error.message}`;
+      }
+      return error.message;
+    }
+    return String(error);
+  }
 }
 
-/**
- * Create an Ollama provider instance
- */
 export function createOllamaProvider(): OllamaProvider {
   return new OllamaProvider();
 }
