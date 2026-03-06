@@ -10,6 +10,7 @@ import { initDatabase, isInitialized, getDbPath } from '../database/connection.j
 import type { GlobalFlags } from '../cli/flags.js';
 import { createOutput } from '../cli/output.js';
 import { colors, markers } from '../cli/colors.js';
+import { ErrorCode } from '../cli/errors.js';
 import { registerProject } from '../runners/projects.js';
 import { generateHelp } from '../cli/help.js';
 import { runAISetup } from '../config/ai-setup.js';
@@ -135,6 +136,30 @@ function detectDefaultBranch(cwd: string): string | null {
   return null;
 }
 
+/**
+ * Return the list of remote names, or an empty array if none are configured.
+ */
+function getRemotes(cwd: string): string[] {
+  try {
+    const out = execFileSync('git', ['remote'], { cwd, stdio: 'pipe' }).toString().trim();
+    return out ? out.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Return true if the given remote has at least one branch ref.
+ */
+function remoteHasBranches(cwd: string, remote: string): boolean {
+  try {
+    const out = execFileSync('git', ['ls-remote', '--heads', remote], { cwd, stdio: 'pipe' }).toString().trim();
+    return out.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function initCommand(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'init', flags });
 
@@ -157,6 +182,34 @@ export async function initCommand(args: string[], flags: GlobalFlags): Promise<v
 
   const cwd = process.cwd();
   const dbPath = getDbPath(cwd);
+
+  // ── Git prerequisites ──────────────────────────────────────────────────────
+  // Check 1: Must be inside a git repository.
+  if (!isInsideGitRepo(cwd)) {
+    out.error(
+      ErrorCode.CONFIG_ERROR,
+      'Not a git repository. Steroids requires git for task branch management.',
+      { suggestion: 'git init && git add . && git commit -m "Initial commit"' },
+    );
+    process.exit(1);
+  }
+
+  // Check 2: If a remote is configured, it must have branches on it.
+  // Local-only repos (no remote) are fine — steroids supports them.
+  const remotes = getRemotes(cwd);
+  if (remotes.length > 0) {
+    const primary = remotes.includes('origin') ? 'origin' : remotes[0];
+    if (!remoteHasBranches(cwd, primary)) {
+      const localBranch = detectDefaultBranch(cwd) ?? 'main';
+      out.error(
+        ErrorCode.CONFIG_ERROR,
+        `Remote '${primary}' exists but has no branches. Push your base branch before initializing.`,
+        { suggestion: `git push -u ${primary} ${localBranch}` },
+      );
+      process.exit(1);
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   if (isInitialized(cwd)) {
     if (flags.json) {
