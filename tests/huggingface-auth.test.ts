@@ -69,6 +69,26 @@ describe('HuggingFaceTokenAuth', () => {
     expect(result.error).toBe('Invalid Hugging Face token');
   });
 
+  it('flags broad token role from whoami metadata', async () => {
+    getWhoAmI.mockResolvedValueOnce({
+      name: 'user-2',
+      auth: {
+        accessToken: {
+          role: 'admin',
+        },
+      },
+    });
+
+    const auth = new HuggingFaceTokenAuth({
+      client: { getWhoAmI } as any,
+      tokenFilePath: tokenPath,
+    });
+
+    const result = await auth.validateToken('hf_admin_token');
+    expect(result.valid).toBe(true);
+    expect(result.hasBroadScopes).toBe(true);
+  });
+
   it('clears token from disk', () => {
     const auth = new HuggingFaceTokenAuth({
       client: { getWhoAmI } as any,

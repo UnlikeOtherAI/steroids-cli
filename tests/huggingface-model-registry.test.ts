@@ -126,4 +126,36 @@ describe('HuggingFaceModelRegistry', () => {
     const rebuilt = JSON.parse(readFileSync(cachePath, 'utf-8')) as { models: unknown[] };
     expect(Array.isArray(rebuilt.models)).toBe(true);
   });
+
+  it('propagates trending query failures that are not unsupported-sort errors', async () => {
+    listModels.mockImplementation(async (options?: Record<string, unknown>) => {
+      switch (options?.sort) {
+        case 'downloads':
+          return downloadFirst;
+        case 'likes':
+          return likesFirst;
+        case 'createdAt':
+          return newestFirst;
+        case 'trendingScore':
+          throw new HubAPIError('Unauthorized', 401);
+        default:
+          return [];
+      }
+    });
+
+    const registry = new HuggingFaceModelRegistry({
+      client: {
+        listModels,
+        getModel,
+        searchModels: jest.fn(),
+        getWhoAmI: jest.fn(),
+      } as any,
+      cacheFilePath: join(cacheDir, 'models.json'),
+      nowFn: () => now,
+    });
+
+    await expect(registry.refreshCuratedModels()).rejects.toEqual(
+      expect.objectContaining({ status: 401 })
+    );
+  });
 });

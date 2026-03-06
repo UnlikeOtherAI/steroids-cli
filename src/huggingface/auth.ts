@@ -65,11 +65,13 @@ export class HuggingFaceTokenAuth {
     try {
       const account = await this.client.getWhoAmI(value);
       const scopes = extractScopes(account);
+      const privilegeMarkers = extractPrivilegeMarkers(account);
       return {
         valid: true,
         account,
         scopes,
-        hasBroadScopes: scopes.some((scope) => scope === 'write' || scope === 'admin'),
+        hasBroadScopes: [...scopes, ...privilegeMarkers]
+          .some((scope) => scope.includes('write') || scope.includes('admin')),
       };
     } catch (error) {
       if (error instanceof HubAPIError && error.status === 401) {
@@ -107,4 +109,25 @@ function extractScopes(account: HFWhoAmI): string[] {
         .filter(Boolean)
     )
   );
+}
+
+function extractPrivilegeMarkers(account: HFWhoAmI): string[] {
+  const rawPrivileges = [
+    account.role,
+    account.permissions,
+    account.auth?.accessToken?.role,
+    account.auth?.accessToken?.permissions,
+    account.accessToken?.role,
+    account.accessToken?.permissions,
+  ];
+
+  const values = rawPrivileges.flatMap((entry) => {
+    if (!entry) return [];
+    if (Array.isArray(entry)) return entry;
+    return entry.split(/[,\s]+/g);
+  });
+
+  return values
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
 }

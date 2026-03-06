@@ -25,14 +25,20 @@ export interface HFWhoAmI {
   isPro?: boolean;
   canPay?: boolean;
   periodEnd?: string;
+  role?: string;
   orgs?: HFWhoAmIOrg[];
   scopes?: string[] | string;
+  permissions?: string[] | string;
   auth?: {
     accessToken?: {
+      role?: string;
+      permissions?: string[] | string;
       scopes?: string[] | string;
     };
   };
   accessToken?: {
+    role?: string;
+    permissions?: string[] | string;
     scopes?: string[] | string;
   };
 }

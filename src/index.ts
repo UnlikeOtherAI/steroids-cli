@@ -36,6 +36,7 @@ import { webCommand } from './commands/web.js';
 import { mergeCommand } from './commands/merge.js';
 import { workspacesCommand } from './commands/workspaces.js';
 import { skillsCommand } from './commands/skills.js';
+import { hfCommand } from './commands/hf.js';
 import { checkForNewVersion } from './cli/version-check.js';
 
 // Read version from package.json - search up from dist folder
@@ -78,6 +79,7 @@ COMMANDS:
   runners           Manage runner daemons
   config            Manage configuration
   ai                Manage AI providers and models
+  hf                Hugging Face model cache utilities
   hooks             Manage event hooks
   health            Check project health
   scan              Scan directory for projects
@@ -190,6 +192,9 @@ async function main(): Promise<void> {
         break;
       case 'ai':
         await aiCommand(commandArgs, flags);
+        break;
+      case 'hf':
+        await hfCommand(commandArgs, flags);
         break;
       case 'hooks':
         await hooksCommand(commandArgs, flags);

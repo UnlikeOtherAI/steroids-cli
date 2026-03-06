@@ -123,12 +123,7 @@ export class HuggingFaceModelRegistry {
         token,
       });
     } catch (error) {
-      if (
-        error instanceof HubAPIError &&
-        error.status !== undefined &&
-        error.status >= 400 &&
-        error.status < 500
-      ) {
+      if (isUnsupportedTrendingSort(error)) {
         return undefined;
       }
       throw error;
@@ -298,4 +293,10 @@ async function mapWithConcurrency<T, U>(
 
   await Promise.all(workers);
   return results;
+}
+
+function isUnsupportedTrendingSort(error: unknown): boolean {
+  if (!(error instanceof HubAPIError)) return false;
+  if (error.status !== 400 && error.status !== 422) return false;
+  return /trending|trendingscore|sort|unsupported|invalid/i.test(error.message);
 }
