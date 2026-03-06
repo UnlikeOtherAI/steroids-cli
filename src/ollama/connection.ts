@@ -1,7 +1,7 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getGlobalSteroidsDir } from '../runners/global-db-connection.js';
-import { OllamaApiClient } from './api-client.js';
+import { OllamaApiClient, OllamaApiError } from './api-client.js';
 
 export const DEFAULT_LOCAL_ENDPOINT = 'http://localhost:11434';
 export const DEFAULT_CLOUD_ENDPOINT = 'https://ollama.com';
@@ -121,7 +121,7 @@ export function setCloudConnection(
 export function clearCloudApiKey(): void {
   const tokenPath = getOllamaTokenPath();
   if (existsSync(tokenPath)) {
-    writeFileSync(tokenPath, '', 'utf8');
+    rmSync(tokenPath, { force: true });
   }
 }
 
@@ -184,6 +184,15 @@ export async function testConnection(
           error: `Unexpected health status: ${health.status}`,
         };
       }
+
+      if (!isOllamaHealthResponse(health.body)) {
+        return {
+          connected: false,
+          endpoint,
+          mode: config.mode,
+          error: 'Unexpected health response: endpoint is not an Ollama instance',
+        };
+      }
     } else {
       await client.listInstalledModels();
     }
@@ -205,6 +214,10 @@ export async function testConnection(
       loadedModels,
     };
   } catch (error) {
+    if (config.mode === 'cloud' && error instanceof OllamaApiError && error.status === 401) {
+      clearCloudApiKey();
+    }
+
     return {
       connected: false,
       endpoint,
@@ -251,6 +264,10 @@ function ensureOllamaConfigDir(): void {
 
 function normalizeEndpoint(endpoint: string): string {
   return endpoint.trim().replace(/\/+$/, '');
+}
+
+function isOllamaHealthResponse(body: string): boolean {
+  return body.toLowerCase().includes('ollama is running');
 }
 
 function getEndpointOverrideFromEnv(): string | undefined {

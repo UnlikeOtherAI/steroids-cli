@@ -1,13 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   getResolvedConnectionConfig,
   getCloudApiKey,
+  getOllamaTokenPath,
   isVersionSupported,
   loadConnectionConfig,
   setCloudConnection,
   setLocalConnection,
+  testConnection,
 } from '../src/ollama/connection.js';
 
 describe('ollama connection config', () => {
@@ -16,8 +18,10 @@ describe('ollama connection config', () => {
   const originalHost = process.env.STEROIDS_OLLAMA_HOST;
   const originalPort = process.env.STEROIDS_OLLAMA_PORT;
   const originalApiKey = process.env.OLLAMA_API_KEY;
+  const originalFetch = global.fetch;
 
   let tempHome = '';
+  let fetchMock: jest.MockedFunction<typeof fetch>;
 
   beforeEach(() => {
     tempHome = mkdtempSync(join('/tmp', 'steroids-ollama-connection-'));
@@ -26,6 +30,8 @@ describe('ollama connection config', () => {
     delete process.env.STEROIDS_OLLAMA_HOST;
     delete process.env.STEROIDS_OLLAMA_PORT;
     delete process.env.OLLAMA_API_KEY;
+    fetchMock = jest.fn<typeof fetch>();
+    global.fetch = fetchMock;
   });
 
   afterEach(() => {
@@ -57,6 +63,8 @@ describe('ollama connection config', () => {
     if (tempHome) {
       rmSync(tempHome, { recursive: true, force: true });
     }
+
+    global.fetch = originalFetch;
   });
 
   it('persists local config and reloads it', () => {
@@ -92,5 +100,46 @@ describe('ollama connection config', () => {
     expect(isVersionSupported('0.1.14')).toBe(true);
     expect(isVersionSupported('0.1.13')).toBe(false);
     expect(isVersionSupported('v0.6.2')).toBe(true);
+  });
+
+  it('rejects local connection when health endpoint body is not Ollama sentinel', async () => {
+    fetchMock.mockResolvedValue(
+      new Response('hello from nginx', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    );
+
+    const status = await testConnection({
+      endpoint: 'http://localhost:11434',
+      mode: 'local',
+      cloudTier: null,
+    });
+
+    expect(status.connected).toBe(false);
+    expect(status.error).toContain('endpoint is not an Ollama instance');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears persisted cloud token after 401 during cloud validation', async () => {
+    setCloudConnection('bad-token', 'https://ollama.com');
+    const tokenPath = getOllamaTokenPath();
+    expect(existsSync(tokenPath)).toBe(true);
+
+    fetchMock.mockResolvedValue(
+      new Response('unauthorized', {
+        status: 401,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    );
+
+    const status = await testConnection({
+      endpoint: 'https://ollama.com',
+      mode: 'cloud',
+      cloudTier: null,
+    });
+
+    expect(status.connected).toBe(false);
+    expect(existsSync(tokenPath)).toBe(false);
   });
 });
