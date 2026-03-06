@@ -249,7 +249,9 @@ export function applyEnvOverrides(
     if (key === 'STEROIDS_AI_REVIEWERS' && value) {
       if (!result.ai) result.ai = {};
       result.ai.reviewers = value.split(',').map(s => {
-        const [provider, model] = s.split(':');
+        const delimiterIndex = s.indexOf(':');
+        const provider = delimiterIndex === -1 ? s : s.slice(0, delimiterIndex);
+        const model = delimiterIndex === -1 ? undefined : s.slice(delimiterIndex + 1);
         return { provider: provider as ProviderName, model };
       });
       continue;
