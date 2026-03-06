@@ -10,7 +10,7 @@ vi.mock('../services/modelUsageApi', async () => {
     ...actual,
     modelUsageApi: {
       ...actual.modelUsageApi,
-      streamOllamaPull: vi.fn(),
+      pullModel: vi.fn(),
     },
   };
 });
@@ -69,10 +69,9 @@ describe('OllamaUsageWidgets', () => {
   });
 
   it('renders streamed pull progress bar while model download is active', async () => {
-    const streamMock = vi.mocked(modelUsageApi.streamOllamaPull);
+    const streamMock = vi.mocked(modelUsageApi.pullModel);
     streamMock.mockImplementation(async (_model, onProgress) => {
       onProgress({ status: 'downloading', phase: 'downloading', percent: 42, done: false });
-      onProgress({ status: 'success', phase: 'complete', percent: 100, done: true });
     });
 
     const user = userEvent.setup();
@@ -104,7 +103,7 @@ describe('OllamaUsageWidgets', () => {
     await user.click(screen.getByRole('button', { name: 'Pull Model' }));
 
     expect(streamMock).toHaveBeenCalledWith('qwen2.5-coder:32b', expect.any(Function));
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
-    expect(screen.getByText(/complete: success/)).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('value', '42');
+    expect(screen.getByText('downloading')).toBeInTheDocument();
   });
 });

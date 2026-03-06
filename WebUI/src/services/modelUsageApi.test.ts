@@ -80,12 +80,12 @@ describe('modelUsageApi', () => {
     );
   });
 
-  it('streams pull progress updates from NDJSON endpoint', async () => {
+  it('streams pull progress updates from SSE endpoint', async () => {
     const encoder = new TextEncoder();
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode('{"status":"pulling","percent":10}\n'));
-        controller.enqueue(encoder.encode('{"status":"success","percent":100,"done":true}\n'));
+        controller.enqueue(encoder.encode('data: {"status":"pulling","phase":"downloading","percent":10}\n\n'));
+        controller.enqueue(encoder.encode('data: {"status":"success","phase":"complete","percent":100,"done":true}\n\n'));
         controller.close();
       },
     });
@@ -97,7 +97,7 @@ describe('modelUsageApi', () => {
     });
 
     const seen: Array<{ status: string; percent?: number; done?: boolean }> = [];
-    await modelUsageApi.streamOllamaPull('qwen2.5-coder:32b', (progress) => {
+    await modelUsageApi.pullModel('qwen2.5-coder:32b', (progress) => {
       seen.push({
         status: progress.status,
         percent: progress.percent ?? undefined,
@@ -106,9 +106,9 @@ describe('modelUsageApi', () => {
     });
 
     expect(mockFetch).toHaveBeenCalledWith(
-      `${API_BASE_URL}/api/ollama/pull-stream?model=${encodeURIComponent('qwen2.5-coder:32b')}`,
+      `${API_BASE_URL}/api/ollama/pull`,
       expect.objectContaining({
-        method: 'GET',
+        method: 'POST',
       }),
     );
     expect(seen).toEqual([

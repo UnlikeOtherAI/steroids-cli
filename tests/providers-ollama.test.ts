@@ -14,6 +14,7 @@ describe('OllamaProvider', () => {
   const originalApiKey = process.env.OLLAMA_API_KEY;
   const originalMaxConcurrent = process.env.STEROIDS_OLLAMA_MAX_CONCURRENT;
   const originalQueueTimeout = process.env.STEROIDS_OLLAMA_QUEUE_TIMEOUT_MS;
+  const originalColdStartTimeout = process.env.STEROIDS_OLLAMA_COLD_START_TIMEOUT_MS;
 
   let tempHome = '';
   let fetchMock: jest.MockedFunction<typeof fetch>;
@@ -27,6 +28,7 @@ describe('OllamaProvider', () => {
     delete process.env.OLLAMA_API_KEY;
     delete process.env.STEROIDS_OLLAMA_MAX_CONCURRENT;
     delete process.env.STEROIDS_OLLAMA_QUEUE_TIMEOUT_MS;
+    delete process.env.STEROIDS_OLLAMA_COLD_START_TIMEOUT_MS;
     fetchMock = jest.fn<typeof fetch>();
     global.fetch = fetchMock;
     OllamaProvider.resetSemaphoresForTests();
@@ -53,6 +55,9 @@ describe('OllamaProvider', () => {
 
     if (originalQueueTimeout === undefined) delete process.env.STEROIDS_OLLAMA_QUEUE_TIMEOUT_MS;
     else process.env.STEROIDS_OLLAMA_QUEUE_TIMEOUT_MS = originalQueueTimeout;
+
+    if (originalColdStartTimeout === undefined) delete process.env.STEROIDS_OLLAMA_COLD_START_TIMEOUT_MS;
+    else process.env.STEROIDS_OLLAMA_COLD_START_TIMEOUT_MS = originalColdStartTimeout;
 
     OllamaProvider.resetSemaphoresForTests();
     if (tempHome) {
@@ -278,5 +283,91 @@ describe('OllamaProvider', () => {
 
     expect(result.success).toBe(false);
     expect(result.stderr).toContain('done:true');
+  });
+
+  it('returns cold-start timeout guidance when first token is not produced within cold-start window', async () => {
+    setLocalConnection('http://localhost:11434');
+    process.env.STEROIDS_OLLAMA_COLD_START_TIMEOUT_MS = '15';
+
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/api/show')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              model_info: {
+                qwen2: { context_length: 8192 },
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
+
+      if (url.endsWith('/api/chat')) {
+        return new Promise((_resolve, reject) => {
+          const signal = init?.signal as AbortSignal | undefined;
+          signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        });
+      }
+
+      return Promise.reject(new Error(`Unexpected URL: ${url}`));
+    });
+
+    const provider = new OllamaProvider();
+    const result = await provider.invoke('cold start', { model: 'qwen2.5-coder:32b', timeout: 10_000 });
+
+    expect(result.success).toBe(false);
+    expect(result.timedOut).toBe(true);
+    expect(result.stderr).toContain("is taking too long to load");
+  });
+
+  it('maps non-2xx and connection failures to actionable error UX', async () => {
+    setLocalConnection('http://localhost:11434');
+
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/api/show')) {
+        return new Response(
+          JSON.stringify({
+            model_info: {
+              qwen2: { context_length: 8192 },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.endsWith('/api/chat')) {
+        return new Response('model requires more system memory', { status: 500 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new OllamaProvider();
+    const oomResult = await provider.invoke('oom', { model: 'qwen2.5-coder:32b' });
+    expect(oomResult.stderr).toContain("Insufficient VRAM for model 'qwen2.5-coder:32b'.");
+
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/api/show')) {
+        return new Response(
+          JSON.stringify({
+            model_info: {
+              qwen2: { context_length: 8192 },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.endsWith('/api/chat')) {
+        throw new Error('connect ECONNREFUSED 127.0.0.1:11434');
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const refused = await provider.invoke('conn', { model: 'qwen2.5-coder:32b' });
+    expect(refused.stderr).toContain('Cannot connect to Ollama');
   });
 });

@@ -74,7 +74,7 @@ export const OllamaUsageWidgets: React.FC<Props> = ({ ollama }) => {
     setPullProgress({ status: 'starting', phase: 'starting', percent: 0, done: false });
 
     try {
-      await modelUsageApi.streamOllamaPull(modelName, (progress) => {
+      await modelUsageApi.pullModel(modelName, (progress) => {
         setPullProgress(progress);
       });
     } catch (error) {
@@ -141,25 +141,26 @@ export const OllamaUsageWidgets: React.FC<Props> = ({ ollama }) => {
           </button>
         </div>
 
-        {pullProgress && (
+        {pullProgress && !pullProgress.done && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-text-muted">
-              <span>
-                {pullProgress.phase ? `${pullProgress.phase}: ` : ''}
-                {pullProgress.status}
-              </span>
+            <div className="flex items-center justify-between text-xs text-text-muted gap-3">
+              <span>{pullProgress.phase ?? pullProgress.status}</span>
               <span>{pullPercent === null ? '--' : `${pullPercent}%`}</span>
             </div>
-            <div className="h-2 rounded-full bg-bg-elevated overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pullPercent ?? undefined}>
-              <div
-                className={`h-full transition-all ${pullProgress.phase === 'error' ? 'bg-danger' : 'bg-accent'}`}
-                style={{ width: `${pullPercent ?? 0}%` }}
-              />
-            </div>
+            <progress
+              role="progressbar"
+              value={pullPercent ?? 0}
+              max={100}
+              className="w-full h-2 [&::-webkit-progress-bar]:bg-bg-elevated [&::-webkit-progress-value]:bg-accent"
+            />
             {pullProgress.error && (
               <div className="text-xs text-danger">{pullProgress.error}</div>
             )}
           </div>
+        )}
+
+        {pullProgress?.done && !pullProgress.error && (
+          <div className="text-xs text-success">Pull complete.</div>
         )}
 
         {pullError && !pullProgress?.error && (
@@ -178,8 +179,19 @@ export const OllamaUsageWidgets: React.FC<Props> = ({ ollama }) => {
               <div className="min-w-0">
                 <div className="text-text-primary font-medium truncate" title={model.name}>{model.name}</div>
                 <div className="text-xs text-text-muted">
-                  VRAM {formatBytes(model.vram_bytes)} / RAM {formatBytes(model.ram_bytes)}
+                  VRAM {(model.vram_bytes / 1e9).toFixed(1)} GB / RAM {(model.ram_bytes / 1e9).toFixed(1)} GB
+                  {typeof model.vram_utilization_ratio === 'number' && (
+                    <> ({Math.round(model.vram_utilization_ratio * 100)}% VRAM)</>
+                  )}
                 </div>
+                {typeof model.vram_utilization_ratio === 'number' && (
+                  <div className="mt-1 h-1.5 rounded-full bg-bg-elevated overflow-hidden">
+                    <div
+                      className="h-full bg-accent"
+                      style={{ width: `${Math.max(0, Math.min(100, Math.round(model.vram_utilization_ratio * 100)))}%` }}
+                    />
+                  </div>
+                )}
               </div>
               <div className="text-xs text-text-secondary whitespace-nowrap">
                 unload in {formatUnloadEta(model.unload_in_seconds)}

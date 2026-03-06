@@ -2,7 +2,6 @@
  * Ollama Provider
  * Native /api/chat inference with NDJSON streaming, plus /v1/models discovery.
  */
-
 import { TextDecoder } from 'node:util';
 import { loadConfig } from '../config/loader.js';
 import {
@@ -28,8 +27,14 @@ import {
   recommendRoles,
 } from './ollama-utils.js';
 import { buildOllamaTokenMetrics, recordOllamaUsage } from '../ollama/metrics.js';
-
+import {
+  formatOllamaHttpError,
+  formatOllamaInvocationError,
+  isAbortError,
+  resolveOllamaHostPort,
+} from './ollama-error-utils.js';
 const DEFAULT_TIMEOUT_MS = 900_000;
+const DEFAULT_COLD_START_TIMEOUT_MS = 90_000;
 const DEFAULT_LOCAL_MAX_CONCURRENT = 1;
 const DEFAULT_CLOUD_MAX_CONCURRENT = 3;
 const DEFAULT_QUEUE_TIMEOUT_MS = 120_000;
@@ -66,7 +71,6 @@ interface OllamaStreamChunk {
   prompt_eval_duration?: number;
   eval_duration?: number;
 }
-
 /**
  * Ollama AI Provider implementation
  */
@@ -131,6 +135,7 @@ export class OllamaProvider extends BaseAIProvider {
     const onActivity = options.onActivity;
     const model = options.model;
     const endpointConfig = this.resolveEndpointConfig();
+    const hostPort = resolveOllamaHostPort(endpointConfig.endpoint);
 
     let release: SemaphoreRelease | undefined;
     try {
@@ -147,7 +152,19 @@ export class OllamaProvider extends BaseAIProvider {
     }
 
     const controller = new AbortController();
-    const requestTimeout = setTimeout(() => controller.abort(), timeout);
+    let coldStartTimedOut = false;
+    let generationTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const coldStartTimeout = setTimeout(() => {
+      coldStartTimedOut = true;
+      controller.abort();
+    }, this.resolveColdStartTimeoutMs());
+
+    const scheduleGenerationTimeout = () => {
+      if (generationTimeoutHandle) {
+        clearTimeout(generationTimeoutHandle);
+      }
+      generationTimeoutHandle = setTimeout(() => controller.abort(), timeout);
+    };
 
     try {
       const numCtx = await this.resolveContextWindow(model, endpointConfig);
@@ -172,12 +189,12 @@ export class OllamaProvider extends BaseAIProvider {
       });
 
       if (!response.ok) {
-        const errorBody = (await response.text()).slice(0, MAX_ERROR_BODY);
+        const errorBody = (await response.text()).slice(0, MAX_ERROR_BODY).trim();
         return {
           success: false,
           exitCode: response.status || 1,
           stdout: '',
-          stderr: errorBody || `Ollama API request failed: ${response.status}`,
+          stderr: formatOllamaHttpError(response.status, errorBody, model),
           duration: Date.now() - startTime,
           timedOut: false,
         };
@@ -199,6 +216,7 @@ export class OllamaProvider extends BaseAIProvider {
       let buffer = '';
       let stdout = '';
       let finalChunk: OllamaStreamChunk | undefined;
+      let sawFirstToken = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -214,6 +232,11 @@ export class OllamaProvider extends BaseAIProvider {
 
           const delta = chunk.message?.content ?? '';
           if (delta) {
+            if (!sawFirstToken) {
+              sawFirstToken = true;
+              clearTimeout(coldStartTimeout);
+            }
+            scheduleGenerationTimeout();
             stdout += delta;
             onActivity?.({
               type: 'output',
@@ -237,6 +260,11 @@ export class OllamaProvider extends BaseAIProvider {
         }
         const delta = chunk.message?.content ?? '';
         if (delta) {
+          if (!sawFirstToken) {
+            sawFirstToken = true;
+            clearTimeout(coldStartTimeout);
+          }
+          scheduleGenerationTimeout();
           stdout += delta;
           onActivity?.({
             type: 'output',
@@ -289,17 +317,26 @@ export class OllamaProvider extends BaseAIProvider {
         tokenUsage,
       };
     } catch (error) {
-      const timedOut = this.isAbortError(error);
+      const timedOut = isAbortError(error);
       return {
         success: false,
         exitCode: 1,
         stdout: '',
-        stderr: this.mapInvocationError(error, timeout),
+        stderr: formatOllamaInvocationError(error, {
+          hostPort,
+          model,
+          coldStartTimedOut,
+          timeoutMs: timeout,
+          mode: endpointConfig.mode,
+        }),
         duration: Date.now() - startTime,
         timedOut,
       };
     } finally {
-      clearTimeout(requestTimeout);
+      clearTimeout(coldStartTimeout);
+      if (generationTimeoutHandle) {
+        clearTimeout(generationTimeoutHandle);
+      }
       release();
     }
   }
@@ -335,7 +372,6 @@ export class OllamaProvider extends BaseAIProvider {
     }
     return super.classifyError(exitCode, stderr);
   }
-
   static resetSemaphoresForTests(): void {
     this.semaphores.clear();
   }
@@ -455,26 +491,10 @@ export class OllamaProvider extends BaseAIProvider {
     this.modelContextCache.set(model, contextWindow);
     return contextWindow;
   }
-
-  private isAbortError(error: unknown): boolean {
-    return error instanceof Error && error.name === 'AbortError';
-  }
-
-  private mapInvocationError(error: unknown, timeoutMs: number): string {
-    if (this.isAbortError(error)) {
-      return `Ollama request timed out after ${timeoutMs}ms`;
-    }
-
-    if (error instanceof Error) {
-      if (error.message.toLowerCase().includes('econnrefused')) {
-        return `Ollama connection refused: ${error.message}`;
-      }
-      return error.message;
-    }
-    return String(error);
+  private resolveColdStartTimeoutMs(): number {
+    return normalizePositiveInt(process.env.STEROIDS_OLLAMA_COLD_START_TIMEOUT_MS) ?? DEFAULT_COLD_START_TIMEOUT_MS;
   }
 }
-
 export function createOllamaProvider(): OllamaProvider {
   return new OllamaProvider();
 }

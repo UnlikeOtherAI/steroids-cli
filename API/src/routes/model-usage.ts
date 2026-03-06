@@ -59,6 +59,7 @@ interface OllamaRuntimeModelStatus {
   name: string;
   size_bytes: number;
   vram_bytes: number;
+  vram_utilization_ratio?: number;
   ram_bytes: number;
   context_length: number | null;
   expires_at: string | null;
@@ -312,11 +313,13 @@ async function getOllamaRuntimeStatus(): Promise<OllamaRuntimeStatus> {
         : null;
       const sizeBytes = typeof model.size === 'number' && Number.isFinite(model.size) ? model.size : 0;
       const vramBytes = typeof model.size_vram === 'number' && Number.isFinite(model.size_vram) ? model.size_vram : 0;
+      const vramUtilizationRatio = sizeBytes > 0 ? vramBytes / sizeBytes : 0;
 
       return {
         name: model.name,
         size_bytes: sizeBytes,
         vram_bytes: vramBytes,
+        vram_utilization_ratio: Number.isFinite(vramUtilizationRatio) ? vramUtilizationRatio : 0,
         ram_bytes: Math.max(0, sizeBytes - vramBytes),
         context_length:
           typeof model.context_length === 'number' && Number.isFinite(model.context_length)
@@ -339,7 +342,7 @@ async function getOllamaRuntimeStatus(): Promise<OllamaRuntimeStatus> {
   } catch (error) {
     return {
       ...fallback,
-      error: error instanceof Error ? error.message : String(error),
+      error: 'ollama_unavailable',
     };
   }
 }

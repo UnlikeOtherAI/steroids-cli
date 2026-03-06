@@ -6,17 +6,17 @@ const router = Router();
 const PULL_TIMEOUT_MS = 30 * 60 * 1000;
 
 function writeProgress(res: Response, progress: OllamaPullProgress): void {
-  res.write(`${JSON.stringify(progress)}\n`);
+  res.write(`data: ${JSON.stringify(progress)}\n\n`);
 }
 
-router.get('/ollama/pull-stream', async (req: Request, res: Response) => {
-  const model = typeof req.query.model === 'string' ? req.query.model.trim() : '';
+router.post('/ollama/pull', async (req: Request, res: Response) => {
+  const model = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
   if (!model) {
-    res.status(400).json({ success: false, error: 'model query parameter is required' });
+    res.status(400).json({ success: false, error: 'model is required' });
     return;
   }
 
-  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
@@ -24,7 +24,7 @@ router.get('/ollama/pull-stream', async (req: Request, res: Response) => {
   const resolved = getResolvedConnectionConfig();
   const client = createOllamaApiClient(resolved);
   let closed = false;
-  req.on('close', () => {
+  res.on('close', () => {
     closed = true;
   });
 

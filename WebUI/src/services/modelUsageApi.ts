@@ -40,16 +40,17 @@ export const modelUsageApi = {
     return fetchModelUsageJson<ModelUsageResponse>(url);
   },
 
-  async streamOllamaPull(
-    model: string,
+  async pullModel(
+    modelName: string,
     onProgress: (progress: OllamaPullProgress) => void,
   ): Promise<void> {
-    const encoded = encodeURIComponent(model.trim());
-    const response = await fetch(`${API_BASE_URL}/api/ollama/pull-stream?model=${encoded}`, {
-      method: 'GET',
+    const response = await fetch(`${API_BASE_URL}/api/ollama/pull`, {
+      method: 'POST',
       headers: {
-        Accept: 'application/x-ndjson',
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
       },
+      body: JSON.stringify({ model: modelName.trim() }),
     });
 
     if (!response.ok) {
@@ -68,28 +69,51 @@ export const modelUsageApi = {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      buffer = consumeNdjsonBuffer(buffer, onProgress);
+      buffer = consumeProgressBuffer(buffer, onProgress);
     }
 
     buffer += decoder.decode();
     const tail = buffer.trim();
     if (tail) {
-      onProgress(JSON.parse(tail) as OllamaPullProgress);
+      consumeProgressBuffer(tail, onProgress);
     }
   },
 };
 
-function consumeNdjsonBuffer(
+function consumeProgressBuffer(
   buffer: string,
   onProgress: (progress: OllamaPullProgress) => void,
 ): string {
   let remaining = buffer;
+  while (true) {
+    const nextEvent = remaining.indexOf('\n\n');
+    if (nextEvent === -1) break;
+    const chunk = remaining.slice(0, nextEvent).trim();
+    remaining = remaining.slice(nextEvent + 2);
+    if (!chunk) continue;
+    const line = chunk
+      .split('\n')
+      .map((entry) => entry.trim())
+      .find((entry) => entry.startsWith('data:'));
+    if (!line) continue;
+    const payload = line.slice('data:'.length).trim();
+    if (!payload) continue;
+    onProgress(JSON.parse(payload) as OllamaPullProgress);
+  }
+
   while (true) {
     const newline = remaining.indexOf('\n');
     if (newline === -1) break;
     const line = remaining.slice(0, newline).trim();
     remaining = remaining.slice(newline + 1);
     if (!line) continue;
+    if (line.startsWith('data:')) {
+      const payload = line.slice('data:'.length).trim();
+      if (payload) {
+        onProgress(JSON.parse(payload) as OllamaPullProgress);
+      }
+      continue;
+    }
     onProgress(JSON.parse(line) as OllamaPullProgress);
   }
   return remaining;

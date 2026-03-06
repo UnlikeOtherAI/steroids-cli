@@ -312,8 +312,19 @@ describe('API model-usage endpoint', () => {
     expect(body.ollama.runtime.models[0]).toMatchObject({
       name: 'qwen2.5-coder:32b',
       vram_bytes: 8000000000,
+      vram_utilization_ratio: 0.8,
       ram_bytes: 2000000000,
     });
+  });
+
+  it('returns normalized ollama_unavailable runtime error when /api/ps is unreachable', async () => {
+    await new Promise<void>((resolve) => ollamaServer.close(() => resolve()));
+
+    const resp = await fetch(`http://127.0.0.1:${port}/api/model-usage`);
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as any;
+    expect(body.ollama.runtime.connected).toBe(false);
+    expect(body.ollama.runtime.error).toBe('ollama_unavailable');
   });
 
   it('omits global ollama widgets payload when project filter is applied', async () => {
@@ -329,17 +340,22 @@ describe('API model-usage endpoint', () => {
   });
 
   it('streams ollama model pull progress to the UI endpoint', async () => {
-    const resp = await fetch(
-      `http://127.0.0.1:${port}/api/ollama/pull-stream?model=${encodeURIComponent('qwen2.5-coder:32b')}`,
-    );
+    const resp = await fetch(`http://127.0.0.1:${port}/api/ollama/pull`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({ model: 'qwen2.5-coder:32b' }),
+    });
     expect(resp.status).toBe(200);
 
     const text = await resp.text();
     const updates = text
       .trim()
-      .split('\n')
+      .split('\n\n')
       .filter((line) => line.trim().length > 0)
-      .map((line) => JSON.parse(line));
+      .map((line) => JSON.parse(line.replace(/^data:\s*/, '')));
 
     expect(updates).toHaveLength(3);
     expect(updates[0]).toMatchObject({ status: 'pulling manifest', phase: 'starting', done: false });

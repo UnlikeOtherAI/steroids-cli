@@ -56,9 +56,10 @@ export interface ModelUsageResponse {
         name: string;
         size_bytes: number;
         vram_bytes: number;
+        vram_utilization_ratio?: number;
         ram_bytes: number;
         context_length: number | null;
-        expires_at: string | null;
+        expires_at?: string | null;
         unload_in_seconds: number | null;
       }>;
       error?: string;

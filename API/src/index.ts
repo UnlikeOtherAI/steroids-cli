@@ -154,7 +154,7 @@ export function createApp(): express.Express {
         'GET /api/ai/providers',
         'GET /api/ai/models/<provider>',
         'GET /api/model-usage?project=<path>&hours=<hours>',
-        'GET /api/ollama/pull-stream?model=<model>',
+        'POST /api/ollama/pull',
         'GET /api/hf/account',
         'GET /api/hf/usage',
         'POST /api/hf/account/connect',
