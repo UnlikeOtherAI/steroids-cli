@@ -6,12 +6,12 @@ import { HuggingFaceTokenAuth } from '../src/huggingface/auth.js';
 import { HubAPIError } from '../src/huggingface/hub-client.js';
 
 describe('HuggingFaceTokenAuth', () => {
-  const getWhoAmI = jest.fn<(token: string) => Promise<any>>();
+  const getWhoAmIWithHeaders = jest.fn<(token: string) => Promise<any>>();
   let tokenDir: string;
   let tokenPath: string;
 
   beforeEach(() => {
-    getWhoAmI.mockReset();
+    getWhoAmIWithHeaders.mockReset();
     tokenDir = mkdtempSync(join(tmpdir(), 'hf-auth-'));
     tokenPath = join(tokenDir, 'token');
   });
@@ -22,7 +22,7 @@ describe('HuggingFaceTokenAuth', () => {
 
   it('stores token with restrictive permissions', () => {
     const auth = new HuggingFaceTokenAuth({
-      client: { getWhoAmI } as any,
+      client: { getWhoAmIWithHeaders } as any,
       tokenFilePath: tokenPath,
     });
 
@@ -34,18 +34,22 @@ describe('HuggingFaceTokenAuth', () => {
   });
 
   it('validates token and flags broad scopes', async () => {
-    getWhoAmI.mockResolvedValueOnce({
-      name: 'user-1',
-      isPro: true,
-      auth: {
-        accessToken: {
-          scopes: ['read', 'inference', 'write'],
+    getWhoAmIWithHeaders.mockResolvedValueOnce({
+      account: {
+        name: 'user-1',
+        isPro: true,
+        auth: {
+          accessToken: {
+            scopes: ['read', 'inference', 'write'],
+          },
         },
       },
+      rateLimit: '\"api\";r=900;t=60',
+      rateLimitPolicy: '\"fixed window\";\"api\";q=1000;w=300',
     });
 
     const auth = new HuggingFaceTokenAuth({
-      client: { getWhoAmI } as any,
+      client: { getWhoAmIWithHeaders } as any,
       tokenFilePath: tokenPath,
     });
 
@@ -55,12 +59,16 @@ describe('HuggingFaceTokenAuth', () => {
     expect(result.valid).toBe(true);
     expect(result.hasBroadScopes).toBe(true);
     expect(result.scopes).toEqual(['read', 'inference', 'write']);
+    expect(result.rateLimit).toMatchObject({
+      remaining: 900,
+      limit: 1000,
+    });
   });
 
   it('returns invalid for unauthorized token', async () => {
-    getWhoAmI.mockRejectedValueOnce(new HubAPIError('Unauthorized', 401));
+    getWhoAmIWithHeaders.mockRejectedValueOnce(new HubAPIError('Unauthorized', 401));
     const auth = new HuggingFaceTokenAuth({
-      client: { getWhoAmI } as any,
+      client: { getWhoAmIWithHeaders } as any,
       tokenFilePath: tokenPath,
     });
 
@@ -70,17 +78,19 @@ describe('HuggingFaceTokenAuth', () => {
   });
 
   it('flags broad token role from whoami metadata', async () => {
-    getWhoAmI.mockResolvedValueOnce({
-      name: 'user-2',
-      auth: {
-        accessToken: {
-          role: 'admin',
+    getWhoAmIWithHeaders.mockResolvedValueOnce({
+      account: {
+        name: 'user-2',
+        auth: {
+          accessToken: {
+            role: 'admin',
+          },
         },
       },
     });
 
     const auth = new HuggingFaceTokenAuth({
-      client: { getWhoAmI } as any,
+      client: { getWhoAmIWithHeaders } as any,
       tokenFilePath: tokenPath,
     });
 
@@ -91,7 +101,7 @@ describe('HuggingFaceTokenAuth', () => {
 
   it('clears token from disk', () => {
     const auth = new HuggingFaceTokenAuth({
-      client: { getWhoAmI } as any,
+      client: { getWhoAmIWithHeaders } as any,
       tokenFilePath: tokenPath,
     });
 

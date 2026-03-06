@@ -1,5 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
+import { mkdirSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { HuggingFaceProvider } from '../src/providers/huggingface.js';
+import { openGlobalDatabase } from '../src/runners/global-db.js';
 
 function createSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -119,5 +123,87 @@ describe('HuggingFaceProvider', () => {
     expect(result.success).toBe(false);
     expect(result.stdout).toBe('partial');
     expect(result.stderr).toContain('before [DONE]');
+  });
+
+  it('records hf usage metrics for successful streamed responses', async () => {
+    const originalHome = process.env.STEROIDS_HOME;
+    const homeDir = join('/tmp', `hf-provider-metrics-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    process.env.STEROIDS_HOME = homeDir;
+    mkdirSync(join(homeDir, 'huggingface'), { recursive: true });
+
+    const provider = new HuggingFaceProvider({
+      auth: { getToken: () => 'hf_test' },
+      registry: {
+        getCuratedModels: async () => [],
+        getCachedModel: () => ({
+          id: 'meta-llama/Llama-3.3-70B-Instruct',
+          pipelineTag: 'text-generation',
+          downloads: 0,
+          likes: 0,
+          tags: [],
+          providers: ['novita'],
+          pricing: {
+            novita: { input: 0.1, output: 0.4 },
+          },
+          addedAt: Date.now(),
+          source: 'search',
+        }),
+      },
+      fetchImpl: async () =>
+        new Response(
+          createSSEStream([
+            'data: {"choices":[{"delta":{"content":"done"}}]}\n\n',
+            'data: {"usage":{"prompt_tokens":1000,"completion_tokens":250}}\n\n',
+            'data: [DONE]\n\n',
+          ]),
+          {
+            status: 200,
+            headers: {
+              'x-hf-inference-provider': 'novita',
+            },
+          }
+        ),
+    });
+
+    const result = await provider.invoke('hello', {
+      model: 'meta-llama/Llama-3.3-70B-Instruct:novita',
+      role: 'coder',
+      streamOutput: false,
+    });
+    expect(result.success).toBe(true);
+
+    const { db, close } = openGlobalDatabase();
+    try {
+      const row = db.prepare(
+        `SELECT model, provider, routing_policy, role, prompt_tokens, completion_tokens, estimated_cost_usd
+         FROM hf_usage
+         ORDER BY id DESC
+         LIMIT 1`
+      ).get() as {
+        model: string;
+        provider: string | null;
+        routing_policy: string;
+        role: string;
+        prompt_tokens: number;
+        completion_tokens: number;
+        estimated_cost_usd: number;
+      };
+
+      expect(row.model).toBe('meta-llama/Llama-3.3-70B-Instruct');
+      expect(row.provider).toBe('novita');
+      expect(row.routing_policy).toBe('novita');
+      expect(row.role).toBe('coder');
+      expect(row.prompt_tokens).toBe(1000);
+      expect(row.completion_tokens).toBe(250);
+      expect(row.estimated_cost_usd).toBeCloseTo(0.0002, 8);
+    } finally {
+      close();
+      await rm(homeDir, { recursive: true, force: true });
+      if (originalHome === undefined) {
+        delete process.env.STEROIDS_HOME;
+      } else {
+        process.env.STEROIDS_HOME = originalHome;
+      }
+    }
   });
 });

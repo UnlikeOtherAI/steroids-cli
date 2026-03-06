@@ -2,10 +2,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { HuggingFaceHubClient, HubAPIError, type HFWhoAmI } from './hub-client.js';
+import { parseHubRateLimitHeaders, type HFHubRateLimitSnapshot } from './metrics.js';
 
 export interface HFTokenValidationResult {
   valid: boolean;
   account?: HFWhoAmI;
+  rateLimit?: HFHubRateLimitSnapshot | null;
   hasBroadScopes?: boolean;
   scopes?: string[];
   error?: string;
@@ -63,12 +65,17 @@ export class HuggingFaceTokenAuth {
     }
 
     try {
-      const account = await this.client.getWhoAmI(value);
+      const whoAmI = await this.client.getWhoAmIWithHeaders(value);
+      const account = whoAmI.account;
       const scopes = extractScopes(account);
       const privilegeMarkers = extractPrivilegeMarkers(account);
       return {
         valid: true,
         account,
+        rateLimit: parseHubRateLimitHeaders({
+          rateLimit: whoAmI.rateLimit,
+          rateLimitPolicy: whoAmI.rateLimitPolicy,
+        }),
         scopes,
         hasBroadScopes: [...scopes, ...privilegeMarkers]
           .some((scope) => scope.includes('write') || scope.includes('admin')),

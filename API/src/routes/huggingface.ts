@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { HuggingFaceTokenAuth } from '../../../src/huggingface/auth.js';
 import { HuggingFaceModelRegistry, type HFCachedModel } from '../../../src/huggingface/model-registry.js';
+import { HuggingFaceUsageMetrics } from '../../../src/huggingface/metrics.js';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 
 const router = Router();
@@ -32,6 +33,10 @@ function getRegistry(): HuggingFaceModelRegistry {
   return new HuggingFaceModelRegistry({
     cacheFilePath: join(getSteroidsHomeDir(), 'huggingface', 'models.json'),
   });
+}
+
+function getMetrics(registry: HuggingFaceModelRegistry): HuggingFaceUsageMetrics {
+  return new HuggingFaceUsageMetrics({ registry });
 }
 
 function getSteroidsHomeDir(): string {
@@ -100,10 +105,25 @@ router.get('/hf/account', async (_req: Request, res: Response) => {
       canPay: Boolean(account?.canPay),
       hasBroadScopes: Boolean(validation.hasBroadScopes),
       periodEnd: account?.periodEnd ?? null,
+      rateLimit: validation.rateLimit ?? null,
     });
   } catch (error) {
     res.status(500).json({
       error: 'Failed to load Hugging Face account',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+router.get('/hf/usage', (_req: Request, res: Response) => {
+  const registry = getRegistry();
+  const metrics = getMetrics(registry);
+  try {
+    const usage = metrics.getDashboardUsage();
+    res.json(usage);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to load Hugging Face usage',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }

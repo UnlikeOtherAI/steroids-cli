@@ -153,6 +153,7 @@ export function createApp(): express.Express {
         'GET /api/ai/models/<provider>',
         'GET /api/model-usage?project=<path>&hours=<hours>',
         'GET /api/hf/account',
+        'GET /api/hf/usage',
         'POST /api/hf/account/connect',
         'POST /api/hf/account/disconnect',
         'GET /api/hf/models?search=<query>',

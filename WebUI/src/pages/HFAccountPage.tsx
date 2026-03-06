@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { HFAccountStatus } from '../types';
+import type { HFAccountStatus, HFUsageDashboardResponse } from '../types';
 import { huggingFaceApi } from '../services/huggingFaceApi';
+import { formatTokenCount, formatUsdCost } from '../services/modelUsageFormat';
 
 const BILLING_URL = 'https://huggingface.co/settings/billing';
 const USAGE_URL = 'https://huggingface.co/settings/inference-providers/overview';
@@ -13,6 +14,7 @@ function getTierLabel(tier?: HFAccountStatus['tier']): string {
 
 export function HFAccountPage() {
   const [account, setAccount] = useState<HFAccountStatus | null>(null);
+  const [usage, setUsage] = useState<HFUsageDashboardResponse | null>(null);
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -22,8 +24,12 @@ export function HFAccountPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await huggingFaceApi.getAccount();
-      setAccount(data);
+      const [accountData, usageData] = await Promise.all([
+        huggingFaceApi.getAccount(),
+        huggingFaceApi.getUsage(),
+      ]);
+      setAccount(accountData);
+      setUsage(usageData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load account');
     } finally {
@@ -106,6 +112,12 @@ export function HFAccountPage() {
                     {account.hasBroadScopes ? 'Includes write/admin scopes' : 'Read + inference scoped'}
                   </p>
                 </div>
+                <div>
+                  <p className="text-text-muted">Hub API Rate Limit</p>
+                  <p className="font-semibold text-text-primary">
+                    {formatRateLimit(account)}
+                  </p>
+                </div>
               </div>
               {account.hasBroadScopes && (
                 <div className="badge-warning inline-flex">
@@ -154,6 +166,71 @@ export function HFAccountPage() {
           {error && <div className="text-sm text-danger">{error}</div>}
         </div>
       )}
+
+      {!loading && usage && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="card p-5">
+              <p className="text-xs uppercase tracking-wide text-text-muted">Today Requests</p>
+              <p className="mt-2 text-2xl font-semibold text-text-primary">{usage.today.requests}</p>
+            </div>
+            <div className="card p-5">
+              <p className="text-xs uppercase tracking-wide text-text-muted">Today Tokens</p>
+              <p className="mt-2 text-2xl font-semibold text-text-primary">{formatTokenCount(usage.today.totalTokens)}</p>
+              <p className="text-xs text-text-muted mt-1">
+                {formatTokenCount(usage.today.promptTokens)} in / {formatTokenCount(usage.today.completionTokens)} out
+              </p>
+            </div>
+            <div className="card p-5">
+              <p className="text-xs uppercase tracking-wide text-text-muted">Estimated Cost Today</p>
+              <p className="mt-2 text-2xl font-semibold text-text-primary">{formatUsdCost(usage.today.estimatedCostUsd)}</p>
+            </div>
+          </div>
+
+          <div className="card p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-text-primary">Per Model (Last 7 Days)</h2>
+              <span className="text-xs text-text-muted">HF local usage log</span>
+            </div>
+            {usage.byModel7d.length === 0 ? (
+              <p className="text-sm text-text-muted">No Hugging Face usage has been recorded yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {usage.byModel7d.map((entry) => (
+                  <div key={`${entry.model}:${entry.routingPolicy}:${entry.provider ?? 'auto'}`} className="border border-border rounded-lg p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-text-primary truncate" title={entry.model}>{entry.model}</p>
+                      <span className="badge-accent text-xs">
+                        {entry.provider ? `via ${entry.provider}` : `policy ${entry.routingPolicy}`}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-xs text-text-muted">
+                      {entry.requests} request(s) • {formatTokenCount(entry.totalTokens)} tokens • {formatUsdCost(entry.estimatedCostUsd)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
+}
+
+function formatRateLimit(account: HFAccountStatus | null): string {
+  const snapshot = account?.rateLimit;
+  if (!snapshot) return 'Unavailable';
+  if (snapshot.remaining === null || snapshot.limit === null) return 'Unavailable';
+
+  const reset = snapshot.resetSeconds !== null ? ` (resets in ${formatReset(snapshot.resetSeconds)})` : '';
+  return `${snapshot.remaining}/${snapshot.limit} remaining${reset}`;
+}
+
+function formatReset(seconds: number): string {
+  if (seconds <= 0) return '0s';
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (mins <= 0) return `${secs}s`;
+  return `${mins}m ${secs}s`;
 }

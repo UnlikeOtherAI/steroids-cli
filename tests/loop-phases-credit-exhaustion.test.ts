@@ -99,7 +99,12 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
 
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
   withGlobalDatabase: jest.fn().mockImplementation((cb: any) => cb({ prepare: () => ({ get: () => undefined, all: () => [], run: () => ({ changes: 0 }) }) })),
-  openGlobalDatabase: jest.fn().mockReturnValue({ db: {}, close: jest.fn() }),
+  openGlobalDatabase: jest.fn().mockReturnValue({
+    db: {
+      prepare: () => ({ get: () => undefined, all: () => [], run: () => ({ changes: 0 }) }),
+    },
+    close: jest.fn(),
+  }),
   getProviderBackoffRemainingMs: jest.fn().mockReturnValue(0),
   recordProviderBackoff: jest.fn(),
   clearProviderBackoff: jest.fn(),
@@ -267,7 +272,13 @@ const CREDIT_ERROR: ProviderError = {
 // ── Tests ───────────────────────────────────────────────────────────────
 
 describe('Loop Phases — Credit Exhaustion', () => {
-  const db = {} as any;
+  const db = {
+    prepare: () => ({
+      get: () => undefined,
+      all: () => [],
+      run: () => ({ changes: 0 }),
+    }),
+  } as any;
   const projectPath = '/tmp/test-project';
 
   beforeEach(() => {

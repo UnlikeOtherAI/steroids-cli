@@ -12,6 +12,10 @@ import {
 } from './interface.js';
 import { HuggingFaceTokenAuth } from '../huggingface/auth.js';
 import { HuggingFaceModelRegistry } from '../huggingface/model-registry.js';
+import {
+  extractInferenceProviderFromHeaders,
+  HuggingFaceUsageMetrics,
+} from '../huggingface/metrics.js';
 
 const HF_ROUTER_URL = 'https://router.huggingface.co/v1/chat/completions';
 const DEFAULT_TIMEOUT_MS = 900_000;
@@ -47,7 +51,8 @@ type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 
 interface HFProviderDeps {
   auth?: Pick<HuggingFaceTokenAuth, 'getToken'>;
-  registry?: Pick<HuggingFaceModelRegistry, 'getCuratedModels'>;
+  registry?: Pick<HuggingFaceModelRegistry, 'getCuratedModels' | 'getCachedModel'>;
+  metrics?: Pick<HuggingFaceUsageMetrics, 'recordInvocationUsage'>;
   fetchImpl?: FetchFn;
 }
 
@@ -77,7 +82,8 @@ export class HuggingFaceProvider extends BaseAIProvider {
   readonly displayName = 'Hugging Face Router';
 
   private readonly auth: Pick<HuggingFaceTokenAuth, 'getToken'>;
-  private readonly registry: Pick<HuggingFaceModelRegistry, 'getCuratedModels'>;
+  private readonly registry: Pick<HuggingFaceModelRegistry, 'getCuratedModels' | 'getCachedModel'>;
+  private readonly metrics: Pick<HuggingFaceUsageMetrics, 'recordInvocationUsage'>;
   private readonly fetchImpl: FetchFn;
   private dynamicModels: ModelInfo[] = [];
 
@@ -85,6 +91,7 @@ export class HuggingFaceProvider extends BaseAIProvider {
     super();
     this.auth = deps.auth ?? new HuggingFaceTokenAuth();
     this.registry = deps.registry ?? new HuggingFaceModelRegistry();
+    this.metrics = deps.metrics ?? new HuggingFaceUsageMetrics({ registry: this.registry });
     this.fetchImpl = deps.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
@@ -183,7 +190,9 @@ export class HuggingFaceProvider extends BaseAIProvider {
         };
       }
 
-      return await this.parseSSEStream(response.body, startedAt);
+      const result = await this.parseSSEStream(response.body, startedAt);
+      this.recordMetrics(requestBody.model, options.role, result.tokenUsage, response.headers);
+      return result;
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'AbortError';
       return {
@@ -315,6 +324,26 @@ export class HuggingFaceProvider extends BaseAIProvider {
       : undefined;
 
     return { text, usage };
+  }
+
+  private recordMetrics(
+    requestedModel: string,
+    role: 'orchestrator' | 'coder' | 'reviewer' | undefined,
+    tokenUsage: TokenUsage | undefined,
+    headers: Headers
+  ): void {
+    if (!tokenUsage) return;
+
+    try {
+      this.metrics.recordInvocationUsage({
+        requestedModel,
+        role,
+        tokenUsage,
+        providerHint: extractInferenceProviderFromHeaders(headers),
+      });
+    } catch {
+      // Metrics are best-effort and must not fail model invocation.
+    }
   }
 }
 

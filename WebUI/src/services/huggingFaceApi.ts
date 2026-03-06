@@ -3,6 +3,7 @@ import type {
   HFModelListResponse,
   HFReadyModelsResponse,
   HFRuntime,
+  HFUsageDashboardResponse,
 } from '../types';
 import { API_BASE_URL, ApiError } from './api';
 
@@ -52,6 +53,10 @@ export const huggingFaceApi = {
 
   async getReadyModels(): Promise<HFReadyModelsResponse> {
     return fetchHfJson<HFReadyModelsResponse>('/api/hf/ready-models');
+  },
+
+  async getUsage(): Promise<HFUsageDashboardResponse> {
+    return fetchHfJson<HFUsageDashboardResponse>('/api/hf/usage');
   },
 
   async pairModel(input: {

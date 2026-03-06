@@ -8,7 +8,16 @@ export interface HFAccountStatus {
   canPay?: boolean;
   hasBroadScopes?: boolean;
   periodEnd?: string | null;
+  rateLimit?: HFHubRateLimit | null;
   error?: string;
+}
+
+export interface HFHubRateLimit {
+  remaining: number | null;
+  limit: number | null;
+  resetSeconds: number | null;
+  windowSeconds: number | null;
+  observedAtMs: number;
 }
 
 export interface HFCachedModel {
@@ -49,4 +58,28 @@ export interface HFReadyModel {
 
 export interface HFReadyModelsResponse {
   models: HFReadyModel[];
+}
+
+export interface HFUsageSummary {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  requests: number;
+  estimatedCostUsd: number;
+}
+
+export interface HFUsageByModel {
+  model: string;
+  provider: string | null;
+  routingPolicy: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  requests: number;
+  estimatedCostUsd: number;
+}
+
+export interface HFUsageDashboardResponse {
+  today: HFUsageSummary;
+  byModel7d: HFUsageByModel[];
 }

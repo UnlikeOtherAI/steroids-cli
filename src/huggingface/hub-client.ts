@@ -43,6 +43,12 @@ export interface HFWhoAmI {
   };
 }
 
+export interface HFWhoAmIWithHeaders {
+  account: HFWhoAmI;
+  rateLimit?: string | null;
+  rateLimitPolicy?: string | null;
+}
+
 export interface HFRouterProviderPricing {
   input?: number;
   output?: number;
@@ -135,12 +141,30 @@ export class HuggingFaceHubClient {
     return this.requestJson<HFWhoAmI>(url, token);
   }
 
+  async getWhoAmIWithHeaders(token: string): Promise<HFWhoAmIWithHeaders> {
+    const url = `${this.hubBaseUrl}/api/whoami-v2`;
+    const response = await this.requestJsonWithHeaders<HFWhoAmI>(url, token);
+    return {
+      account: response.data,
+      rateLimit: response.headers.get('RateLimit'),
+      rateLimitPolicy: response.headers.get('RateLimit-Policy'),
+    };
+  }
+
   async listRouterModels(token?: string): Promise<HFRouterModel[]> {
     const url = `${this.routerBaseUrl}/v1/models`;
     return this.requestJson<HFRouterModel[]>(url, token);
   }
 
   private async requestJson<T>(url: string, token?: string): Promise<T> {
+    const response = await this.requestJsonWithHeaders<T>(url, token);
+    return response.data;
+  }
+
+  private async requestJsonWithHeaders<T>(
+    url: string,
+    token?: string
+  ): Promise<{ data: T; headers: Headers }> {
     let response: Response;
     try {
       response = await this.fetchImpl(url, {
@@ -168,7 +192,10 @@ export class HuggingFaceHubClient {
     }
 
     try {
-      return (await response.json()) as T;
+      return {
+        data: (await response.json()) as T,
+        headers: response.headers,
+      };
     } catch {
       throw new HubAPIError('Hugging Face API returned invalid JSON');
     }

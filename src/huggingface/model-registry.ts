@@ -128,6 +128,12 @@ export class HuggingFaceModelRegistry {
     return enriched;
   }
 
+  getCachedModel(modelId: string): HFCachedModel | null {
+    const cache = this.readCache();
+    if (!cache) return null;
+    return cache.models.find((model) => model.id === modelId) ?? null;
+  }
+
   private async fetchTrendingList(token?: string): Promise<HFModel[] | undefined> {
     try {
       return await this.client.listModels({

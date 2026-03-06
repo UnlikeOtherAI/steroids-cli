@@ -276,4 +276,66 @@ describe('API Hugging Face routes', () => {
     const emptyBody = await emptyResp.json() as { models: unknown[] };
     expect(emptyBody.models).toHaveLength(0);
   });
+
+  it('returns usage dashboard data from hf_usage table', async () => {
+    const { db, close } = openGlobalDatabase();
+    try {
+      db.prepare(
+        `INSERT INTO hf_usage (
+          model, provider, routing_policy, role, prompt_tokens, completion_tokens, estimated_cost_usd, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        'deepseek-ai/DeepSeek-V3',
+        'novita',
+        'cheapest',
+        'coder',
+        700,
+        300,
+        0.015,
+        Date.now()
+      );
+
+      db.prepare(
+        `INSERT INTO hf_usage (
+          model, provider, routing_policy, role, prompt_tokens, completion_tokens, estimated_cost_usd, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        'Qwen/Qwen2.5-Coder-32B-Instruct',
+        null,
+        'fastest',
+        'reviewer',
+        200,
+        100,
+        0.01,
+        Date.now()
+      );
+    } finally {
+      close();
+    }
+
+    const resp = await fetch(`http://127.0.0.1:${port}/api/hf/usage`);
+    expect(resp.status).toBe(200);
+    const body = await resp.json() as {
+      today: { requests: number; totalTokens: number; estimatedCostUsd: number };
+      byModel7d: Array<{ model: string; requests: number; totalTokens: number }>;
+    };
+
+    expect(body.today.requests).toBe(2);
+    expect(body.today.totalTokens).toBe(1300);
+    expect(body.today.estimatedCostUsd).toBeCloseTo(0.025, 8);
+    expect(body.byModel7d).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          model: 'deepseek-ai/DeepSeek-V3',
+          requests: 1,
+          totalTokens: 1000,
+        }),
+        expect.objectContaining({
+          model: 'Qwen/Qwen2.5-Coder-32B-Instruct',
+          requests: 1,
+          totalTokens: 300,
+        }),
+      ])
+    );
+  });
 });
