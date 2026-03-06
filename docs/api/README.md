@@ -109,6 +109,51 @@ Incident history for a single project.
 }
 ```
 
+### GET /api/model-usage
+Aggregate token usage by model across one project or all registered projects.
+
+**Query Parameters:**
+- `project` - Project path (optional). If omitted, aggregates all registered projects.
+- `hours` - Lookback window in hours (optional, default: `24`).
+
+**Response:**
+```json
+{
+  "success": true,
+  "hours": 24,
+  "stats": {
+    "inputTokens": 240,
+    "outputTokens": 100,
+    "cachedInputTokens": 35,
+    "cacheReadTokens": 5,
+    "cacheCreationTokens": 2,
+    "totalCostUsd": 0.38,
+    "totalTokens": 340,
+    "invocations": 4
+  },
+  "by_model": [
+    {
+      "provider": "claude",
+      "model": "claude-3-7-sonnet",
+      "inputTokens": 150,
+      "outputTokens": 60,
+      "totalTokens": 210,
+      "invocations": 2
+    }
+  ],
+  "by_project": [
+    {
+      "project_path": "/Users/john/code/myapp",
+      "project_name": "My App",
+      "inputTokens": 160,
+      "outputTokens": 70,
+      "totalTokens": 230,
+      "invocations": 2
+    }
+  ]
+}
+```
+
 ### GET /api/projects
 List all registered projects with stats and runner info
 

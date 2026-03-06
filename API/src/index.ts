@@ -45,6 +45,7 @@ import healthRouter from './routes/health.js';
 import incidentsRouter from './routes/incidents.js';
 import skillsRouter from './routes/skills.js';
 import { creditAlertRoutes } from './routes/credit-alerts.js';
+import modelUsageRouter from './routes/model-usage.js';
 
 const PORT = process.env.PORT || 3501;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -100,6 +101,7 @@ export function createApp(): express.Express {
   app.use('/api', healthRouter);
   app.use('/api', incidentsRouter);
   app.use('/api', skillsRouter);
+  app.use('/api', modelUsageRouter);
   app.use('/api/credit-alerts', creditAlertRoutes);
 
   // Health check
@@ -145,6 +147,7 @@ export function createApp(): express.Express {
         'GET /api/incidents?project=<path>&limit=<n>&task=<prefix>&unresolved=<true|false>',
         'GET /api/ai/providers',
         'GET /api/ai/models/<provider>',
+        'GET /api/model-usage?project=<path>&hours=<hours>',
         'GET /api/credit-alerts?project=<path>',
         'POST /api/credit-alerts/<id>/dismiss',
         'POST /api/credit-alerts/<id>/retry',
