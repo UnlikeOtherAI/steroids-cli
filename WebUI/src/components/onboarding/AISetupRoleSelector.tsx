@@ -50,6 +50,7 @@ interface AISetupRoleSelectorProps {
   onModelChange: (modelId: string) => void;
   onRefreshModels: (providerId: string) => void;
   onCopyToClipboard: (text: string, id: string) => void;
+  onRemove?: () => void;
 }
 
 function getGroupedModels(models: AIModel[]): Array<{ label: string; items: AIModel[] }> {
@@ -81,6 +82,7 @@ export const AISetupRoleSelector: React.FC<AISetupRoleSelectorProps> = ({
   onModelChange,
   onRefreshModels,
   onCopyToClipboard,
+  onRemove,
 }) => {
   const selectedProvider = providers.find((p) => p.id === config.provider);
   const isNotInstalled = selectedProvider && !selectedProvider.installed;
@@ -106,6 +108,15 @@ export const AISetupRoleSelector: React.FC<AISetupRoleSelectorProps> = ({
             Project Override
           </span>
         )}
+        {onRemove && (
+          <button
+            onClick={onRemove}
+            className="ml-auto flex-shrink-0 p-1 text-text-secondary hover:text-danger transition-colors"
+            title="Remove reviewer"
+          >
+            <i className="fa-solid fa-trash-can text-xs"></i>
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-3">
@@ -129,53 +140,53 @@ export const AISetupRoleSelector: React.FC<AISetupRoleSelectorProps> = ({
           </select>
         </div>
         <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="block text-xs text-text-secondary">
-              Model
-              {modelSources[config.provider] && (
-                <span className="ml-1 text-text-secondary/60">
-                  ({modelSources[config.provider] === 'cache' ? 'CLI' :
-                    modelSources[config.provider] === 'api' ? 'API' :
-                    modelSources[config.provider] === 'ready-models' ? 'Ready' : 'static'})
-                </span>
+          <label className="block text-xs text-text-secondary mb-1">
+            Model
+            {modelSources[config.provider] && (
+              <span className="ml-1 text-text-secondary/60">
+                ({modelSources[config.provider] === 'cache' ? 'CLI' :
+                  modelSources[config.provider] === 'api' ? 'API' :
+                  modelSources[config.provider] === 'ready-models' ? 'Ready' : 'static'})
+              </span>
+            )}
+          </label>
+          <div className="flex items-center gap-1">
+            <select
+              value={isInherited ? inheritedModel || '' : config.model}
+              onChange={(e) => onModelChange(e.target.value)}
+              disabled={isInherited}
+              className="flex-1 min-w-0 px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isInherited ? (
+                <option value={inheritedModel || ''}>{inheritedModel || '(inherited from global)'}</option>
+              ) : (
+                <>
+                  <option value="">Select model...</option>
+                  {showGroupedModels
+                    ? groupedModels.map((group) => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.items.map((m) => (
+                            <option key={`${group.label}:${m.id}`} value={m.id}>{m.name || m.id}</option>
+                          ))}
+                        </optgroup>
+                      ))
+                    : providerModels.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                      ))}
+                </>
               )}
-            </label>
+            </select>
             {config.provider && !isNotInstalled && modelSources[config.provider] !== 'fallback' && (
               <button
                 onClick={() => onRefreshModels(config.provider)}
                 disabled={refreshingProvider === config.provider}
-                className="p-1 text-text-muted hover:text-accent disabled:opacity-50 transition-colors"
+                className="flex-shrink-0 p-2 text-text-secondary hover:text-accent disabled:opacity-50 transition-colors"
                 title="Refresh models"
               >
-                <i className={`fa-solid fa-arrows-rotate ${refreshingProvider === config.provider ? 'animate-spin' : ''}`}></i>
+                <i className={`fa-solid fa-arrows-rotate text-xs ${refreshingProvider === config.provider ? 'animate-spin' : ''}`}></i>
               </button>
             )}
           </div>
-          <select
-            value={isInherited ? inheritedModel || '' : config.model}
-            onChange={(e) => onModelChange(e.target.value)}
-            disabled={isInherited}
-            className="w-full px-3 py-2 bg-bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {isInherited ? (
-              <option value={inheritedModel || ''}>{inheritedModel || '(inherited from global)'}</option>
-            ) : (
-              <>
-                <option value="">Select model...</option>
-                {showGroupedModels
-                  ? groupedModels.map((group) => (
-                      <optgroup key={group.label} label={group.label}>
-                        {group.items.map((m) => (
-                          <option key={`${group.label}:${m.id}`} value={m.id}>{m.name || m.id}</option>
-                        ))}
-                      </optgroup>
-                    ))
-                  : providerModels.map((m) => (
-                      <option key={m.id} value={m.id}>{m.name || m.id}</option>
-                    ))}
-              </>
-            )}
-          </select>
         </div>
       </div>
 

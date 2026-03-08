@@ -400,33 +400,25 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                 {useMultiReview ? (
                   <div className="space-y-3">
                     {reviewers.map((r, i) => (
-                      <div key={i} className="relative">
-                        <AISetupRoleSelector
-                          label={`Reviewer ${i + 1}`}
-                          icon="fa-user-check"
-                          config={r}
-                          providers={providers}
-                          modelsByProvider={models}
-                          modelSources={modelSources}
-                          copiedCommand={copiedCommand}
-                          refreshingProvider={refreshingProvider}
-                          isProjectLevel={isProjectLevel}
-                          isInherited={Boolean(isProjectLevel && !r.provider && hasProviderAndModel(getInheritedValue(i)))}
-                          inheritedModel={getInheritedValue(i)?.model}
-                          onProviderChange={(providerId) => handleProviderChange(i, providerId)}
-                          onModelChange={(m) => handleModelChange(i, m)}
-                          onRefreshModels={refreshModels}
-                          onCopyToClipboard={copyToClipboard}
-                        />
-                        {reviewers.length > 1 && (
-                          <button 
-                            onClick={() => setReviewers(reviewers.filter((_, idx) => idx !== i))}
-                            className="absolute top-4 right-4 text-text-muted hover:text-danger transition-colors"
-                          >
-                            <i className="fa-solid fa-trash-can text-xs"></i>
-                          </button>
-                        )}
-                      </div>
+                      <AISetupRoleSelector
+                        key={i}
+                        label={`Reviewer ${i + 1}`}
+                        icon="fa-user-check"
+                        config={r}
+                        providers={providers}
+                        modelsByProvider={models}
+                        modelSources={modelSources}
+                        copiedCommand={copiedCommand}
+                        refreshingProvider={refreshingProvider}
+                        isProjectLevel={isProjectLevel}
+                        isInherited={Boolean(isProjectLevel && !r.provider && hasProviderAndModel(getInheritedValue(i)))}
+                        inheritedModel={getInheritedValue(i)?.model}
+                        onProviderChange={(providerId) => handleProviderChange(i, providerId)}
+                        onModelChange={(m) => handleModelChange(i, m)}
+                        onRefreshModels={refreshModels}
+                        onCopyToClipboard={copyToClipboard}
+                        onRemove={reviewers.length > 1 ? () => setReviewers(reviewers.filter((_, idx) => idx !== i)) : undefined}
+                      />
                     ))}
                     <button 
                       onClick={() => setReviewers([...reviewers, {provider: 'claude', model: 'claude-sonnet-4'}])}
