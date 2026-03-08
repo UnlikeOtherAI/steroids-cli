@@ -43,7 +43,7 @@ export function OllamaConnectionPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const loadedModelsCount = useMemo(() => connection?.loadedModels.length ?? 0, [connection?.loadedModels.length]);
+  const loadedModelsCount = useMemo(() => connection?.loadedModels?.length ?? 0, [connection?.loadedModels?.length]);
 
   const syncFromConnection = (data: OllamaConnectionStatus) => {
     const mode = data.mode ?? 'local';
@@ -233,9 +233,9 @@ export function OllamaConnectionPage() {
             <div>
               <p className="text-text-muted">Loaded Models</p>
               <p className="font-semibold text-text-primary">{loadedModelsCount}</p>
-              {connection.loadedModels.length > 0 ? (
+              {(connection.loadedModels?.length ?? 0) > 0 ? (
                 <ul className="mt-2 space-y-1">
-                  {connection.loadedModels.map((model) => (
+                  {connection.loadedModels?.map((model) => (
                     <li key={model.name} className="text-xs text-text-muted">
                       {model.name} • VRAM {formatVramGb(model.sizeVram)}
                     </li>

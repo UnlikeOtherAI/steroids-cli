@@ -61,7 +61,7 @@ export function OllamaAccountPage() {
             </div>
             <div>
               <p className="text-text-muted">Loaded Models</p>
-              <p className="font-semibold text-text-primary">{account.loadedModels.length}</p>
+              <p className="font-semibold text-text-primary">{account.loadedModels?.length ?? 0}</p>
             </div>
             {account.mode === 'cloud' && (
               <>

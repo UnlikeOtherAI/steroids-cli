@@ -11,7 +11,7 @@ export interface OllamaConnectionStatus {
   endpoint: string;
   connected: boolean;
   version?: string | null;
-  loadedModels: OllamaLoadedModel[];
+  loadedModels?: OllamaLoadedModel[];
   cloudTier?: string | null;
 }
 

@@ -21,7 +21,7 @@ export interface OllamaConnectionStatus {
   mode: OllamaConnectionMode;
   version?: string;
   minimumVersionMet?: boolean;
-  loadedModels?: number;
+  loadedModels?: Array<{ name: string; sizeVram?: number }>;
   error?: string;
 }
 
@@ -203,7 +203,9 @@ export async function testConnection(
     ]);
 
     const version = versionResult.status === 'fulfilled' ? versionResult.value.version : undefined;
-    const loadedModels = psResult.status === 'fulfilled' ? psResult.value.models.length : undefined;
+    const loadedModels = psResult.status === 'fulfilled'
+      ? psResult.value.models.map((m) => ({ name: m.name, sizeVram: m.size_vram }))
+      : undefined;
 
     return {
       connected: true,
