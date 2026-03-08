@@ -353,6 +353,13 @@ async function autoMergeOnCompletion(
     });
 
     if (result.success) {
+      if (result.completedCommits === 0 && result.skipped > 0 && result.conflicts === 0) {
+        console.warn(
+          `[AUTO-MERGE] WARNING: All workstreams skipped, 0 commits applied ` +
+          `(${result.skipped} skipped). Workstream branches may be unreachable ` +
+          `from the integration workspace. Check remote URL configuration.`
+        );
+      }
       console.log(`[AUTO-MERGE] Success: ${result.completedCommits} commits applied, ${result.conflicts} conflicts, ${result.skipped} skipped`);
 
       // Mark session complete only if ALL workstreams in this session are now done.

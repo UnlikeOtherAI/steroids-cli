@@ -6,6 +6,7 @@
 import { resolve } from 'node:path';
 import { rmSync } from 'node:fs';
 import { getDefaultWorkspaceRoot, getProjectHash, createIntegrationWorkspace } from './clone.js';
+import { resolveRemoteUrl } from '../workspace/pool.js';
 import { openDatabase } from '../database/connection.js';
 import {
   openGlobalDatabase,
@@ -122,6 +123,8 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
     assertMergeLockEpoch(db, sessionId, runnerId, lockEpoch);
     updateParallelSessionStatus(sessionId, 'merging');
 
+    const canonicalRemoteUrl = resolveRemoteUrl(projectPath);
+
     const integrationWorkspace = createIntegrationWorkspace({
       projectPath,
       sessionId,
@@ -129,6 +132,7 @@ export async function runParallelMerge(options: MergeOptions): Promise<MergeResu
       remote,
       workspaceRoot,
       integrationBranchName,
+      canonicalRemoteUrl: canonicalRemoteUrl ?? undefined,
     });
     mergePath = integrationWorkspace.workspacePath;
     integrationWorkspacePath = integrationWorkspace.workspacePath;

@@ -46,7 +46,8 @@ export function closeStaleParallelSessions(
          WHERE r.parallel_session_id = workstreams.session_id
            AND r.status != 'stopped'
            AND r.heartbeat_at > datetime('now', '-5 minutes')
-       )`
+       )
+       AND (workstreams.lease_expires_at IS NULL OR workstreams.lease_expires_at <= datetime('now'))`
   ).run(...params);
 
   // Step 2: Close sessions with no active workstreams and no alive runners.

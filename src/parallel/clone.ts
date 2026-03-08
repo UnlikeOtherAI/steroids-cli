@@ -54,6 +54,8 @@ export interface IntegrationWorkspaceOptions {
   remote?: string;
   workspaceRoot?: string;
   integrationBranchName?: string;
+  /** Canonical remote URL (e.g. GitHub). When set, origin is re-pointed before any fetch. */
+  canonicalRemoteUrl?: string;
 }
 
 export interface IntegrationWorkspaceResult extends WorkspaceCloneResult {
@@ -458,11 +460,27 @@ export function createIntegrationWorkspace(options: IntegrationWorkspaceOptions)
   });
 
   try {
+    // Re-point origin to canonical remote (e.g. GitHub) so workstream branch
+    // fetches reach branches pushed by pool slots, not the local project dir.
+    if (options.canonicalRemoteUrl) {
+      execFileSync('git', ['-C', clone.workspacePath, 'remote', 'set-url', remote, options.canonicalRemoteUrl],
+        { stdio: 'inherit', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    }
+
     execFileSync(
       'git',
       ['-C', clone.workspacePath, 'fetch', remote, options.baseBranch],
       { stdio: 'inherit', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
     );
+
+    // Force-update local base branch to match remote — getWorkstreamCommitList()
+    // uses it as baseline, and it may be stale after origin rewrite.
+    execFileSync(
+      'git',
+      ['-C', clone.workspacePath, 'branch', '--force', options.baseBranch, `${remote}/${options.baseBranch}`],
+      { stdio: 'inherit', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
+    );
+
     execFileSync(
       'git',
       ['-C', clone.workspacePath, 'checkout', '-B', integrationBranchName, `${remote}/${options.baseBranch}`],
