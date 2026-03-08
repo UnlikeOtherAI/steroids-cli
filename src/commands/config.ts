@@ -602,7 +602,7 @@ ARGUMENTS:
   [role]              Role to configure: coder | reviewer | orchestrator
 
 OPTIONS:
-  -p, --provider      Provider (claude | codex | gemini | mistral | openai) - skip interactive selection
+  -p, --provider      Provider (claude | codex | gemini | mistral) - skip interactive selection
   -m, --model         Model ID - skip interactive selection
   --global            Save to global config
   --add               Add a reviewer (requires -p and -m)
@@ -621,7 +621,7 @@ EXAMPLES:
 
 ENVIRONMENT VARIABLES:
   STEROIDS_ANTHROPIC           Required for Claude models
-  STEROIDS_OPENAI              Required for OpenAI/Codex models
+  STEROIDS_OPENAI              Required for Codex models
   STEROIDS_GOOGLE              Required for Gemini models
   STEROIDS_MISTRAL             Optional for Mistral (Vibe) models
 `);
@@ -706,9 +706,9 @@ ENVIRONMENT VARIABLES:
 
   if (values.provider) {
     const provider = values.provider as any;
-    if (!['claude', 'codex', 'gemini', 'mistral', 'openai'].includes(provider)) {
+    if (!['claude', 'codex', 'gemini', 'mistral'].includes(provider)) {
       console.error(`Invalid provider: ${provider}`);
-      console.error('Valid providers: claude, codex, gemini, mistral, openai');
+      console.error('Valid providers: claude, codex, gemini, mistral');
       process.exit(1);
     }
 
@@ -749,7 +749,7 @@ USAGE:
   steroids config models <provider> [options]
 
 ARGUMENTS:
-  <provider>          Provider to query: claude | openai | gemini | mistral
+  <provider>          Provider to query: claude | gemini | mistral
 
 OPTIONS:
   -j, --json          Output as JSON
@@ -757,13 +757,11 @@ OPTIONS:
 
 EXAMPLES:
   steroids config models claude           # List Claude models
-  steroids config models openai --json    # List OpenAI models as JSON
   steroids config models gemini           # List Gemini models
   steroids config models mistral          # List Mistral models
 
 ENVIRONMENT VARIABLES:
   STEROIDS_ANTHROPIC           Required for Claude
-  STEROIDS_OPENAI              Required for OpenAI
   STEROIDS_GOOGLE              Required for Gemini
   STEROIDS_MISTRAL             Optional for Mistral (Vibe) model listing
 `);
@@ -772,15 +770,15 @@ ENVIRONMENT VARIABLES:
 
   if (positionals.length === 0) {
     console.error('Provider is required');
-    console.error('Usage: steroids config models <claude|openai|gemini|mistral>');
+    console.error('Usage: steroids config models <claude|gemini|mistral>');
     process.exit(2);
   }
 
-  const provider = positionals[0] as 'claude' | 'openai' | 'gemini' | 'mistral';
+  const provider = positionals[0] as 'claude' | 'gemini' | 'mistral';
 
-  if (!['claude', 'openai', 'gemini', 'mistral'].includes(provider)) {
+  if (!['claude', 'gemini', 'mistral'].includes(provider)) {
     console.error(`Invalid provider: ${provider}`);
-    console.error('Valid providers: claude, openai, gemini, mistral');
+    console.error('Valid providers: claude, gemini, mistral');
     process.exit(2);
   }
 

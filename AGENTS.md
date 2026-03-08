@@ -103,6 +103,10 @@ For orchestrator-generated coder/reviewer/coordinator prompts:
 - Path format is strict: in-repo links use `./...`; out-of-repo links use absolute paths.
 - Do not emit placeholder text like "file not found" for linked spec/instruction/skill paths in prompt templates.
 
+### CLI-Only Providers (CRITICAL)
+
+All AI providers MUST invoke models by spawning a CLI subprocess (`spawn`). Never implement providers that call model APIs directly via HTTP (`fetch`, `https.request`, etc.). The provider's job is to wrap a CLI tool — authentication, tool use, multi-step reasoning, and request handling are the CLI's responsibility, not ours. If a model doesn't have a CLI wrapper, it doesn't get a provider.
+
 ### Command Execution Discipline (CRITICAL)
 
 Use non-interactive modes for all scripted/automated flows. For `npx` in automation, use `-y`/`--yes`.

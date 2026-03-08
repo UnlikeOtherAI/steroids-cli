@@ -262,7 +262,6 @@ const AIRoleSettingsSingle: React.FC<AIRoleSettingsSingleProps> = ({
   const formatProviderName = (id: string): string => {
     switch (id) {
       case 'claude': return 'Anthropic (claude)';
-      case 'openai': return 'OpenAI API';
       case 'gemini': return 'Google (gemini)';
       case 'codex': return 'OpenAI (codex)';
       case 'mistral': return 'Mistral (vibe)';
@@ -281,7 +280,7 @@ const AIRoleSettingsSingle: React.FC<AIRoleSettingsSingleProps> = ({
   const isNotInstalled = currentProviderInfo && !currentProviderInfo.installed;
   const installInfo = INSTALL_COMMANDS[currentProvider];
 
-  const providerOptions = schema.properties?.provider?.enum || ['claude', 'openai', 'gemini', 'mistral', 'codex'];
+  const providerOptions = schema.properties?.provider?.enum || ['claude', 'gemini', 'mistral', 'codex'];
 
   return (
     <div className="space-y-4">

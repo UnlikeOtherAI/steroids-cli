@@ -396,6 +396,7 @@ export interface AIModel {
   name: string;
   description?: string;
   contextWindow?: number;
+  mappedProvider?: string;
 }
 
 export interface AIProvider {

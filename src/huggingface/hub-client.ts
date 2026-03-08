@@ -126,7 +126,7 @@ export class HuggingFaceHubClient {
   }
 
   async getModel(modelId: string, options: { token?: string; expandInferenceProviders?: boolean } = {}): Promise<HFModel> {
-    const encodedModelId = encodeURIComponent(modelId);
+    const encodedModelId = modelId.split('/').map(encodeURIComponent).join('/');
     const params = new URLSearchParams();
     if (options.expandInferenceProviders) {
       params.set('expand', 'inferenceProviderMapping');

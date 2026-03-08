@@ -21,6 +21,7 @@ interface AIModelResponse {
   name: string;
   runtime?: Runtime;
   groupLabel?: string;
+  mappedProvider?: string;
 }
 
 const HF_RUNTIME_LABELS: Record<Runtime, string> = {
@@ -42,21 +43,27 @@ function isCliInstalled(command: string): boolean {
   }
 }
 
+function runtimeToProvider(runtime: Runtime): string {
+  return runtime === 'opencode' ? 'opencode' : 'claude';
+}
+
 function toGroupedHFModel(row: HFPairedModelRow): AIModelResponse {
   return {
-    id: row.model_id,
+    id: row.runtime === 'opencode' ? `huggingface/${row.model_id}` : row.model_id,
     name: row.model_id,
     runtime: row.runtime,
     groupLabel: HF_RUNTIME_LABELS[row.runtime],
+    mappedProvider: runtimeToProvider(row.runtime),
   };
 }
 
 function toGroupedOllamaModel(row: OllamaPairedModelRow): AIModelResponse {
   return {
-    id: row.model_name,
+    id: row.runtime === 'opencode' ? `ollama/${row.model_name}` : row.model_name,
     name: row.model_name,
     runtime: row.runtime,
     groupLabel: OLLAMA_RUNTIME_LABELS[row.runtime],
+    mappedProvider: runtimeToProvider(row.runtime),
   };
 }
 
@@ -83,14 +90,9 @@ router.get('/ai/providers', (_req: Request, res: Response) => {
       installed: isCliInstalled('codex'),
     },
     {
-      id: 'hf',
-      name: 'Hugging Face',
-      installed: true,
-    },
-    {
-      id: 'ollama',
-      name: 'Ollama',
-      installed: true,
+      id: 'opencode',
+      name: 'OpenCode (HF/Ollama)',
+      installed: isCliInstalled('opencode'),
     },
   ];
 

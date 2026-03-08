@@ -12,7 +12,8 @@ import { CONFIG_SCHEMA, isSchemaField, type SchemaField, type SchemaObject } fro
 const STEROIDS_DIR = '.steroids';
 const CONFIG_FILE = 'config.yaml';
 
-export type ProviderName = 'claude' | 'gemini' | 'openai' | 'codex' | 'mistral' | 'minimax' | 'ollama' | 'hf';
+import { PROVIDER_NAMES, type ProviderName } from './provider-names.js';
+export { PROVIDER_NAMES, type ProviderName } from './provider-names.js';
 
 export interface ReviewerConfig {
   provider?: ProviderName;

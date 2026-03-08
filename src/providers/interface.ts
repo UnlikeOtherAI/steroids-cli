@@ -143,7 +143,7 @@ export interface ModelInfo {
  * All providers must implement this interface
  */
 export interface IAIProvider {
-  /** Provider name (e.g., 'claude', 'gemini', 'openai') */
+  /** Provider name (e.g., 'claude', 'gemini', 'codex') */
   readonly name: string;
 
   /** Human-readable display name */

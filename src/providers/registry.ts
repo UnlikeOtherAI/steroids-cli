@@ -8,10 +8,7 @@ import { ClaudeProvider } from './claude.js';
 import { CodexProvider } from './codex.js';
 import { GeminiProvider } from './gemini.js';
 import { MistralProvider } from './mistral.js';
-import { OpenAIProvider } from './openai.js';
-import { MiniMaxProvider } from './minimax.js';
-import { OllamaProvider } from './ollama.js';
-import { HuggingFaceProvider } from './huggingface.js';
+import { OpenCodeProvider } from './opencode.js';
 
 /**
  * Provider availability status
@@ -187,10 +184,7 @@ export async function createDefaultRegistry(): Promise<ProviderRegistry> {
     new CodexProvider(),
     new GeminiProvider(),
     new MistralProvider(),
-    new OpenAIProvider(),
-    new MiniMaxProvider(),
-    new OllamaProvider(),
-    new HuggingFaceProvider(),
+    new OpenCodeProvider(),
   ];
 
   for (const provider of providers) {
