@@ -16,7 +16,7 @@ import {
   getModelsForProvider,
   checkProviderCLI,
 } from '../providers/api-models.js';
-import { loadConfig } from '../config/loader.js';
+import { loadConfig, type ProviderName } from '../config/loader.js';
 
 const HELP = generateHelp({
   command: 'ai',
@@ -168,7 +168,7 @@ USAGE:
   steroids ai models <provider> [options]
 
 ARGUMENTS:
-  <provider>          Provider name: claude | openai | gemini | codex | mistral
+  <provider>          Provider name: claude | gemini | codex | mistral
 
 OPTIONS:
   --api               Fetch models from API (requires API key)
@@ -181,7 +181,7 @@ EXAMPLES:
 
 ENVIRONMENT VARIABLES:
   STEROIDS_ANTHROPIC           Required for Claude API access
-  STEROIDS_OPENAI              Required for OpenAI API access
+  STEROIDS_OPENAI              Required for Codex API access
   STEROIDS_GOOGLE              Required for Gemini API access
   STEROIDS_MISTRAL             Optional for Mistral (Vibe) model access
 `);
@@ -190,27 +190,27 @@ ENVIRONMENT VARIABLES:
 
   const provider = positionals[0];
 
-  if (!['claude', 'openai', 'gemini', 'codex', 'mistral'].includes(provider)) {
+  if (!['claude', 'gemini', 'codex', 'mistral'].includes(provider)) {
     out.error('INVALID_ARGUMENTS', `Invalid provider: ${provider}`);
-    out.log('Valid providers: claude, openai, gemini, codex, mistral');
+    out.log('Valid providers: claude, gemini, codex, mistral');
     process.exit(2);
   }
 
   if (values.api) {
     // Fetch from API
-    if (!['claude', 'openai', 'gemini', 'mistral'].includes(provider)) {
+    if (!['claude', 'gemini', 'mistral'].includes(provider)) {
       out.error('INVALID_ARGUMENTS', `Provider ${provider} does not support API model fetching`);
       process.exit(2);
     }
 
-    if (!hasApiKey(provider as 'claude' | 'openai' | 'gemini' | 'mistral')) {
-      out.error('CONFIGURATION_ERROR', `${getApiKeyEnvVar(provider as 'claude' | 'openai' | 'gemini' | 'mistral')} environment variable not set`);
+    if (!hasApiKey(provider as 'claude' | 'gemini' | 'mistral')) {
+      out.error('CONFIGURATION_ERROR', `${getApiKeyEnvVar(provider as 'claude' | 'gemini' | 'mistral')} environment variable not set`);
       process.exit(1);
     }
 
     out.verbose(`Fetching models from ${provider} API...`);
 
-    const result = await fetchModelsForProvider(provider as 'claude' | 'openai' | 'gemini' | 'mistral');
+    const result = await fetchModelsForProvider(provider as 'claude' | 'gemini' | 'mistral');
 
     if (!result.success) {
       out.error('GENERAL_ERROR', `Failed to fetch models: ${result.error}`);
@@ -336,7 +336,7 @@ EXAMPLES:
   out.log('');
 
   // Check if provider CLI is available
-  const status = await checkProviderCLI(provider as 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral');
+  const status = await checkProviderCLI(provider as ProviderName);
 
   const results = {
     role,

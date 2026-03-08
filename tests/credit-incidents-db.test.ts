@@ -114,7 +114,7 @@ describe('Credit Exhaustion Incident DB Queries', () => {
 
     it('allows duplicate when provider differs', () => {
       const id1 = recordCreditIncident(db, baseDetails, 'runner-1');
-      const id2 = recordCreditIncident(db, { ...baseDetails, provider: 'openai' }, 'runner-1');
+      const id2 = recordCreditIncident(db, { ...baseDetails, provider: 'codex' }, 'runner-1');
       expect(id2).not.toBe(id1);
     });
 

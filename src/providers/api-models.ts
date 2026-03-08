@@ -5,6 +5,7 @@
 
 import { getProviderRegistry, type ProviderStatus } from './registry.js';
 import type { ModelInfo } from './interface.js';
+import type { ProviderName } from '../config/loader.js';
 
 export interface APIModel {
   id: string;
@@ -26,7 +27,7 @@ export interface ProviderModel {
  * Uses the provider registry to verify CLI availability
  */
 export async function checkProviderCLI(
-  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral' | 'minimax' | 'ollama'
+  provider: ProviderName
 ): Promise<ProviderStatus> {
   const registry = await getProviderRegistry();
   const providerInstance = registry.tryGet(provider);
@@ -55,7 +56,7 @@ export async function checkProviderCLI(
  * Does not require API keys - uses hardcoded model lists from provider implementations
  */
 export async function getModelsForProvider(
-  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral' | 'minimax' | 'ollama'
+  provider: ProviderName
 ): Promise<ProviderModel[]> {
   const registry = await getProviderRegistry();
   const providerInstance = registry.tryGet(provider);
@@ -77,7 +78,7 @@ export async function getModelsForProvider(
  * Get the default model for a provider and role
  */
 export async function getDefaultModel(
-  provider: 'claude' | 'openai' | 'gemini' | 'codex' | 'mistral' | 'minimax' | 'ollama',
+  provider: ProviderName,
   role: 'orchestrator' | 'coder' | 'reviewer'
 ): Promise<string | undefined> {
   const registry = await getProviderRegistry();
@@ -155,100 +156,6 @@ export async function fetchClaudeModels(): Promise<FetchModelsResult> {
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
-}
-
-/**
- * Fetch models from OpenAI API
- * Uses STEROIDS_OPENAI environment variable
- */
-export async function fetchOpenAIModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.STEROIDS_OPENAI;
-
-  if (!apiKey) {
-    return {
-      success: false,
-      models: [],
-      error: 'STEROIDS_OPENAI not set',
-    };
-  }
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/models', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      return {
-        success: false,
-        models: [],
-        error: `API error: ${response.status} - ${text}`,
-      };
-    }
-
-    const data = (await response.json()) as {
-      data: Array<{
-        id: string;
-        created?: number;
-        owned_by?: string;
-      }>;
-    };
-
-    // Filter to chat models (gpt-4, gpt-3.5, o1, etc.)
-    const chatModels = data.data.filter(
-      (m) =>
-        m.id.startsWith('gpt-4') ||
-        m.id.startsWith('gpt-3.5') ||
-        m.id.startsWith('o1') ||
-        m.id.startsWith('o3')
-    );
-
-    const models: APIModel[] = chatModels.map((m) => ({
-      id: m.id,
-      name: formatOpenAIModelName(m.id),
-      created: m.created ? new Date(m.created * 1000) : undefined,
-    }));
-
-    // Sort by model family and version
-    models.sort((a, b) => {
-      const aScore = getOpenAIModelScore(a.id);
-      const bScore = getOpenAIModelScore(b.id);
-      if (aScore !== bScore) return aScore - bScore;
-      return a.id.localeCompare(b.id);
-    });
-
-    return { success: true, models };
-  } catch (error) {
-    return {
-      success: false,
-      models: [],
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-}
-
-function formatOpenAIModelName(id: string): string {
-  if (id.startsWith('gpt-4o')) return `GPT-4o ${id.replace('gpt-4o', '').replace(/-/g, ' ').trim()}`.trim();
-  if (id.startsWith('gpt-4-turbo')) return 'GPT-4 Turbo';
-  if (id.startsWith('gpt-4')) return `GPT-4 ${id.replace('gpt-4', '').replace(/-/g, ' ').trim()}`.trim();
-  if (id.startsWith('gpt-3.5-turbo')) return 'GPT-3.5 Turbo';
-  if (id.startsWith('o1')) return `O1 ${id.replace('o1', '').replace(/-/g, ' ').trim()}`.trim();
-  if (id.startsWith('o3')) return `O3 ${id.replace('o3', '').replace(/-/g, ' ').trim()}`.trim();
-  return id;
-}
-
-function getOpenAIModelScore(id: string): number {
-  if (id.startsWith('o3')) return 0;
-  if (id.startsWith('o1')) return 1;
-  if (id.startsWith('gpt-4o')) return 2;
-  if (id.startsWith('gpt-4-turbo')) return 3;
-  if (id.startsWith('gpt-4')) return 4;
-  if (id.startsWith('gpt-3.5')) return 5;
-  return 6;
 }
 
 /**
@@ -483,21 +390,15 @@ function preferMistralModel(candidate: APIModel, existing: APIModel): boolean {
  * Fetch models for a specific provider
  */
 export async function fetchModelsForProvider(
-  provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex' | 'minimax' | 'ollama'
+  provider: ProviderName
 ): Promise<FetchModelsResult> {
   switch (provider) {
     case 'claude':
       return fetchClaudeModels();
-    case 'openai':
-      return fetchOpenAIModels();
     case 'gemini':
       return fetchGeminiModels();
     case 'mistral':
       return fetchMistralModels();
-    case 'minimax':
-      return fetchMiniMaxModels();
-    case 'ollama':
-      return fetchOllamaModels();
     case 'codex':
       return {
         success: true,
@@ -506,6 +407,8 @@ export async function fetchModelsForProvider(
           name: m.name,
         })),
       };
+    case 'opencode':
+      return { success: true, models: [] }; // Models come from paired tables, not provider
     default:
       return {
         success: false,
@@ -516,98 +419,35 @@ export async function fetchModelsForProvider(
 }
 
 /**
- * Fetch models from MiniMax API
- */
-export async function fetchMiniMaxModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.STEROIDS_MINIMAX;
-
-  if (!apiKey) {
-    return {
-      success: false,
-      models: [],
-      error: 'STEROIDS_MINIMAX not set',
-    };
-  }
-
-  try {
-    // MiniMax uses a list of static models mostly, but we can fetch account info or similar if needed.
-    // For now, return the list from the provider.
-    const models = (await getModelsForProvider('minimax')).map(m => ({
-      id: m.id,
-      name: m.name,
-    }));
-    return { success: true, models };
-  } catch (error) {
-    return {
-      success: false,
-      models: [],
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-}
-
-/**
- * Fetch models from local Ollama service
- */
-export async function fetchOllamaModels(): Promise<FetchModelsResult> {
-  try {
-    const registry = await getProviderRegistry();
-    const ollama = registry.get('ollama') as any;
-    if (ollama.fetchModels) {
-      await ollama.fetchModels();
-    }
-    const models = (await getModelsForProvider('ollama')).map(m => ({
-      id: m.id,
-      name: m.name,
-    }));
-    return { success: true, models };
-  } catch (error) {
-    return {
-      success: false,
-      models: [],
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-}
-
-/**
  * Get the environment variable name for a provider's API key
  */
-export function getApiKeyEnvVar(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex' | 'minimax' | 'ollama'): string {
+export function getApiKeyEnvVar(provider: ProviderName): string {
   switch (provider) {
     case 'claude':
       return 'STEROIDS_ANTHROPIC';
-    case 'openai':
-      return 'STEROIDS_OPENAI';
     case 'gemini':
       return 'STEROIDS_GOOGLE';
     case 'mistral':
       return 'STEROIDS_MISTRAL';
     case 'codex':
       return 'STEROIDS_OPENAI';
-    case 'minimax':
-      return 'STEROIDS_MINIMAX';
-    case 'ollama':
-      return ''; // No API key for local Ollama
+    case 'opencode':
+      return ''; // No API key needed
   }
 }
 
 /**
  * Check if API key is set for a provider
  */
-export function hasApiKey(provider: 'claude' | 'openai' | 'gemini' | 'mistral' | 'codex' | 'minimax' | 'ollama'): boolean {
+export function hasApiKey(provider: ProviderName): boolean {
   if (provider === 'codex') return true;
-  if (provider === 'ollama') return true; // Local service
+  if (provider === 'opencode') return true; // Uses own auth via opencode.json
   if (provider === 'mistral') return true; // Vibe CLI can operate with local auth and does not require API key
   switch (provider) {
     case 'claude':
       return !!process.env.STEROIDS_ANTHROPIC;
-    case 'openai':
-      return !!process.env.STEROIDS_OPENAI;
     case 'gemini':
       return !!process.env.STEROIDS_GOOGLE;
-    case 'minimax':
-      return !!process.env.STEROIDS_MINIMAX;
     default:
       return false;
   }

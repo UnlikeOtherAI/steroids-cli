@@ -21,13 +21,12 @@ import {
   type ProviderName,
 } from './loader.js';
 
-type Provider = Exclude<ProviderName, 'hf'>;
 type Role = 'orchestrator' | 'coder' | 'reviewer';
 
 interface SetupState {
   step: 'role' | 'reviewer_mode' | 'reviewer_list' | 'provider' | 'model' | 'confirm' | 'done';
   role: Role;
-  provider: Provider | null;
+  provider: ProviderName | null;
   model: string | null;
   selectedIndex: number;
   items: string[];
@@ -39,12 +38,12 @@ interface SetupState {
   editingReviewerIndex: number | null;
 }
 
-const PROVIDERS: { id: Provider; name: string; description: string }[] = [
+const PROVIDERS: { id: ProviderName; name: string; description: string }[] = [
   { id: 'claude', name: 'Anthropic (claude)', description: 'Claude Opus/Sonnet/Haiku models' },
   { id: 'codex', name: 'OpenAI (codex)', description: 'GPT-5 and specialized coding models' },
   { id: 'gemini', name: 'Google (gemini)', description: 'Gemini Pro/Flash models' },
   { id: 'mistral', name: 'Mistral (vibe)', description: 'Devstral and Mistral models' },
-  { id: 'openai', name: 'OpenAI API', description: 'Standard GPT-4o/3.5 models via API' },
+  { id: 'opencode', name: 'OpenCode (HF/Ollama)', description: 'HuggingFace/Ollama models via OpenCode CLI' },
 ];
 
 const ROLES: { id: Role; name: string; description: string }[] = [
@@ -617,7 +616,7 @@ export async function runAISetup(options: {
  */
 export async function quickAISetup(options: {
   role: Role;
-  provider: Provider;
+  provider: ProviderName;
   model?: string;
   global?: boolean;
 }): Promise<{ success: boolean; error?: string }> {

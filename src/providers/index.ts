@@ -26,11 +26,8 @@ export { GeminiProvider, createGeminiProvider } from './gemini.js';
 // Mistral provider
 export { MistralProvider, createMistralProvider } from './mistral.js';
 
-// OpenAI provider
-export { OpenAIProvider, createOpenAIProvider } from './openai.js';
-
-// Hugging Face provider
-export { HuggingFaceProvider, createHuggingFaceProvider } from './huggingface.js';
+// OpenCode provider
+export { OpenCodeProvider, createOpenCodeProvider } from './opencode.js';
 
 // Registry
 export {
@@ -47,7 +44,6 @@ export {
   type APIModel,
   type FetchModelsResult,
   fetchClaudeModels,
-  fetchOpenAIModels,
   fetchGeminiModels,
   fetchMistralModels,
   fetchModelsForProvider,

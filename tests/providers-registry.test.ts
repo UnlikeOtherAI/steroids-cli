@@ -7,7 +7,7 @@ import { ProviderRegistry } from '../src/providers/registry.js';
 import { ClaudeProvider } from '../src/providers/claude.js';
 import { CodexProvider } from '../src/providers/codex.js';
 import { GeminiProvider } from '../src/providers/gemini.js';
-import { OpenAIProvider } from '../src/providers/openai.js';
+import { OpenCodeProvider } from '../src/providers/opencode.js';
 
 describe('ProviderRegistry', () => {
   let registry: ProviderRegistry;
@@ -156,8 +156,7 @@ describe('ProviderRegistry', () => {
       expect(defaultRegistry.has('claude')).toBe(true);
       expect(defaultRegistry.has('codex')).toBe(true);
       expect(defaultRegistry.has('gemini')).toBe(true);
-      expect(defaultRegistry.has('openai')).toBe(true);
-      expect(defaultRegistry.has('hf')).toBe(true);
+      expect(defaultRegistry.has('opencode')).toBe(true);
     });
   });
 });

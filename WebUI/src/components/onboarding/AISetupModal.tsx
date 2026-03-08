@@ -147,6 +147,29 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     }
   };
 
+  const handleModelChange = (role: 'orchestrator' | 'coder' | 'reviewer' | number, modelId: string) => {
+    // Check if the selected model has a mappedProvider override
+    const providerKey = typeof role === 'number'
+      ? reviewers[role]?.provider
+      : role === 'orchestrator' ? orchestrator.provider
+        : role === 'coder' ? coder.provider : reviewer.provider;
+    const providerModels = models[providerKey] || [];
+    const selectedModel = providerModels.find((m) => m.id === modelId);
+    const mapped = selectedModel?.mappedProvider;
+
+    if (typeof role === 'number') {
+      const next = [...reviewers];
+      next[role] = { provider: mapped || next[role].provider, model: modelId };
+      setReviewers(next);
+    } else if (role === 'orchestrator') {
+      setOrchestrator({ provider: mapped || orchestrator.provider, model: modelId });
+    } else if (role === 'coder') {
+      setCoder({ provider: mapped || coder.provider, model: modelId });
+    } else {
+      setReviewer({ provider: mapped || reviewer.provider, model: modelId });
+    }
+  };
+
   const getInheritedValue = (role: RoleKey | number): InheritedRoleConfig | null => {
     const inheritedAi = (inheritedConfig?.ai as Record<string, unknown> | undefined)
       ?? globalAIConfig;
@@ -330,7 +353,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                 isInherited={Boolean(isProjectLevel && !orchestrator.provider && hasProviderAndModel(getInheritedValue('orchestrator')))}
                 inheritedModel={getInheritedValue('orchestrator')?.model}
                 onProviderChange={(providerId) => handleProviderChange('orchestrator', providerId)}
-                onModelChange={(m) => setOrchestrator(prev => ({ ...prev, model: m }))}
+                onModelChange={(m) => handleModelChange('orchestrator', m)}
                 onRefreshModels={refreshModels}
                 onCopyToClipboard={copyToClipboard}
               />
@@ -347,7 +370,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                 isInherited={Boolean(isProjectLevel && !coder.provider && hasProviderAndModel(getInheritedValue('coder')))}
                 inheritedModel={getInheritedValue('coder')?.model}
                 onProviderChange={(providerId) => handleProviderChange('coder', providerId)}
-                onModelChange={(m) => setCoder(prev => ({ ...prev, model: m }))}
+                onModelChange={(m) => handleModelChange('coder', m)}
                 onRefreshModels={refreshModels}
                 onCopyToClipboard={copyToClipboard}
               />
@@ -391,11 +414,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                           isInherited={Boolean(isProjectLevel && !r.provider && hasProviderAndModel(getInheritedValue(i)))}
                           inheritedModel={getInheritedValue(i)?.model}
                           onProviderChange={(providerId) => handleProviderChange(i, providerId)}
-                          onModelChange={(m) => {
-                            const next = [...reviewers];
-                            next[i].model = m;
-                            setReviewers(next);
-                          }}
+                          onModelChange={(m) => handleModelChange(i, m)}
                           onRefreshModels={refreshModels}
                           onCopyToClipboard={copyToClipboard}
                         />
@@ -430,7 +449,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                     isInherited={Boolean(isProjectLevel && !reviewer.provider && hasProviderAndModel(getInheritedValue('reviewer')))}
                     inheritedModel={getInheritedValue('reviewer')?.model}
                     onProviderChange={(providerId) => handleProviderChange('reviewer', providerId)}
-                    onModelChange={(m) => setReviewer(prev => ({ ...prev, model: m }))}
+                    onModelChange={(m) => handleModelChange('reviewer', m)}
                     onRefreshModels={refreshModels}
                     onCopyToClipboard={copyToClipboard}
                   />

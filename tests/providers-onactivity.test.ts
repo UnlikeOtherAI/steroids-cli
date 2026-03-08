@@ -88,26 +88,6 @@ describe('Providers emit onActivity events', () => {
     expect(activities.some((a) => a.type === 'output')).toBe(true);
   });
 
-  it('OpenAIProvider emits output activity', async () => {
-    mockSpawn.mockReturnValue(
-      createMockChildProcess({ stdoutChunks: ['ok\n'], closeCode: 0 })
-    );
-
-    const { OpenAIProvider } = await import('../src/providers/openai.js');
-    const provider = new OpenAIProvider();
-
-    const activities: any[] = [];
-    const result = await provider.invoke('prompt', {
-      model: 'gpt-4o',
-      streamOutput: false,
-      onActivity: (a) => activities.push(a),
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.stdout).toContain('ok');
-    expect(activities.some((a) => a.type === 'output')).toBe(true);
-  });
-
   it('CodexProvider emits tool activity when JSON events are present', async () => {
     mockSpawn.mockReturnValue(
       createMockChildProcess({

@@ -91,12 +91,16 @@ describe('API Hugging Face routes', () => {
       providers: Array<{ id: string; installed: boolean }>;
     };
     expect(providersBody.success).toBe(true);
+    // hf and ollama are no longer direct providers — models are browsed via API routes
+    // but invocation goes through claude or opencode
     expect(providersBody.providers).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'hf', installed: true }),
-        expect.objectContaining({ id: 'ollama', installed: true }),
+        expect.objectContaining({ id: 'opencode' }),
       ])
     );
+    const providerIds = providersBody.providers.map(p => p.id);
+    expect(providerIds).not.toContain('hf');
+    expect(providerIds).not.toContain('ollama');
 
     const base = `http://127.0.0.1:${port}/api/hf/ready-models`;
     await fetch(base, {
@@ -138,11 +142,13 @@ describe('API Hugging Face routes', () => {
           id: 'deepseek-ai/DeepSeek-V3',
           runtime: 'claude-code',
           groupLabel: 'Claude Code (Hugging Face)',
+          mappedProvider: 'claude',
         }),
         expect.objectContaining({
-          id: 'Qwen/Qwen2.5-Coder-32B-Instruct',
+          id: 'huggingface/Qwen/Qwen2.5-Coder-32B-Instruct',
           runtime: 'opencode',
           groupLabel: 'OpenCode (Hugging Face)',
+          mappedProvider: 'opencode',
         }),
       ])
     );
@@ -179,11 +185,13 @@ describe('API Hugging Face routes', () => {
           id: 'deepseek-coder-v2:33b',
           runtime: 'claude-code',
           groupLabel: 'Claude Code (Ollama)',
+          mappedProvider: 'claude',
         }),
         expect.objectContaining({
-          id: 'qwen2.5-coder:32b',
+          id: 'ollama/qwen2.5-coder:32b',
           runtime: 'opencode',
           groupLabel: 'OpenCode (Ollama)',
+          mappedProvider: 'opencode',
         }),
       ])
     );

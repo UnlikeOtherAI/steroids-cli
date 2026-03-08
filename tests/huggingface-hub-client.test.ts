@@ -61,7 +61,7 @@ describe('HuggingFaceHubClient', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://example.hf/api/models/deepseek-ai%2FDeepSeek-V3?expand=inferenceProviderMapping',
+      'https://example.hf/api/models/deepseek-ai/DeepSeek-V3?expand=inferenceProviderMapping',
       expect.any(Object)
     );
   });

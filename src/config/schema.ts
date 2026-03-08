@@ -2,6 +2,8 @@
  * Configuration schema with descriptions, options, and defaults
  */
 
+import { PROVIDER_NAMES } from './provider-names.js';
+
 export interface SchemaField {
   _description: string;
   _type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -27,7 +29,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       provider: {
         _description: 'AI provider for orchestrator',
         _type: 'string',
-        _options: ['claude', 'gemini', 'openai', 'codex', 'mistral', 'minimax', 'ollama', 'hf'] as const,
+        _options: PROVIDER_NAMES,
         _default: 'claude',
       },
       model: {
@@ -42,7 +44,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       provider: {
         _description: 'AI provider for coder',
         _type: 'string',
-        _options: ['claude', 'gemini', 'openai', 'codex', 'mistral', 'minimax', 'ollama', 'hf'] as const,
+        _options: PROVIDER_NAMES,
         _default: 'claude',
       },
       model: {
@@ -57,7 +59,7 @@ export const CONFIG_SCHEMA: SchemaObject = {
       provider: {
         _description: 'AI provider for reviewer',
         _type: 'string',
-        _options: ['claude', 'gemini', 'openai', 'codex', 'mistral', 'minimax', 'ollama', 'hf'] as const,
+        _options: PROVIDER_NAMES,
         _default: 'claude',
       },
       model: {
