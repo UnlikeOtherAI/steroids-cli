@@ -211,6 +211,7 @@ steroids web                            # clone (first run) and launch dashboard
 steroids web update                     # pull latest + reinstall deps
 steroids web stop                       # stop running dashboard
 steroids web status                     # check if dashboard is running
+steroids web config                     # manage web dashboard configuration
 
 ## COMMON OPERATIONS
 

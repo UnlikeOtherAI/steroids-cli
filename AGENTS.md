@@ -149,11 +149,12 @@ Each follow-up must specify: **WHAT** (files/functions), **WHY** (technical debt
 When the user says "do a release" or "do a publish":
 
 1. Commit all intended changes.
-2. Bump version: `npm version patch|minor|major`
-3. Push: `git push && git push --tags`
-4. Publish: `npm publish`
-5. Create GitHub release: `gh release create v<version> --title ... --notes ...` (include user-visible changes, bug fixes, and a compare link to the previous tag).
-6. Install globally: `npm i -g steroids-cli@latest`
-7. Reload web assets: `steroids web stop && steroids web` (if UI looks stale: `steroids web update` first, then restart).
+2. **Pre-publish gate (MANDATORY):** Run `npm run build` (CLI) and `cd WebUI && npm run build` (dashboard) to verify both compile cleanly. Do NOT proceed if there are TypeScript errors or build failures — fix them first. Also run `npm audit` and fix any high/critical vulnerabilities before publishing.
+3. Bump version: `npm version patch|minor|major`
+4. Push: `git push && git push --tags`
+5. Publish: `npm publish`
+6. Create GitHub release: `gh release create v<version> --title ... --notes ...` (include user-visible changes, bug fixes, and a compare link to the previous tag).
+7. Install globally: `npm i -g steroids-cli@latest`
+8. Reload web assets: `steroids web stop && steroids web` (if UI looks stale: `steroids web update` first, then restart).
 
 **Verify:** `steroids --version` matches; `steroids web` starts with no errors; hard-refresh browser if UI still shows old version.
