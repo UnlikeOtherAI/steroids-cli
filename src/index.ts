@@ -37,6 +37,7 @@ import { mergeCommand } from './commands/merge.js';
 import { workspacesCommand } from './commands/workspaces.js';
 import { skillsCommand } from './commands/skills.js';
 import { hfCommand } from './commands/hf.js';
+import { statusCommand } from './commands/status.js';
 import { checkForNewVersion } from './cli/version-check.js';
 
 // Read version from package.json - search up from dist folder
@@ -68,6 +69,7 @@ USAGE:
 COMMANDS:
   llm               Quick reference for LLM agents (project setup, commands, task flow)
   about             Alias for llm
+  status            Comprehensive project status overview
 
   init              Initialize steroids in current directory
   sections          Manage task sections
@@ -252,6 +254,9 @@ async function main(): Promise<void> {
         break;
       case 'skills':
         await skillsCommand(commandArgs, flags);
+        break;
+      case 'status':
+        await statusCommand(commandArgs, flags);
         break;
       default:
         if (flags.json) {
