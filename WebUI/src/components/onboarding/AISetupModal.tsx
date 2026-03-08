@@ -418,7 +418,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
                           onRefreshModels={refreshModels}
                           onCopyToClipboard={copyToClipboard}
                         />
-                        {reviewers.length > 2 && (
+                        {reviewers.length > 1 && (
                           <button 
                             onClick={() => setReviewers(reviewers.filter((_, idx) => idx !== i))}
                             className="absolute top-4 right-4 text-text-muted hover:text-danger transition-colors"
