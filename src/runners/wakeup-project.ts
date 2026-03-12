@@ -1,0 +1,260 @@
+import { existsSync } from 'node:fs';
+import { loadConfig } from '../config/loader.js';
+import { openDatabase } from '../database/connection.js';
+import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
+import { cleanupInvocationLogs } from '../cleanup/invocation-logs.js';
+import { getProviderBackoffRemainingMs } from './global-db.js';
+import {
+  SanitiseSummary,
+  runPeriodicSanitiseForProject,
+  sanitisedActionCount,
+} from './wakeup-sanitise.js';
+import {
+  projectHasPendingWork,
+  hasActiveRunnerForProject,
+} from './wakeup-checks.js';
+import { startRunner } from './wakeup-runner.js';
+import { waitForRunnerRegistration } from './wakeup-registration.js';
+import { reconcileProjectParallelState } from './wakeup-project-parallel.js';
+import type { WakeupLogger, WakeupResult } from './wakeup-types.js';
+
+interface ProjectMaintenanceState {
+  recoveredActions: number;
+  skippedRecoveryDueToSafetyLimit: boolean;
+  deletedInvocationLogs: number;
+  sanitisedActions: number;
+}
+
+interface ProcessProjectOptions {
+  globalDb: any;
+  projectPath: string;
+  dryRun: boolean;
+  log: WakeupLogger;
+}
+
+function cleanupProjectInvocationLogs(
+  projectPath: string,
+  dryRun: boolean,
+  log: WakeupLogger
+): number {
+  try {
+    const cleanup = cleanupInvocationLogs(projectPath, { retentionDays: 7, dryRun });
+    if (cleanup.deletedFiles > 0) {
+      log(`Cleaned ${cleanup.deletedFiles} old invocation log(s) in ${projectPath}`);
+    }
+    return cleanup.deletedFiles;
+  } catch {
+    return 0;
+  }
+}
+
+async function runProjectMaintenance(
+  globalDb: any,
+  projectPath: string,
+  dryRun: boolean,
+  log: WakeupLogger
+): Promise<ProjectMaintenanceState> {
+  const state: ProjectMaintenanceState = {
+    recoveredActions: 0,
+    skippedRecoveryDueToSafetyLimit: false,
+    deletedInvocationLogs: cleanupProjectInvocationLogs(projectPath, dryRun, log),
+    sanitisedActions: 0,
+  };
+
+  try {
+    const { db: projectDb, close: closeProjectDb } = openDatabase(projectPath);
+    try {
+      const sanitiseSummary: SanitiseSummary = runPeriodicSanitiseForProject(
+        globalDb,
+        projectDb,
+        projectPath,
+        dryRun
+      );
+      state.sanitisedActions = sanitisedActionCount(sanitiseSummary);
+      if (state.sanitisedActions > 0) {
+        log(`Sanitised ${state.sanitisedActions} stale item(s) in ${projectPath}`);
+      }
+
+      const config = loadConfig(projectPath);
+      const recovery = await recoverStuckTasks({
+        projectPath,
+        projectDb,
+        globalDb,
+        config,
+        dryRun,
+      });
+      state.recoveredActions = recovery.actions.length;
+      state.skippedRecoveryDueToSafetyLimit = recovery.skippedDueToSafetyLimit;
+
+      if (state.recoveredActions > 0) {
+        log(`Recovered ${state.recoveredActions} stuck item(s) in ${projectPath}`);
+      }
+      if (state.skippedRecoveryDueToSafetyLimit) {
+        log(`Skipping auto-recovery in ${projectPath}: safety limit hit (maxIncidentsPerHour)`);
+      }
+    } finally {
+      closeProjectDb();
+    }
+  } catch {
+    // If maintenance can't run (DB missing/corrupt), still proceed with runner checks.
+  }
+
+  return state;
+}
+
+function createProjectResult(
+  action: WakeupResult['action'],
+  reason: string,
+  projectPath: string,
+  state: ProjectMaintenanceState,
+  pid?: number
+): WakeupResult {
+  return {
+    action,
+    reason,
+    pid,
+    projectPath,
+    recoveredActions: state.recoveredActions,
+    skippedRecoveryDueToSafetyLimit: state.skippedRecoveryDueToSafetyLimit,
+    deletedInvocationLogs: state.deletedInvocationLogs,
+    sanitisedActions: state.sanitisedActions,
+  };
+}
+
+function getProviderBackoff(projectPath: string): { provider: string; remainingMs: number } | null {
+  const projectConfig = loadConfig(projectPath);
+  const coderProvider = projectConfig.ai?.coder?.provider;
+  const reviewerProvider = projectConfig.ai?.reviewer?.provider;
+  const providersToCheck = [coderProvider, reviewerProvider].filter(Boolean) as string[];
+
+  for (const provider of providersToCheck) {
+    const remainingMs = getProviderBackoffRemainingMs(provider);
+    if (remainingMs > 0) {
+      return { provider, remainingMs };
+    }
+  }
+
+  return null;
+}
+
+export async function processWakeupProject(
+  options: ProcessProjectOptions
+): Promise<WakeupResult> {
+  const { globalDb, projectPath, dryRun, log } = options;
+
+  if (!existsSync(projectPath)) {
+    log(`Skipping ${projectPath}: directory not found`);
+    return { action: 'none', reason: 'Directory not found', projectPath };
+  }
+
+  const state = await runProjectMaintenance(globalDb, projectPath, dryRun, log);
+
+  const hasWork = await projectHasPendingWork(projectPath);
+  if (!hasWork) {
+    const noWorkReason =
+      state.sanitisedActions > 0
+        ? `No pending tasks after sanitise (${state.sanitisedActions} action(s))`
+        : 'No pending tasks';
+    log(`Skipping ${projectPath}: ${noWorkReason.toLowerCase()}`);
+    return createProjectResult('none', noWorkReason, projectPath, state);
+  }
+
+  const providerBackoff = getProviderBackoff(projectPath);
+  if (providerBackoff) {
+    const remainingMinutes = Math.ceil(providerBackoff.remainingMs / 60000);
+    log(
+      `Skipping ${projectPath}: Provider '${providerBackoff.provider}' ` +
+      `is in backoff for ${remainingMinutes}m`
+    );
+    return {
+      action: 'skipped',
+      reason: `Provider '${providerBackoff.provider}' backed off for ${remainingMinutes}m`,
+      projectPath,
+    };
+  }
+
+  const projectConfig = loadConfig(projectPath);
+  const parallelEnabled = projectConfig.runners?.parallel?.enabled === true;
+  const configuredMaxClonesRaw = Number(projectConfig.runners?.parallel?.maxClones);
+  const configuredMaxClones =
+    Number.isFinite(configuredMaxClonesRaw) && configuredMaxClonesRaw > 0
+      ? configuredMaxClonesRaw
+      : 3;
+
+  const parallelResult = reconcileProjectParallelState({
+    globalDb,
+    projectPath,
+    dryRun,
+    log,
+    parallelEnabled,
+    configuredMaxClones,
+    deletedInvocationLogs: state.deletedInvocationLogs,
+  });
+  if (parallelResult) {
+    return parallelResult;
+  }
+
+  if (hasActiveRunnerForProject(projectPath)) {
+    log(`Skipping ${projectPath}: runner already active`);
+    return createProjectResult(
+      'none',
+      state.recoveredActions > 0
+        ? `Runner already active (recovered ${state.recoveredActions} stuck item(s))`
+        : 'Runner already active',
+      projectPath,
+      state
+    );
+  }
+
+  log(`Starting ${parallelEnabled ? 'parallel session' : 'runner'} for: ${projectPath}`);
+  if (dryRun) {
+    return createProjectResult(
+      'would_start',
+      state.recoveredActions > 0
+        ? `Recovered ${state.recoveredActions} stuck item(s); would start runner (dry-run)`
+        : 'Would start runner (dry-run)',
+      projectPath,
+      state
+    );
+  }
+
+  const startResult = startRunner(projectPath);
+  if (!startResult) {
+    return createProjectResult(
+      'none',
+      state.recoveredActions > 0
+        ? `Recovered ${state.recoveredActions} stuck item(s); failed to start runner`
+        : 'Failed to start runner',
+      projectPath,
+      state
+    );
+  }
+
+  const mode = startResult.parallel ? 'parallel session' : 'runner';
+  const registered = await waitForRunnerRegistration(
+    globalDb,
+    projectPath,
+    startResult.parallel === true
+  );
+
+  if (!registered) {
+    return createProjectResult(
+      'none',
+      state.recoveredActions > 0
+        ? `Recovered ${state.recoveredActions} stuck item(s); ${mode} failed to register`
+        : `${mode} failed to register`,
+      projectPath,
+      state
+    );
+  }
+
+  return createProjectResult(
+    'started',
+    state.recoveredActions > 0
+      ? `Recovered ${state.recoveredActions} stuck item(s); started ${mode}`
+      : `Started ${mode}`,
+    projectPath,
+    state,
+    startResult.pid
+  );
+}
