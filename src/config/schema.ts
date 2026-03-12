@@ -20,6 +20,97 @@ export interface SchemaObject {
  * Full configuration schema
  */
 export const CONFIG_SCHEMA: SchemaObject = {
+  intake: {
+    _description: 'External bug intake connector settings',
+    _type: 'object',
+    enabled: {
+      _description: 'Enable external bug intake polling and sync',
+      _type: 'boolean',
+      _default: false,
+    },
+    pollIntervalMinutes: {
+      _description: 'Minutes between intake polls',
+      _type: 'number',
+      _default: 15,
+    },
+    maxReportsPerPoll: {
+      _description: 'Maximum normalized reports to process per poll',
+      _type: 'number',
+      _default: 50,
+    },
+    connectors: {
+      _description: 'Connector-specific intake configuration',
+      _type: 'object',
+      sentry: {
+        _description: 'Sentry bug intake settings',
+        _type: 'object',
+        enabled: {
+          _description: 'Enable the Sentry intake connector',
+          _type: 'boolean',
+          _default: false,
+        },
+        baseUrl: {
+          _description: 'Sentry API base URL',
+          _type: 'string',
+          _default: 'https://sentry.io',
+        },
+        organization: {
+          _description: 'Sentry organization slug',
+          _type: 'string',
+          _default: '',
+        },
+        project: {
+          _description: 'Sentry project slug',
+          _type: 'string',
+          _default: '',
+        },
+        authTokenEnvVar: {
+          _description: 'Environment variable that stores the Sentry auth token',
+          _type: 'string',
+          _default: 'SENTRY_AUTH_TOKEN',
+        },
+        defaultAssignee: {
+          _description: 'Optional default assignee for created Sentry issues',
+          _type: 'string',
+          _default: '',
+        },
+      },
+      github: {
+        _description: 'GitHub Issues intake settings',
+        _type: 'object',
+        enabled: {
+          _description: 'Enable the GitHub Issues intake connector',
+          _type: 'boolean',
+          _default: false,
+        },
+        apiBaseUrl: {
+          _description: 'GitHub API base URL',
+          _type: 'string',
+          _default: 'https://api.github.com',
+        },
+        owner: {
+          _description: 'GitHub repository owner',
+          _type: 'string',
+          _default: '',
+        },
+        repo: {
+          _description: 'GitHub repository name',
+          _type: 'string',
+          _default: '',
+        },
+        tokenEnvVar: {
+          _description: 'Environment variable that stores the GitHub token',
+          _type: 'string',
+          _default: 'GITHUB_TOKEN',
+        },
+        labels: {
+          _description: 'Labels required when scanning or creating GitHub issues',
+          _type: 'array',
+          _default: [],
+        },
+      },
+    },
+  },
   ai: {
     _description: 'AI provider configuration',
     _type: 'object',

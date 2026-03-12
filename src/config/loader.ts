@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { parse, stringify } from 'yaml';
 import { CONFIG_SCHEMA, isSchemaField, type SchemaField, type SchemaObject } from './schema.js';
+import type { IntakeConfig } from '../intake/types.js';
 
 const STEROIDS_DIR = '.steroids';
 const CONFIG_FILE = 'config.yaml';
@@ -24,6 +25,7 @@ export interface ReviewerConfig {
 
 export interface SteroidsConfig {
   skills?: string[];
+  intake?: IntakeConfig;
   ai?: {
     orchestrator?: {
       provider?: ProviderName;
@@ -107,6 +109,29 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
       model: 'claude-sonnet-4-6',
     },
     reviewers: [],
+  },
+  intake: {
+    enabled: false,
+    pollIntervalMinutes: 15,
+    maxReportsPerPoll: 50,
+    connectors: {
+      sentry: {
+        enabled: false,
+        baseUrl: 'https://sentry.io',
+        organization: '',
+        project: '',
+        authTokenEnvVar: 'SENTRY_AUTH_TOKEN',
+        defaultAssignee: '',
+      },
+      github: {
+        enabled: false,
+        apiBaseUrl: 'https://api.github.com',
+        owner: '',
+        repo: '',
+        tokenEnvVar: 'GITHUB_TOKEN',
+        labels: [],
+      },
+    },
   },
   git: {
     remote: 'origin',

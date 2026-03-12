@@ -222,7 +222,32 @@ hooks:
     event: project.completed
     type: script
     command: "./deploy.sh"
+
+intake:
+  enabled: true
+  pollIntervalMinutes: 15
+  maxReportsPerPoll: 50
+  connectors:
+    sentry:
+      enabled: true
+      baseUrl: "https://sentry.io"
+      organization: "acme"
+      project: "web-app"
+      authTokenEnvVar: "SENTRY_AUTH_TOKEN"
+    github:
+      enabled: false
+      apiBaseUrl: "https://api.github.com"
+      owner: ""
+      repo: ""
+      tokenEnvVar: "GITHUB_TOKEN"
+      labels: []
 ```
+
+For bug intake, validation is partly schema-driven and partly semantic:
+
+- `intake.enabled: true` requires at least one enabled connector
+- enabled Sentry connectors require `baseUrl`, `organization`, `project`, and `authTokenEnvVar`
+- enabled GitHub connectors require `apiBaseUrl`, `owner`, `repo`, and `tokenEnvVar`
 
 ---
 

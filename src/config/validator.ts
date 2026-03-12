@@ -5,6 +5,11 @@
 
 import type { SteroidsConfig } from './loader.js';
 import { CONFIG_SCHEMA, isSchemaField, type SchemaField, type SchemaObject } from './schema.js';
+import type {
+  GitHubIntakeConnectorConfig,
+  IntakeConfig,
+  SentryIntakeConnectorConfig,
+} from '../intake/types.js';
 
 export interface ValidationError {
   path: string;
@@ -119,6 +124,114 @@ function validateObject(
   }
 }
 
+function pushError(
+  errors: ValidationError[],
+  path: string,
+  message: string,
+  suggestion?: string
+): void {
+  errors.push({ path, message, suggestion });
+}
+
+function isBlankString(value: string | undefined): boolean {
+  return value === undefined || value.trim() === '';
+}
+
+function validatePositiveInteger(
+  value: number | undefined,
+  path: string,
+  errors: ValidationError[]
+): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (!Number.isInteger(value) || value <= 0) {
+    pushError(errors, path, 'Expected a positive integer', 'Use a whole number greater than 0');
+  }
+}
+
+function validateEnabledSentryConnector(
+  sentry: SentryIntakeConnectorConfig,
+  errors: ValidationError[]
+): void {
+  if (isBlankString(sentry.baseUrl)) {
+    pushError(errors, 'intake.connectors.sentry.baseUrl', 'Sentry baseUrl is required when the connector is enabled');
+  }
+  if (isBlankString(sentry.organization)) {
+    pushError(
+      errors,
+      'intake.connectors.sentry.organization',
+      'Sentry organization is required when the connector is enabled'
+    );
+  }
+  if (isBlankString(sentry.project)) {
+    pushError(errors, 'intake.connectors.sentry.project', 'Sentry project is required when the connector is enabled');
+  }
+  if (isBlankString(sentry.authTokenEnvVar)) {
+    pushError(
+      errors,
+      'intake.connectors.sentry.authTokenEnvVar',
+      'Sentry authTokenEnvVar is required when the connector is enabled'
+    );
+  }
+}
+
+function validateEnabledGitHubConnector(
+  github: GitHubIntakeConnectorConfig,
+  errors: ValidationError[]
+): void {
+  if (isBlankString(github.apiBaseUrl)) {
+    pushError(errors, 'intake.connectors.github.apiBaseUrl', 'GitHub apiBaseUrl is required when the connector is enabled');
+  }
+  if (isBlankString(github.owner)) {
+    pushError(errors, 'intake.connectors.github.owner', 'GitHub owner is required when the connector is enabled');
+  }
+  if (isBlankString(github.repo)) {
+    pushError(errors, 'intake.connectors.github.repo', 'GitHub repo is required when the connector is enabled');
+  }
+  if (isBlankString(github.tokenEnvVar)) {
+    pushError(
+      errors,
+      'intake.connectors.github.tokenEnvVar',
+      'GitHub tokenEnvVar is required when the connector is enabled'
+    );
+  }
+}
+
+function validateIntakeConfig(
+  intake: IntakeConfig | undefined,
+  errors: ValidationError[]
+): void {
+  if (!intake) {
+    return;
+  }
+
+  validatePositiveInteger(intake.pollIntervalMinutes, 'intake.pollIntervalMinutes', errors);
+  validatePositiveInteger(intake.maxReportsPerPoll, 'intake.maxReportsPerPoll', errors);
+
+  const sentry = intake.connectors?.sentry;
+  const github = intake.connectors?.github;
+  const enabledConnectorCount = [sentry?.enabled, github?.enabled].filter(Boolean).length;
+
+  if (intake.enabled && enabledConnectorCount === 0) {
+    pushError(
+      errors,
+      'intake.connectors',
+      'At least one intake connector must be enabled when intake.enabled is true',
+      'Enable intake.connectors.sentry.enabled or intake.connectors.github.enabled'
+    );
+  }
+
+  if (sentry?.enabled) {
+    validateEnabledSentryConnector(sentry, errors);
+  }
+
+  if (github?.enabled) {
+    validateEnabledGitHubConnector(github, errors);
+  }
+}
+
 /**
  * Validate configuration against schema
  */
@@ -127,6 +240,7 @@ export function validateConfig(config: Partial<SteroidsConfig>): ValidationResul
   const warnings: ValidationError[] = [];
 
   validateObject(config as Record<string, unknown>, CONFIG_SCHEMA, '', errors, warnings);
+  validateIntakeConfig(config.intake, errors);
 
   return {
     valid: errors.length === 0,

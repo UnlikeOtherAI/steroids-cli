@@ -541,7 +541,28 @@ logs:
 backup:
   enabled: true
   retention: 7d
+
+intake:
+  enabled: false
+  pollIntervalMinutes: 15
+  maxReportsPerPoll: 50
+  connectors:
+    sentry:
+      enabled: false
+      baseUrl: https://sentry.io
+      organization: ""
+      project: ""
+      authTokenEnvVar: SENTRY_AUTH_TOKEN
+    github:
+      enabled: false
+      apiBaseUrl: https://api.github.com
+      owner: ""
+      repo: ""
+      tokenEnvVar: GITHUB_TOKEN
+      labels: []
 ```
+
+`intake` defines shared bug-intake connector settings. Validation rejects `intake.enabled: true` unless at least one connector is enabled and its required identifiers are configured.
 
 ### Global Config (`~/.steroids/config.yaml`)
 
