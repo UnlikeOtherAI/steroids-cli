@@ -5,8 +5,6 @@ import {
   approveTask,
   rejectTask,
   getTaskAudit,
-  getFollowUpDepth,
-  createFollowUpTask,
   incrementTaskFailureCount,
   clearTaskFailureCount,
   clearMergeFailureCount,
@@ -45,61 +43,7 @@ import {
   countConsecutiveUnclearEntries,
 } from './loop-phases-helpers.js';
 import { runReviewerSubmissionPreflight } from './reviewer-preflight.js';
-
-/**
- * Create follow-up tasks based on reviewer decision.
- * This is extracted to keep runReviewerPhase under 500 lines.
- */
-async function createFollowUpTasksIfNeeded(
-  db: ReturnType<typeof openDatabase>['db'],
-  task: ReturnType<typeof getTask>,
-  projectPath: string,
-  followUpTasks: Array<{ title: string; description: string }> | undefined,
-  submissionCommitSha: string,
-  jsonMode: boolean
-): Promise<void> {
-  if (!task || !followUpTasks || followUpTasks.length === 0) {
-    return;
-  }
-
-  const followUpConfig = loadConfig(projectPath);
-  const depth = getFollowUpDepth(db, task.id);
-  const maxDepth = followUpConfig.followUpTasks?.maxDepth ?? 2;
-
-  if (depth < maxDepth) {
-    for (const followUp of followUpTasks) {
-      try {
-        const nextDepth = depth + 1;
-
-        // Policy: Auto-implement depth 1 if configured.
-        // Depth 2+ always requires human promotion (approval).
-        let requiresPromotion = true;
-        if (nextDepth === 1 && followUpConfig.followUpTasks?.autoImplementDepth1) {
-          requiresPromotion = false;
-        }
-
-        const followUpId = createFollowUpTask(db, {
-          title: followUp.title,
-          description: followUp.description,
-          sectionId: task.section_id,
-          referenceTaskId: task.id,
-          referenceCommit: submissionCommitSha,
-          requiresPromotion,
-          depth: nextDepth,
-        });
-
-        if (!jsonMode) {
-          const statusLabel = requiresPromotion ? '(deferred)' : '(active)';
-          console.log(`\n+ Created follow-up task ${statusLabel}: ${followUp.title} (${followUpId.substring(0, 8)})`);
-        }
-      } catch (error) {
-        console.warn(`Failed to create follow-up task "${followUp.title}":`, error);
-      }
-    }
-  } else if (!jsonMode) {
-    console.log(`\n! Follow-up depth limit reached (${depth}), skipping new follow-ups.`);
-  }
-}
+import { createFollowUpTasksIfNeeded } from './loop-phases-reviewer-follow-ups.js';
 
 export async function runReviewerPhase(
   db: ReturnType<typeof openDatabase>['db'],
