@@ -249,6 +249,8 @@ For bug intake, validation is partly schema-driven and partly semantic:
 - enabled Sentry connectors require `baseUrl`, `organization`, `project`, and `authTokenEnvVar`
 - enabled GitHub connectors require `apiBaseUrl`, `owner`, `repo`, and `tokenEnvVar`
 
+At runtime, the GitHub connector shells out through the installed `gh` CLI. The configured `tokenEnvVar` must resolve to a non-empty token in the process environment.
+
 ---
 
 ## Schema Metadata Fields

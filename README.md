@@ -564,6 +564,8 @@ intake:
 
 `intake` defines shared bug-intake connector settings. Validation rejects `intake.enabled: true` unless at least one connector is enabled and its required identifiers are configured.
 
+The GitHub Issues connector uses the installed `gh` CLI for pull and push operations. The token named by `intake.connectors.github.tokenEnvVar` must be present in the environment when intake runs.
+
 ### Global Config (`~/.steroids/config.yaml`)
 
 Same schema — acts as default, overridden by project config.
