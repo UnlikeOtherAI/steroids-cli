@@ -143,6 +143,68 @@ describe('intake config schema and validation', () => {
     expect(result.errors).toHaveLength(0);
   });
 
+  it('does not throw when connector fields have malformed non-string values', () => {
+    const config = {
+      intake: {
+        enabled: true,
+        connectors: {
+          sentry: {
+            enabled: true,
+            baseUrl: 42,
+            organization: ['team'],
+            project: { slug: 'web' },
+            authTokenEnvVar: false,
+          },
+        },
+      },
+    } as unknown as SteroidsConfig;
+
+    expect(() => validateConfig(config)).not.toThrow();
+
+    const result = validateConfig(config);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'intake.connectors.sentry.baseUrl' }),
+        expect.objectContaining({ path: 'intake.connectors.sentry.organization' }),
+        expect.objectContaining({ path: 'intake.connectors.sentry.project' }),
+        expect.objectContaining({ path: 'intake.connectors.sentry.authTokenEnvVar' }),
+      ])
+    );
+  });
+
+  it('ignores malformed truthy enabled flags during semantic validation', () => {
+    const config = {
+      intake: {
+        enabled: true,
+        connectors: {
+          github: {
+            enabled: 'true',
+            apiBaseUrl: '',
+            owner: '',
+            repo: '',
+            tokenEnvVar: '',
+          },
+        },
+      },
+    } as unknown as SteroidsConfig;
+
+    const result = validateConfig(config);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'intake.connectors.github.enabled' }),
+        expect.objectContaining({ path: 'intake.connectors' }),
+      ])
+    );
+    expect(result.errors).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'intake.connectors.github.apiBaseUrl' }),
+      ])
+    );
+  });
+
   it('provides a typed connector contract for future implementations', async () => {
     const sampleReport: IntakeReport = {
       source: 'sentry',

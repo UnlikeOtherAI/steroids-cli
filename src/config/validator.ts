@@ -133,8 +133,16 @@ function pushError(
   errors.push({ path, message, suggestion });
 }
 
-function isBlankString(value: string | undefined): boolean {
-  return value === undefined || value.trim() === '';
+function isBlankString(value: unknown): boolean {
+  if (value === undefined) {
+    return true;
+  }
+
+  if (typeof value !== 'string') {
+    return true;
+  }
+
+  return value.trim() === '';
 }
 
 function validatePositiveInteger(
@@ -212,7 +220,7 @@ function validateIntakeConfig(
 
   const sentry = intake.connectors?.sentry;
   const github = intake.connectors?.github;
-  const enabledConnectorCount = [sentry?.enabled, github?.enabled].filter(Boolean).length;
+  const enabledConnectorCount = [sentry?.enabled === true, github?.enabled === true].filter(Boolean).length;
 
   if (intake.enabled && enabledConnectorCount === 0) {
     pushError(
@@ -223,11 +231,11 @@ function validateIntakeConfig(
     );
   }
 
-  if (sentry?.enabled) {
+  if (sentry?.enabled === true) {
     validateEnabledSentryConnector(sentry, errors);
   }
 
-  if (github?.enabled) {
+  if (github?.enabled === true) {
     validateEnabledGitHubConnector(github, errors);
   }
 }

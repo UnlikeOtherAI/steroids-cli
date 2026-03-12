@@ -34,13 +34,11 @@ const mockGetProjectHash = jest.fn(() => 'project-hash');
 const mockCreateIntegrationWorkspace = jest.fn((options: { projectPath: string }) => ({
   workspacePath: options.projectPath,
 }));
-const mockEnsureWorkspaceSteroidsSymlink = jest.fn(() => '/tmp/steroids-workspaces/project/.steroids');
 
 jest.unstable_mockModule('../../src/parallel/clone.js', () => ({
   getDefaultWorkspaceRoot: mockGetDefaultWorkspaceRoot,
   getProjectHash: mockGetProjectHash,
   createIntegrationWorkspace: mockCreateIntegrationWorkspace,
-  ensureWorkspaceSteroidsSymlink: mockEnsureWorkspaceSteroidsSymlink,
 }));
 
 const mockOpenGlobalDatabase = jest.fn();

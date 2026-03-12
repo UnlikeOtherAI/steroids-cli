@@ -12,11 +12,7 @@ import { join, resolve } from 'node:path';
 
 import type { PoolSlot, SlotStatus } from './types.js';
 import { isShallowRepository, execGit } from './git-helpers.js';
-import {
-  getProjectHash,
-  getDefaultWorkspaceRoot,
-  ensureWorkspaceSteroidsSymlink,
-} from '../parallel/clone.js';
+import * as cloneWorkspace from '../parallel/clone.js';
 
 /**
  * Resolve the remote URL for a project.
@@ -47,8 +43,8 @@ export function resolveRemoteUrl(projectPath: string): string | null {
  * Build the slot path for a given project and index.
  */
 function buildSlotPath(projectPath: string, slotIndex: number): string {
-  const workspaceRoot = getDefaultWorkspaceRoot();
-  const projectHash = getProjectHash(projectPath);
+  const workspaceRoot = cloneWorkspace.getDefaultWorkspaceRoot();
+  const projectHash = cloneWorkspace.getProjectHash(projectPath);
   return join(workspaceRoot, projectHash, `pool-${slotIndex}`);
 }
 
@@ -318,5 +314,5 @@ export function ensureSlotClone(
   }
 
   // Ensure .steroids symlink points directly to the real source project.
-  ensureWorkspaceSteroidsSymlink(slotPath, sourceProjectPath);
+  cloneWorkspace.ensureWorkspaceSteroidsSymlink(slotPath, sourceProjectPath);
 }
