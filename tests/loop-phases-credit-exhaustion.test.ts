@@ -14,6 +14,7 @@ import { jest, describe, it, expect, beforeEach, beforeAll } from '@jest/globals
 // ── Mock functions ──────────────────────────────────────────────────────
 
 const mockInvokeCoder = jest.fn<(...args: any[]) => Promise<CoderResult>>();
+const mockResolveEffectiveCoderConfig = jest.fn();
 const mockInvokeReviewer = jest.fn<(...args: any[]) => Promise<ReviewerResult>>();
 const mockInvokeCoderOrchestrator = jest.fn<(...args: any[]) => Promise<string>>();
 const mockInvokeReviewerOrchestrator = jest.fn<(...args: any[]) => Promise<string>>();
@@ -49,6 +50,7 @@ const mockInvokeCoordinator = jest.fn();
 
 jest.unstable_mockModule('../src/orchestrator/coder.js', () => ({
   invokeCoder: mockInvokeCoder,
+  resolveEffectiveCoderConfig: mockResolveEffectiveCoderConfig,
 }));
 
 jest.unstable_mockModule('../src/orchestrator/reviewer.js', () => ({
@@ -255,6 +257,7 @@ function setupConfig() {
       reviewer: { provider: 'claude', model: 'claude-sonnet-4' },
     },
   });
+  mockResolveEffectiveCoderConfig.mockReturnValue({ provider: 'claude', model: 'claude-sonnet-4' });
 }
 
 function setupRegistry(provider: ReturnType<typeof makeMockProvider>) {
@@ -305,6 +308,32 @@ describe('Loop Phases — Credit Exhaustion', () => {
       });
 
       expect(provider.classifyResult).toHaveBeenCalledTimes(1);
+      expect(mockInvokeCoderOrchestrator).not.toHaveBeenCalled();
+    });
+
+    it('uses the section-specific coder provider/model for classification and reporting', async () => {
+      const provider = makeMockProvider(CREDIT_ERROR);
+      setupRegistry(provider);
+      mockResolveEffectiveCoderConfig.mockReturnValue({ provider: 'codex', model: 'gpt-5-codex' });
+
+      mockInvokeCoder.mockResolvedValue(makeCoderResult());
+
+      const result = await runCoderPhase(
+        db,
+        makeTask({ section_id: 'section-1' }),
+        projectPath,
+        'start',
+        true
+      );
+
+      expect(result).toEqual({
+        action: 'pause_credit_exhaustion',
+        provider: 'codex',
+        model: 'gpt-5-codex',
+        role: 'coder',
+        message: 'Insufficient credits on your account',
+      });
+      expect(mockGetProviderRegistry).toHaveBeenCalledTimes(1);
       expect(mockInvokeCoderOrchestrator).not.toHaveBeenCalled();
     });
   });

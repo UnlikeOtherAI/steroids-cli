@@ -66,6 +66,10 @@ export interface Section {
   branch?: string | null;     // target branch override (added by migration 021)
   auto_pr?: number;           // 0 = push only, 1 = create PR on completion (migration 022)
   pr_number?: number | null;  // GitHub PR number if created (added by migration 022)
+  coder_provider?: string | null; // per-section coder provider override (migration 026)
+  coder_model?: string | null;    // per-section coder model override (migration 026)
+  pr_labels?: string | null;      // future PR label metadata (migration 026)
+  pr_draft?: number;              // 0 = ready, 1 = draft PR (migration 026)
   created_at: string;
 }
 

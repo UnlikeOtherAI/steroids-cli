@@ -4,7 +4,7 @@
  */
 
 import type { Task } from '../database/queries.js';
-import { getTaskRejections, findResumableSession, invalidateSession, listTasks } from '../database/queries.js';
+import { getSection, getTaskRejections, findResumableSession, invalidateSession, listTasks } from '../database/queries.js';
 import { withDatabase } from '../database/connection.js';
 import {
   generateCoderPrompt,
@@ -14,7 +14,7 @@ import {
   type CoderPromptContext,
 } from '../prompts/coder.js';
 import { getGitStatus, getGitDiff } from '../git/status.js';
-import { loadConfig } from '../config/loader.js';
+import { loadConfig, type ReviewerConfig } from '../config/loader.js';
 import { SessionNotFoundError } from '../providers/interface.js';
 import { countTokens } from '../utils/tokens.js';
 import { HistoryManager } from './history-manager.js';
@@ -26,6 +26,32 @@ export interface BatchCoderResult extends BaseRunnerResult {
   taskCount: number;
 }
 
+export function resolveEffectiveCoderConfig(task: Pick<Task, 'section_id'>, projectPath: string): ReviewerConfig | undefined {
+  const projectCoderConfig = loadConfig(projectPath).ai?.coder;
+  if (!task.section_id) {
+    return projectCoderConfig;
+  }
+
+  let sectionProvider: ReviewerConfig['provider'] | null | undefined;
+  let sectionModel: string | null | undefined;
+
+  try {
+    withDatabase(projectPath, (db) => {
+      const section = getSection(db, task.section_id!);
+      sectionProvider = section?.coder_provider as ReviewerConfig['provider'] | null | undefined;
+      sectionModel = section?.coder_model;
+    });
+  } catch (error) {
+    console.warn(`Could not load section coder overrides for task ${'id' in task ? task.id : 'unknown'}:`, error);
+  }
+
+  return {
+    ...projectCoderConfig,
+    provider: sectionProvider ?? projectCoderConfig?.provider,
+    model: sectionModel ?? projectCoderConfig?.model,
+  };
+}
+
 class CoderRunner extends BaseRunner {
   public async runTask(
     task: Task,
@@ -34,8 +60,7 @@ class CoderRunner extends BaseRunner {
     coordinatorGuidance?: string,
     runnerId?: string
   ): Promise<CoderResult> {
-    const config = loadConfig(projectPath);
-    const coderConfig = config.ai?.coder;
+    const coderConfig = resolveEffectiveCoderConfig(task, projectPath);
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`CODER: ${task.title}`);

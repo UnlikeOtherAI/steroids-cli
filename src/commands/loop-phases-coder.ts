@@ -7,7 +7,7 @@ import {
   clearTaskFailureCount,
 } from '../database/queries.js';
 import type { openDatabase } from '../database/connection.js';
-import { invokeCoder, type CoderResult } from '../orchestrator/coder.js';
+import { invokeCoder, resolveEffectiveCoderConfig, type CoderResult } from '../orchestrator/coder.js';
 import { type CoordinatorResult } from '../orchestrator/coordinator.js';
 import {
   getCurrentCommitSha,
@@ -19,7 +19,7 @@ import {
 import { invokeCoderOrchestrator } from '../orchestrator/invoke.js';
 import { OrchestrationFallbackHandler } from '../orchestrator/fallback-handler.js';
 import type { CoderContext } from '../orchestrator/types.js';
-import { loadConfig, type ReviewerConfig } from '../config/loader.js';
+import { loadConfig } from '../config/loader.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { PoolSlotContext } from '../workspace/types.js';
 import { prepareForTask, postCoderGate } from '../workspace/git-lifecycle.js';
@@ -126,7 +126,7 @@ export async function runCoderPhase(
   }
 
   const initialSha = poolStartingSha || getCurrentCommitSha(effectiveProjectPath) || '';
-  const coderConfig = loadConfig(projectPath).ai?.coder as ReviewerConfig | undefined;
+  const coderConfig = resolveEffectiveCoderConfig(task, projectPath);
   const coderInvocation = await invokeWithLeaseHeartbeat(
     projectPath,
     leaseFence,

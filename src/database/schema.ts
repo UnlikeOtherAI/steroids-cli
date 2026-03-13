@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS sections (
     branch TEXT,
     auto_pr INTEGER NOT NULL DEFAULT 0,
     pr_number INTEGER,
+    coder_provider TEXT,
+    coder_model TEXT,
+    pr_labels TEXT,
+    pr_draft INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -321,4 +325,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (22, '022_add_sect
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (23, '023_add_task_feedback', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (24, '024_add_merge_failure_count', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (25, '025_add_intake_tables', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (26, '026_add_section_coder_and_pr_fields', 'builtin');
 `;

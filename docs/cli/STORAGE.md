@@ -96,6 +96,15 @@ CREATE TABLE sections (
     id TEXT PRIMARY KEY,           -- UUID
     name TEXT NOT NULL,
     position INTEGER NOT NULL,     -- Display order
+    priority INTEGER DEFAULT 50,   -- 0 = highest, 100 = lowest
+    skipped INTEGER DEFAULT 0,     -- 1 = hidden from task selection
+    branch TEXT,                   -- Optional per-section git branch
+    auto_pr INTEGER NOT NULL DEFAULT 0,
+    pr_number INTEGER,
+    coder_provider TEXT,           -- Optional per-section coder provider override
+    coder_model TEXT,              -- Optional per-section coder model override
+    pr_labels TEXT,                -- Reserved PR metadata for future label wiring
+    pr_draft INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
