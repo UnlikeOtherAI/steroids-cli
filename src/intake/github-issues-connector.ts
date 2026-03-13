@@ -11,6 +11,7 @@ import type {
   PushIntakeUpdateRequest,
   PushIntakeUpdateResult,
 } from './types.js';
+import { isManagedGitHubGateLabel } from './github-gate.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const GITHUB_PUBLIC_HOST = 'github.com';
@@ -146,6 +147,10 @@ function collectTagNames(labels: GitHubIssueResponse['labels']): string[] {
     })
     .filter((label): label is string => typeof label === 'string' && label.trim() !== '')
     .map((label) => label.trim());
+}
+
+function isGateIssue(tags: string[]): boolean {
+  return tags.some((tag) => isManagedGitHubGateLabel(tag));
 }
 
 function inferSeverity(tags: string[]): IntakeReport['severity'] {
@@ -343,7 +348,8 @@ export class GitHubIssuesConnector implements IntakeConnector {
 
     const reports = payload
       .filter((issue) => issue.pull_request === undefined)
-      .map((issue) => normalizeIssue(issue, this.config.owner!, this.config.repo!));
+      .map((issue) => normalizeIssue(issue, this.config.owner!, this.config.repo!))
+      .filter((report) => !isGateIssue(report.tags));
 
     return {
       reports,

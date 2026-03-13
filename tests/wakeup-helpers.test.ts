@@ -3,10 +3,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, jest } from '@jest/globals';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { openDatabase, initDatabase } from '../src/database/connection.js';
+import { upsertIntakeReport } from '../src/database/intake-queries.js';
 import type {
   hasActiveRunnerForProject as HasActiveRunnerFn,
   hasActiveParallelSessionForProject as HasActiveParallelFn,
@@ -67,6 +68,24 @@ function createTestProject(name: string, taskCounts: {
 
 function cleanupTestProjects(projects: TestProject[]): void {
   projects.forEach((p) => p.cleanup());
+}
+
+function enableGitHubIntake(projectPath: string): void {
+  writeFileSync(
+    join(projectPath, '.steroids', 'config.yaml'),
+    [
+      'intake:',
+      '  enabled: true',
+      '  connectors:',
+      '    github:',
+      '      enabled: true',
+      '      apiBaseUrl: https://api.github.com',
+      '      owner: acme',
+      '      repo: widgets',
+      '      tokenEnvVar: GITHUB_TOKEN',
+    ].join('\n'),
+    'utf-8'
+  );
 }
 
 // Mock modules before imports
@@ -344,5 +363,44 @@ describe('checkWakeupNeeded()', () => {
 
     expect(result.needed).toBe(false);
     expect(result.reason).toContain('No pending tasks');
+  });
+
+  it('should return true when github intake gate work exists without internal tasks', async () => {
+    const project = createTestProject('intake-gate-only', { completed: 1 });
+    testProjects.push(project);
+    enableGitHubIntake(project.path);
+
+    const { db, close } = openDatabase(project.path);
+    try {
+      upsertIntakeReport(db, {
+        source: 'github',
+        externalId: '42',
+        url: 'https://github.com/acme/widgets/issues/42',
+        fingerprint: 'github:acme/widgets#42',
+        title: 'Checkout fails on empty cart',
+        summary: 'Stack trace attached',
+        severity: 'high',
+        status: 'open',
+        createdAt: '2026-03-12T10:00:00.000Z',
+        updatedAt: '2026-03-12T10:05:00.000Z',
+        tags: ['bug'],
+        payload: {},
+      });
+    } finally {
+      close();
+    }
+
+    mockCheckLockStatus.mockReturnValue({
+      locked: false,
+      isZombie: false,
+    });
+    mockGetRegisteredProjects.mockReturnValue([
+      { path: project.path, enabled: true, name: 'Project 1' },
+    ]);
+
+    const result = await checkWakeupNeeded();
+
+    expect(result.needed).toBe(true);
+    expect(result.reason).toContain('pending tasks');
   });
 });

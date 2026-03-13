@@ -7,6 +7,7 @@ const mockOpenDatabase = jest.fn<() => unknown>();
 const mockRecoverStuckTasks = jest.fn<() => Promise<unknown>>();
 const mockCleanupInvocationLogs = jest.fn<() => unknown>();
 const mockPollIntakeProject = jest.fn<() => Promise<unknown>>();
+const mockSyncGitHubIntakeGate = jest.fn<any>();
 const mockGetProviderBackoffRemainingMs = jest.fn<() => number>();
 const mockRunPeriodicSanitiseForProject = jest.fn<() => unknown>();
 const mockSanitisedActionCount = jest.fn<() => number>();
@@ -34,6 +35,10 @@ jest.unstable_mockModule('../src/cleanup/invocation-logs.js', () => ({
 
 jest.unstable_mockModule('../src/intake/poller.js', () => ({
   pollIntakeProject: mockPollIntakeProject,
+}));
+
+jest.unstable_mockModule('../src/intake/github-gate.js', () => ({
+  syncGitHubIntakeGate: mockSyncGitHubIntakeGate,
 }));
 
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
@@ -101,6 +106,14 @@ describe('processWakeupProject intake integration', () => {
       ],
     });
     mockGetProviderBackoffRemainingMs.mockReturnValue(0);
+    mockSyncGitHubIntakeGate.mockResolvedValue({
+      status: 'success',
+      reason: 'Created 1 gate issue(s), applied 0 approval(s), applied 0 rejection(s)',
+      issuesCreated: 1,
+      approvalsApplied: 0,
+      rejectionsApplied: 0,
+      errors: [],
+    });
     mockRunPeriodicSanitiseForProject.mockReturnValue({});
     mockSanitisedActionCount.mockReturnValue(0);
     mockProjectHasPendingWork.mockResolvedValue(false);
@@ -129,6 +142,11 @@ describe('processWakeupProject intake integration', () => {
       config: mockLoadConfig.mock.results[0]?.value,
       dryRun: false,
     });
+    expect(mockSyncGitHubIntakeGate).toHaveBeenCalledWith({
+      projectDb: expect.any(Object),
+      config: mockLoadConfig.mock.results[0]?.value,
+      dryRun: false,
+    });
     expect(result).toEqual(
       expect.objectContaining({
         action: 'none',
@@ -136,10 +154,17 @@ describe('processWakeupProject intake integration', () => {
         projectPath,
         polledIntakeReports: 1,
         intakePollErrors: 0,
+        githubGateIssuesCreated: 1,
+        githubGateApprovalsApplied: 0,
+        githubGateRejectionsApplied: 0,
+        githubGateErrors: 0,
       })
     );
     expect(log).toHaveBeenCalledWith(
       `Intake poll for ${projectPath}: Persisted 1 intake report(s) across 1 connector(s)`
+    );
+    expect(log).toHaveBeenCalledWith(
+      `GitHub intake gate for ${projectPath}: Created 1 gate issue(s), applied 0 approval(s), applied 0 rejection(s)`
     );
   });
 });

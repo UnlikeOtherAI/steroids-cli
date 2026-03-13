@@ -17,6 +17,10 @@ export interface WakeupResult {
   sanitisedActions?: number;
   polledIntakeReports?: number;
   intakePollErrors?: number;
+  githubGateIssuesCreated?: number;
+  githubGateApprovalsApplied?: number;
+  githubGateRejectionsApplied?: number;
+  githubGateErrors?: number;
 }
 
 export type WakeupLogger = (message: string) => void;

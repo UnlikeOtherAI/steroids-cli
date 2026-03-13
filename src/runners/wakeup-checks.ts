@@ -1,5 +1,6 @@
 import { withDatabase } from '../database/connection.js';
 import { withGlobalDatabase } from './global-db.js';
+import { loadConfig } from '../config/loader.js';
 /**
  * Project state checks for wakeup
  */
@@ -10,6 +11,25 @@ import { openGlobalDatabase } from './global-db.js';
 import { openDatabase } from '../database/connection.js';
 import { selectNextTask } from '../orchestrator/task-selector.js';
 import { closeStaleParallelSessions, hasActiveParallelSessionForProjectDb } from './parallel-session-state.js';
+
+function hasPendingGitHubGateWork(projectPath: string, db: any): boolean {
+  const config = loadConfig(projectPath);
+  if (config.intake?.enabled !== true || config.intake.connectors?.github?.enabled !== true) {
+    return false;
+  }
+
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) as count
+       FROM intake_reports
+       WHERE source = 'github'
+         AND linked_task_id IS NULL
+         AND status NOT IN ('resolved', 'ignored')`
+    )
+    .get() as { count: number };
+
+  return row.count > 0;
+}
 
 /**
  * Check if a project has pending work
@@ -38,7 +58,7 @@ export async function projectHasPendingWork(projectPath: string): Promise<boolea
         )
         .get() as { count: number };
 
-      return row.count > 0;
+      return row.count > 0 || hasPendingGitHubGateWork(projectPath, db);
     }, { timeoutMs: 1000 });
   } catch (error) {
     // Treat timeouts or locked DBs as no pending work for this cycle

@@ -4,6 +4,7 @@ import { openDatabase } from '../database/connection.js';
 import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
 import { cleanupInvocationLogs } from '../cleanup/invocation-logs.js';
 import { pollIntakeProject } from '../intake/poller.js';
+import { syncGitHubIntakeGate } from '../intake/github-gate.js';
 import { getProviderBackoffRemainingMs } from './global-db.js';
 import {
   SanitiseSummary,
@@ -26,6 +27,10 @@ interface ProjectMaintenanceState {
   sanitisedActions: number;
   polledIntakeReports: number;
   intakePollErrors: number;
+  githubGateIssuesCreated: number;
+  githubGateApprovalsApplied: number;
+  githubGateRejectionsApplied: number;
+  githubGateErrors: number;
 }
 
 interface ProcessProjectOptions {
@@ -65,6 +70,10 @@ async function runProjectMaintenance(
     sanitisedActions: 0,
     polledIntakeReports: 0,
     intakePollErrors: 0,
+    githubGateIssuesCreated: 0,
+    githubGateApprovalsApplied: 0,
+    githubGateRejectionsApplied: 0,
+    githubGateErrors: 0,
   };
 
   try {
@@ -83,6 +92,21 @@ async function runProjectMaintenance(
         log(`Intake poll for ${projectPath}: ${intakePollSummary.reason}`);
       } else if (intakePollSummary.status === 'error') {
         log(`Intake poll for ${projectPath} failed: ${intakePollSummary.reason}`);
+      }
+
+      const githubGateSummary = await syncGitHubIntakeGate({
+        projectDb,
+        config,
+        dryRun,
+      });
+      state.githubGateIssuesCreated = githubGateSummary.issuesCreated;
+      state.githubGateApprovalsApplied = githubGateSummary.approvalsApplied;
+      state.githubGateRejectionsApplied = githubGateSummary.rejectionsApplied;
+      state.githubGateErrors = githubGateSummary.errors.length;
+      if (githubGateSummary.status === 'success' || githubGateSummary.status === 'partial') {
+        log(`GitHub intake gate for ${projectPath}: ${githubGateSummary.reason}`);
+      } else if (githubGateSummary.status === 'error') {
+        log(`GitHub intake gate for ${projectPath} failed: ${githubGateSummary.reason}`);
       }
 
       const sanitiseSummary: SanitiseSummary = runPeriodicSanitiseForProject(
@@ -140,6 +164,10 @@ function createProjectResult(
     sanitisedActions: state.sanitisedActions,
     polledIntakeReports: state.polledIntakeReports,
     intakePollErrors: state.intakePollErrors,
+    githubGateIssuesCreated: state.githubGateIssuesCreated,
+    githubGateApprovalsApplied: state.githubGateApprovalsApplied,
+    githubGateRejectionsApplied: state.githubGateRejectionsApplied,
+    githubGateErrors: state.githubGateErrors,
   };
 }
 

@@ -50,12 +50,22 @@ describe('GitHubIssuesConnector', () => {
           updated_at: '2026-03-10T09:30:00Z',
           pull_request: { url: 'https://api.github.com/repos/acme/widgets/pulls/99' },
         },
+        {
+          number: 100,
+          title: 'Internal intake approval gate',
+          body: 'Approve or reject this intake report',
+          state: 'open',
+          html_url: 'https://github.com/acme/widgets/issues/100',
+          created_at: '2026-03-10T09:40:00Z',
+          updated_at: '2026-03-10T09:50:00Z',
+          labels: [{ name: 'steroids:intake-gate' }, { name: 'steroids:intake-awaiting-approval' }],
+        },
       ])
     ) as GhRunner;
     const connector = createConnector(runGhCommand);
 
     const result = await connector.pullReports({
-      limit: 2,
+      limit: 3,
       since: '2026-03-10T00:00:00Z',
     });
 
@@ -74,7 +84,7 @@ describe('GitHubIssuesConnector', () => {
         '-f',
         'direction=asc',
         '-f',
-        'per_page=2',
+        'per_page=3',
         '-f',
         'page=1',
         '-f',
@@ -101,6 +111,7 @@ describe('GitHubIssuesConnector', () => {
           status: 'triaged',
           createdAt: '2026-03-10T10:00:00Z',
           updatedAt: '2026-03-10T11:00:00Z',
+          resolvedAt: undefined,
           tags: ['bug', 'sev:1', 'triaged'],
           payload: {
             body: 'Steps to reproduce',
