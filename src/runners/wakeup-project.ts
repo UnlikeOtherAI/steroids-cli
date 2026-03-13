@@ -82,6 +82,7 @@ async function runProjectMaintenance(
       const intakePollSummary = await pollIntakeProject({
         projectDb,
         config,
+        projectPath,
         dryRun,
       });
       state.polledIntakeReports = intakePollSummary.totalReportsPersisted;
@@ -97,6 +98,7 @@ async function runProjectMaintenance(
       const githubGateSummary = await syncGitHubIntakeGate({
         projectDb,
         config,
+        projectPath,
         dryRun,
       });
       state.githubGateIssuesCreated = githubGateSummary.issuesCreated;

@@ -13,6 +13,9 @@ export const HOOK_EVENTS = [
   'task.updated',
   'task.completed',
   'task.failed',
+  'intake.received',
+  'intake.triaged',
+  'intake.pr_created',
   'section.completed',
   'project.completed',
   'health.changed',
@@ -39,6 +42,17 @@ export const TASK_EVENTS = [
 ] as const;
 
 export type TaskEvent = (typeof TASK_EVENTS)[number];
+
+/**
+ * Intake-related events
+ */
+export const INTAKE_EVENTS = [
+  'intake.received',
+  'intake.triaged',
+  'intake.pr_created',
+] as const;
+
+export type IntakeEvent = (typeof INTAKE_EVENTS)[number];
 
 /**
  * Section-related events
@@ -83,6 +97,9 @@ export const EVENT_DESCRIPTIONS: Record<HookEvent, string> = {
   'task.updated': 'Triggered when a task status changes',
   'task.completed': 'Triggered when a task is marked complete',
   'task.failed': 'Triggered when a task fails (max rejections reached)',
+  'intake.received': 'Triggered when a new intake report is first persisted',
+  'intake.triaged': 'Triggered when an intake report is accepted into internal triage',
+  'intake.pr_created': 'Triggered when an intake-linked fix task is associated with a PR',
   'section.completed': 'Triggered when all tasks in a section are done',
   'project.completed': 'Triggered when all tasks in the project are done',
   'health.changed': 'Triggered when the project health score changes',
@@ -105,6 +122,13 @@ export function isValidHookEvent(event: string): event is HookEvent {
  */
 export function isTaskEvent(event: HookEvent): event is TaskEvent {
   return TASK_EVENTS.includes(event as TaskEvent);
+}
+
+/**
+ * Check if an event is an intake event
+ */
+export function isIntakeEvent(event: HookEvent): event is IntakeEvent {
+  return INTAKE_EVENTS.includes(event as IntakeEvent);
 }
 
 /**
@@ -141,6 +165,7 @@ export function isDisputeEvent(event: HookEvent): event is DisputeEvent {
 export function getEventsByCategory(): Record<string, HookEvent[]> {
   return {
     task: [...TASK_EVENTS],
+    intake: [...INTAKE_EVENTS],
     section: [...SECTION_EVENTS],
     project: [...PROJECT_EVENTS],
     health: [...HEALTH_EVENTS],

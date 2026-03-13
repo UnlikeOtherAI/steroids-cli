@@ -10,12 +10,15 @@ import { loadConfigFile, getProjectConfigPath, getGlobalConfigPath } from '../co
 import { mergeHooks, type HookConfig } from './merge.js';
 import { HookOrchestrator, type HookExecutionResult } from './orchestrator.js';
 import type { HookEvent } from './events.js';
-import type { HookPayload, TaskData, ProjectContext, SectionData } from './payload.js';
+import type { HookPayload, TaskData, ProjectContext, SectionData, IntakeData } from './payload.js';
 import {
   createTaskCreatedPayload,
   createTaskUpdatedPayload,
   createTaskCompletedPayload,
   createTaskFailedPayload,
+  createIntakeReceivedPayload,
+  createIntakeTriagedPayload,
+  createIntakePRCreatedPayload,
   createSectionCompletedPayload,
   createProjectCompletedPayload,
   createCreditExhaustedPayload,
@@ -25,6 +28,7 @@ import {
   type CreditData,
 } from './payload.js';
 import type { Task } from '../database/queries.js';
+import type { StoredIntakeReport } from '../database/intake-queries.js';
 
 /**
  * Load and merge hooks from global and project configs
@@ -76,6 +80,29 @@ function taskToPayloadData(task: Task): TaskData {
     sectionId: task.section_id || null,
     sourceFile: task.source_file || null,
     rejectionCount: task.rejection_count || 0,
+  };
+}
+
+/**
+ * Convert stored intake report to payload intake data
+ */
+function intakeReportToPayloadData(
+  report: StoredIntakeReport,
+  overrides: Pick<IntakeData, 'linkedTaskId' | 'prNumber'> = {}
+): IntakeData {
+  return {
+    source: report.source,
+    externalId: report.externalId,
+    url: report.url,
+    fingerprint: report.fingerprint,
+    title: report.title,
+    summary: report.summary,
+    severity: report.severity,
+    status: report.status,
+    linkedTaskId: Object.prototype.hasOwnProperty.call(overrides, 'linkedTaskId')
+      ? overrides.linkedTaskId
+      : report.linkedTaskId,
+    prNumber: overrides.prNumber,
   };
 }
 
@@ -158,6 +185,53 @@ export async function triggerTaskFailed(
   const payload = createTaskFailedPayload(taskData, project, maxRejections);
 
   return await executeHooks('task.failed', payload, options);
+}
+
+/**
+ * Trigger intake.received hooks
+ */
+export async function triggerIntakeReceived(
+  report: StoredIntakeReport,
+  options: { verbose?: boolean; projectPath?: string } = {}
+): Promise<HookExecutionResult[]> {
+  const project = getProjectContext(options.projectPath);
+  const intake = intakeReportToPayloadData(report);
+  const payload = createIntakeReceivedPayload(intake, project);
+
+  return await executeHooks('intake.received', payload, options);
+}
+
+/**
+ * Trigger intake.triaged hooks
+ */
+export async function triggerIntakeTriaged(
+  report: StoredIntakeReport,
+  linkedTaskId: string | null,
+  options: { verbose?: boolean; projectPath?: string } = {}
+): Promise<HookExecutionResult[]> {
+  const project = getProjectContext(options.projectPath);
+  const intake = intakeReportToPayloadData(report, { linkedTaskId, prNumber: undefined });
+  const payload = createIntakeTriagedPayload(intake, project);
+
+  return await executeHooks('intake.triaged', payload, options);
+}
+
+/**
+ * Trigger intake.pr_created hooks
+ */
+export async function triggerIntakePRCreated(
+  report: StoredIntakeReport,
+  prNumber: number,
+  options: { verbose?: boolean; projectPath?: string } = {}
+): Promise<HookExecutionResult[]> {
+  const project = getProjectContext(options.projectPath);
+  const intake = intakeReportToPayloadData(report, {
+    linkedTaskId: report.linkedTaskId,
+    prNumber,
+  });
+  const payload = createIntakePRCreatedPayload(intake, project);
+
+  return await executeHooks('intake.pr_created', payload, options);
 }
 
 /**

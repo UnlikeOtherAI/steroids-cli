@@ -20,6 +20,7 @@ import {
 } from '../database/intake-queries.js';
 import * as taskQueries from '../database/queries.js';
 import { buildIntakeTaskTemplate, getIntakeTaskSectionName } from './task-templates.js';
+import { triggerHooksSafely, triggerIntakeTriaged } from '../hooks/integration.js';
 
 export {
   GITHUB_GATE_APPROVED_LABEL,
@@ -51,6 +52,7 @@ export interface GitHubGateSummary {
 export interface SyncGitHubIntakeGateOptions {
   projectDb: Database.Database;
   config: SteroidsConfig;
+  projectPath?: string;
   dryRun?: boolean;
   now?: () => Date;
   env?: NodeJS.ProcessEnv;
@@ -256,13 +258,14 @@ export async function syncGitHubIntakeGate(
         }
 
         let taskId = freshReport.linkedTaskId;
+        let triagedReport: StoredIntakeReport | null = null;
         projectDb.transaction(() => {
           const current = getIntakeReport(projectDb, report.source, report.externalId);
           if (!current) {
             throw new Error(`Missing intake report ${report.source}#${report.externalId} during approval transaction`);
           }
           taskId = current.linkedTaskId ?? createTriageTask(projectDb, current);
-          setGateState(projectDb, current, {
+          triagedReport = setGateState(projectDb, current, {
             ...gate,
             issueNumber: gate.issueNumber,
             issueUrl: gate.issueUrl,
@@ -275,6 +278,14 @@ export async function syncGitHubIntakeGate(
             resolvedAt: null,
           });
         })();
+
+        if (triagedReport) {
+          const reportForHook = triagedReport;
+          await triggerHooksSafely(
+            () => triggerIntakeTriaged(reportForHook, taskId ?? null, { projectPath: options.projectPath }),
+            { verbose: false }
+          );
+        }
 
         replaceManagedLabels(runtime, gate.issueNumber, labels, 'approved', runGhCommand);
         summary.approvalsApplied += 1;

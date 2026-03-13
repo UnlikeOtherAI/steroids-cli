@@ -140,11 +140,13 @@ describe('processWakeupProject intake integration', () => {
     expect(firstPollCall).toEqual({
       projectDb: expect.any(Object),
       config: mockLoadConfig.mock.results[0]?.value,
+      projectPath,
       dryRun: false,
     });
     expect(mockSyncGitHubIntakeGate).toHaveBeenCalledWith({
       projectDb: expect.any(Object),
       config: mockLoadConfig.mock.results[0]?.value,
+      projectPath,
       dryRun: false,
     });
     expect(result).toEqual(

@@ -238,6 +238,8 @@ describe('orchestrator loop and runner wiring', () => {
     jest.unstable_mockModule('../src/config/loader.js', () => ({
       loadConfig: mockLoadConfig,
       loadConfigFile: jest.fn().mockReturnValue({}),
+      getGlobalConfigPath: jest.fn().mockReturnValue('/tmp/global-config.yaml'),
+      getProjectConfigPath: jest.fn().mockReturnValue('/tmp/project-config.yaml'),
       saveConfig: jest.fn(),
     }));
     jest.unstable_mockModule('../src/runners/activity-log.js', () => ({

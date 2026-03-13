@@ -96,6 +96,9 @@ jest.unstable_mockModule('../src/database/connection.js', () => ({
 
 jest.unstable_mockModule('../src/config/loader.js', () => ({
   loadConfig: mockLoadConfig,
+  loadConfigFile: jest.fn().mockReturnValue({}),
+  getGlobalConfigPath: jest.fn().mockReturnValue('/tmp/global-config.yaml'),
+  getProjectConfigPath: jest.fn().mockReturnValue('/tmp/project-config.yaml'),
 }));
 
 jest.unstable_mockModule('../src/health/stuck-task-recovery.js', () => ({

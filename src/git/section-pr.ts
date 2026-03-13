@@ -251,7 +251,7 @@ export async function checkSectionCompletionAndPR(
         error instanceof Error ? error.message : String(error)
       );
     }
-    await handleIntakePostPR({ db, sectionId, prNumber: section.pr_number, config });
+    await handleIntakePostPR({ db, sectionId, prNumber: section.pr_number, config, projectPath });
     return section.pr_number;
   }
 
@@ -275,7 +275,7 @@ export async function checkSectionCompletionAndPR(
         error instanceof Error ? error.message : String(error)
       );
     }
-    await handleIntakePostPR({ db, sectionId, prNumber: existingPrNumber, config });
+    await handleIntakePostPR({ db, sectionId, prNumber: existingPrNumber, config, projectPath });
     return existingPrNumber;
   }
 
@@ -294,7 +294,7 @@ export async function checkSectionCompletionAndPR(
     const prNumber = createPr(projectPath, section.name, section.branch, baseBranch, completedTitles, metadata);
     setSectionPrNumber(db, sectionId, prNumber);
     console.log(`[section-pr] Created PR #${prNumber} for section "${section.name}" (${section.branch} → ${baseBranch})`);
-    await handleIntakePostPR({ db, sectionId, prNumber, config });
+    await handleIntakePostPR({ db, sectionId, prNumber, config, projectPath });
     return prNumber;
   } catch (error) {
     console.error(

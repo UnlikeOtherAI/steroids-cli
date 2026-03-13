@@ -4,12 +4,14 @@ import { getIntakeReport, updateIntakeReportState } from '../database/intake-que
 import { getSection, listTasks } from '../database/queries.js';
 import { createIntakeRegistry, type IntakeRegistry } from './registry.js';
 import { parseIntakeTaskReference, type IntakeTaskReference } from './task-reference.js';
+import { triggerHooksSafely, triggerIntakePRCreated } from '../hooks/integration.js';
 
 export interface HandleIntakePostPROptions {
   db: Database.Database;
   sectionId: string | null | undefined;
   prNumber: number | null;
   config: SteroidsConfig;
+  projectPath?: string;
   createRegistry?: (config: Partial<SteroidsConfig>) => IntakeRegistry;
 }
 
@@ -101,10 +103,14 @@ export async function handleIntakePostPR(
       }
     }
 
-    updateIntakeReportState(db, report.source, report.externalId, {
+    const updated = updateIntakeReportState(db, report.source, report.externalId, {
       status: 'resolved',
       resolvedAt,
     });
+    await triggerHooksSafely(
+      () => triggerIntakePRCreated(updated, prNumber, { projectPath: options.projectPath }),
+      { verbose: false }
+    );
     reportsResolved += 1;
   }
 

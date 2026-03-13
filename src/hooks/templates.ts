@@ -6,6 +6,15 @@
  */
 
 import type { HookPayload } from './payload.js';
+import {
+  resolveTaskVariable,
+  resolveSectionVariable,
+  resolveProjectVariable,
+  resolveHealthVariable,
+  resolveDisputeVariable,
+  resolveCreditVariable,
+  resolveIntakeVariable,
+} from './template-resolvers.js';
 
 /**
  * Template variable pattern: {{variable.name}}
@@ -62,6 +71,19 @@ export interface TemplateContext {
     model: string;
     role: string;
     message: string;
+  };
+  /** Intake data (if intake event) */
+  intake?: {
+    source: string;
+    externalId: string;
+    url: string;
+    fingerprint: string;
+    title: string;
+    summary?: string;
+    severity: string;
+    status: string;
+    linkedTaskId?: string | null;
+    prNumber?: number;
   };
 }
 
@@ -166,142 +188,8 @@ export function resolveVariable(
       return resolveDisputeVariable(rest, context.dispute);
     case 'credit':
       return resolveCreditVariable(rest, context.credit);
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Resolve task.* variables
- */
-function resolveTaskVariable(
-  path: string[],
-  task: TemplateContext['task']
-): string | undefined {
-  if (!task) return undefined;
-
-  const key = path[0];
-  switch (key) {
-    case 'id':
-      return task.id;
-    case 'title':
-      return task.title;
-    case 'status':
-      return task.status;
-    case 'section':
-      return task.section ?? undefined;
-    case 'sectionId':
-      return task.sectionId ?? undefined;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Resolve section.* variables
- */
-function resolveSectionVariable(
-  path: string[],
-  section: TemplateContext['section']
-): string | undefined {
-  if (!section) return undefined;
-
-  const key = path[0];
-  switch (key) {
-    case 'id':
-      return section.id;
-    case 'name':
-      return section.name;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Resolve project.* variables
- */
-function resolveProjectVariable(
-  path: string[],
-  project: TemplateContext['project']
-): string | undefined {
-  if (!project) return undefined;
-
-  const key = path[0];
-  switch (key) {
-    case 'name':
-      return project.name;
-    case 'path':
-      return project.path;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Resolve health.* variables
- */
-function resolveHealthVariable(
-  path: string[],
-  health: TemplateContext['health']
-): string | number | undefined {
-  if (!health) return undefined;
-
-  const key = path[0];
-  switch (key) {
-    case 'score':
-      return health.score;
-    case 'previousScore':
-      return health.previousScore;
-    case 'status':
-      return health.status;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Resolve dispute.* variables
- */
-function resolveDisputeVariable(
-  path: string[],
-  dispute: TemplateContext['dispute']
-): string | undefined {
-  if (!dispute) return undefined;
-
-  const key = path[0];
-  switch (key) {
-    case 'id':
-      return dispute.id;
-    case 'taskId':
-      return dispute.taskId;
-    case 'type':
-      return dispute.type;
-    case 'status':
-      return dispute.status;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Resolve credit.* variables
- */
-function resolveCreditVariable(
-  path: string[],
-  credit: TemplateContext['credit']
-): string | undefined {
-  if (!credit) return undefined;
-
-  const key = path[0];
-  switch (key) {
-    case 'provider':
-      return credit.provider;
-    case 'model':
-      return credit.model;
-    case 'role':
-      return credit.role;
-    case 'message':
-      return credit.message;
+    case 'intake':
+      return resolveIntakeVariable(rest, context.intake);
     default:
       return undefined;
   }
@@ -332,6 +220,23 @@ export function createTemplateContext(payload: HookPayload): TemplateContext {
         status: payload.task.status,
         section: payload.task.section,
         sectionId: payload.task.sectionId,
+      };
+      break;
+
+    case 'intake.received':
+    case 'intake.triaged':
+    case 'intake.pr_created':
+      context.intake = {
+        source: payload.intake.source,
+        externalId: payload.intake.externalId,
+        url: payload.intake.url,
+        fingerprint: payload.intake.fingerprint,
+        title: payload.intake.title,
+        summary: payload.intake.summary,
+        severity: payload.intake.severity,
+        status: payload.intake.status,
+        linkedTaskId: payload.intake.linkedTaskId,
+        prNumber: payload.intake.prNumber,
       };
       break;
 
@@ -399,6 +304,22 @@ export function getAvailableVariables(event: string): string[] {
       'task.status',
       'task.section',
       'task.sectionId',
+    ];
+  }
+
+  if (event.startsWith('intake.')) {
+    return [
+      ...baseVars,
+      'intake.source',
+      'intake.externalId',
+      'intake.url',
+      'intake.fingerprint',
+      'intake.title',
+      'intake.summary',
+      'intake.severity',
+      'intake.status',
+      'intake.linkedTaskId',
+      'intake.prNumber',
     ];
   }
 

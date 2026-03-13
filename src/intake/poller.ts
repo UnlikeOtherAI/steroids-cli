@@ -2,12 +2,15 @@ import type Database from 'better-sqlite3';
 import type { SteroidsConfig } from '../config/loader.js';
 import {
   getIntakePollState,
+  getIntakeReport,
   listIntakeReports,
   upsertIntakePollState,
   upsertIntakeReport,
+  type StoredIntakeReport,
 } from '../database/intake-queries.js';
 import { createIntakeRegistry, type IntakeRegistry } from './registry.js';
 import type { IntakeSource } from './types.js';
+import { triggerHooksSafely, triggerIntakeReceived } from '../hooks/integration.js';
 
 export interface IntakeConnectorPollResult {
   source: IntakeSource;
@@ -27,6 +30,7 @@ export interface IntakePollSummary {
 export interface PollIntakeProjectOptions {
   projectDb: Database.Database;
   config: SteroidsConfig;
+  projectPath?: string;
   dryRun?: boolean;
   now?: () => Date;
   createRegistry?: (config: Partial<SteroidsConfig>) => IntakeRegistry;
@@ -193,9 +197,14 @@ export async function pollIntakeProject(options: PollIntakeProjectOptions): Prom
         since: state?.lastSuccessAt ?? undefined,
       });
 
-      projectDb.transaction(() => {
+      const newlyReceived = projectDb.transaction(() => {
+        const reportsToTrigger: StoredIntakeReport[] = [];
         for (const report of pullResult.reports) {
-          upsertIntakeReport(projectDb, report);
+          const existing = getIntakeReport(projectDb, report.source, report.externalId);
+          const stored = upsertIntakeReport(projectDb, report);
+          if (!existing) {
+            reportsToTrigger.push(stored);
+          }
         }
 
         upsertIntakePollState(projectDb, {
@@ -206,7 +215,15 @@ export async function pollIntakeProject(options: PollIntakeProjectOptions): Prom
           lastErrorAt: null,
           lastErrorMessage: null,
         });
+        return reportsToTrigger;
       })();
+
+      for (const report of newlyReceived) {
+        await triggerHooksSafely(
+          () => triggerIntakeReceived(report, { projectPath: options.projectPath }),
+          { verbose: false }
+        );
+      }
 
       connectorResults.push({
         source: connector.source,
