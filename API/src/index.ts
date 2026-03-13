@@ -44,6 +44,7 @@ import configRouter from './routes/config.js';
 import reviewerConfigRouter from './routes/config-reviewer.js';
 import healthRouter from './routes/health.js';
 import incidentsRouter from './routes/incidents.js';
+import intakeRouter from './routes/intake.js';
 import skillsRouter from './routes/skills.js';
 import { creditAlertRoutes } from './routes/credit-alerts.js';
 import modelUsageRouter from './routes/model-usage.js';
@@ -104,6 +105,7 @@ export function createApp(): express.Express {
   app.use('/api', reviewerConfigRouter);
   app.use('/api', healthRouter);
   app.use('/api', incidentsRouter);
+  app.use('/api', intakeRouter);
   app.use('/api', skillsRouter);
   app.use('/api', modelUsageRouter);
   app.use('/api', huggingFaceRouter);
@@ -151,6 +153,13 @@ export function createApp(): express.Express {
         'PUT /api/config/reviewer-custom-instructions',
         'GET /api/health?project=<path>',
         'GET /api/incidents?project=<path>&limit=<n>&task=<prefix>&unresolved=<true|false>',
+        'GET /api/intake/reports?project=<path>&source=<github|sentry>&status=<status>&severity=<severity>',
+        'GET /api/intake/reports/<source>/<externalId>?project=<path>',
+        'POST /api/intake/reports',
+        'PATCH /api/intake/reports/<source>/<externalId>',
+        'DELETE /api/intake/reports/<source>/<externalId>?project=<path>',
+        'GET /api/intake/stats?project=<path>',
+        'GET /api/intake/connectors/health?project=<path>',
         'GET /api/ai/providers',
         'GET /api/ai/models/<provider>',
         'GET /api/model-usage?project=<path>&hours=<hours>',
