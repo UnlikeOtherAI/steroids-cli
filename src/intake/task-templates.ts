@@ -25,6 +25,7 @@ export interface IntakeTaskTemplate {
 
 export interface BuildIntakeTaskTemplateOptions {
   sourceFile?: string;
+  retryAttempt?: number;
 }
 
 const PHASE_SECTION_NAMES: Record<IntakeTaskPhase, string> = {
@@ -41,6 +42,18 @@ const PHASE_VERBS: Record<IntakeTaskPhase, string> = {
 
 function normalizeInlineText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeRetryAttempt(retryAttempt: number | undefined): number | undefined {
+  if (retryAttempt === undefined) {
+    return undefined;
+  }
+
+  if (!Number.isInteger(retryAttempt) || retryAttempt < 2) {
+    throw new Error(`Intake retry attempt must be an integer >= 2, got: ${String(retryAttempt)}`);
+  }
+
+  return retryAttempt;
 }
 
 function formatReportLabel(report: IntakeTaskTemplateReport): string {
@@ -74,7 +87,9 @@ function buildPhaseInstructions(phase: IntakeTaskPhase): string[] {
     case 'reproduction':
       return [
         'Goal: produce a reliable reproduction with the narrowest defensible root-cause evidence.',
+        'Required output: write intake-result.json in the project root using the reproduction contract from the linked spec.',
         'Capture exact steps, environment assumptions, expected behavior, and actual behavior.',
+        'Choose retry only when another reproduction pass is justified; choose fix when the evidence is strong enough to proceed; choose close when the report should be resolved without a fix.',
         'Do not start unrelated cleanup or speculative refactors in this phase.',
       ];
     case 'fix':
@@ -92,17 +107,23 @@ export function getIntakeTaskSectionName(phase: IntakeTaskPhase): string {
 
 export function buildIntakeTaskTitle(
   phase: IntakeTaskPhase,
-  report: IntakeTaskTemplateReport
+  report: IntakeTaskTemplateReport,
+  options: Pick<BuildIntakeTaskTemplateOptions, 'retryAttempt'> = {}
 ): string {
-  return `${PHASE_VERBS[phase]} intake report ${formatReportLabel(report)}: ${normalizeInlineText(report.title)}`;
+  const retryAttempt = normalizeRetryAttempt(options.retryAttempt);
+  const retrySuffix = retryAttempt ? ` (retry ${retryAttempt})` : '';
+  return `${PHASE_VERBS[phase]} intake report ${formatReportLabel(report)}: ${normalizeInlineText(report.title)}${retrySuffix}`;
 }
 
 export function buildIntakeTaskDescription(
   phase: IntakeTaskPhase,
-  report: IntakeTaskTemplateReport
+  report: IntakeTaskTemplateReport,
+  options: Pick<BuildIntakeTaskTemplateOptions, 'retryAttempt'> = {}
 ): string {
+  const retryAttempt = normalizeRetryAttempt(options.retryAttempt);
   const lines = [
     ...buildSharedDescriptionLines(report),
+    ...(retryAttempt ? [`Retry attempt: ${retryAttempt}`] : []),
     '',
     ...buildPhaseInstructions(phase),
   ];
@@ -118,8 +139,8 @@ export function buildIntakeTaskTemplate(
   return {
     phase,
     sectionName: getIntakeTaskSectionName(phase),
-    title: buildIntakeTaskTitle(phase, report),
+    title: buildIntakeTaskTitle(phase, report, options),
     sourceFile: options.sourceFile ?? DEFAULT_INTAKE_PIPELINE_SOURCE_FILE,
-    description: buildIntakeTaskDescription(phase, report),
+    description: buildIntakeTaskDescription(phase, report, options),
   };
 }

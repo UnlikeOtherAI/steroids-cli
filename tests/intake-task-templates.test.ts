@@ -59,6 +59,9 @@ describe('intake task templates', () => {
     expect(buildIntakeTaskDescription('reproduction', report)).toContain(
       'Goal: produce a reliable reproduction with the narrowest defensible root-cause evidence.'
     );
+    expect(buildIntakeTaskDescription('reproduction', report)).toContain(
+      'Required output: write intake-result.json in the project root using the reproduction contract from the linked spec.'
+    );
     expect(buildIntakeTaskDescription('fix', report)).toContain(
       'Goal: implement the narrowest safe fix for the linked intake report and validate it with targeted tests.'
     );
@@ -86,5 +89,24 @@ describe('intake task templates', () => {
 
     expect(template.sourceFile).toBe('docs/custom/intake-fix.md');
     expect(template.description).not.toContain('Summary:');
+  });
+
+  it('supports deterministic retry title and description suffixes for retried intake tasks', () => {
+    const template = buildIntakeTaskTemplate(
+      'reproduction',
+      createReport(),
+      { retryAttempt: 2 }
+    );
+
+    expect(template.title).toBe(
+      'Reproduce intake report github#42: Checkout fails on empty cart (retry 2)'
+    );
+    expect(template.description).toContain('Retry attempt: 2');
+  });
+
+  it('rejects invalid retry attempts', () => {
+    expect(() => buildIntakeTaskTemplate('reproduction', createReport(), { retryAttempt: 1 })).toThrow(
+      'Intake retry attempt must be an integer >= 2, got: 1'
+    );
   });
 });

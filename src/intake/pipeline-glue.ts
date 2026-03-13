@@ -4,8 +4,9 @@ import type { IntakeResolutionCode } from './types.js';
 
 export const DEFAULT_INTAKE_RESULT_FILE = 'intake-result.json';
 
-export type IntakePipelinePhase = 'triage';
+export type IntakePipelinePhase = 'triage' | 'reproduction';
 export type IntakeTriageDecision = 'close' | 'reproduce' | 'fix';
+export type IntakeReproductionDecision = 'close' | 'retry' | 'fix';
 
 interface IntakeResultBase {
   phase: IntakePipelinePhase;
@@ -26,20 +27,43 @@ export interface IntakeTriageAdvanceResult extends IntakeResultBase {
   nextTaskTitle?: string;
 }
 
+export interface IntakeReproductionCloseResult extends IntakeResultBase {
+  phase: 'reproduction';
+  decision: 'close';
+  resolutionCode: IntakeResolutionCode;
+  nextTaskTitle?: string;
+}
+
+export interface IntakeReproductionRetryResult extends IntakeResultBase {
+  phase: 'reproduction';
+  decision: 'retry';
+  nextTaskTitle?: string;
+}
+
+export interface IntakeReproductionAdvanceResult extends IntakeResultBase {
+  phase: 'reproduction';
+  decision: 'fix';
+  nextTaskTitle?: string;
+}
+
 export type IntakeTriageResult = IntakeTriageCloseResult | IntakeTriageAdvanceResult;
-export type IntakeResult = IntakeTriageResult;
+export type IntakeReproductionResult =
+  | IntakeReproductionCloseResult
+  | IntakeReproductionRetryResult
+  | IntakeReproductionAdvanceResult;
+export type IntakeResult = IntakeTriageResult | IntakeReproductionResult;
 
 export interface IntakePipelineCloseTransition {
   action: 'complete';
-  phase: 'triage';
+  phase: IntakePipelinePhase;
   summary: string;
   comment?: string;
   resolutionCode: IntakeResolutionCode;
 }
 
 export interface IntakePipelineAdvanceTransition {
-  action: 'advance';
-  phase: 'triage';
+  action: 'advance' | 'retry';
+  phase: IntakePipelinePhase;
   nextPhase: 'reproduction' | 'fix';
   summary: string;
   comment?: string;
@@ -71,20 +95,33 @@ function parseOptionalString(value: unknown, fieldName: string): string | undefi
 }
 
 function parsePhase(value: unknown): IntakePipelinePhase {
-  if (value !== 'triage') {
-    throw new Error(`intake-result.json field "phase" must be "triage", got: ${String(value)}`);
+  if (value !== 'triage' && value !== 'reproduction') {
+    throw new Error(`intake-result.json field "phase" must be "triage" or "reproduction", got: ${String(value)}`);
   }
 
   return value;
 }
 
-function parseDecision(value: unknown): IntakeTriageDecision {
-  if (value === 'close' || value === 'reproduce' || value === 'fix') {
+function parseDecision(
+  phase: IntakePipelinePhase,
+  value: unknown
+): IntakeTriageDecision | IntakeReproductionDecision {
+  if (phase === 'triage') {
+    if (value === 'close' || value === 'reproduce' || value === 'fix') {
+      return value;
+    }
+
+    throw new Error(
+      `intake-result.json field "decision" must be one of "close", "reproduce", or "fix" for phase "triage", got: ${String(value)}`
+    );
+  }
+
+  if (value === 'close' || value === 'retry' || value === 'fix') {
     return value;
   }
 
   throw new Error(
-    `intake-result.json field "decision" must be one of "close", "reproduce", or "fix", got: ${String(value)}`
+    `intake-result.json field "decision" must be one of "close", "retry", or "fix" for phase "reproduction", got: ${String(value)}`
   );
 }
 
@@ -112,7 +149,7 @@ export function parseIntakeResult(raw: string): IntakeResult {
   }
 
   const phase = parsePhase(parsed.phase);
-  const decision = parseDecision(parsed.decision);
+  const decision = parseDecision(phase, parsed.decision);
   const summary = requireNonEmptyString(parsed.summary, 'summary');
   const comment = parseOptionalString(parsed.comment, 'comment');
   const nextTaskTitle = parseOptionalString(parsed.nextTaskTitle, 'nextTaskTitle');
@@ -132,13 +169,23 @@ export function parseIntakeResult(raw: string): IntakeResult {
     throw new Error('intake-result.json field "resolutionCode" is only allowed when decision is "close"');
   }
 
+  if (phase === 'triage') {
+    return {
+      phase,
+      decision,
+      summary,
+      comment,
+      nextTaskTitle,
+    } as IntakeTriageAdvanceResult;
+  }
+
   return {
     phase,
     decision,
     summary,
     comment,
     nextTaskTitle,
-  };
+  } as IntakeReproductionAdvanceResult | IntakeReproductionRetryResult;
 }
 
 export function parseIntakeResultFile(
@@ -159,32 +206,33 @@ export function parseIntakeResultFile(
 }
 
 export function deriveIntakePipelineTransition(result: IntakeResult): IntakePipelineTransition {
-  switch (result.decision) {
-    case 'close':
-      return {
-        action: 'complete',
-        phase: result.phase,
-        summary: result.summary,
-        comment: result.comment,
-        resolutionCode: result.resolutionCode,
-      };
-    case 'reproduce':
-      return {
-        action: 'advance',
-        phase: result.phase,
-        nextPhase: 'reproduction',
-        summary: result.summary,
-        comment: result.comment,
-        nextTaskTitle: result.nextTaskTitle,
-      };
-    case 'fix':
-      return {
-        action: 'advance',
-        phase: result.phase,
-        nextPhase: 'fix',
-        summary: result.summary,
-        comment: result.comment,
-        nextTaskTitle: result.nextTaskTitle,
-      };
+  if (result.decision === 'close') {
+    return {
+      action: 'complete',
+      phase: result.phase,
+      summary: result.summary,
+      comment: result.comment,
+      resolutionCode: result.resolutionCode,
+    };
   }
+
+  if (result.phase === 'triage') {
+    return {
+      action: 'advance',
+      phase: result.phase,
+      nextPhase: result.decision === 'reproduce' ? 'reproduction' : 'fix',
+      summary: result.summary,
+      comment: result.comment,
+      nextTaskTitle: result.nextTaskTitle,
+    };
+  }
+
+  return {
+    action: result.decision === 'retry' ? 'retry' : 'advance',
+    phase: result.phase,
+    nextPhase: result.decision === 'retry' ? 'reproduction' : 'fix',
+    summary: result.summary,
+    comment: result.comment,
+    nextTaskTitle: result.nextTaskTitle,
+  };
 }

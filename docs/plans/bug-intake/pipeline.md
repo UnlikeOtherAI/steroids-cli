@@ -1,22 +1,25 @@
-# Bug Intake Pipeline Task Templates
+# Bug Intake Pipeline Tasks And Reproduction Glue
 
 ## Problem Statement
 
-The intake subsystem can now persist external reports and parse the first `triage`
-phase result, but it still has no shared contract for the internal tasks that the
-pipeline is supposed to create. Without deterministic templates, later glue code
-would invent titles, sections, and coder instructions ad hoc, which would make the
-pipeline brittle and difficult to review.
+The intake subsystem can now persist external reports, build deterministic task
+templates, and parse the first `triage` phase result, but the pipeline still lacks
+deterministic reproduction-phase glue. Without an explicit `reproduction`
+contract, reviewer approval cannot safely decide whether to retry reproduction,
+advance to a fix, or close the report.
 
 ## Current Behavior
 
 - [src/intake/poller.ts](../../../src/intake/poller.ts) persists normalized intake reports
   but does not create internal tasks.
 - [src/intake/pipeline-glue.ts](../../../src/intake/pipeline-glue.ts) validates
-  `intake-result.json` for the `triage` phase and derives the next transition, but
-  it does not define the task metadata for any phase.
-- The normal task helper in [src/database/queries.ts](../../../src/database/queries.ts)
-  only creates generic tasks and does not provide intake-specific defaults.
+  `intake-result.json` for the `triage` phase only.
+- [src/intake/reviewer-approval.ts](../../../src/intake/reviewer-approval.ts) only
+  handles approved `triage` tasks and cannot create deterministic retry
+  reproduction tasks.
+- [src/intake/task-templates.ts](../../../src/intake/task-templates.ts) builds the
+  three intake task templates, but reproduction tasks do not yet explain the
+  reproduction output contract or deterministic retry naming.
 
 ## Desired Behavior
 
@@ -33,27 +36,54 @@ Each phase template should define:
 - spec/source file path
 - report-specific description text
 
-This task does not create or wire tasks. It only defines the template contract that
-later glue code can consume.
+Reviewer approval should also consume deterministic `intake-result.json`
+contracts for:
+
+1. `triage` decisions `close | reproduce | fix`
+2. `reproduction` decisions `close | retry | fix`
 
 ## Design
 
 ### Module
 
-Add `src/intake/task-templates.ts` with pure builders:
+Keep `src/intake/task-templates.ts` as the pure builder source of truth:
 
 - `getIntakeTaskSectionName(phase)`
 - `buildIntakeTaskTitle(phase, report)`
 - `buildIntakeTaskDescription(phase, report)`
 - `buildIntakeTaskTemplate(phase, report, options?)`
 
+Extend `src/intake/pipeline-glue.ts` and
+`src/intake/reviewer-approval.ts` so approved intake tasks can deterministically:
+
+- complete the report
+- create another reproduction task
+- create the fix task
+
 ### Phase Defaults
 
 | Phase | Section | Title prefix | Notes |
 |---|---|---|---|
 | `triage` | `Bug Intake: Triage` | `Triage intake report ...` | Must instruct the coder to write `intake-result.json` using the existing triage contract |
-| `reproduction` | `Bug Intake: Reproduction` | `Reproduce intake report ...` | Focus on reliable repro + evidence; no speculative cleanup |
+| `reproduction` | `Bug Intake: Reproduction` | `Reproduce intake report ...` | Focus on reliable repro + evidence, require the reproduction `intake-result.json` contract, and support deterministic retry titles |
 | `fix` | `Bug Intake: Fix` | `Fix intake report ...` | Focus on the narrowest safe fix + targeted validation |
+
+### Reproduction Result Contract
+
+The reproduction phase writes `intake-result.json` with:
+
+- `phase: "reproduction"`
+- `decision: "close" | "retry" | "fix"`
+- `summary` (required)
+- `comment` (optional)
+- `resolutionCode` (required only when `decision === "close"`)
+- `nextTaskTitle` (optional deterministic override)
+
+Transition rules:
+
+- `close` completes the intake report using `resolutionCode`
+- `retry` creates another `reproduction` task
+- `fix` creates the `fix` task
 
 ### Shared Context
 
@@ -69,13 +99,19 @@ Every template description includes:
 The shared spec/source path is `docs/plans/bug-intake/pipeline.md` so generated
 tasks all point at one stable pipeline spec instead of phase-specific ad hoc docs.
 
+Retry support stays deterministic by appending ` (retry N)` to a generated
+reproduction task title when glue creates another reproduction task without an
+explicit `nextTaskTitle`.
+
 ## Implementation Order
 
 1. Create this pipeline design doc.
 2. Add the pure intake task-template module.
-3. Export it from `src/intake/index.ts`.
-4. Add deterministic unit tests for all three phases.
-5. Run targeted tests and the project build.
+3. Extend task templates with deterministic retry-title support.
+4. Extend pipeline glue with the reproduction result contract.
+5. Update reviewer approval to handle approved reproduction tasks.
+6. Add deterministic unit tests for triage, reproduction, and retry behavior.
+7. Run targeted tests and the project build.
 
 ## Edge Cases
 
@@ -84,14 +120,14 @@ tasks all point at one stable pipeline spec instead of phase-specific ad hoc doc
 | Report title contains newlines or repeated spaces | Normalize whitespace so titles remain stable |
 | Summary is empty or missing | Omit the summary line |
 | Later glue needs a different source file path | Allow an explicit `sourceFile` override |
-| Reproduction/fix pipeline transitions are not wired yet | Keep this task template layer pure and glue-free |
+| Reproduction is retried repeatedly | Derive the next retry attempt from the current task title and append a deterministic ` (retry N)` suffix |
+| Reproduction closes without requiring code changes | Allow `decision: "close"` with `resolutionCode`, which completes the report without creating a fix task |
 
 ## Non-Goals
 
-- reviewer approval-path wiring
-- task insertion or section creation side effects
 - new database migrations
-- new `intake-result.json` parsing beyond the current `triage` contract
+- non-deterministic retry policies or backoff
+- new database state for retry counters
 
 ## Cross-Provider Review
 

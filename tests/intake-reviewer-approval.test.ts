@@ -148,4 +148,94 @@ describe('handleIntakeTaskApproval', () => {
     );
     expect(getIntakeReport(db, 'github', '42')?.resolvedAt).toBeUndefined();
   });
+
+  it('creates the next reproduction retry task with a deterministic retry suffix', () => {
+    const reproductionSection = createSection(db, 'Bug Intake: Reproduction');
+    const reproductionTask = createTask(
+      db,
+      'Reproduce intake report github#42: Checkout fails on empty cart',
+      {
+        sectionId: reproductionSection.id,
+        sourceFile: DEFAULT_INTAKE_PIPELINE_SOURCE_FILE,
+      }
+    );
+
+    upsertIntakeReport(db, createSampleReport({ status: 'in_progress' }), { linkedTaskId: reproductionTask.id });
+    writeFileSync(
+      join(projectPath, 'intake-result.json'),
+      JSON.stringify({
+        phase: 'reproduction',
+        decision: 'retry',
+        summary: 'The failure is still flaky; run one more controlled pass.',
+      }),
+      'utf-8'
+    );
+
+    const result = handleIntakeTaskApproval(db, reproductionTask, projectPath);
+    const tasks = listTasks(db, { status: 'all' });
+    const nextTask = tasks.find((entry) => entry.id === result.createdTaskId);
+
+    expect(result).toMatchObject({
+      handled: true,
+      createdTaskId: expect.any(String),
+      transition: {
+        action: 'retry',
+        nextPhase: 'reproduction',
+      },
+    });
+    expect(nextTask).toEqual(
+      expect.objectContaining({
+        title: 'Reproduce intake report github#42: Checkout fails on empty cart (retry 2)',
+        section_id: reproductionSection.id,
+        source_file: DEFAULT_INTAKE_PIPELINE_SOURCE_FILE,
+        status: 'pending',
+      })
+    );
+    expect(getIntakeReport(db, 'github', '42')).toEqual(
+      expect.objectContaining({
+        status: 'in_progress',
+        linkedTaskId: result.createdTaskId,
+      })
+    );
+  });
+
+  it('marks a reproduction task closed as resolved when the report is fixed without a follow-up fix task', () => {
+    const reproductionSection = createSection(db, 'Bug Intake: Reproduction');
+    const reproductionTask = createTask(
+      db,
+      'Reproduce intake report github#42: Checkout fails on empty cart (retry 2)',
+      {
+        sectionId: reproductionSection.id,
+        sourceFile: DEFAULT_INTAKE_PIPELINE_SOURCE_FILE,
+      }
+    );
+
+    upsertIntakeReport(db, createSampleReport({ status: 'in_progress' }), { linkedTaskId: reproductionTask.id });
+    writeFileSync(
+      join(projectPath, 'intake-result.json'),
+      JSON.stringify({
+        phase: 'reproduction',
+        decision: 'close',
+        summary: 'The issue was fixed by an upstream configuration change.',
+        resolutionCode: 'fixed',
+      }),
+      'utf-8'
+    );
+
+    const result = handleIntakeTaskApproval(db, reproductionTask, projectPath);
+
+    expect(result.handled).toBe(true);
+    expect(result.transition).toMatchObject({
+      action: 'complete',
+      phase: 'reproduction',
+      resolutionCode: 'fixed',
+    });
+    expect(getIntakeReport(db, 'github', '42')).toEqual(
+      expect.objectContaining({
+        status: 'resolved',
+        linkedTaskId: reproductionTask.id,
+      })
+    );
+    expect(getIntakeReport(db, 'github', '42')?.resolvedAt).toBeTruthy();
+  });
 });

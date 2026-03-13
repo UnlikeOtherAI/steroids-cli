@@ -89,6 +89,45 @@ describe('intake pipeline glue', () => {
     });
   });
 
+  it('maps a reproduction retry decision into a deterministic retry transition', () => {
+    const result = parseIntakeResult(
+      JSON.stringify({
+        phase: 'reproduction',
+        decision: 'retry',
+        summary: 'The failure is still flaky; collect one tighter repro pass.',
+        nextTaskTitle: 'Reproduce checkout failure from intake report github#42 (retry 2)',
+      })
+    );
+
+    expect(deriveIntakePipelineTransition(result)).toEqual({
+      action: 'retry',
+      phase: 'reproduction',
+      nextPhase: 'reproduction',
+      summary: 'The failure is still flaky; collect one tighter repro pass.',
+      comment: undefined,
+      nextTaskTitle: 'Reproduce checkout failure from intake report github#42 (retry 2)',
+    });
+  });
+
+  it('maps a reproduction fix decision into a deterministic fix transition', () => {
+    const result = parseIntakeResult(
+      JSON.stringify({
+        phase: 'reproduction',
+        decision: 'fix',
+        summary: 'The reproduction is stable and the bug is isolated enough to fix.',
+      })
+    );
+
+    expect(deriveIntakePipelineTransition(result)).toEqual({
+      action: 'advance',
+      phase: 'reproduction',
+      nextPhase: 'fix',
+      summary: 'The reproduction is stable and the bug is isolated enough to fix.',
+      comment: undefined,
+      nextTaskTitle: undefined,
+    });
+  });
+
   it('rejects invalid triage result shapes instead of guessing', () => {
     expect(() =>
       parseIntakeResult(
@@ -110,6 +149,28 @@ describe('intake pipeline glue', () => {
         })
       )
     ).toThrow('intake-result.json field "resolutionCode" is only allowed when decision is "close"');
+  });
+
+  it('rejects invalid reproduction result shapes instead of guessing', () => {
+    expect(() =>
+      parseIntakeResult(
+        JSON.stringify({
+          phase: 'reproduction',
+          decision: 'close',
+          summary: 'Missing resolution code.',
+        })
+      )
+    ).toThrow('intake-result.json field "resolutionCode" must be one of "fixed", "duplicate", "wontfix", or "invalid", got: undefined');
+
+    expect(() =>
+      parseIntakeResult(
+        JSON.stringify({
+          phase: 'reproduction',
+          decision: 'reproduce',
+          summary: 'Wrong decision for reproduction phase.',
+        })
+      )
+    ).toThrow('intake-result.json field "decision" must be one of "close", "retry", or "fix" for phase "reproduction", got: reproduce');
   });
 
   it('reads intake-result.json from the project root and validates invalid JSON', () => {

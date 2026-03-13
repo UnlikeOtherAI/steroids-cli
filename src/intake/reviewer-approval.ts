@@ -35,15 +35,32 @@ function getOrCreateSectionId(db: Database.Database, sectionName: string): strin
   return createSection(db, sectionName).id;
 }
 
+function parseRetryAttemptFromTitle(title: string): number {
+  const match = title.match(/\(retry (\d+)\)$/);
+  if (!match) {
+    return 1;
+  }
+
+  const retryAttempt = Number.parseInt(match[1], 10);
+  return Number.isInteger(retryAttempt) && retryAttempt >= 2 ? retryAttempt : 1;
+}
+
 function createNextIntakeTask(
   db: Database.Database,
   nextPhase: Exclude<IntakeTaskPhase, 'triage'>,
   report: StoredIntakeReport,
-  nextTaskTitle?: string
+  options: {
+    currentTaskTitle?: string;
+    nextTaskTitle?: string;
+    retry?: boolean;
+  } = {}
 ): string {
-  const template = buildIntakeTaskTemplate(nextPhase, report);
+  const retryAttempt = options.retry
+    ? parseRetryAttemptFromTitle(options.currentTaskTitle ?? '') + 1
+    : undefined;
+  const template = buildIntakeTaskTemplate(nextPhase, report, { retryAttempt });
   const sectionId = getOrCreateSectionId(db, getIntakeTaskSectionName(nextPhase));
-  const nextTask = createTask(db, nextTaskTitle ?? template.title, {
+  const nextTask = createTask(db, options.nextTaskTitle ?? template.title, {
     sectionId,
     sourceFile: template.sourceFile,
   });
@@ -57,7 +74,7 @@ export function handleIntakeTaskApproval(
   projectPath: string
 ): IntakeTaskApprovalResult {
   const reference = parseIntakeTaskReference(task);
-  if (!reference || reference.phase !== 'triage') {
+  if (!reference || reference.phase === 'fix') {
     return { handled: false };
   }
 
@@ -77,7 +94,11 @@ export function handleIntakeTaskApproval(
     return { handled: true, transition };
   }
 
-  const createdTaskId = createNextIntakeTask(db, transition.nextPhase, report, transition.nextTaskTitle);
+  const createdTaskId = createNextIntakeTask(db, transition.nextPhase, report, {
+    currentTaskTitle: task.title,
+    nextTaskTitle: transition.nextTaskTitle,
+    retry: transition.action === 'retry',
+  });
   updateIntakeReportState(db, report.source, report.externalId, {
     status: 'in_progress',
     resolvedAt: null,
