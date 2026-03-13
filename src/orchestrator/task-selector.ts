@@ -4,7 +4,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { findNextTask, getTask, updateTaskStatus, getLastRejectionNotes, hasDependenciesMet } from '../database/queries.js';
+import { findNextTask, getTask, updateTaskStatus, getLastRejectionNotes, hasDependenciesMet, hasTaskDependenciesMet } from '../database/queries.js';
 import type { Task } from '../database/queries.js';
 import {
   acquireTaskLock,
@@ -189,9 +189,12 @@ export function selectTaskBatch(
       )
       .all(section.id, maxSize) as Task[];
 
-    if (tasks.length > 0) {
+    // Filter out tasks with unmet task-level dependencies
+    const eligible = tasks.filter(t => hasTaskDependenciesMet(db, t.id));
+
+    if (eligible.length > 0) {
       return {
-        tasks,
+        tasks: eligible,
         sectionId: section.id,
         sectionName: section.name,
       };
@@ -344,12 +347,14 @@ export function selectNextTaskWithLock(
  * Helper to check if a task's section has met dependencies
  */
 function canSelectTask(db: Database.Database, task: Task): boolean {
-  if (!task.section_id) {
-    // Tasks without a section are always allowed
-    return true;
+  if (task.section_id && !hasDependenciesMet(db, task.section_id)) {
+    return false;
   }
-  // Check if section has all dependencies met
-  return hasDependenciesMet(db, task.section_id);
+  // Check if task-level dependencies are met
+  if (!hasTaskDependenciesMet(db, task.id)) {
+    return false;
+  }
+  return true;
 }
 
 /**
