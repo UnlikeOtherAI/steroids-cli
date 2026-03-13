@@ -1,6 +1,6 @@
 {
   "version": "0.2.3",
-  "latestDbVersion": 26,
+  "latestDbVersion": 27,
   "migrations": [
     {
       "id": 1,
@@ -207,6 +207,14 @@
       "name": "026_add_section_coder_and_pr_fields",
       "file": "026_add_section_coder_and_pr_fields.sql",
       "description": "Add per-section coder provider/model overrides and PR label/draft fields",
+      "checksum": "",
+      "cliVersion": "0.12.7"
+    },
+    {
+      "id": 27,
+      "name": "027_add_task_dependencies",
+      "file": "027_add_task_dependencies.sql",
+      "description": "Add task_dependencies table for explicit task-level dependency tracking",
       "checksum": "",
       "cliVersion": "0.12.7"
     }
