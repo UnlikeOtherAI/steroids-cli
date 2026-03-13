@@ -500,6 +500,59 @@ export abstract class BaseAIProvider implements IAIProvider {
       delete env[key];
     }
 
+    // When HOME is overridden (isolated provider home), redirect cache directories
+    // back to the real user's cache locations. Without this, tools like pnpm,
+    // Playwright, and Prisma cache hundreds of MB into each project's provider-home.
+    if (overrides?.HOME && overrides.HOME !== homedir()) {
+      const realHome = homedir();
+      const isDarwin = process.platform === 'darwin';
+      const pnpmHome = isDarwin
+        ? join(realHome, 'Library', 'pnpm')
+        : join(realHome, '.local', 'share', 'pnpm');
+      const cacheOverrides: Record<string, string> = {
+        // XDG standard — covers most Linux/cross-platform tools
+        XDG_CACHE_HOME: join(realHome, '.cache'),
+        // Playwright: macOS uses ~/Library/Caches/, Linux uses ~/.cache/
+        PLAYWRIGHT_BROWSERS_PATH: isDarwin
+          ? join(realHome, 'Library', 'Caches', 'ms-playwright')
+          : join(realHome, '.cache', 'ms-playwright'),
+        // npm cache redirection
+        npm_config_cache: join(realHome, '.npm'),
+        // pnpm: share the binary home AND content-addressable store so provider
+        // CLIs (Codex, Claude) don't re-download/install pnpm on every invocation.
+        PNPM_HOME: pnpmHome,
+        PNPM_STORE_DIR: join(pnpmHome, 'store'),
+        // Prisma engine cache directory (PRISMA_ENGINES_DIR, not PRISMA_ENGINES_MIRROR)
+        PRISMA_ENGINES_DIR: join(realHome, '.cache', 'prisma', 'engines'),
+      };
+      // Only set cache overrides if not already explicitly set by caller
+      for (const [key, value] of Object.entries(cacheOverrides)) {
+        if (!overrides[key]) {
+          env[key] = value;
+        }
+      }
+
+      // Prepend real user's pnpm and npm global bin dirs to PATH so provider
+      // CLIs find already-installed tools (pnpm, npx, etc.) without re-installing.
+      const realBinDirs = [
+        pnpmHome,                                      // pnpm global bin
+        join(realHome, '.npm', 'bin'),                  // npm global bin
+        isDarwin ? '/opt/homebrew/bin' : '/usr/local/bin', // system package managers
+      ].filter((d) => existsSync(d));
+      if (realBinDirs.length > 0) {
+        const currentPath = env.PATH ?? process.env.PATH ?? '';
+        env.PATH = [...realBinDirs, currentPath].join(':');
+      }
+    }
+
+    // Cap Node.js heap for child processes to prevent runaway memory consumption.
+    // Provider CLIs (Codex, Claude) spawn sub-processes (pnpm, tsc, etc.) that
+    // can each balloon to GBs and trigger massive macOS swap on constrained systems.
+    if (!overrides?.NODE_OPTIONS?.includes('max-old-space-size')) {
+      const existing = env.NODE_OPTIONS ?? '';
+      env.NODE_OPTIONS = `${existing} --max-old-space-size=1536`.trim();
+    }
+
     return { ...env, ...overrides };
   }
 

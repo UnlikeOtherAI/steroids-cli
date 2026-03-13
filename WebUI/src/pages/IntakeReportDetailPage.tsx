@@ -347,7 +347,7 @@ export const IntakeReportDetailPage: React.FC<IntakeReportDetailPageProps> = ({
 
             {report.tags.length > 0 && (
               <div className="mt-5 flex flex-wrap gap-2">
-                {report.tags.map((tag) => (
+                {report.tags.map((tag: string) => (
                   <span key={tag} className="px-2.5 py-1 rounded-full bg-bg-surface text-xs text-text-secondary">
                     {tag}
                   </span>

@@ -5,6 +5,9 @@
 - Keep instructions modular and prefer progressive disclosure.
 - If deeper scoped behavior is needed, use `.claude/rules/` files.
 
+## Debugging Protocol
+- **Always check logs first** before using browser automation or code analysis. Look at server logs (`~/.steroids/logs/api.log`, `~/.steroids/logs/webui.log`), runner logs (`~/.steroids/runners/logs/`), and browser console errors before diving into source code.
+
 ## How to Run Parallel Adversarial Reviews (Claude + Codex)
 
 When a design requires cross-provider review (see AGENTS.md for when), dispatch Claude and Codex **simultaneously** by sending a single message with two `Task` tool calls:

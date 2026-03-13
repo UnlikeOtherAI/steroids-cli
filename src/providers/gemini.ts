@@ -71,24 +71,17 @@ export class GeminiProvider extends BaseAIProvider {
   ];
 
   protected getSanitizedCliEnv(overrides: Record<string, string> = {}): Record<string, string> {
-    const env = { ...process.env, ...overrides };
+    // Call base class to get API key stripping + cache directory redirection
+    const env = super.getSanitizedCliEnv(overrides);
 
-    // Remove raw provider API keys — CLIs should use their own auth
-    // But preserve GEMINI_API_KEY since Gemini CLI can use it directly
-    const keysToStrip = [
-      'ANTHROPIC_API_KEY',
-      'OPENAI_API_KEY',
-      'GOOGLE_API_KEY',
-      'GOOGLE_CLOUD_API_KEY',
-      'MISTRAL_API_KEY',
-      'CLAUDECODE',
-    ];
-    for (const key of keysToStrip) {
-      delete env[key];
+    // Gemini CLI can use GEMINI_API_KEY directly — restore it if it was in the
+    // original environment (base class strips it along with other provider keys)
+    if (process.env.GEMINI_API_KEY && !overrides.GEMINI_API_KEY) {
+      env.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     }
 
     // Filter out undefined values to satisfy Record<string, string> type
-    const result: Record<string, string> = { ...overrides };
+    const result: Record<string, string> = {};
     for (const key in env) {
       if (env[key] !== undefined) {
         result[key] = env[key] as string;

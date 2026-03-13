@@ -12,6 +12,7 @@ import { getLastWakeupTime, recordWakeupTime } from './wakeup-timing.js';
 import { performWakeupGlobalMaintenance } from './wakeup-global-cleanup.js';
 import { processWakeupProject } from './wakeup-project.js';
 import { checkWakeupNeeded } from './wakeup-needed.js';
+import { checkSystemPressure } from './system-pressure.js';
 import type { WakeupOptions, WakeupResult } from './wakeup-types.js';
 
 export { getLastWakeupTime, hasActiveRunnerForProject, hasActiveParallelSessionForProject };
@@ -74,6 +75,14 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
       }
 
       log(`Checking ${registeredProjects.length} registered project(s)...`);
+
+      // Skip spawning new runners if system is under memory/disk pressure
+      const pressure = checkSystemPressure();
+      if (!pressure.ok) {
+        log(`System pressure: ${pressure.reason} — skipping runner spawns`);
+        results.push({ action: 'skipped', reason: `System pressure: ${pressure.reason}` });
+        return results;
+      }
 
       for (const project of registeredProjects) {
         results.push(

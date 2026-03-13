@@ -4,13 +4,13 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { loadConfig } from '../../../src/config/loader.js';
+import { loadConfig } from '../../../dist/config/loader.js';
 import {
   getIntakeReport,
   listIntakeReports,
   upsertIntakeReport,
-} from '../../../src/database/intake-queries.js';
-import type { IntakeReportStatus, IntakeSeverity, IntakeSource } from '../../../src/intake/types.js';
+} from '../../../dist/database/intake-queries.js';
+import type { IntakeReportStatus, IntakeSeverity, IntakeSource } from '../../../dist/intake/types.js';
 import {
   buildConnectorHealth,
   buildStats,

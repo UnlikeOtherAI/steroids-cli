@@ -2,8 +2,13 @@ import {
   ConnectorHealth,
   intakeApi,
   IntakeReport,
+  IntakeSeverity,
+  IntakeSource,
   IntakeStats,
+  IntakeStatus,
 } from '../services/intakeApi';
+
+export type { ConnectorHealth, IntakeReport, IntakeSeverity, IntakeSource, IntakeStats, IntakeStatus };
 
 export interface IntakePageData {
   stats: IntakeStats;

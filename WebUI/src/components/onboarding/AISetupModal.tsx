@@ -157,16 +157,20 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     const selectedModel = providerModels.find((m) => m.id === modelId);
     const mapped = selectedModel?.mappedProvider;
 
+    // For hf/ollama, keep the UI provider unchanged — mappedProvider is used at save time only
+    const isModelSource = providerKey === 'hf' || providerKey === 'ollama';
+    const effectiveProvider = isModelSource ? undefined : mapped;
+
     if (typeof role === 'number') {
       const next = [...reviewers];
-      next[role] = { provider: mapped || next[role].provider, model: modelId };
+      next[role] = { provider: effectiveProvider || next[role].provider, model: modelId };
       setReviewers(next);
     } else if (role === 'orchestrator') {
-      setOrchestrator({ provider: mapped || orchestrator.provider, model: modelId });
+      setOrchestrator({ provider: effectiveProvider || orchestrator.provider, model: modelId });
     } else if (role === 'coder') {
-      setCoder({ provider: mapped || coder.provider, model: modelId });
+      setCoder({ provider: effectiveProvider || coder.provider, model: modelId });
     } else {
-      setReviewer({ provider: mapped || reviewer.provider, model: modelId });
+      setReviewer({ provider: effectiveProvider || reviewer.provider, model: modelId });
     }
   };
 
@@ -197,6 +201,14 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     return value && typeof value === 'object' ? (value as InheritedRoleConfig) : null;
   };
 
+  /** Resolve the provider to save: for hf/ollama, use the model's mappedProvider (the runtime). */
+  const resolveSaveProvider = (config: RoleConfig): string => {
+    if (config.provider !== 'hf' && config.provider !== 'ollama') return config.provider;
+    const providerModels = models[config.provider] || [];
+    const selected = providerModels.find((m) => m.id === config.model);
+    return selected?.mappedProvider || config.provider;
+  };
+
   const normalizeRoleConfig = (config: RoleConfig, role: RoleKey | number) => {
     const inheritedValue = getInheritedValue(role);
     const usesInheritance = isProjectLevel && !config.provider;
@@ -211,7 +223,7 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
     }
 
     return {
-      provider: config.provider,
+      provider: resolveSaveProvider(config),
       model: config.model,
       valid: Boolean(config.provider && config.model),
       inherited: false,

@@ -21,6 +21,7 @@ interface GcResult {
   orphanedIds: number;
   staleRunners: number;
   tempFiles: number;
+  providerHomes: number;
   vacuumedBytes: number;
 }
 
@@ -53,6 +54,7 @@ const HELP = generateHelp({
   ],
 });
 
+import { cleanStaleProviderHomes } from '../runners/wakeup-global-cleanup.js';
 import { defineCommand } from '../cli/base-command.js';
 
 export const gcCommand = defineCommand({
@@ -81,6 +83,7 @@ export const gcCommand = defineCommand({
       orphanedIds: 0,
       staleRunners: 0,
       tempFiles: 0,
+      providerHomes: 0,
       vacuumedBytes: 0,
     };
 
@@ -98,6 +101,7 @@ export const gcCommand = defineCommand({
       // Clean temp files
       if (runAll || values['temp-files']) {
         result.tempFiles = cleanTempFiles(projectPath, dryRun);
+        result.providerHomes = cleanStaleProviderHomes(dryRun, () => {});
       }
 
       // Vacuum database
@@ -296,6 +300,7 @@ function outputResult(result: GcResult, json: boolean, dryRun: boolean): void {
         orphanedIds: result.orphanedIds,
         staleRunners: result.staleRunners,
         tempFiles: result.tempFiles,
+        providerHomes: result.providerHomes,
         vacuumedBytes: result.vacuumedBytes,
       },
       error: null,
@@ -321,6 +326,12 @@ function outputResult(result: GcResult, json: boolean, dryRun: boolean): void {
     console.log(`  \u2713 ${prefix}Deleted ${result.tempFiles} temp files`);
   } else {
     console.log(`  - No temp files found`);
+  }
+
+  if (result.providerHomes > 0) {
+    console.log(`  \u2713 ${prefix}Cleaned ${result.providerHomes} stale provider home dir(s)`);
+  } else {
+    console.log(`  - No stale provider homes found`);
   }
 
   if (result.vacuumedBytes > 0) {

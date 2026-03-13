@@ -1,14 +1,14 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import express, { Router, type Request, type Response } from 'express';
 
-import { loadConfig } from '../../../src/config/loader.js';
-import { getIntakeReport, upsertIntakeReport } from '../../../src/database/intake-queries.js';
+import { loadConfig } from '../../../dist/config/loader.js';
+import { getIntakeReport, upsertIntakeReport } from '../../../dist/database/intake-queries.js';
 import type {
   GitHubIntakeConnectorConfig,
   IntakeReport,
   IntakeSource,
   SentryIntakeConnectorConfig,
-} from '../../../src/intake/types.js';
+} from '../../../dist/intake/types.js';
 import { isIntakeSource, openProjectDatabase, parseReportPayload } from './intake-support.js';
 
 const router = Router();

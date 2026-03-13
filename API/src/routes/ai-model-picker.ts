@@ -90,9 +90,14 @@ router.get('/ai/providers', (_req: Request, res: Response) => {
       installed: isCliInstalled('codex'),
     },
     {
-      id: 'opencode',
-      name: 'OpenCode (HF/Ollama)',
-      installed: isCliInstalled('opencode'),
+      id: 'hf',
+      name: 'Hugging Face',
+      installed: true,
+    },
+    {
+      id: 'ollama',
+      name: 'Ollama',
+      installed: true,
     },
   ];
 

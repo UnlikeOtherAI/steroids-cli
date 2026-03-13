@@ -210,6 +210,17 @@ export const AISetupRoleSelector: React.FC<AISetupRoleSelectorProps> = ({
         </div>
       )}
 
+      {(config.provider === 'hf' || config.provider === 'ollama') && providerModels.length === 0 && (
+        <div className="p-3 bg-info/10 border border-info/30 rounded-lg">
+          <div className="flex items-start gap-2 text-info text-sm">
+            <i className="fa-solid fa-circle-info mt-0.5"></i>
+            <span>
+              No paired models yet — visit the {config.provider === 'hf' ? 'Hugging Face' : 'Ollama'} section to pair models first.
+            </span>
+          </div>
+        </div>
+      )}
+
       {needsApiKey && envVar && (
         <div className="p-3 bg-info/10 border border-info/30 rounded-lg">
           <div className="flex items-start gap-2 text-info text-sm mb-2">

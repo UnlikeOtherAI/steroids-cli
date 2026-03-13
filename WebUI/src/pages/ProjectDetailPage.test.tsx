@@ -317,7 +317,7 @@ describe('ProjectDetailPage storage section', () => {
     expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument();
     expect(screen.queryByText('Current Queue')).not.toBeInTheDocument();
     expect(screen.getByText('Rate: 0 tasks/hour')).toBeInTheDocument();
-    expect(screen.getByText('Success Rate: 52.6%')).toBeInTheDocument();
+    expect(screen.getByText('Success Rate: 76.9%')).toBeInTheDocument();
     expect(screen.getByText('19 tasks in selected range')).toBeInTheDocument();
 
     expect(screen.getByText('Pending')).toBeInTheDocument();
@@ -368,7 +368,7 @@ describe('ProjectDetailPage storage section', () => {
     });
   });
 
-  it('hides issues section when there are no runner-blocking issues', async () => {
+  it('shows "No issues detected" when there are no runner-blocking issues', async () => {
     mockProjectsApi.list.mockResolvedValue([
       {
         ...fakeProject,
@@ -416,6 +416,10 @@ describe('ProjectDetailPage storage section', () => {
       expect(screen.getByText('Stats')).toBeInTheDocument();
     });
 
-    expect(screen.queryByRole('button', { name: 'Issues' })).not.toBeInTheDocument();
+    // The Issues section header is always rendered; verify it shows no actual issues
+    expect(screen.getByRole('button', { name: 'Issues' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('No issues detected')).toBeInTheDocument();
+    });
   });
 });

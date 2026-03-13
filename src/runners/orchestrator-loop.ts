@@ -29,6 +29,7 @@ import { ensureWorkspaceSteroidsSymlink, getProjectHash } from '../parallel/clon
 import type { PoolSlotContext } from '../workspace/types.js';
 import { claimSlot, finalizeSlotPath, releaseSlot, partialReleaseSlot, resolveRemoteUrl, refreshSlotHeartbeat, getSlot } from '../workspace/pool.js';
 import { refreshWorkspaceMergeLockHeartbeat } from '../workspace/merge-lock.js';
+import { waitForPressureRelief } from './system-pressure.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -428,6 +429,13 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       console.log(`Task: ${task.title}`);
       console.log(`Action: ${action}`);
       console.log(`Status: ${task.status}`);
+
+      // ── System pressure gate: wait for memory/disk headroom ──
+      const pressureOk = await waitForPressureRelief();
+      if (!pressureOk) {
+        console.error('[pressure] System under sustained pressure — stopping runner to prevent crash');
+        break;
+      }
 
       // ── Workspace pool: claim slot, start heartbeat ──
       let poolSlotCtx: PoolSlotContext | undefined;

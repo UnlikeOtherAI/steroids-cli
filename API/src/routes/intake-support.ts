@@ -1,19 +1,19 @@
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { validateConfig } from '../../../src/config/validator.js';
+import { validateConfig } from '../../../dist/config/validator.js';
 import {
   getIntakePollState,
   listIntakeReports,
   type StoredIntakeReport,
-} from '../../../src/database/intake-queries.js';
+} from '../../../dist/database/intake-queries.js';
 import type {
   IntakeConfig,
   IntakeReport,
   IntakeReportStatus,
   IntakeSeverity,
   IntakeSource,
-} from '../../../src/intake/types.js';
+} from '../../../dist/intake/types.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
 
 export const INTAKE_SOURCES: IntakeSource[] = ['github', 'sentry'];
