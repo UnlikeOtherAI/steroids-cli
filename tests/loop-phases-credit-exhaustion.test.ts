@@ -79,6 +79,9 @@ jest.unstable_mockModule('../src/providers/registry.js', () => ({
 
 jest.unstable_mockModule('../src/database/queries.js', () => ({
   getTask: mockGetTask,
+  createSection: jest.fn(),
+  createTask: jest.fn(),
+  getSectionByName: jest.fn().mockReturnValue(null),
   updateTaskStatus: mockUpdateTaskStatus,
   approveTask: mockApproveTask,
   rejectTask: mockRejectTask,

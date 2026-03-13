@@ -44,6 +44,7 @@ import {
 } from './loop-phases-helpers.js';
 import { runReviewerSubmissionPreflight } from './reviewer-preflight.js';
 import { createFollowUpTasksIfNeeded } from './loop-phases-reviewer-follow-ups.js';
+import { handleIntakeTaskApproval } from '../intake/reviewer-approval.js';
 
 export async function runReviewerPhase(
   db: ReturnType<typeof openDatabase>['db'],
@@ -320,6 +321,7 @@ export async function runReviewerPhase(
         const isNoOp = reviewerResult?.isNoOp ?? false;
         if (isNoOp) {
           approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
+          handleIntakeTaskApproval(db, task, effectiveProjectPath);
           releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
           if (!jsonMode) console.log('\n✓ Task APPROVED (pre-existing work confirmed by reviewer, no merge needed)');
           await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
@@ -343,6 +345,7 @@ export async function runReviewerPhase(
         // Merge succeeded — clear merge failure counter and approve the task
         clearMergeFailureCount(db, task.id);
         approveTask(db, task.id, 'orchestrator', decision.notes, mergeResult.mergedSha || commitSha);
+        handleIntakeTaskApproval(db, task, effectiveProjectPath);
         releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
         if (!jsonMode) {
           console.log(`\n✓ Task APPROVED and merged (sha: ${mergeResult.mergedSha})`);
@@ -375,6 +378,7 @@ export async function runReviewerPhase(
         // Check if the section is now complete and create PR if auto_pr is set.
         // Only fire when push succeeded — a PR against an un-pushed branch is invalid.
         if (pushResult.success) {
+          handleIntakeTaskApproval(db, task, effectiveProjectPath);
           await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
         }
       }

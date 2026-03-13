@@ -330,6 +330,48 @@ export function linkIntakeReportToTask(
   return result.changes > 0;
 }
 
+export interface UpdateIntakeReportStateInput {
+  status?: IntakeReportStatus;
+  resolvedAt?: string | null;
+  linkedTaskId?: string | null;
+}
+
+export function updateIntakeReportState(
+  db: Database.Database,
+  source: IntakeSource,
+  externalId: string,
+  updates: UpdateIntakeReportStateInput
+): StoredIntakeReport {
+  const existing = getIntakeReport(db, source, externalId);
+  if (!existing) {
+    throw new Error(`Intake report not found: ${source}:${externalId}`);
+  }
+
+  const nextReport: IntakeReport = {
+    source: existing.source,
+    externalId: existing.externalId,
+    url: existing.url,
+    fingerprint: existing.fingerprint,
+    title: existing.title,
+    summary: existing.summary,
+    severity: existing.severity,
+    status: updates.status ?? existing.status,
+    createdAt: existing.createdAt,
+    updatedAt: existing.updatedAt,
+    resolvedAt: Object.prototype.hasOwnProperty.call(updates, 'resolvedAt')
+      ? updates.resolvedAt ?? undefined
+      : existing.resolvedAt,
+    tags: existing.tags,
+    payload: existing.payload,
+  };
+
+  const options: UpsertIntakeReportOptions = Object.prototype.hasOwnProperty.call(updates, 'linkedTaskId')
+    ? { linkedTaskId: updates.linkedTaskId ?? null }
+    : { linkedTaskId: existing.linkedTaskId };
+
+  return upsertIntakeReport(db, nextReport, options);
+}
+
 export function getIntakePollState(
   db: Database.Database,
   source: IntakeSource
