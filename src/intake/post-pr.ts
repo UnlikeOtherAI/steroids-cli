@@ -65,6 +65,7 @@ export async function handleIntakePostPR(
       `[intake-post-pr] Failed to initialize intake registry for section "${section.name}":`,
       error instanceof Error ? error.message : String(error)
     );
+    return { handled: false, reportsResolved: 0 };
   }
 
   let reportsResolved = 0;

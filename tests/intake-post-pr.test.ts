@@ -221,4 +221,36 @@ describe('handleIntakePostPR', () => {
     );
     expect(getIntakeReport(db, 'github', '42')?.resolvedAt).toBeUndefined();
   });
+
+  it('leaves the report in progress when intake registry creation fails', async () => {
+    const section = createSection(db, 'Bug Intake: Fix');
+    createTask(
+      db,
+      'Fix intake report github#42: Checkout fails on empty cart',
+      {
+        sectionId: section.id,
+        sourceFile: DEFAULT_INTAKE_PIPELINE_SOURCE_FILE,
+        status: 'completed',
+      }
+    );
+    upsertIntakeReport(db, createSampleReport());
+
+    const result = await handleIntakePostPR({
+      db,
+      sectionId: section.id,
+      prNumber: 123,
+      config: createConfig(),
+      createRegistry: () => {
+        throw new Error('registry unavailable');
+      },
+    });
+
+    expect(result).toEqual({ handled: false, reportsResolved: 0 });
+    expect(getIntakeReport(db, 'github', '42')).toEqual(
+      expect.objectContaining({
+        status: 'in_progress',
+      })
+    );
+    expect(getIntakeReport(db, 'github', '42')?.resolvedAt).toBeUndefined();
+  });
 });
