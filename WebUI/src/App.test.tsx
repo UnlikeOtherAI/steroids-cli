@@ -66,9 +66,9 @@ function ProjectSetter({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function renderApp({ withProject = false } = {}) {
+function renderApp({ withProject = false, initialEntries = ['/'] }: { withProject?: boolean; initialEntries?: string[] } = {}) {
   const wrapper = withProject ? (
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter initialEntries={initialEntries} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ProjectProvider>
         <ProjectSetter>
           <App />
@@ -76,7 +76,7 @@ function renderApp({ withProject = false } = {}) {
       </ProjectProvider>
     </MemoryRouter>
   ) : (
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter initialEntries={initialEntries} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ProjectProvider>
         <App />
       </ProjectProvider>
@@ -226,5 +226,17 @@ describe('App credit alert integration', () => {
     await waitFor(() => {
       expect(mockCreditAlertsApi.getActive).toHaveBeenCalled();
     });
+  });
+
+  it('shows the intake sidebar navigation entry', async () => {
+    renderApp();
+
+    expect(await screen.findByRole('link', { name: 'Intake' })).toHaveAttribute('href', '/intake');
+  });
+
+  it('renders the intake route', async () => {
+    renderApp({ initialEntries: ['/intake'] });
+
+    expect(await screen.findByText('Select a project to view intake')).toBeInTheDocument();
   });
 });

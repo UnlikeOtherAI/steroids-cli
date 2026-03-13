@@ -9,6 +9,7 @@ import {
   StopIcon,
   XMarkIcon,
   BoltIcon,
+  ExclamationTriangleIcon,
   PauseIcon,
   BookOpenIcon,
   ChartBarIcon,
@@ -60,6 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
 
   const navItems = [
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
+    { to: '/intake', icon: ExclamationTriangleIcon, label: 'Intake' },
     { to: '/model-usage', icon: ChartBarIcon, label: 'Model Usage' },
     { to: '/runners', icon: PlayIcon, label: 'Runners' },
     { to: '/projects', icon: FolderIcon, label: 'Projects' },

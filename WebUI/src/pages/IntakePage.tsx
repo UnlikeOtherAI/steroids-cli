@@ -3,13 +3,15 @@ import { PageLayout } from '../components/templates/PageLayout';
 import { StatTile } from '../components/molecules/StatTile';
 import type { Project } from '../types';
 import {
-  ConnectorHealth,
   IntakePageData,
+  loadIntakePageData,
+} from './intakePageData';
+import type {
+  ConnectorHealth,
   IntakeSeverity,
   IntakeSource,
   IntakeStatus,
-  loadIntakePageData,
-} from './intakePageData';
+} from '../services/intakeApi';
 
 const STATUS_LABELS: Record<IntakeStatus, string> = {
   open: 'Open',

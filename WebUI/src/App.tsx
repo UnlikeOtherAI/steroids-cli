@@ -18,6 +18,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then(({ SettingsP
 const SkillsPage = lazy(() => import('./pages/SkillsPage').then(({ SkillsPage }) => ({ default: SkillsPage })));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(({ ProjectsPage }) => ({ default: ProjectsPage })));
 const SystemLogsPage = lazy(() => import('./pages/SystemLogsPage').then(({ SystemLogsPage }) => ({ default: SystemLogsPage })));
+const IntakePage = lazy(() => import('./pages/IntakePage').then(({ IntakePage }) => ({ default: IntakePage })));
 const ModelUsagePage = lazy(() => import('./pages/ModelUsagePage').then(({ ModelUsagePage }) => ({ default: ModelUsagePage })));
 const HFAccountPage = lazy(() => import('./pages/HFAccountPage').then(({ HFAccountPage }) => ({ default: HFAccountPage })));
 const HFModelLibraryPage = lazy(() => import('./pages/HFModelLibraryPage').then(({ HFModelLibraryPage }) => ({ default: HFModelLibraryPage })));
@@ -82,6 +83,7 @@ function App() {
     if (location.pathname.includes('/tasks') && location.pathname.startsWith('/project/')) return 'Project Tasks';
     if (location.pathname.startsWith('/project/')) return 'Project Details';
     if (location.pathname.startsWith('/task/')) return 'Task Details';
+    if (location.pathname.startsWith('/intake')) return 'Intake';
     if (location.pathname === '/hf/account') return 'Hugging Face Account';
     if (location.pathname === '/hf/models') return 'Hugging Face Model Library';
     if (location.pathname === '/hf/ready') return 'Hugging Face Ready to Use';
@@ -148,6 +150,7 @@ function App() {
                 path="/"
                 element={<DashboardPage project={selectedProject} />}
               />
+              <Route path="/intake" element={<IntakePage project={selectedProject} />} />
               <Route path="/model-usage" element={<ModelUsagePage project={selectedProject} />} />
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/project/:projectPath" element={<ProjectDetailPage />} />
