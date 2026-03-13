@@ -43,6 +43,8 @@ export interface SteroidsConfig {
   git?: {
     remote?: string;
     branch?: string;
+    prAssignees?: string[];
+    prReviewers?: string[];
   };
   runners?: {
     daemonLogs?: boolean;
@@ -136,6 +138,8 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
   git: {
     remote: 'origin',
     branch: 'main',
+    prAssignees: [],
+    prReviewers: [],
   },
   runners: {
     daemonLogs: true,

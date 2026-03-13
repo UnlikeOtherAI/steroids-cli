@@ -103,8 +103,8 @@ CREATE TABLE sections (
     pr_number INTEGER,
     coder_provider TEXT,           -- Optional per-section coder provider override
     coder_model TEXT,              -- Optional per-section coder model override
-    pr_labels TEXT,                -- Reserved PR metadata for future label wiring
-    pr_draft INTEGER NOT NULL DEFAULT 0,
+    pr_labels TEXT,                -- Comma-separated labels for auto-created section PRs
+    pr_draft INTEGER NOT NULL DEFAULT 0,   -- 1 = create section PR as draft
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

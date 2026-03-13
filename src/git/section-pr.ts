@@ -22,6 +22,13 @@ interface SectionCounts {
   completed: number;
 }
 
+interface PrMetadata {
+  labels: string[];
+  assignees: string[];
+  reviewers: string[];
+  draft: boolean;
+}
+
 function getSectionCounts(db: Database.Database, sectionId: string): SectionCounts {
   return db.prepare(`
     SELECT
@@ -30,6 +37,36 @@ function getSectionCounts(db: Database.Database, sectionId: string): SectionCoun
       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
     FROM tasks WHERE section_id = ?
   `).get(sectionId) as SectionCounts;
+}
+
+function normalizeMetadataList(values: string[] | null | undefined): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
+function parseSectionPrLabels(rawLabels: string | null | undefined): string[] {
+  if (!rawLabels) {
+    return [];
+  }
+
+  return rawLabels
+    .split(',')
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0);
+}
+
+function getPrMetadata(section: { pr_labels?: string | null; pr_draft?: number | null }, config: SteroidsConfig): PrMetadata {
+  return {
+    labels: parseSectionPrLabels(section.pr_labels),
+    assignees: normalizeMetadataList(config.git?.prAssignees),
+    reviewers: normalizeMetadataList(config.git?.prReviewers),
+    draft: section.pr_draft === 1,
+  };
 }
 
 // ─── gh CLI helpers ──────────────────────────────────────────────────────────
@@ -92,7 +129,8 @@ function createPr(
   sectionName: string,
   headBranch: string,
   baseBranch: string,
-  completedTaskTitles: string[]
+  completedTaskTitles: string[],
+  metadata: PrMetadata
 ): number {
   const prBody = [
     `## ${sectionName}`,
@@ -103,14 +141,29 @@ function createPr(
     '_Auto-created by steroids on section completion._',
   ].join('\n');
 
-  const output = execFileSync('gh', [
+  const args = [
     'pr', 'create',
     '--base', baseBranch,
     '--head', headBranch,
     '--title', `Section: ${sectionName}`,
     '--body', prBody,
     '--json', 'number',
-  ], {
+  ];
+
+  if (metadata.draft) {
+    args.push('--draft');
+  }
+  for (const label of metadata.labels) {
+    args.push('--label', label);
+  }
+  for (const assignee of metadata.assignees) {
+    args.push('--assignee', assignee);
+  }
+  for (const reviewer of metadata.reviewers) {
+    args.push('--reviewer', reviewer);
+  }
+
+  const output = execFileSync('gh', args, {
     cwd: projectPath,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -125,12 +178,42 @@ function createPr(
   return parsed.number;
 }
 
+function updatePrMetadata(
+  projectPath: string,
+  prNumber: number,
+  metadata: Pick<PrMetadata, 'labels' | 'assignees' | 'reviewers'>
+): void {
+  const args = ['pr', 'edit', String(prNumber)];
+
+  for (const label of metadata.labels) {
+    args.push('--add-label', label);
+  }
+  for (const assignee of metadata.assignees) {
+    args.push('--add-assignee', assignee);
+  }
+  for (const reviewer of metadata.reviewers) {
+    args.push('--add-reviewer', reviewer);
+  }
+
+  if (args.length === 3) {
+    return;
+  }
+
+  execFileSync('gh', args, {
+    cwd: projectPath,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 60_000,
+  });
+}
+
 // ─── Core function ───────────────────────────────────────────────────────────
 
 /**
  * Check whether a section is complete and create a PR if auto_pr is enabled.
  *
- * Idempotent: if pr_number is already set, does nothing.
+ * Idempotent: if pr_number is already set, it returns the recorded PR number and
+ * only attempts metadata refreshes.
  * Safe to call after every task approval — cheap unless all conditions are met.
  *
  * @param db         Project database (read/write)
@@ -143,24 +226,36 @@ export async function checkSectionCompletionAndPR(
   projectPath: string,
   sectionId: string | null | undefined,
   config: SteroidsConfig
-): Promise<void> {
-  if (!sectionId) return;
+): Promise<number | null> {
+  if (!sectionId) return null;
 
   const section = getSection(db, sectionId);
-  if (!section) return;
+  if (!section) return null;
 
   // Skip if auto_pr is not enabled
-  if (!section.auto_pr) return;
+  if (!section.auto_pr) return null;
 
   // Skip if no branch is set (can't create PR without a branch)
-  if (!section.branch) return;
+  if (!section.branch) return null;
 
-  // Idempotent: skip if PR already exists
-  if (section.pr_number != null) return;
+  const metadata = getPrMetadata(section, config);
+
+  // Idempotent fast path: keep existing recorded PR number and avoid duplicate creation.
+  if (section.pr_number != null) {
+    try {
+      updatePrMetadata(projectPath, section.pr_number, metadata);
+    } catch (error) {
+      console.error(
+        `[section-pr] Failed to update PR metadata for section "${section.name}" (#${section.pr_number}):`,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    return section.pr_number;
+  }
 
   // Check task completion
   const counts = getSectionCounts(db, sectionId);
-  if (counts.total === 0 || counts.active > 0 || counts.completed === 0) return;
+  if (counts.total === 0 || counts.active > 0 || counts.completed === 0) return null;
 
   // All tasks are in terminal states and at least one completed — create the PR
   const baseBranch = config.git?.branch ?? 'main';
@@ -170,7 +265,15 @@ export async function checkSectionCompletionAndPR(
   if (existingPrNumber !== null) {
     console.log(`[section-pr] PR #${existingPrNumber} already exists for section "${section.name}" — recording it`);
     setSectionPrNumber(db, sectionId, existingPrNumber);
-    return;
+    try {
+      updatePrMetadata(projectPath, existingPrNumber, metadata);
+    } catch (error) {
+      console.error(
+        `[section-pr] Failed to update PR metadata for section "${section.name}" (#${existingPrNumber}):`,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    return existingPrNumber;
   }
 
   // Collect completed task titles for PR body
@@ -181,18 +284,20 @@ export async function checkSectionCompletionAndPR(
 
   if (!isGhAvailable()) {
     console.warn(`[section-pr] Section "${section.name}" complete but gh CLI not available — skipping PR creation`);
-    return;
+    return null;
   }
 
   try {
-    const prNumber = createPr(projectPath, section.name, section.branch, baseBranch, completedTitles);
+    const prNumber = createPr(projectPath, section.name, section.branch, baseBranch, completedTitles, metadata);
     setSectionPrNumber(db, sectionId, prNumber);
     console.log(`[section-pr] Created PR #${prNumber} for section "${section.name}" (${section.branch} → ${baseBranch})`);
+    return prNumber;
   } catch (error) {
     console.error(
       `[section-pr] Failed to create PR for section "${section.name}":`,
       error instanceof Error ? error.message : String(error)
     );
     // Don't throw — commits are already pushed. PR failure is non-fatal.
+    return null;
   }
 }

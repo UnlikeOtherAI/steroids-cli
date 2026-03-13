@@ -182,6 +182,16 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _type: 'string',
       _default: 'main',
     },
+    prAssignees: {
+      _description: 'Optional GitHub logins to assign when auto-creating section PRs',
+      _type: 'array',
+      _default: [],
+    },
+    prReviewers: {
+      _description: 'Optional GitHub logins or teams to request review from when auto-creating section PRs',
+      _type: 'array',
+      _default: [],
+    },
   },
   runners: {
     _description: 'Runner daemon configuration',

@@ -498,6 +498,15 @@ ai:
     provider: claude
     model: claude-sonnet-4
 
+git:
+  remote: origin
+  branch: main
+  prAssignees:               # Optional GitHub assignees for auto-created section PRs
+    - "@me"
+  prReviewers:               # Optional GitHub reviewers or teams for auto-created section PRs
+    - octocat
+    - my-org/platform-team
+
 output:
   format: table
   colors: true
