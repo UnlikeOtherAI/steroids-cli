@@ -18,6 +18,7 @@ Any change to the dispatch pipeline requires two independent adversarial reviews
 | Runner loop | `orchestrator-loop.ts`, `daemon.ts` — any change to when runners exit or restart |
 | Status definitions | `TaskStatus` enum — `src/database/queries.ts` — adding or redefining a status propagates to all of the above |
 | Section "done" checks | Any code that answers "is this section finished?" — must stay consistent across all call sites |
+| Intake pipeline transitions | `buildIntakeTaskTemplate`, `parseIntakeResult`, `deriveIntakePipelineTransition`, `handleIntakeTaskApproval`, `syncGitHubIntakeGate`, `pollIntakeProject`, `processWakeupProject` — `src/intake/*.ts`, `src/runners/wakeup-project.ts` |
 
 **Each adversarial review must check:**
 
@@ -26,6 +27,8 @@ Any change to the dispatch pipeline requires two independent adversarial reviews
 3. **Wait-loop exit conditions** — every task/section state combination must result in a clean exit, not an infinite poll.
 4. **Parallel plan / dependency gate alignment** — the pending-work query and the blocking query must exclude exactly the same terminal statuses.
 5. **Rollback failure modes** — if a task is incorrectly marked terminal by a bug, document the worst-case consequence.
+6. **Intake phase contract alignment** — task templates, `intake-result.json` parsing, and approval transitions must agree on valid phases, decisions, and required fields.
+7. **Intake wakeup/gate alignment** — poller, approval gate, and wakeup-triggered task creation must not create duplicate triage tasks or strand reports without a linked task.
 
 **Core engine functions NEVER skip review regardless of change size.**
 
@@ -89,6 +92,10 @@ Keep the system deterministic. Any non-deterministic addition (regex parsing of 
 ### Simplification First (CRITICAL)
 
 Before patching, ask whether the right fix is to simplify. Every change must reduce or hold total system complexity — never increase it. Two code paths that answer the same invariant question must share one source of truth. If a short-term patch is unavoidable, create a follow-up simplification task with concrete scope.
+
+### Intake Pipeline Consistency (CRITICAL)
+
+Treat the intake phase contract as a core-engine invariant. If you add or change an intake phase, decision, required result field, or task-creation trigger, update the single source of truth across task templates, `intake-result.json` parsing, approval transitions, and wakeup/gate entry points together. Never let one path invent a phase transition or terminal outcome that the others do not understand.
 
 ### Documentation Alignment (CRITICAL)
 

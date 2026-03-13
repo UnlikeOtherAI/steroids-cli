@@ -34,6 +34,7 @@ Steroids is an AI-powered task orchestration system that automates software deve
 * [Web Dashboard](#web-dashboard)
 * [CLI Commands](#cli-commands)
 * [Runner Daemon](#runner-daemon)
+* [Bug Intake](#bug-intake)
 * [Coordinator System](#coordinator-system)
 * [Disputes](#disputes)
 * [Hooks](#hooks)
@@ -116,6 +117,7 @@ pending → in_progress → review → completed
 * **Multi-provider support** — Claude, Codex (OpenAI), Gemini
 * **CLI-first workflow** for power users and automation
 * **Background runner daemon** to process tasks without babysitting
+* **Bug intake pipeline** for polling external reports, triaging them, and driving triage/reproduction/fix work
 * **Event hooks** — trigger scripts/webhooks on task completion, project events
 * **Multi-project support** with global project registry
 * **Web dashboard** for monitoring progress across projects
@@ -402,6 +404,20 @@ The daemon:
 - Pushes approved work to git
 - Continues until all tasks complete or shutdown signal received
 - Skips sections marked as skipped (e.g., "Needs User Input")
+
+---
+
+## Bug Intake
+
+Steroids can ingest external bug reports, normalize them into the project database, and move them through a deterministic `triage -> reproduction -> fix` workflow.
+
+- Intake connectors poll during `steroids runners wakeup`, honoring each connector's poll interval and persisted cursor state.
+- GitHub intake can also accept signed inbound webhooks at `POST /webhooks/intake/:connector`.
+- New reports can open a GitHub approval issue, then create internal intake tasks only after the gate is approved.
+- Intake tasks stay phase-specific: triage decides `close | reproduce | fix`, reproduction decides `close | retry | fix`, and approved tasks advance the report without ad hoc state transitions.
+- The dashboard and API expose intake reports, summary stats, and connector health so you can monitor the pipeline without digging through the database.
+
+This is intended for bug-report funnels such as GitHub Issues or Sentry where you want external reports to become tightly scoped internal work instead of free-form backlog noise.
 
 ---
 
