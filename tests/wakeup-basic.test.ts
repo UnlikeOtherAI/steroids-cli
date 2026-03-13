@@ -75,6 +75,7 @@ const mockRemoveLock = jest.fn();
 // Mock node:child_process
 jest.unstable_mockModule('node:child_process', () => ({
   spawn: mockSpawn,
+  execFileSync: jest.fn(),
 }));
 
 // Mock global-db

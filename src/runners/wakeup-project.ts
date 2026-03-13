@@ -3,6 +3,7 @@ import { loadConfig } from '../config/loader.js';
 import { openDatabase } from '../database/connection.js';
 import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
 import { cleanupInvocationLogs } from '../cleanup/invocation-logs.js';
+import { pollIntakeProject } from '../intake/poller.js';
 import { getProviderBackoffRemainingMs } from './global-db.js';
 import {
   SanitiseSummary,
@@ -23,6 +24,8 @@ interface ProjectMaintenanceState {
   skippedRecoveryDueToSafetyLimit: boolean;
   deletedInvocationLogs: number;
   sanitisedActions: number;
+  polledIntakeReports: number;
+  intakePollErrors: number;
 }
 
 interface ProcessProjectOptions {
@@ -51,6 +54,7 @@ function cleanupProjectInvocationLogs(
 async function runProjectMaintenance(
   globalDb: any,
   projectPath: string,
+  config: ReturnType<typeof loadConfig>,
   dryRun: boolean,
   log: WakeupLogger
 ): Promise<ProjectMaintenanceState> {
@@ -59,11 +63,28 @@ async function runProjectMaintenance(
     skippedRecoveryDueToSafetyLimit: false,
     deletedInvocationLogs: cleanupProjectInvocationLogs(projectPath, dryRun, log),
     sanitisedActions: 0,
+    polledIntakeReports: 0,
+    intakePollErrors: 0,
   };
 
   try {
     const { db: projectDb, close: closeProjectDb } = openDatabase(projectPath);
     try {
+      const intakePollSummary = await pollIntakeProject({
+        projectDb,
+        config,
+        dryRun,
+      });
+      state.polledIntakeReports = intakePollSummary.totalReportsPersisted;
+      state.intakePollErrors = intakePollSummary.connectorResults.filter(
+        (result) => result.status === 'error'
+      ).length + (intakePollSummary.status === 'error' && intakePollSummary.connectorResults.length === 0 ? 1 : 0);
+      if (intakePollSummary.status === 'success' || intakePollSummary.status === 'partial') {
+        log(`Intake poll for ${projectPath}: ${intakePollSummary.reason}`);
+      } else if (intakePollSummary.status === 'error') {
+        log(`Intake poll for ${projectPath} failed: ${intakePollSummary.reason}`);
+      }
+
       const sanitiseSummary: SanitiseSummary = runPeriodicSanitiseForProject(
         globalDb,
         projectDb,
@@ -75,7 +96,6 @@ async function runProjectMaintenance(
         log(`Sanitised ${state.sanitisedActions} stale item(s) in ${projectPath}`);
       }
 
-      const config = loadConfig(projectPath);
       const recovery = await recoverStuckTasks({
         projectPath,
         projectDb,
@@ -118,6 +138,8 @@ function createProjectResult(
     skippedRecoveryDueToSafetyLimit: state.skippedRecoveryDueToSafetyLimit,
     deletedInvocationLogs: state.deletedInvocationLogs,
     sanitisedActions: state.sanitisedActions,
+    polledIntakeReports: state.polledIntakeReports,
+    intakePollErrors: state.intakePollErrors,
   };
 }
 
@@ -147,7 +169,8 @@ export async function processWakeupProject(
     return { action: 'none', reason: 'Directory not found', projectPath };
   }
 
-  const state = await runProjectMaintenance(globalDb, projectPath, dryRun, log);
+  const projectConfig = loadConfig(projectPath);
+  const state = await runProjectMaintenance(globalDb, projectPath, projectConfig, dryRun, log);
 
   const hasWork = await projectHasPendingWork(projectPath);
   if (!hasWork) {
@@ -173,7 +196,6 @@ export async function processWakeupProject(
     };
   }
 
-  const projectConfig = loadConfig(projectPath);
   const parallelEnabled = projectConfig.runners?.parallel?.enabled === true;
   const configuredMaxClonesRaw = Number(projectConfig.runners?.parallel?.maxClones);
   const configuredMaxClones =

@@ -15,6 +15,8 @@ export interface WakeupResult {
   skippedRecoveryDueToSafetyLimit?: boolean;
   deletedInvocationLogs?: number;
   sanitisedActions?: number;
+  polledIntakeReports?: number;
+  intakePollErrors?: number;
 }
 
 export type WakeupLogger = (message: string) => void;

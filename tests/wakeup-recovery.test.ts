@@ -56,6 +56,7 @@ const mockRecoverStuckTasks: any = jest.fn();
 
 jest.unstable_mockModule('node:child_process', () => ({
   spawn: mockSpawn,
+  execFileSync: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/runners/global-db.js', () => ({
