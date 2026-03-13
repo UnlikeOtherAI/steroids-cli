@@ -80,6 +80,13 @@ export interface SectionDependency {
   created_at: string;
 }
 
+export interface TaskDependency {
+  id: string;
+  task_id: string;
+  depends_on_task_id: string;
+  created_at: string;
+}
+
 export interface AuditEntry {
   id: number;
   task_id: string;
@@ -489,6 +496,197 @@ export function getSectionDependents(
        ORDER BY s.position ASC`
     )
     .all(sectionId) as Section[];
+}
+
+// ============ Task Dependency Operations ============
+
+/**
+ * Check if adding a task dependency would create a circular dependency.
+ * Uses DFS from dependsOnTaskId through existing task_dependencies;
+ * if taskId is reachable, adding the edge would form a cycle.
+ */
+export function wouldCreateCircularTaskDependency(
+  db: Database.Database,
+  taskId: string,
+  dependsOnTaskId: string
+): boolean {
+  if (taskId === dependsOnTaskId) {
+    return true;
+  }
+
+  const visited = new Set<string>();
+  const recursionStack = new Set<string>();
+
+  function hasCycle(currentId: string): boolean {
+    if (recursionStack.has(currentId)) {
+      return true;
+    }
+    if (visited.has(currentId)) {
+      return false;
+    }
+
+    visited.add(currentId);
+    recursionStack.add(currentId);
+
+    const deps = db
+      .prepare(
+        `SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ?`
+      )
+      .all(currentId) as Array<{ depends_on_task_id: string }>;
+
+    // Simulate the proposed new edge
+    if (currentId === taskId) {
+      deps.push({ depends_on_task_id: dependsOnTaskId });
+    }
+
+    for (const dep of deps) {
+      if (hasCycle(dep.depends_on_task_id)) {
+        return true;
+      }
+    }
+
+    recursionStack.delete(currentId);
+    return false;
+  }
+
+  return hasCycle(taskId);
+}
+
+/**
+ * Add a dependency between tasks.
+ * Makes taskId depend on dependsOnTaskId (taskId cannot start until
+ * dependsOnTaskId reaches a terminal status).
+ */
+export function addTaskDependency(
+  db: Database.Database,
+  taskId: string,
+  dependsOnTaskId: string
+): TaskDependency {
+  // Validate both tasks exist
+  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId);
+  if (!task) {
+    throw new Error(`Task not found: ${taskId}`);
+  }
+  const depTask = db.prepare('SELECT id FROM tasks WHERE id = ?').get(dependsOnTaskId);
+  if (!depTask) {
+    throw new Error(`Task not found: ${dependsOnTaskId}`);
+  }
+
+  // Self-dependency check
+  if (taskId === dependsOnTaskId) {
+    throw new Error('A task cannot depend on itself');
+  }
+
+  // Circular dependency check
+  if (wouldCreateCircularTaskDependency(db, taskId, dependsOnTaskId)) {
+    throw new Error('Cannot add dependency: would create a circular dependency');
+  }
+
+  const id = uuidv4();
+
+  try {
+    db.prepare(
+      `INSERT INTO task_dependencies (id, task_id, depends_on_task_id)
+       VALUES (?, ?, ?)`
+    ).run(id, taskId, dependsOnTaskId);
+
+    return {
+      id,
+      task_id: taskId,
+      depends_on_task_id: dependsOnTaskId,
+      created_at: new Date().toISOString(),
+    };
+  } catch (error: any) {
+    if (error.message?.includes('UNIQUE constraint')) {
+      throw new Error('This dependency already exists');
+    }
+    if (error.message?.includes('FOREIGN KEY constraint')) {
+      throw new Error('One or both task IDs are invalid');
+    }
+    throw error;
+  }
+}
+
+/**
+ * Remove a dependency between tasks.
+ * Returns number of rows affected.
+ */
+export function removeTaskDependency(
+  db: Database.Database,
+  taskId: string,
+  dependsOnTaskId: string
+): number {
+  const result = db
+    .prepare(
+      `DELETE FROM task_dependencies
+       WHERE task_id = ? AND depends_on_task_id = ?`
+    )
+    .run(taskId, dependsOnTaskId);
+
+  if (result.changes === 0) {
+    throw new Error('Dependency not found');
+  }
+
+  return result.changes;
+}
+
+/**
+ * Get all tasks that taskId depends on.
+ */
+export function getTaskDependencies(
+  db: Database.Database,
+  taskId: string
+): Task[] {
+  return db
+    .prepare(
+      `SELECT t.*
+       FROM tasks t
+       INNER JOIN task_dependencies td ON t.id = td.depends_on_task_id
+       WHERE td.task_id = ?`
+    )
+    .all(taskId) as Task[];
+}
+
+/**
+ * Get all tasks that depend on taskId.
+ */
+export function getTaskDependents(
+  db: Database.Database,
+  taskId: string
+): Task[] {
+  return db
+    .prepare(
+      `SELECT t.*
+       FROM tasks t
+       INNER JOIN task_dependencies td ON t.id = td.task_id
+       WHERE td.depends_on_task_id = ?`
+    )
+    .all(taskId) as Task[];
+}
+
+/**
+ * Check if all task-level dependencies for a task are met.
+ *
+ * Terminal statuses that count as "met": completed, disputed, skipped, partial.
+ *
+ * NOTE: Unlike section-level deps, blocked_error and blocked_conflict are NOT
+ * considered met for task deps — a blocked upstream task should block its
+ * direct dependents since the specific output is expected.
+ */
+export function hasTaskDependenciesMet(
+  db: Database.Database,
+  taskId: string
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) as unmet FROM task_dependencies td
+       JOIN tasks t ON td.depends_on_task_id = t.id
+       WHERE td.task_id = ?
+       AND t.status NOT IN ('completed', 'disputed', 'skipped', 'partial')`
+    )
+    .get(taskId) as { unmet: number };
+
+  return row.unmet === 0;
 }
 
 // ============ Task Operations ============
