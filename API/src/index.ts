@@ -45,6 +45,7 @@ import reviewerConfigRouter from './routes/config-reviewer.js';
 import healthRouter from './routes/health.js';
 import incidentsRouter from './routes/incidents.js';
 import intakeRouter from './routes/intake.js';
+import intakeWebhookRouter from './routes/intake-webhooks.js';
 import skillsRouter from './routes/skills.js';
 import { creditAlertRoutes } from './routes/credit-alerts.js';
 import modelUsageRouter from './routes/model-usage.js';
@@ -83,6 +84,7 @@ export function createApp(): express.Express {
     origin: true, // Allow all origins
     credentials: true,
   }));
+  app.use('/webhooks', intakeWebhookRouter);
   app.use(express.json());
 
   // Request logging (keep test output clean)
@@ -160,6 +162,7 @@ export function createApp(): express.Express {
         'DELETE /api/intake/reports/<source>/<externalId>?project=<path>',
         'GET /api/intake/stats?project=<path>',
         'GET /api/intake/connectors/health?project=<path>',
+        'POST /webhooks/intake/<connector>',
         'GET /api/ai/providers',
         'GET /api/ai/models/<provider>',
         'GET /api/model-usage?project=<path>&hours=<hours>',

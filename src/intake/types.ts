@@ -95,6 +95,7 @@ export interface SentryIntakeConnectorConfig {
   organization?: string;
   project?: string;
   authTokenEnvVar?: string;
+  webhookSecretEnvVar?: string;
   defaultAssignee?: string;
 }
 
@@ -104,6 +105,7 @@ export interface GitHubIntakeConnectorConfig {
   owner?: string;
   repo?: string;
   tokenEnvVar?: string;
+  webhookSecretEnvVar?: string;
   labels?: string[];
 }
 

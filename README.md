@@ -562,18 +562,21 @@ intake:
       organization: ""
       project: ""
       authTokenEnvVar: SENTRY_AUTH_TOKEN
+      webhookSecretEnvVar: SENTRY_WEBHOOK_SECRET
     github:
       enabled: false
       apiBaseUrl: https://api.github.com
       owner: ""
       repo: ""
       tokenEnvVar: GITHUB_TOKEN
+      webhookSecretEnvVar: GITHUB_WEBHOOK_SECRET
       labels: []
 ```
 
 `intake` defines shared bug-intake connector settings. Validation rejects `intake.enabled: true` unless at least one connector is enabled and its required identifiers are configured.
 
 The GitHub Issues connector uses the installed `gh` CLI for pull and push operations. The token named by `intake.connectors.github.tokenEnvVar` must be present in the environment when intake runs.
+Inbound signed webhooks use `POST /webhooks/intake/:connector` and validate HMAC-SHA256 signatures against the connector secret named by `webhookSecretEnvVar`.
 Enabled intake connectors are polled during the regular `steroids runners wakeup` cycle, honoring `pollIntervalMinutes` and persisting normalized reports plus per-connector cursor state in the project database.
 
 ### Global Config (`~/.steroids/config.yaml`)

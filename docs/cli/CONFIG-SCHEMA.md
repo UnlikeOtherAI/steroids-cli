@@ -234,22 +234,25 @@ intake:
       organization: "acme"
       project: "web-app"
       authTokenEnvVar: "SENTRY_AUTH_TOKEN"
+      webhookSecretEnvVar: "SENTRY_WEBHOOK_SECRET"
     github:
       enabled: false
       apiBaseUrl: "https://api.github.com"
       owner: ""
       repo: ""
       tokenEnvVar: "GITHUB_TOKEN"
+      webhookSecretEnvVar: "GITHUB_WEBHOOK_SECRET"
       labels: []
 ```
 
 For bug intake, validation is partly schema-driven and partly semantic:
 
 - `intake.enabled: true` requires at least one enabled connector
-- enabled Sentry connectors require `baseUrl`, `organization`, `project`, and `authTokenEnvVar`
-- enabled GitHub connectors require `apiBaseUrl`, `owner`, `repo`, and `tokenEnvVar`
+- enabled Sentry connectors require `baseUrl`, `organization`, `project`, `authTokenEnvVar`, and `webhookSecretEnvVar`
+- enabled GitHub connectors require `apiBaseUrl`, `owner`, `repo`, `tokenEnvVar`, and `webhookSecretEnvVar`
 
 At runtime, the GitHub connector shells out through the installed `gh` CLI. The configured `tokenEnvVar` must resolve to a non-empty token in the process environment.
+Inbound connector webhooks use `POST /webhooks/intake/:connector` and validate an HMAC-SHA256 signature against the secret stored in the configured `webhookSecretEnvVar`.
 
 ---
 

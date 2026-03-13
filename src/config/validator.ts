@@ -183,6 +183,13 @@ function validateEnabledSentryConnector(
       'Sentry authTokenEnvVar is required when the connector is enabled'
     );
   }
+  if (isBlankString(sentry.webhookSecretEnvVar)) {
+    pushError(
+      errors,
+      'intake.connectors.sentry.webhookSecretEnvVar',
+      'Sentry webhookSecretEnvVar is required when the connector is enabled'
+    );
+  }
 }
 
 function validateEnabledGitHubConnector(
@@ -203,6 +210,13 @@ function validateEnabledGitHubConnector(
       errors,
       'intake.connectors.github.tokenEnvVar',
       'GitHub tokenEnvVar is required when the connector is enabled'
+    );
+  }
+  if (isBlankString(github.webhookSecretEnvVar)) {
+    pushError(
+      errors,
+      'intake.connectors.github.webhookSecretEnvVar',
+      'GitHub webhookSecretEnvVar is required when the connector is enabled'
     );
   }
 }

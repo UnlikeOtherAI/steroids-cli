@@ -123,6 +123,7 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
         organization: '',
         project: '',
         authTokenEnvVar: 'SENTRY_AUTH_TOKEN',
+        webhookSecretEnvVar: 'SENTRY_WEBHOOK_SECRET',
         defaultAssignee: '',
       },
       github: {
@@ -131,6 +132,7 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
         owner: '',
         repo: '',
         tokenEnvVar: 'GITHUB_TOKEN',
+        webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET',
         labels: [],
       },
     },

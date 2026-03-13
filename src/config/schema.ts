@@ -69,6 +69,11 @@ export const CONFIG_SCHEMA: SchemaObject = {
           _type: 'string',
           _default: 'SENTRY_AUTH_TOKEN',
         },
+        webhookSecretEnvVar: {
+          _description: 'Environment variable that stores the Sentry webhook signing secret',
+          _type: 'string',
+          _default: 'SENTRY_WEBHOOK_SECRET',
+        },
         defaultAssignee: {
           _description: 'Optional default assignee for created Sentry issues',
           _type: 'string',
@@ -102,6 +107,11 @@ export const CONFIG_SCHEMA: SchemaObject = {
           _description: 'Environment variable that stores the GitHub token',
           _type: 'string',
           _default: 'GITHUB_TOKEN',
+        },
+        webhookSecretEnvVar: {
+          _description: 'Environment variable that stores the GitHub webhook signing secret',
+          _type: 'string',
+          _default: 'GITHUB_WEBHOOK_SECRET',
         },
         labels: {
           _description: 'Labels required when scanning or creating GitHub issues',

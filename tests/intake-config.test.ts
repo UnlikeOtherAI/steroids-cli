@@ -23,6 +23,7 @@ describe('intake config schema and validation', () => {
           organization: '',
           project: '',
           authTokenEnvVar: 'SENTRY_AUTH_TOKEN',
+          webhookSecretEnvVar: 'SENTRY_WEBHOOK_SECRET',
           defaultAssignee: '',
         },
         github: {
@@ -31,6 +32,7 @@ describe('intake config schema and validation', () => {
           owner: '',
           repo: '',
           tokenEnvVar: 'GITHUB_TOKEN',
+          webhookSecretEnvVar: 'GITHUB_WEBHOOK_SECRET',
           labels: [],
         },
       },
@@ -84,6 +86,7 @@ describe('intake config schema and validation', () => {
             organization: '',
             project: '',
             authTokenEnvVar: ' ',
+            webhookSecretEnvVar: '',
           },
           github: {
             enabled: true,
@@ -91,6 +94,7 @@ describe('intake config schema and validation', () => {
             owner: '',
             repo: ' ',
             tokenEnvVar: '',
+            webhookSecretEnvVar: ' ',
           },
         },
       },
@@ -106,10 +110,12 @@ describe('intake config schema and validation', () => {
         'intake.connectors.sentry.organization',
         'intake.connectors.sentry.project',
         'intake.connectors.sentry.authTokenEnvVar',
+        'intake.connectors.sentry.webhookSecretEnvVar',
         'intake.connectors.github.apiBaseUrl',
         'intake.connectors.github.owner',
         'intake.connectors.github.repo',
         'intake.connectors.github.tokenEnvVar',
+        'intake.connectors.github.webhookSecretEnvVar',
       ])
     );
   });
@@ -126,12 +132,14 @@ describe('intake config schema and validation', () => {
             organization: '',
             project: '',
             authTokenEnvVar: '',
+            webhookSecretEnvVar: '',
           },
           github: {
             enabled: false,
             owner: '',
             repo: '',
             tokenEnvVar: '',
+            webhookSecretEnvVar: '',
           },
         },
       },
@@ -154,6 +162,7 @@ describe('intake config schema and validation', () => {
             organization: ['team'],
             project: { slug: 'web' },
             authTokenEnvVar: false,
+            webhookSecretEnvVar: 123,
           },
         },
       },
@@ -169,6 +178,7 @@ describe('intake config schema and validation', () => {
         expect.objectContaining({ path: 'intake.connectors.sentry.organization' }),
         expect.objectContaining({ path: 'intake.connectors.sentry.project' }),
         expect.objectContaining({ path: 'intake.connectors.sentry.authTokenEnvVar' }),
+        expect.objectContaining({ path: 'intake.connectors.sentry.webhookSecretEnvVar' }),
       ])
     );
   });
@@ -184,6 +194,7 @@ describe('intake config schema and validation', () => {
             owner: '',
             repo: '',
             tokenEnvVar: '',
+            webhookSecretEnvVar: '',
           },
         },
       },
