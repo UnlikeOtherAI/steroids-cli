@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
 import type { SteroidsConfig } from '../config/loader.js';
 import { getSection, listTasks, setSectionPrNumber } from '../database/queries.js';
+import { handleIntakePostPR } from '../intake/post-pr.js';
 
 // ─── Terminal state check ────────────────────────────────────────────────────
 
@@ -250,6 +251,7 @@ export async function checkSectionCompletionAndPR(
         error instanceof Error ? error.message : String(error)
       );
     }
+    await handleIntakePostPR({ db, sectionId, prNumber: section.pr_number, config });
     return section.pr_number;
   }
 
@@ -273,6 +275,7 @@ export async function checkSectionCompletionAndPR(
         error instanceof Error ? error.message : String(error)
       );
     }
+    await handleIntakePostPR({ db, sectionId, prNumber: existingPrNumber, config });
     return existingPrNumber;
   }
 
@@ -291,6 +294,7 @@ export async function checkSectionCompletionAndPR(
     const prNumber = createPr(projectPath, section.name, section.branch, baseBranch, completedTitles, metadata);
     setSectionPrNumber(db, sectionId, prNumber);
     console.log(`[section-pr] Created PR #${prNumber} for section "${section.name}" (${section.branch} → ${baseBranch})`);
+    await handleIntakePostPR({ db, sectionId, prNumber, config });
     return prNumber;
   } catch (error) {
     console.error(

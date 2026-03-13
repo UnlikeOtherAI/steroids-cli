@@ -5,3 +5,5 @@ export * from './poller.js';
 export * from './github-gate.js';
 export * from './pipeline-glue.js';
 export * from './task-templates.js';
+export * from './task-reference.js';
+export * from './post-pr.js';

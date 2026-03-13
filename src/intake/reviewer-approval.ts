@@ -18,42 +18,12 @@ import {
   type IntakeTaskPhase,
 } from './task-templates.js';
 import { DEFAULT_INTAKE_PIPELINE_SOURCE_FILE } from './task-templates.js';
-import type { IntakeSource } from './types.js';
-
-interface IntakeTaskReference {
-  phase: IntakeTaskPhase;
-  source: IntakeSource;
-  externalId: string;
-}
+import { parseIntakeTaskReference } from './task-reference.js';
 
 export interface IntakeTaskApprovalResult {
   handled: boolean;
   transition?: IntakePipelineTransition;
   createdTaskId?: string;
-}
-
-const INTAKE_TASK_TITLE_PATTERN =
-  /^(Triage|Reproduce|Fix) intake report (github|sentry)#([^:]+): /;
-
-function parseIntakeTaskReference(task: Pick<Task, 'title' | 'source_file'>): IntakeTaskReference | null {
-  if (task.source_file !== DEFAULT_INTAKE_PIPELINE_SOURCE_FILE) {
-    return null;
-  }
-
-  const match = task.title.match(INTAKE_TASK_TITLE_PATTERN);
-  if (!match) {
-    return null;
-  }
-
-  const phase = match[1] === 'Triage'
-    ? 'triage'
-    : (match[1] === 'Reproduce' ? 'reproduction' : 'fix');
-
-  return {
-    phase,
-    source: match[2] as IntakeSource,
-    externalId: match[3],
-  };
 }
 
 function getOrCreateSectionId(db: Database.Database, sectionName: string): string {

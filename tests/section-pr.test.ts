@@ -9,9 +9,14 @@ import { createSection, createTask, getSection } from '../src/database/queries.j
 import type { SteroidsConfig } from '../src/config/loader.js';
 
 const mockExecFileSync = jest.fn();
+const mockHandleIntakePostPR = jest.fn(async () => ({ handled: false, reportsResolved: 0 }));
 
 jest.unstable_mockModule('node:child_process', () => ({
   execFileSync: mockExecFileSync,
+}));
+
+jest.unstable_mockModule('../src/intake/post-pr.js', () => ({
+  handleIntakePostPR: mockHandleIntakePostPR,
 }));
 
 const { checkSectionCompletionAndPR } = await import('../src/git/section-pr.js');
@@ -39,6 +44,7 @@ describe('checkSectionCompletionAndPR', () => {
     db = connection.db;
     closeDb = connection.close;
     mockExecFileSync.mockReset();
+    mockHandleIntakePostPR.mockClear();
   });
 
   afterEach(() => {
@@ -74,6 +80,14 @@ describe('checkSectionCompletionAndPR', () => {
 
     expect(prNumber).toBe(123);
     expect(getSection(db, section.id)?.pr_number).toBe(123);
+    expect(mockHandleIntakePostPR as any).toHaveBeenCalledWith(
+      expect.objectContaining({
+        db,
+        sectionId: section.id,
+        prNumber: 123,
+        config,
+      })
+    );
 
     const createCall = mockExecFileSync.mock.calls.find(
       (call) => Array.isArray(call[1]) && (call[1] as string[])[0] === 'pr' && (call[1] as string[])[1] === 'create'
@@ -132,6 +146,14 @@ describe('checkSectionCompletionAndPR', () => {
 
     expect(prNumber).toBe(77);
     expect(getSection(db, section.id)?.pr_number).toBe(77);
+    expect(mockHandleIntakePostPR as any).toHaveBeenCalledWith(
+      expect.objectContaining({
+        db,
+        sectionId: section.id,
+        prNumber: 77,
+        config,
+      })
+    );
 
     const editCall = mockExecFileSync.mock.calls.find(
       (call) => Array.isArray(call[1]) && (call[1] as string[])[0] === 'pr' && (call[1] as string[])[1] === 'edit'
@@ -168,5 +190,6 @@ describe('checkSectionCompletionAndPR', () => {
     expect(prNumber).toBeNull();
     expect(mockExecFileSync).not.toHaveBeenCalled();
     expect(getSection(db, section.id)?.pr_number).toBeNull();
+    expect(mockHandleIntakePostPR).not.toHaveBeenCalled();
   });
 });
