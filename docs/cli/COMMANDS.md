@@ -30,6 +30,7 @@ The llm command covers:
 - What Steroids is (AI task orchestration)
 - Task sizing guidance (PR-sized chunks, not individual classes)
 - The coder/reviewer loop and task state machine
+- Bug intake concepts (connectors, reports, approval gate, intake hooks)
 - Project setup (sections, tasks, specifications)
 - All key commands organized by category
 - Current context (active tasks, runners) with `--context`
@@ -41,7 +42,7 @@ The llm command covers:
 **Every command supports full non-interactive operation via explicit flags.**
 
 - **Current directory = project context** - run `steroids` from your project root
-- **File-based storage** - all changes write to TODO.md, no database
+- **Database-backed state** - tasks, runners, and intake reports live in `.steroids/steroids.db`; specs stay in markdown
 - **Hooks support** - trigger scripts/webhooks on task completion
 
 ---
@@ -386,12 +387,41 @@ Examples:
   steroids config browse                             # Interactive TUI browser
   steroids config browse --global                    # Browse global config
   steroids config show                               # Show merged config
+  steroids config show intake                        # Show bug-intake settings
   steroids config show --json                        # As JSON
   steroids config set output.format json             # Set value
+  steroids config set intake.enabled true            # Enable bug-intake
   steroids config get output.format                  # Get value
   steroids config validate                           # Check syntax
+  steroids config schema intake                      # Show intake JSON Schema
   steroids config edit                               # Open in editor
 ```
+
+### Bug Intake Configuration
+
+Bug intake is configured under the top-level `intake` category:
+- `intake.enabled` turns polling and sync on
+- `intake.pollIntervalMinutes` controls `steroids runners wakeup` poll cadence
+- `intake.maxReportsPerPoll` caps each batch deterministically
+- `intake.connectors.github.*` configures the supported runtime connector
+- `intake.connectors.sentry.*` is schema-valid, but enabling it fails fast until the runtime connector exists
+
+Useful commands: `steroids config show intake`, `steroids config schema intake`, `steroids config validate`
+
+Connector webhooks post to `POST /webhooks/intake/:connector` and validate HMAC-SHA256 signatures against the configured `webhookSecretEnvVar`.
+
+### Bug Intake Workflow
+
+Steroids models external bug reports as normalized intake reports keyed by `(source, external_id)`.
+- **Connector**: pulls reports from GitHub and normalizes them into the local database
+- **Report status**: `open`, `triaged`, `in_progress`, `resolved`, or `ignored`
+- **Approval gate**: GitHub issues labeled for approve/reject before internal triage starts
+- **Pipeline tasks**: `Triage intake report ...`, `Reproduce intake report ...`, `Fix intake report ...`
+- **Hooks**: `intake.received`, `intake.triaged`, `intake.pr_created`
+
+Useful commands: `steroids hooks list --event intake.received`, `steroids hooks test intake.triaged`, `steroids runners wakeup`, `steroids web`
+
+`steroids runners wakeup` handles both stale-runner recovery and intake maintenance: it polls due connectors, persists normalized reports, and syncs the GitHub intake approval gate. The web dashboard surfaces intake reports, statuses, and approval outcomes.
 
 ### Config Browse TUI
 

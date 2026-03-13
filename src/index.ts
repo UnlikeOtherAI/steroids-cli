@@ -126,6 +126,8 @@ EXAMPLES:
   steroids init
   steroids sections add "Phase 1"
   steroids tasks add "Implement feature" --section "Phase 1"
+  steroids config show intake
+  steroids runners wakeup
   steroids tasks list --json
   steroids loop --verbose
   STEROIDS_QUIET=1 steroids tasks list
