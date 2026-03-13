@@ -385,8 +385,19 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
       }
 
       out.log('Pulling latest changes...');
+      const updateTag = `v${CLI_VERSION}`;
       forceReset(WEB_DIR);
-      run('git pull', WEB_DIR);
+
+      if (hasRemoteTag(updateTag, WEB_DIR)) {
+        execSync(`git fetch --depth 1 origin tag ${updateTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
+        execSync(`git checkout ${updateTag}`, { cwd: WEB_DIR, stdio: 'inherit' });
+        out.log(`Checked out ${updateTag}.`);
+      } else {
+        out.log(`Tag ${updateTag} not found on remote, fetching latest main...`);
+        execSync('git fetch origin main', { cwd: WEB_DIR, stdio: 'inherit' });
+        execSync('git checkout -B main origin/main', { cwd: WEB_DIR, stdio: 'inherit' });
+        out.log('Checked out latest main.');
+      }
 
       installAndBuild(out);
 
