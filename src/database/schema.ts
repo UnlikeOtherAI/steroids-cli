@@ -246,6 +246,49 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_merge_progress_unique_position
 ON merge_progress(session_id, workstream_id, position);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_merge_progress_unique_commit
 ON merge_progress(session_id, workstream_id, commit_sha);
+
+-- Normalized external intake reports
+CREATE TABLE IF NOT EXISTS intake_reports (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT,
+    severity TEXT NOT NULL,
+    status TEXT NOT NULL,
+    report_url TEXT NOT NULL,
+    created_at_remote TEXT NOT NULL,
+    updated_at_remote TEXT NOT NULL,
+    resolved_at_remote TEXT,
+    tags_json TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    linked_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_intake_reports_source_external
+ON intake_reports(source, external_id);
+CREATE INDEX IF NOT EXISTS idx_intake_reports_source_status
+ON intake_reports(source, status);
+CREATE INDEX IF NOT EXISTS idx_intake_reports_source_severity
+ON intake_reports(source, severity);
+CREATE INDEX IF NOT EXISTS idx_intake_reports_linked_task
+ON intake_reports(linked_task_id) WHERE linked_task_id IS NOT NULL;
+
+-- Per-source intake poll cursors and timestamps
+CREATE TABLE IF NOT EXISTS intake_poll_state (
+    source TEXT PRIMARY KEY,
+    cursor TEXT,
+    last_polled_at TEXT,
+    last_success_at TEXT,
+    last_error_at TEXT,
+    last_error_message TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 export const INITIAL_SCHEMA_DATA = `
@@ -277,4 +320,5 @@ INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (21, '021_add_sect
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (22, '022_add_section_auto_pr', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (23, '023_add_task_feedback', 'builtin');
 INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (24, '024_add_merge_failure_count', 'builtin');
+INSERT OR IGNORE INTO _migrations (id, name, checksum) VALUES (25, '025_add_intake_tables', 'builtin');
 `;

@@ -1,6 +1,6 @@
 {
-  "version": "0.2.2",
-  "latestDbVersion": 24,
+  "version": "0.2.3",
+  "latestDbVersion": 25,
   "migrations": [
     {
       "id": 1,
@@ -193,6 +193,14 @@
       "description": "Add merge_failure_count to tasks for dedicated merge failure tracking",
       "checksum": "",
       "cliVersion": "0.10.61"
+    },
+    {
+      "id": 25,
+      "name": "025_add_intake_tables",
+      "file": "025_add_intake_tables.sql",
+      "description": "Add intake_reports and intake_poll_state tables for normalized bug intake persistence",
+      "checksum": "",
+      "cliVersion": "0.12.7"
     }
   ]
 }
