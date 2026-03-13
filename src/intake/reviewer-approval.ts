@@ -83,7 +83,14 @@ export function handleIntakeTaskApproval(
     throw new Error(`Intake pipeline task refers to missing report ${reference.source}#${reference.externalId}`);
   }
 
-  const transition = deriveIntakePipelineTransition(parseIntakeResultFile(projectPath));
+  const result = parseIntakeResultFile(projectPath);
+  if (result.phase !== reference.phase) {
+    throw new Error(
+      `Intake result phase "${result.phase}" does not match approved task phase "${reference.phase}" for ${reference.source}#${reference.externalId}`
+    );
+  }
+
+  const transition = deriveIntakePipelineTransition(result);
   if (transition.action === 'complete') {
     updateIntakeReportState(db, report.source, report.externalId, {
       status: transition.resolutionCode === 'fixed' ? 'resolved' : 'ignored',

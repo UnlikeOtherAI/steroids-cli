@@ -199,6 +199,60 @@ describe('handleIntakeTaskApproval', () => {
     );
   });
 
+  it('rejects a triage task that points at a reproduction-phase result file', () => {
+    const triageSection = createSection(db, 'Bug Intake: Triage');
+    const triageTask = createTask(
+      db,
+      'Triage intake report github#42: Checkout fails on empty cart',
+      {
+        sectionId: triageSection.id,
+        sourceFile: DEFAULT_INTAKE_PIPELINE_SOURCE_FILE,
+      }
+    );
+
+    upsertIntakeReport(db, createSampleReport(), { linkedTaskId: triageTask.id });
+    writeFileSync(
+      join(projectPath, 'intake-result.json'),
+      JSON.stringify({
+        phase: 'reproduction',
+        decision: 'fix',
+        summary: 'This should not be accepted by a triage task.',
+      }),
+      'utf-8'
+    );
+
+    expect(() => handleIntakeTaskApproval(db, triageTask, projectPath)).toThrow(
+      'Intake result phase "reproduction" does not match approved task phase "triage" for github#42'
+    );
+  });
+
+  it('rejects a reproduction task that points at a triage-phase result file', () => {
+    const reproductionSection = createSection(db, 'Bug Intake: Reproduction');
+    const reproductionTask = createTask(
+      db,
+      'Reproduce intake report github#42: Checkout fails on empty cart',
+      {
+        sectionId: reproductionSection.id,
+        sourceFile: DEFAULT_INTAKE_PIPELINE_SOURCE_FILE,
+      }
+    );
+
+    upsertIntakeReport(db, createSampleReport({ status: 'in_progress' }), { linkedTaskId: reproductionTask.id });
+    writeFileSync(
+      join(projectPath, 'intake-result.json'),
+      JSON.stringify({
+        phase: 'triage',
+        decision: 'fix',
+        summary: 'This should not be accepted by a reproduction task.',
+      }),
+      'utf-8'
+    );
+
+    expect(() => handleIntakeTaskApproval(db, reproductionTask, projectPath)).toThrow(
+      'Intake result phase "triage" does not match approved task phase "reproduction" for github#42'
+    );
+  });
+
   it('marks a reproduction task closed as resolved when the report is fixed without a follow-up fix task', () => {
     const reproductionSection = createSection(db, 'Bug Intake: Reproduction');
     const reproductionTask = createTask(
