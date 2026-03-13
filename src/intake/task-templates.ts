@@ -1,0 +1,125 @@
+import type {
+  IntakeReportReference,
+  IntakeReportStatus,
+  IntakeSeverity,
+} from './types.js';
+
+export const DEFAULT_INTAKE_PIPELINE_SOURCE_FILE = 'docs/plans/bug-intake/pipeline.md';
+
+export type IntakeTaskPhase = 'triage' | 'reproduction' | 'fix';
+
+export interface IntakeTaskTemplateReport extends IntakeReportReference {
+  title: string;
+  summary?: string;
+  severity: IntakeSeverity;
+  status: IntakeReportStatus;
+}
+
+export interface IntakeTaskTemplate {
+  phase: IntakeTaskPhase;
+  sectionName: string;
+  title: string;
+  sourceFile: string;
+  description: string;
+}
+
+export interface BuildIntakeTaskTemplateOptions {
+  sourceFile?: string;
+}
+
+const PHASE_SECTION_NAMES: Record<IntakeTaskPhase, string> = {
+  triage: 'Bug Intake: Triage',
+  reproduction: 'Bug Intake: Reproduction',
+  fix: 'Bug Intake: Fix',
+};
+
+const PHASE_VERBS: Record<IntakeTaskPhase, string> = {
+  triage: 'Triage',
+  reproduction: 'Reproduce',
+  fix: 'Fix',
+};
+
+function normalizeInlineText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function formatReportLabel(report: IntakeTaskTemplateReport): string {
+  return `${report.source}#${report.externalId}`;
+}
+
+function buildSharedDescriptionLines(report: IntakeTaskTemplateReport): string[] {
+  const lines = [
+    `External report: ${formatReportLabel(report)}`,
+    `Title: ${normalizeInlineText(report.title)}`,
+    `Severity: ${report.severity}`,
+    `Current intake status: ${report.status}`,
+    `Report URL: ${report.url}`,
+  ];
+
+  if (report.summary && normalizeInlineText(report.summary) !== '') {
+    lines.push(`Summary: ${normalizeInlineText(report.summary)}`);
+  }
+
+  return lines;
+}
+
+function buildPhaseInstructions(phase: IntakeTaskPhase): string[] {
+  switch (phase) {
+    case 'triage':
+      return [
+        'Goal: classify the report as close, reproduce, or fix without broadening scope.',
+        'Required output: write intake-result.json in the project root using the triage contract from the linked spec.',
+        'If you choose close, include resolutionCode. If you choose reproduce or fix, keep the next task title phase-specific and deterministic.',
+      ];
+    case 'reproduction':
+      return [
+        'Goal: produce a reliable reproduction with the narrowest defensible root-cause evidence.',
+        'Capture exact steps, environment assumptions, expected behavior, and actual behavior.',
+        'Do not start unrelated cleanup or speculative refactors in this phase.',
+      ];
+    case 'fix':
+      return [
+        'Goal: implement the narrowest safe fix for the linked intake report and validate it with targeted tests.',
+        'Preserve the intake scope. Defer broader cleanup or follow-up work instead of widening this task.',
+        'Document any residual risk or follow-up idea in reviewer notes rather than folding it into the implementation.',
+      ];
+  }
+}
+
+export function getIntakeTaskSectionName(phase: IntakeTaskPhase): string {
+  return PHASE_SECTION_NAMES[phase];
+}
+
+export function buildIntakeTaskTitle(
+  phase: IntakeTaskPhase,
+  report: IntakeTaskTemplateReport
+): string {
+  return `${PHASE_VERBS[phase]} intake report ${formatReportLabel(report)}: ${normalizeInlineText(report.title)}`;
+}
+
+export function buildIntakeTaskDescription(
+  phase: IntakeTaskPhase,
+  report: IntakeTaskTemplateReport
+): string {
+  const lines = [
+    ...buildSharedDescriptionLines(report),
+    '',
+    ...buildPhaseInstructions(phase),
+  ];
+
+  return lines.join('\n');
+}
+
+export function buildIntakeTaskTemplate(
+  phase: IntakeTaskPhase,
+  report: IntakeTaskTemplateReport,
+  options: BuildIntakeTaskTemplateOptions = {}
+): IntakeTaskTemplate {
+  return {
+    phase,
+    sectionName: getIntakeTaskSectionName(phase),
+    title: buildIntakeTaskTitle(phase, report),
+    sourceFile: options.sourceFile ?? DEFAULT_INTAKE_PIPELINE_SOURCE_FILE,
+    description: buildIntakeTaskDescription(phase, report),
+  };
+}
