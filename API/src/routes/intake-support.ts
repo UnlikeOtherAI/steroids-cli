@@ -154,6 +154,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
 
   const payload = body as Record<string, unknown>;
   const result: IntakeReportUpdateBody = {};
+  let recognizedFieldCount = 0;
 
   if (Object.keys(payload).length === 0) {
     return { error: 'Request body must contain at least one updatable field' };
@@ -168,6 +169,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'linkedTaskId must be a non-empty string or null' };
     }
     result.linkedTaskId = typeof payload.linkedTaskId === 'string' ? payload.linkedTaskId.trim() : null;
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'fingerprint')) {
@@ -175,6 +177,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'fingerprint must be a non-empty string' };
     }
     result.fingerprint = payload.fingerprint.trim();
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'title')) {
@@ -182,6 +185,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'title must be a non-empty string' };
     }
     result.title = payload.title.trim();
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'summary')) {
@@ -189,6 +193,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'summary must be a string or null' };
     }
     result.summary = payload.summary === null ? null : (payload.summary as string | undefined);
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'severity')) {
@@ -196,6 +201,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'severity must be one of: critical, high, medium, low, info' };
     }
     result.severity = payload.severity;
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'status')) {
@@ -203,6 +209,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'status must be one of: open, triaged, in_progress, resolved, ignored' };
     }
     result.status = payload.status;
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'url')) {
@@ -210,6 +217,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'url must be a non-empty string' };
     }
     result.url = payload.url.trim();
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'createdAt')) {
@@ -217,6 +225,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'createdAt must be a non-empty string' };
     }
     result.createdAt = payload.createdAt;
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'updatedAt')) {
@@ -224,6 +233,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'updatedAt must be a non-empty string' };
     }
     result.updatedAt = payload.updatedAt;
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'resolvedAt')) {
@@ -231,6 +241,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'resolvedAt must be a string or null' };
     }
     result.resolvedAt = payload.resolvedAt === null ? null : (payload.resolvedAt as string | undefined);
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'tags')) {
@@ -238,6 +249,7 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'tags must be an array of strings' };
     }
     result.tags = payload.tags as string[];
+    recognizedFieldCount += 1;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'payload')) {
@@ -245,6 +257,11 @@ export function parseReportUpdateBody(body: unknown): IntakeReportUpdateBody | {
       return { error: 'payload must be an object' };
     }
     result.payload = payload.payload as Record<string, unknown>;
+    recognizedFieldCount += 1;
+  }
+
+  if (recognizedFieldCount === 0) {
+    return { error: 'Request body must contain at least one recognized updatable field' };
   }
 
   return result;
@@ -261,7 +278,7 @@ export function mergeReport(existing: StoredIntakeReport, updates: IntakeReportU
     severity: updates.severity ?? existing.severity,
     status: updates.status ?? existing.status,
     createdAt: updates.createdAt ?? existing.createdAt,
-    updatedAt: updates.updatedAt ?? new Date().toISOString(),
+    updatedAt: updates.updatedAt ?? existing.updatedAt,
     resolvedAt: updates.resolvedAt === null ? undefined : (updates.resolvedAt ?? existing.resolvedAt),
     tags: updates.tags ?? existing.tags,
     payload: updates.payload ?? existing.payload,

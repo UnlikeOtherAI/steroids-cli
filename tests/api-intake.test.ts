@@ -173,6 +173,7 @@ describe('API intake endpoints', () => {
     expect(patchBody.report.status).toBe('in_progress');
     expect(patchBody.report.linkedTaskId).toBe('task-1');
     expect(patchBody.report.tags).toEqual(['bug', 'triaged']);
+    expect(patchBody.report.updatedAt).toBe('2026-03-12T09:09:00.000Z');
 
     const deleteResp = await fetch(
       `http://127.0.0.1:${port}/api/intake/reports/github/9?project=${encodeURIComponent(projectPath)}`,
@@ -188,6 +189,34 @@ describe('API intake endpoints', () => {
     } finally {
       close();
     }
+  });
+
+  it('rejects PATCH bodies with no recognized updatable fields and preserves stored state', async () => {
+    const beforeResp = await fetch(
+      `http://127.0.0.1:${port}/api/intake/reports/github/2?project=${encodeURIComponent(projectPath)}`
+    );
+    expect(beforeResp.status).toBe(200);
+    const beforeBody = (await beforeResp.json()) as any;
+
+    const patchResp = await fetch(`http://127.0.0.1:${port}/api/intake/reports/github/2`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project: projectPath,
+      }),
+    });
+
+    expect(patchResp.status).toBe(400);
+    const patchBody = (await patchResp.json()) as any;
+    expect(patchBody.success).toBe(false);
+    expect(patchBody.error).toBe('Request body must contain at least one recognized updatable field');
+
+    const afterResp = await fetch(
+      `http://127.0.0.1:${port}/api/intake/reports/github/2?project=${encodeURIComponent(projectPath)}`
+    );
+    expect(afterResp.status).toBe(200);
+    const afterBody = (await afterResp.json()) as any;
+    expect(afterBody.report).toEqual(beforeBody.report);
   });
 
   it('returns intake stats and connector health summaries', async () => {
