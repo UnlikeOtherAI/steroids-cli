@@ -33,6 +33,18 @@ export const STATUS_MARKERS: Record<TaskStatus, string> = {
   blocked_conflict: '[C]', // Blocked by merge conflicts
 };
 
+/**
+ * Terminal status sets for dependency checks — single source of truth.
+ *
+ * SECTION deps (coarse): blocked_error/blocked_conflict count as "met" so one
+ * blocked task doesn't hold up entire downstream section chains.
+ *
+ * TASK deps (fine-grained): blocked statuses are NOT "met" because a direct
+ * dependency on a blocked task means the dependent needs that specific output.
+ */
+export const SECTION_DEP_TERMINAL: readonly TaskStatus[] = ['completed', 'disputed', 'skipped', 'partial', 'blocked_error', 'blocked_conflict'];
+export const TASK_DEP_TERMINAL: readonly TaskStatus[] = ['completed', 'disputed', 'skipped', 'partial'];
+
 export interface Task {
   id: string;
   title: string;
@@ -252,7 +264,7 @@ export function getPendingDependencies(
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.section_id = s.id
-         AND t.status NOT IN ('completed', 'disputed', 'skipped', 'partial', 'blocked_error', 'blocked_conflict')
+         AND t.status NOT IN ('completed', 'disputed', 'skipped', 'partial', 'blocked_error', 'blocked_conflict') -- SECTION_DEP_TERMINAL
        )
        ORDER BY s.position ASC`
     )
@@ -683,7 +695,7 @@ export function hasTaskDependenciesMet(
       `SELECT COUNT(*) as unmet FROM task_dependencies td
        JOIN tasks t ON td.depends_on_task_id = t.id
        WHERE td.task_id = ?
-       AND t.status NOT IN ('completed', 'disputed', 'skipped', 'partial')`
+       AND t.status NOT IN ('completed', 'disputed', 'skipped', 'partial') -- TASK_DEP_TERMINAL`
     )
     .get(taskId) as { unmet: number };
 
@@ -1320,12 +1332,15 @@ function filterTasksWithMetDependencies(
   tasks: Task[]
 ): Task[] {
   return tasks.filter(task => {
-    if (!task.section_id) {
-      // Tasks without a section are always allowed
-      return true;
+    // Check section-level dependencies
+    if (task.section_id && !hasDependenciesMet(db, task.section_id)) {
+      return false;
     }
-    // Check if section has all dependencies met
-    return hasDependenciesMet(db, task.section_id);
+    // Check task-level dependencies
+    if (!hasTaskDependenciesMet(db, task.id)) {
+      return false;
+    }
+    return true;
   });
 }
 

@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline';
 import { withDatabase } from '../database/connection.js';
+import { openGlobalDatabase } from '../runners/global-db-connection.js';
 import { createOutput } from '../cli/output.js';
 import type { GlobalFlags } from '../cli/flags.js';
 import { listRunners, unregisterRunner } from '../runners/daemon.js';
@@ -96,6 +97,18 @@ DESCRIPTION:
   }
   if (stopped > 0) {
     out.log(`Stopped ${stopped} runner(s) for this project.`);
+    // Wait for runners to exit before resetting DB
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+
+  // Clean parallel sessions/workstreams from global DB
+  try {
+    const globalConn = openGlobalDatabase();
+    globalConn.db.prepare(`UPDATE parallel_sessions SET status = 'failed' WHERE project_path = ? AND status = 'running'`).run(projectPath);
+    globalConn.db.prepare(`UPDATE workstreams SET status = 'failed' WHERE session_id IN (SELECT id FROM parallel_sessions WHERE project_path = ?)`).run(projectPath);
+    globalConn.close();
+  } catch {
+    // Global DB cleanup is best-effort
   }
 
   // Perform the reset in a single transaction
