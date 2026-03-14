@@ -131,6 +131,7 @@ DESCRIPTION:
         rejection_count = 0,
         failure_count = 0,
         merge_failure_count = 0,
+        conflict_count = 0,
         start_commit_sha = NULL,
         blocked_reason = NULL,
         updated_at = datetime('now')

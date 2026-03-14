@@ -45,6 +45,9 @@ export const STATUS_MARKERS: Record<TaskStatus, string> = {
 export const SECTION_DEP_TERMINAL: readonly TaskStatus[] = ['completed', 'disputed', 'skipped', 'partial', 'blocked_error', 'blocked_conflict'];
 export const TASK_DEP_TERMINAL: readonly TaskStatus[] = ['completed', 'disputed', 'skipped', 'partial'];
 
+/** Generate SQL IN clause from a status array: ('completed', 'disputed', ...) */
+const sqlIn = (statuses: readonly TaskStatus[]) => `(${statuses.map(s => `'${s}'`).join(', ')})`;
+
 export interface Task {
   id: string;
   title: string;
@@ -264,7 +267,7 @@ export function getPendingDependencies(
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.section_id = s.id
-         AND t.status NOT IN ('completed', 'disputed', 'skipped', 'partial', 'blocked_error', 'blocked_conflict') -- SECTION_DEP_TERMINAL
+         AND t.status NOT IN ${sqlIn(SECTION_DEP_TERMINAL)}
        )
        ORDER BY s.position ASC`
     )
@@ -695,7 +698,7 @@ export function hasTaskDependenciesMet(
       `SELECT COUNT(*) as unmet FROM task_dependencies td
        JOIN tasks t ON td.depends_on_task_id = t.id
        WHERE td.task_id = ?
-       AND t.status NOT IN ('completed', 'disputed', 'skipped', 'partial') -- TASK_DEP_TERMINAL`
+       AND t.status NOT IN ${sqlIn(TASK_DEP_TERMINAL)}`
     )
     .get(taskId) as { unmet: number };
 
