@@ -39,6 +39,13 @@ export const WakeupModal: React.FC<WakeupModalProps> = ({ results, onClose }) =>
     }
   };
 
+  const actionPriority: Record<string, number> = {
+    started: 0, restarted: 1, error: 2, would_start: 3, cleaned: 4, none: 5, skipped: 6,
+  };
+  const sortedResults = [...results].sort(
+    (a, b) => (actionPriority[a.action] ?? 9) - (actionPriority[b.action] ?? 9)
+  );
+
   const totalStarted = results.filter(r => r.action === 'started' || r.action === 'restarted').length;
   const isGlobalMessage = results.length === 1 && !results[0].projectPath;
 
@@ -77,7 +84,7 @@ export const WakeupModal: React.FC<WakeupModalProps> = ({ results, onClose }) =>
             </div>
           ) : (
             <div className="space-y-3">
-              {results.map((result, idx) => (
+              {sortedResults.map((result, idx) => (
                 <div key={idx} className="flex items-start gap-4 p-4 rounded-lg bg-bg-surface border border-border">
                   <div className="mt-0.5">
                     {getIcon(result.action)}

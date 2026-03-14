@@ -24,6 +24,7 @@ import {
 } from './git-helpers.js';
 import { ensureBranchExists } from '../git/branch-resolver.js';
 import { updateSlotStatus, ensureSlotClone } from './pool.js';
+import { ensureWorkspaceSteroidsSymlink } from '../parallel/clone.js';
 import {
   acquireWorkspaceMergeLock,
   releaseWorkspaceMergeLock,
@@ -86,6 +87,16 @@ export function prepareForTask(
   const slotPath = slot.slot_path;
   let localOnly = slot.remote_url === null;
   const remote = 'origin';
+
+  // Guard: .steroids/ must not be tracked in git — it breaks pool slot DB sharing.
+  const trackedSteroids = execGit(sourceProjectPath, ['ls-files', '.steroids/'], { tolerateFailure: true });
+  if (trackedSteroids && trackedSteroids.trim().length > 0) {
+    return {
+      ok: false,
+      reason: `.steroids/ is tracked in git. Run: git rm -r --cached .steroids/ && echo ".steroids/" >> .gitignore && git commit -m "chore: untrack .steroids"`,
+      blocked: true,
+    };
+  }
 
   // Ensure the clone exists
   try {
@@ -183,6 +194,13 @@ export function prepareForTask(
   // Step 6: Clean worktree (preserve .steroids)
   execGit(slotPath, ['clean', '-fd', '-e', '.steroids']);
 
+  // Step 6b: Re-establish .steroids symlink — git reset --hard restores tracked
+  // .steroids/ files (e.g. config.yaml), destroying the symlink created by
+  // ensureSlotClone. Re-create it so the pool slot shares the project DB.
+  ensureWorkspaceSteroidsSymlink(slotPath, sourceProjectPath);
+  // Remove .steroids from git index so the symlink doesn't cause dirty-tree errors.
+  execGit(slotPath, ['rm', '--cached', '-r', '--quiet', '.steroids'], { tolerateFailure: true });
+
   // Step 7: Verify clean state
   let porcelain = getStatusPorcelain(slotPath);
   if (porcelain.length > 0) {
@@ -216,6 +234,8 @@ export function prepareForTask(
     execGit(slotPath, ['checkout', baseBranch], { tolerateFailure: true });
     execGit(slotPath, ['reset', '--hard', rebaseRef]);
     execGit(slotPath, ['clean', '-fd', '-e', '.steroids']);
+    ensureWorkspaceSteroidsSymlink(slotPath, sourceProjectPath);
+    execGit(slotPath, ['rm', '--cached', '-r', '--quiet', '.steroids'], { tolerateFailure: true });
 
     porcelain = getStatusPorcelain(slotPath);
     if (porcelain.length > 0) {

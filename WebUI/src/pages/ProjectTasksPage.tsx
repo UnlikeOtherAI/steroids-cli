@@ -13,6 +13,8 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   skipped: 'Skipped',
   failed: 'Failed',
   disputed: 'Disputed',
+  blocked_error: 'Blocked',
+  blocked_conflict: 'Conflict',
 };
 
 type IssueFilter = 'failed_retries' | 'stale';
@@ -30,6 +32,8 @@ const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'in
   skipped: 'warning',
   failed: 'danger',
   disputed: 'danger',
+  blocked_error: 'danger',
+  blocked_conflict: 'warning',
 };
 
 // Queue statuses for "next to run" sorting (pending first, then in_progress, then review)

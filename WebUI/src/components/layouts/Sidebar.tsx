@@ -61,10 +61,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
 
   const navItems = [
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
+    { to: '/projects', icon: FolderIcon, label: 'Projects' },
+    { to: '/runners', icon: PlayIcon, label: 'Runners' },
     { to: '/intake', icon: ExclamationTriangleIcon, label: 'Intake' },
     { to: '/model-usage', icon: ChartBarIcon, label: 'Model Usage' },
-    { to: '/runners', icon: PlayIcon, label: 'Runners' },
-    { to: '/projects', icon: FolderIcon, label: 'Projects' },
     { to: '/logs', icon: DocumentTextIcon, label: 'System Logs' },
     { to: '/skills', icon: BookOpenIcon, label: 'Skills' },
     { to: '/settings', icon: Cog6ToothIcon, label: 'Settings' },

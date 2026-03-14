@@ -25,7 +25,7 @@ Task tool:
 ```
 Task tool:
   subagent_type: Bash
-  prompt: "Run: timeout 300 codex exec \"[adversarial review prompt with full design text]\""
+  prompt: "Run: timeout 1800 codex exec \"[adversarial review prompt with full design text]\""
 ```
 
 Both calls go in a **single message** so they execute in parallel. When both return, assess each finding independently per AGENTS.md §"How to Conduct a Review" and append a Cross-Provider Review section to the design doc with adopt/defer/reject decisions for each finding.

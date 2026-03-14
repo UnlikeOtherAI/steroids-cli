@@ -37,7 +37,7 @@ Any change to the dispatch pipeline requires two independent adversarial reviews
 - Non-interactive mode only — never use flags that trigger interactive prompts.
 - Never pass model flags or aliases unless explicitly requested.
 - Before use: `codex --help` to verify availability; `codex exec "say hi"` as a smoke check.
-- Cap long analysis runs at 5 minutes: `timeout 300 codex exec "<prompt>"`
+- Use at least 20-minute timeout for reviews: `timeout 1800 codex exec "<prompt>"`
 - Do not kill an active process; only terminate after sustained inactivity and ~0% CPU.
 
 ### When to Request a Cross-Provider Review

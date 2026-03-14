@@ -17,6 +17,8 @@ const STATUS_VARIANTS: Record<string, 'success' | 'danger' | 'warning' | 'info' 
   skipped: 'warning',
   failed: 'danger',
   disputed: 'danger',
+  blocked_error: 'danger',
+  blocked_conflict: 'warning',
 };
 
 export function formatDuration(seconds: number): string {

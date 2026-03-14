@@ -16,6 +16,8 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   skipped: 'Skipped',
   failed: 'Failed',
   disputed: 'Disputed',
+  blocked_error: 'Blocked',
+  blocked_conflict: 'Conflict',
 };
 
 const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'info' | 'default'> = {
@@ -26,6 +28,8 @@ const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'in
   skipped: 'warning',
   failed: 'danger',
   disputed: 'danger',
+  blocked_error: 'danger',
+  blocked_conflict: 'warning',
 };
 
 // Strip GUID prefix from task title (format: "#<uuid>: <title>")
@@ -297,6 +301,19 @@ export const TaskDetailPage: React.FC = () => {
               </span>
             )}
           </div>
+
+          {/* Blocked Reason Banner */}
+          {task.blocked_reason && ['blocked_error', 'blocked_conflict'].includes(task.status) && (
+            <div className="mb-6 p-4 rounded-lg border border-danger/30 bg-danger/10">
+              <div className="flex items-start gap-3">
+                <i className="fa-solid fa-circle-exclamation text-danger text-lg mt-0.5"></i>
+                <div>
+                  <h3 className="font-semibold text-danger mb-1">Task Blocked</h3>
+                  <p className="text-sm text-text-primary font-mono whitespace-pre-wrap">{task.blocked_reason}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Stats Cards */}
           <div className="grid grid-cols-3 gap-4 mb-6">

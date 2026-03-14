@@ -2,7 +2,7 @@
  * Task detail types for task pages
  */
 
-export type TaskStatus = 'pending' | 'in_progress' | 'review' | 'completed' | 'skipped' | 'failed' | 'disputed';
+export type TaskStatus = 'pending' | 'in_progress' | 'review' | 'completed' | 'skipped' | 'failed' | 'disputed' | 'blocked_error' | 'blocked_conflict';
 
 export interface AuditEntry {
   id: number;
@@ -81,6 +81,7 @@ export interface TaskDetails {
   section_name: string | null;
   source_file: string | null;
   rejection_count: number;
+  blocked_reason: string | null;
   created_at: string;
   updated_at: string;
   duration: TaskDuration;
@@ -118,6 +119,7 @@ export interface TaskListItem {
   source_file: string | null;
   rejection_count: number;
   failure_count: number;
+  blocked_reason: string | null;
   created_at: string;
   updated_at: string;
 }
