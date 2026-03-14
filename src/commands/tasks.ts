@@ -31,6 +31,8 @@ import {
   getOrCreateFeedbackSection,
   updateTaskFields,
   promoteTask,
+  addTaskDependency,
+  getTaskDependencies,
   STATUS_MARKERS,
   type Task,
   type TaskStatus,
@@ -50,6 +52,7 @@ import {
   triggerHooksSafely,
 } from '../hooks/integration.js';
 import { resetTaskCmd } from './tasks-reset.js';
+import { addTaskDependencyCmd, removeTaskDependencyCmd, displayTaskDependencies } from './tasks-deps.js';
 import {
   isFileTracked,
   isFileDirty,
@@ -82,6 +85,8 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { name: 'audit', args: '<id|title>', description: 'View task audit trail' },
     { name: 'promote', args: '<id>', description: 'Enable auto-implementation for a deferred follow-up' },
     { name: 'reset', args: '[<id|title>]', description: 'Reset failed/disputed tasks to pending' },
+    { name: 'depends-on', args: '<id> <dep-id>', description: 'Add task dependency (id depends on dep-id)' },
+    { name: 'no-depends-on', args: '<id> <dep-id>', description: 'Remove task dependency' },
   ],
   options: [
     { short: 's', long: 'status', description: 'Filter by status', values: 'pending | in_progress | review | completed | disputed | failed | skipped | partial | active | all', default: 'pending' },
@@ -203,6 +208,12 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
       break;
     case 'reset':
       await resetTaskCmd(subArgs, flags);
+      break;
+    case 'depends-on':
+      await addTaskDependencyCmd(subArgs, flags);
+      break;
+    case 'no-depends-on':
+      await removeTaskDependencyCmd(subArgs, flags);
       break;
     case 'list':
       await listAllTasks(subArgs, flags);
@@ -666,6 +677,7 @@ async function addTask(args: string[], flags: GlobalFlags, options?: AddTaskOpti
       source: { type: 'string' },
       file: { type: 'string' },
       line: { type: 'string' },
+      'depends-on': { type: 'string' },
       feedback: { type: 'boolean', default: false },
     },
     allowPositionals: true,
@@ -707,11 +719,13 @@ OPTIONS:
   --feedback            Add to "Needs User Input" section (skipped, for human review)
   --file <path>         Anchor task to a committed file
   --line <number>       Line number in the anchored file (requires --file)
+  --depends-on <id>     Make this task depend on another task (by ID prefix)
   -h, --help            Show help
 
 EXAMPLES:
   steroids tasks add "Implement login" --section abc123 --source docs/login-spec.md
   steroids tasks add "Fix null check" --section abc123 --source spec.md --file src/utils.ts --line 42
+  steroids tasks add "Build API" --section abc123 --source spec.md --depends-on def456
   steroids tasks add "Pre-existing execSync in queries.ts needs review" --feedback
   steroids tasks add "Should we use Redis or in-memory cache?" --feedback
 `);
@@ -843,6 +857,25 @@ EXAMPLES:
       );
     }
 
+    // Add dependency if --depends-on is provided
+    const dependsOnInput = values['depends-on'] as string | undefined;
+    let depTask: ReturnType<typeof getTask> = null;
+    if (dependsOnInput) {
+      depTask = getTask(db, dependsOnInput);
+      if (!depTask) {
+        out.error(ErrorCode.TASK_NOT_FOUND, `Dependency task not found: ${dependsOnInput}`, {
+          identifier: dependsOnInput,
+        });
+        process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
+      }
+      try {
+        addTaskDependency(db, task.id, depTask.id);
+      } catch (error: any) {
+        out.error(ErrorCode.INVALID_ARGUMENTS, `Failed to add dependency: ${error.message}`);
+        process.exit(getExitCode(ErrorCode.INVALID_ARGUMENTS));
+      }
+    }
+
     out.success({ task, feedback: isFeedbackTask });
     if (!flags.json) {
       out.log(`Task created: ${task.title}`);
@@ -858,6 +891,9 @@ EXAMPLES:
         const lineStr = task.file_line ? `:${task.file_line}` : '';
         out.log(`  File: ${task.file_path}${lineStr}`);
         out.log(`  Commit: ${task.file_commit_sha?.substring(0, 7) ?? 'unknown'}`);
+      }
+      if (depTask) {
+        out.log(`  Depends on: ${depTask.title} (${depTask.id.substring(0, 8)})`);
       }
     }
   });
@@ -1428,8 +1464,9 @@ OPTIONS:
     }
 
     const entries = getTaskAudit(db, task.id);
+    const deps = getTaskDependencies(db, task.id);
 
-    out.success({ task: { id: task.id, title: task.title }, auditTrail: entries });
+    out.success({ task: { id: task.id, title: task.title }, auditTrail: entries, dependencies: deps });
 
     if (!flags.json) {
       out.log(`Audit trail for: ${task.title}`);
@@ -1445,6 +1482,16 @@ OPTIONS:
         const actor = entry.actor.padEnd(18);
         const notes = entry.notes ?? '-';
         out.log(`${ts}  ${from} ${to} ${actor} ${notes}`);
+      }
+
+      if (deps.length > 0) {
+        out.log('');
+        out.log('DEPENDENCIES (must complete first):');
+        for (const dep of deps) {
+          const marker = STATUS_MARKERS[dep.status] ?? '?';
+          const shortId = dep.id.substring(0, 8);
+          out.log(`  ${marker} ${shortId}  ${dep.title}  (${dep.status})`);
+        }
       }
     }
   });
