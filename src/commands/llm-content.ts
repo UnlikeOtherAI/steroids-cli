@@ -10,6 +10,8 @@ Deterministic daemon — never makes decisions, just follows the state machine.
 - Never touch '.steroids/steroids.db' directly — no raw SQL, no sqlite3.
 - Use 'steroids llm' first to understand how to inspect or manipulate the system.
 - Read/write operations must go through the steroids CLI only.
+- NEVER commit '.steroids/' to git — add it to .gitignore. Tracking it breaks
+  runner workspace isolation and causes data loss.
 
 ## TASK SIZING (CRITICAL)
 
@@ -36,18 +38,20 @@ and the coder needs enough scope to make meaningful progress.
 
 ## TASK STATE MACHINE
 
-### All 8 Statuses
+### All 10 Statuses
 
-| Marker | Status      | Terminal? | Runner picks it? | Description                                    |
-|--------|-------------|-----------|-------------------|------------------------------------------------|
-| [ ]    | pending     | No        | YES → coder       | Not started, waiting for coder                 |
-| [-]    | in_progress | No        | YES → coder       | Coder is actively working                      |
-| [o]    | review      | No        | YES → reviewer     | Coder finished, waiting for reviewer            |
-| [x]    | completed   | YES       | No                | Reviewer approved, code pushed                 |
-| [!]    | disputed    | YES       | No                | Coder/reviewer disagreement, code pushed       |
-| [F]    | failed      | YES       | No                | Exceeded 15 rejections, needs human            |
-| [S]    | skipped     | YES       | No                | Fully external — nothing to code               |
-| [s]    | partial     | YES       | No                | Some coded, rest needs external setup           |
+| Marker | Status           | Terminal? | Runner picks it? | Description                                    |
+|--------|------------------|-----------|-------------------|------------------------------------------------|
+| [ ]    | pending          | No        | YES → coder       | Not started, waiting for coder                 |
+| [-]    | in_progress      | No        | YES → coder       | Coder is actively working                      |
+| [o]    | review           | No        | YES → reviewer     | Coder finished, waiting for reviewer            |
+| [x]    | completed        | YES       | No                | Reviewer approved, code pushed                 |
+| [!]    | disputed         | YES       | No                | Coder/reviewer disagreement, code pushed       |
+| [F]    | failed           | YES       | No                | Exceeded 15 rejections, needs human            |
+| [S]    | skipped          | YES       | No                | Fully external — nothing to code               |
+| [s]    | partial          | YES       | No                | Some coded, rest needs external setup           |
+| [B]    | blocked_error    | YES       | No                | Infrastructure error (e.g. .steroids in git)   |
+| [C]    | blocked_conflict | YES       | No                | Merge conflict, needs human resolution         |
 
 CRITICAL: skipped [S] and partial [s] are TERMINAL states. The runner will NEVER
 pick them up for coding. Once a task is marked partial/skipped, it is DONE from the
@@ -106,6 +110,20 @@ Commands:
   steroids sections graph --mermaid                 # Mermaid syntax
   steroids sections graph --json                    # JSON output
 
+## TASK DEPENDENCIES
+
+Tasks can declare dependencies on other tasks within or across sections:
+  steroids tasks depends-on <A> <B>     # Task A depends on Task B
+
+Effect: Task B must reach a terminal status (completed, disputed, skipped, partial)
+before the runner will pick up Task A. Unlike section dependencies which block entire
+sections, task dependencies provide fine-grained ordering within sections.
+
+Commands:
+  steroids tasks depends-on <A> <B>          # add dependency
+  steroids tasks no-depends-on <A> <B>       # remove dependency
+  steroids tasks audit <id>                   # shows dependencies in output
+
 ## ARCHITECTURE
 - Tasks stored in .steroids/steroids.db (SQLite, per project)
 - Runner daemon executes the loop (one per project)
@@ -144,6 +162,8 @@ Options:
                      Auto-captures: commit SHA of last change + content hash
                      Coder/reviewer prompts will reference this exact location
   --line <number>    Line number in the anchored file (requires --file)
+  --description <text> Free-text description (max 4000 chars) for coder/reviewer context
+  --depends-on <id>    Task ID that must complete before this task can start
   --feedback         Add to skipped "Needs User Input" section for human review
                      Skips --section and --source requirements
 
@@ -245,6 +265,10 @@ steroids tasks update <id> --status pending --reset-rejections  # reset to pendi
 steroids tasks update <id> --status pending --actor human:cli
 # Use when: a task was marked partial/skipped but still needs coding
 
+### Reset project (start over with clean tasks)
+steroids reset-project -y              # reset all tasks to pending, clear all history
+                                        # keeps tasks, sections, and dependencies intact
+
 ### Skip external setup task
 steroids tasks skip <id> --notes "spec says SKIP, needs Cloud SQL setup"
 # Use when: spec says SKIP/MANUAL, requires cloud console, account creation, etc.
@@ -301,6 +325,36 @@ If you see "Database schema is out of date" errors:
 ALWAYS run \`steroids health\` before adding the first task to a project you haven't
 touched recently. This ensures the schema is current and prevents cryptic SQL errors
 during task creation or runner execution.
+
+## TASK AUTHORING BEST PRACTICES
+
+### Specification Files
+- Write focused markdown specs in specs/ directory
+- Include: purpose, requirements, acceptance criteria, code patterns to follow
+- Commit spec files before creating tasks that reference them
+
+### File Anchoring
+Anchor tasks to specific source files so the coder knows where to work:
+  steroids tasks add "Fix auth" --section <id> --source specs/auth.md --file src/auth.ts --line 42
+Steroids captures commit SHA + content hash at creation time for drift detection.
+
+### Content Hashing for Precision
+Include content hashes in description to help agents locate exact code:
+  1. Hash the target code: sha256sum <<< "function processPayment()"
+  2. Reference in description: --description "Modify processPayment() [sha256:a1b2c3] to add retry"
+  3. Agent verifies it found the right code by comparing hashes
+
+### Description Field
+Use --description (-d) for context beyond the spec file:
+- Which functions/classes to modify and their content hashes
+- Integration notes ("output consumed by task X")
+- Constraints ("must not change public API surface")
+Max 4000 characters.
+
+### Task Ordering
+When tasks in the same section must run in sequence:
+  steroids tasks depends-on <later-task> <earlier-task>
+Example: "Set up Prisma" depends on "Initialize monorepo"
 
 ## IMPORTANT NOTES
 - Task spec is in source file (see tasks audit output)
