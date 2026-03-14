@@ -38,6 +38,7 @@ import { workspacesCommand } from './commands/workspaces.js';
 import { skillsCommand } from './commands/skills.js';
 import { hfCommand } from './commands/hf.js';
 import { statusCommand } from './commands/status.js';
+import { resetProject } from './commands/project-reset.js';
 import { checkForNewVersion } from './cli/version-check.js';
 
 // Read version from package.json - search up from dist folder
@@ -97,6 +98,7 @@ COMMANDS:
   workspaces        Manage parallel workspace clones
   locks             Manage task and section locks
   skills            Manage custom AI skills and assignments
+  reset-project     Reset project to clean state (preserves structure)
 
 GLOBAL OPTIONS:
   -h, --help        Show help
@@ -259,6 +261,9 @@ async function main(): Promise<void> {
         break;
       case 'status':
         await statusCommand(commandArgs, flags);
+        break;
+      case 'reset-project':
+        await resetProject(commandArgs, flags);
         break;
       default:
         if (flags.json) {
