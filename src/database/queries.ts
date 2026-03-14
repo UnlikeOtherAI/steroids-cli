@@ -53,6 +53,7 @@ export interface Task {
   reference_task_id?: string | null;
   reference_commit?: string | null;
   reference_commit_message?: string | null;
+  description?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -702,19 +703,21 @@ export function createTask(
     fileLine?: number;
     fileCommitSha?: string;
     fileContentHash?: string;
+    description?: string;
   } = {}
 ): Task {
   const id = uuidv4();
   const status = options.status ?? 'pending';
 
   db.prepare(
-    `INSERT INTO tasks (id, title, status, section_id, source_file, file_path, file_line, file_commit_sha, file_content_hash, start_commit_sha)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO tasks (id, title, status, section_id, source_file, file_path, file_line, file_commit_sha, file_content_hash, start_commit_sha, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, title, status,
     options.sectionId ?? null, options.sourceFile ?? null,
     options.filePath ?? null, options.fileLine ?? null,
-    options.fileCommitSha ?? null, options.fileContentHash ?? null, null
+    options.fileCommitSha ?? null, options.fileContentHash ?? null, null,
+    options.description ?? null
   );
 
   // Add audit entry for creation
@@ -731,6 +734,7 @@ export function createTask(
     file_commit_sha: options.fileCommitSha ?? null,
     file_content_hash: options.fileContentHash ?? null,
     start_commit_sha: null,
+    description: options.description ?? null,
     rejection_count: 0,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -976,6 +980,7 @@ export function clearTaskFailureCount(db: Database.Database, taskId: string): nu
  */
 export interface TaskFieldUpdates {
   title?: string;
+  description?: string | null;
   sourceFile?: string;
   sectionId?: string;
   filePath?: string | null;
@@ -998,6 +1003,7 @@ export function updateTaskFields(
   const params: unknown[] = [];
 
   if (fields.title !== undefined) { sets.push('title = ?'); params.push(fields.title); }
+  if (fields.description !== undefined) { sets.push('description = ?'); params.push(fields.description); }
   if (fields.sourceFile !== undefined) { sets.push('source_file = ?'); params.push(fields.sourceFile); }
   if (fields.sectionId !== undefined) { sets.push('section_id = ?'); params.push(fields.sectionId); }
   if (fields.filePath !== undefined) { sets.push('file_path = ?'); params.push(fields.filePath); }

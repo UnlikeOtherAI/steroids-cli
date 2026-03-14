@@ -677,6 +677,7 @@ async function addTask(args: string[], flags: GlobalFlags, options?: AddTaskOpti
       source: { type: 'string' },
       file: { type: 'string' },
       line: { type: 'string' },
+      description: { type: 'string', short: 'd' },
       'depends-on': { type: 'string' },
       feedback: { type: 'boolean', default: false },
     },
@@ -719,6 +720,7 @@ OPTIONS:
   --feedback            Add to "Needs User Input" section (skipped, for human review)
   --file <path>         Anchor task to a committed file
   --line <number>       Line number in the anchored file (requires --file)
+  -d, --description <text>  Optional description (max 4000 chars)
   --depends-on <id>     Make this task depend on another task (by ID prefix)
   -h, --help            Show help
 
@@ -843,6 +845,7 @@ EXAMPLES:
     const task = createTask(db, title, {
       sectionId: section.id,
       sourceFile: values.source ?? undefined,
+      description: values.description ?? undefined,
       filePath,
       fileLine,
       fileCommitSha,
@@ -912,6 +915,7 @@ async function updateTask(args: string[], flags: GlobalFlags): Promise<void> {
       help: { type: 'boolean', short: 'h', default: false },
       status: { type: 'string' },
       title: { type: 'string' },
+      description: { type: 'string', short: 'd' },
       source: { type: 'string' },
       section: { type: 'string' },
       file: { type: 'string' },
@@ -935,6 +939,7 @@ OPTIONS:
   --status <status>     New status: pending | in_progress | review | completed
                         Setting status to pending clears failure_count for manual restarts
   --title <text>        Change the task title
+  -d, --description <text>  Change the task description (max 4000 chars)
   --source <file>       Change the specification file
   --section <id>        Move task to a different section
   --file <path>         Change the anchored file (or set one)
@@ -956,10 +961,10 @@ EXAMPLES:
     return;
   }
 
-  const hasFieldUpdate = values.title || values.source || values.section || values.file || values.line;
+  const hasFieldUpdate = values.title || values.description || values.source || values.section || values.file || values.line;
 
   if (!values.status && !values['reset-rejections'] && !hasFieldUpdate) {
-    out.error(ErrorCode.INVALID_ARGUMENTS, 'At least one option required (--status, --source, --title, --section, --file, --reset-rejections)');
+    out.error(ErrorCode.INVALID_ARGUMENTS, 'At least one option required (--status, --source, --title, --description, --section, --file, --reset-rejections)');
     process.exit(1);
   }
 
@@ -994,6 +999,7 @@ EXAMPLES:
       const fields: Parameters<typeof updateTaskFields>[2] = {};
 
       if (values.title) fields.title = values.title;
+      if (values.description !== undefined) fields.description = values.description;
       if (values.source) fields.sourceFile = values.source;
       if (values.section) {
         const section = getSection(db, values.section);
@@ -1470,6 +1476,9 @@ OPTIONS:
 
     if (!flags.json) {
       out.log(`Audit trail for: ${task.title}`);
+      if (task.description) {
+        out.log(`Description: ${task.description}`);
+      }
       out.log(`Task ID: ${task.id}`);
       out.log('─'.repeat(80));
       out.log('TIMESTAMP            FROM         TO           ACTOR              NOTES');
