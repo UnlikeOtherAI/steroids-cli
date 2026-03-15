@@ -351,7 +351,7 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
           `SELECT
             t.id, t.title, t.status, t.section_id,
             s.name as section_name,
-            t.source_file, t.rejection_count,
+            t.source_file, t.rejection_count, t.blocked_reason,
             t.created_at, t.updated_at
           FROM tasks t
           LEFT JOIN sections s ON t.section_id = s.id
@@ -1066,7 +1066,7 @@ router.get('/projects/:projectPath(*)/tasks', (req: Request, res: Response) => {
         SELECT
           t.id, t.title, t.status, t.section_id,
           s.name as section_name,
-          t.source_file, t.rejection_count, t.failure_count,
+          t.source_file, t.rejection_count, t.failure_count, t.blocked_reason,
           t.created_at, t.updated_at
         FROM tasks t
         LEFT JOIN sections s ON t.section_id = s.id
