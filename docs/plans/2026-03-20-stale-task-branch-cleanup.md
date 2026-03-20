@@ -55,7 +55,7 @@ export function deleteTaskBranchFromSlot(
   slotPath: string,
   taskBranch: string,
   options?: { deleteRemote?: boolean; remoteUrl?: string | null }
-): void {
+): boolean {
   console.log(`[workspace] Deleting stale task branch ${taskBranch} from ${slotPath}`);
 
   // Detach HEAD to avoid "cannot delete checked out branch" — works
@@ -63,7 +63,11 @@ export function deleteTaskBranchFromSlot(
   execGit(slotPath, ['checkout', '--detach'], { tolerateFailure: true });
 
   // Delete local branch
-  execGit(slotPath, ['branch', '-D', taskBranch], { tolerateFailure: true });
+  const deleted = execGit(slotPath, ['branch', '-D', taskBranch], { tolerateFailure: true });
+  if (deleted === null) {
+    console.warn(`[workspace] WARNING: failed to delete ${taskBranch} from ${slotPath} — stale branch may persist`);
+    return false;
+  }
 
   // Delete remote branch only when explicitly requested (manual reset path)
   if (options?.deleteRemote && options?.remoteUrl) {
@@ -71,6 +75,7 @@ export function deleteTaskBranchFromSlot(
       tolerateFailure: true,
     });
   }
+  return true;
 }
 ```
 
@@ -109,12 +114,13 @@ export function handleMergeFailure(...): MergeFailureResult {
 
 ### Call site 2: `tasks-reset.ts`
 
-After the DB transaction, scan **idle** pool slots only and delete matching branches (local + remote):
+After the DB transaction, scan pool slots that are either **idle** or **bound to the task being reset** (catches SIGKILL'd runners that left slots in `merging`/`review_active`):
 
 ```typescript
 import { deleteTaskBranchFromSlot } from '../workspace/git-lifecycle.js';
+import { releaseSlot } from '../workspace/pool.js';
 
-// After the DB transaction, clean up stale task branches from idle pool slots
+// After the DB transaction, clean up stale task branches from pool slots
 const { db: globalDb2, close: closeGlobal2 } = openGlobalDatabase();
 try {
   const project = globalDb2
@@ -122,21 +128,32 @@ try {
     .get(projectPath) as { id: string } | undefined;
 
   if (project) {
-    const slots = globalDb2
-      .prepare(
-        `SELECT slot_path, remote_url FROM workspace_pool_slots
-         WHERE project_id = ? AND status = 'idle'`
-      )
-      .all(project.id) as Array<{ slot_path: string; remote_url: string | null }>;
-
     for (const task of fullyValidatedTasks) {
       const taskBranch = `steroids/task-${task.id}`;
+
+      // Find slots that are idle OR still bound to this task (SIGKILL'd runner)
+      const slots = globalDb2
+        .prepare(
+          `SELECT id, slot_path, remote_url, status, task_id
+           FROM workspace_pool_slots
+           WHERE project_id = ? AND (status = 'idle' OR task_id = ?)`
+        )
+        .all(project.id, task.id) as Array<{
+          id: number; slot_path: string; remote_url: string | null;
+          status: string; task_id: string | null;
+        }>;
+
       for (const slot of slots) {
-        if (slot.slot_path && existsSync(join(slot.slot_path, '.git'))) {
-          deleteTaskBranchFromSlot(slot.slot_path, taskBranch, {
-            deleteRemote: true,
-            remoteUrl: slot.remote_url,
-          });
+        if (!slot.slot_path || !existsSync(join(slot.slot_path, '.git'))) continue;
+
+        deleteTaskBranchFromSlot(slot.slot_path, taskBranch, {
+          deleteRemote: true,
+          remoteUrl: slot.remote_url,
+        });
+
+        // Release non-idle slots that were bound to this task
+        if (slot.status !== 'idle' && slot.task_id === task.id) {
+          releaseSlot(globalDb2, slot.id);
         }
       }
     }
@@ -244,14 +261,18 @@ export function deleteTaskBranchFromSlot(
   slotPath: string,
   taskBranch: string,
   options?: { deleteRemote?: boolean; remoteUrl?: string | null }
-): void {
+): boolean {
   console.log(`[workspace] Deleting stale task branch ${taskBranch} from ${slotPath}`);
 
   // Detach HEAD -- works regardless of what branches exist
   execGit(slotPath, ['checkout', '--detach'], { tolerateFailure: true });
 
   // Delete local branch
-  execGit(slotPath, ['branch', '-D', taskBranch], { tolerateFailure: true });
+  const deleted = execGit(slotPath, ['branch', '-D', taskBranch], { tolerateFailure: true });
+  if (deleted === null) {
+    console.warn(`[workspace] WARNING: failed to delete ${taskBranch} from ${slotPath} — stale branch may persist`);
+    return false;
+  }
 
   // Delete remote only when explicitly requested (manual reset path)
   if (options?.deleteRemote && options?.remoteUrl) {
@@ -259,6 +280,7 @@ export function deleteTaskBranchFromSlot(
       tolerateFailure: true,
     });
   }
+  return true;
 }
 ```
 
@@ -433,7 +455,7 @@ git commit -m "fix: delete stale task branch on rebase conflict to prevent infin
 
 ---
 
-### Task 3: Wire branch cleanup into `tasks-reset.ts` (idle slots only) + test
+### Task 3: Wire branch cleanup into `tasks-reset.ts` + fix `conflict_count` reset SQL
 
 **Files:**
 - Modify: `src/commands/tasks-reset.ts` (add branch cleanup after DB transaction)
@@ -480,15 +502,26 @@ Expected: PASS
 
 **Step 3: Modify `tasks-reset.ts`**
 
-Add import at top:
+Add imports at top:
 ```typescript
 import { deleteTaskBranchFromSlot } from '../workspace/git-lifecycle.js';
+import { releaseSlot } from '../workspace/pool.js';
 ```
 
-After the `db.transaction()()` block (after line 176), add:
+**Sub-step 3a:** Fix the `conflict_count` reset SQL in the DB transaction (line 152-156). Change from conditional to unconditional zero:
 
 ```typescript
-    // Clean up stale task branches from idle pool slots
+// BEFORE (bug: conflict_count not zeroed for blocked_error)
+conflict_count = CASE WHEN ? = 'blocked_conflict' THEN 0 ELSE conflict_count END
+
+// AFTER (always zero conflict_count on any blocked-task reset)
+conflict_count = 0
+```
+
+**Sub-step 3b:** After the `db.transaction()()` block (after line 176), add branch cleanup:
+
+```typescript
+    // Clean up stale task branches from pool slots
     const { db: globalDb2, close: closeGlobal2 } = openGlobalDatabase();
     try {
       const project = globalDb2
@@ -496,21 +529,32 @@ After the `db.transaction()()` block (after line 176), add:
         .get(projectPath) as { id: string } | undefined;
 
       if (project) {
-        const slots = globalDb2
-          .prepare(
-            `SELECT slot_path, remote_url FROM workspace_pool_slots
-             WHERE project_id = ? AND status = 'idle'`
-          )
-          .all(project.id) as Array<{ slot_path: string; remote_url: string | null }>;
-
         for (const task of fullyValidatedTasks) {
           const taskBranch = `steroids/task-${task.id}`;
+
+          // Find slots that are idle OR still bound to this task (SIGKILL'd runner)
+          const slots = globalDb2
+            .prepare(
+              `SELECT id, slot_path, remote_url, status, task_id
+               FROM workspace_pool_slots
+               WHERE project_id = ? AND (status = 'idle' OR task_id = ?)`
+            )
+            .all(project.id, task.id) as Array<{
+              id: number; slot_path: string; remote_url: string | null;
+              status: string; task_id: string | null;
+            }>;
+
           for (const slot of slots) {
-            if (slot.slot_path && existsSync(join(slot.slot_path, '.git'))) {
-              deleteTaskBranchFromSlot(slot.slot_path, taskBranch, {
-                deleteRemote: true,
-                remoteUrl: slot.remote_url,
-              });
+            if (!slot.slot_path || !existsSync(join(slot.slot_path, '.git'))) continue;
+
+            deleteTaskBranchFromSlot(slot.slot_path, taskBranch, {
+              deleteRemote: true,
+              remoteUrl: slot.remote_url,
+            });
+
+            // Release non-idle slots that were bound to this task
+            if (slot.status !== 'idle' && slot.task_id === task.id) {
+              releaseSlot(globalDb2, slot.id);
             }
           }
         }
@@ -566,8 +610,10 @@ Monitor: the task should fork from current `origin/main`, pass review, and merge
 | Currently checked out on task branch | `git checkout --detach` first |
 | Base branch is not `main` (e.g. `develop`) | `--detach` is base-branch-agnostic |
 | Remote push --delete fails | `tolerateFailure: true` -- local cleanup is sufficient |
-| Multiple pool slots have same task branch | tasks-reset loop cleans all idle slots |
-| Slot is busy with another task | tasks-reset filters `status = 'idle'` only |
+| Multiple pool slots have same task branch | tasks-reset loop cleans all matching slots |
+| Slot is busy with another task | tasks-reset filters `status = 'idle' OR task_id = ?` |
+| SIGKILL'd runner left slot in `merging` | tasks-reset finds via `task_id` match, releases slot |
+| `branch -D` fails silently (corrupted repo) | Helper returns `false` + emits warning; degrades to pre-fix behavior |
 | Infrastructure/general merge failure | Branch preserved for diagnosis (only conflict deletes) |
 | Coder session interrupted mid-work | Task stays `in_progress` -- `handleMergeFailure` not called |
 
@@ -608,3 +654,23 @@ Monitor: the task should fork from current `origin/main`, pass review, and merge
 - `conflict_count` should NOT auto-reset on branch deletion (masks real repeated conflicts)
 - `partialReleaseSlot` interaction is a non-issue (merge failure only fires after review phase)
 - `ws-*` workstream directories are not part of the pool system
+
+### Round 2 — Loop Safety and Death Spiral Review
+
+| # | Source | Finding | Severity | Decision |
+|---|--------|---------|----------|----------|
+| S1 | Claude R2 | `tasks-reset` doesn't zero `conflict_count` for `blocked_error` tasks — reset task can be immediately re-blocked after 1 conflict | CRITICAL | **ADOPT** -- unconditionally zero `conflict_count` on all blocked-task resets |
+| X-F1 | Codex R2 | Manual reset misses stale branches in non-idle slots (SIGKILL'd runner leaves slot in `merging`) | HIGH | **ADOPT** -- expand filter to `status='idle' OR task_id=?`, release non-idle slots |
+| X-F2 | Codex R2 | SIGTERM during conflict-cleanup can leave task in `review` + wakeup-sanitise auto-completes | HIGH | **PRE-EXISTING** -- SIGTERM window existed before this change; not worsened. Follow-up task. |
+| X-F3 | Codex R2 | `deleteTaskBranchFromSlot` fails silently, stale branch survives | MEDIUM | **ADOPT** -- return `boolean`, emit warning on failure |
+| A1 | Claude R2 | Double `releaseSlot` race (handleMergeFailure + finally block) | MEDIUM | **PRE-EXISTING** -- follow-up: add runner_id guard in finally block |
+| C1 | Claude R2 | Three `releaseSlot` calls vs one | MEDIUM | **ACCEPTED** -- structurally required by path-specific pre-release logic |
+| D1 | Claude R2 | `tolerateFailure` masks corrupted repo | MEDIUM | **ACCEPTED** -- degrades to pre-fix behavior, not a new failure mode |
+
+### Loop Safety Verdict (Claude R2)
+All 8 lifecycle paths traced and verified safe:
+- (a) Happy path: untouched. (b) Conflict retry: fresh branch on next pickup, counter incremented correctly.
+- (c) Infrastructure: branch preserved. (d) General failure: branch preserved.
+- (e) No commits: not reached. (f) Reviewer reject: branch intact.
+- (g) SIGTERM during merge: pre-existing risk, not worsened.
+- (h) Multiple runners: slot exclusivity prevents race.
