@@ -60,7 +60,7 @@ function cleanupStaleRunners(globalDb: any, dryRun: boolean, log: WakeupLogger):
               r.parallel_session_id
        FROM runners r
        LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
-       WHERE r.status != 'idle'`
+       WHERE r.pid IS NOT NULL`
     ).all() as Array<{
       id: string;
       pid: number | null;

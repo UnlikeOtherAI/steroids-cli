@@ -53,14 +53,14 @@ describe('performWakeupGlobalMaintenance', () => {
     jest.restoreAllMocks();
   });
 
-  it('purges dead non-idle runner rows during wakeup', async () => {
+  it('purges dead idle runner rows during wakeup', async () => {
     const deletedRunnerIds: string[] = [];
     const globalDb = {
       prepare: (sql: string) => {
-        if (sql.includes('FROM runners r') && sql.includes("WHERE r.status != 'idle'")) {
+        if (sql.includes('FROM runners r') && sql.includes('WHERE r.pid IS NOT NULL')) {
           return {
             all: () => [{
-              id: 'runner-dead',
+              id: 'runner-idle-dead',
               pid: 4242,
               heartbeat_at: '2026-03-20 14:00:00',
               current_task_id: null,
@@ -90,7 +90,7 @@ describe('performWakeupGlobalMaintenance', () => {
       log: jest.fn(),
     });
 
-    expect(deletedRunnerIds).toEqual(['runner-dead']);
+    expect(deletedRunnerIds).toEqual(['runner-idle-dead']);
     expect(mockKillProcess).not.toHaveBeenCalled();
   });
 });

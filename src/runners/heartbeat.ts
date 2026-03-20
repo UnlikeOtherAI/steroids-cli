@@ -52,6 +52,8 @@ export function findStaleRunners(
   // parallel workstream runners, whose r.project_path is a clone workspace
   // path that may not contain a steroids DB. COALESCE falls back to
   // r.project_path for standalone runners (parallel_session_id IS NULL).
+  // Idle runners still heartbeat while their process is alive, so a stale
+  // idle row is abandoned just like a stale running row.
   return db
     .prepare(
       `SELECT r.id, r.pid, r.heartbeat_at, r.current_task_id,
@@ -59,7 +61,7 @@ export function findStaleRunners(
               r.parallel_session_id
        FROM runners r
        LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
-       WHERE r.heartbeat_at < datetime('now', '-5 minutes') AND r.status != 'idle'`
+       WHERE r.heartbeat_at < datetime('now', '-5 minutes')`
     )
     .all() as Array<{ id: string; pid: number | null; heartbeat_at: string; current_task_id: string | null; project_path: string | null; parallel_session_id: string | null }>;
 }
