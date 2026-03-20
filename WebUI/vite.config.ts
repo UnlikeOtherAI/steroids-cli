@@ -4,6 +4,10 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // Project detail pages lazy-load chunks that must stay parseable in older Safari/WebKit engines.
+    target: 'es2019',
+  },
   server: {
     host: '0.0.0.0', // Listen on all interfaces (localhost + IP)
     port: 3500,
