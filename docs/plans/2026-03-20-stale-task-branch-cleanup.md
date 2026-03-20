@@ -83,6 +83,8 @@ export function deleteTaskBranchFromSlot(
 
 In `src/workspace/merge-pipeline.ts`, add branch deletion ONLY on the conflict path, BEFORE `releaseSlot`. Do NOT delete on infrastructure or general merge failures — the branch may be the only copy of valid coder work for diagnosis.
 
+**IMPORTANT:** The existing function uses early `return` in each branch. Preserve that structure — each of the three paths (infrastructure, conflict, general) must `return` independently. Move `releaseSlot` from the single call at line 38 into each branch individually.
+
 ```typescript
 import { deleteTaskBranchFromSlot } from './git-lifecycle.js';
 
@@ -90,7 +92,8 @@ export function handleMergeFailure(...): MergeFailureResult {
   // Infrastructure failure — block immediately, PRESERVE branch for diagnosis
   if (mergeResult.infrastructure) {
     releaseSlot(ctx.globalDb, ctx.slot.id);
-    // ... existing logic ...
+    // ... existing setTaskBlocked + return ...
+    return { taskBlocked: true, blockStatus: 'blocked_error', reason: ... };
   }
 
   if (mergeResult.conflict) {
@@ -103,30 +106,33 @@ export function handleMergeFailure(...): MergeFailureResult {
       deleteTaskBranchFromSlot(slot.slot_path, slot.task_branch);
     }
     releaseSlot(ctx.globalDb, ctx.slot.id);
-    // ... existing conflict counter / block logic ...
+    // ... existing conflict counter / block logic + return ...
+    return { ... };
   }
 
   // General merge failure — PRESERVE branch, only release slot
   releaseSlot(ctx.globalDb, ctx.slot.id);
-  // ... existing general failure logic ...
+  // ... existing general failure logic + return ...
+  return { ... };
 }
 ```
 
 ### Call site 2: `tasks-reset.ts`
 
-After the DB transaction, scan pool slots that are either **idle** or **bound to the task being reset** (catches SIGKILL'd runners that left slots in `merging`/`review_active`). **Only run for blocked tasks** (`blocked_conflict`/`blocked_error`) — `failed` and `disputed` tasks may have branches with diagnostic value or active work:
+**BEFORE** the DB transaction (while tasks are still in blocked status, no runner can pick them up — eliminates race with runner pickup). Scan pool slots that are either **idle** or **bound to the task being reset** (catches SIGKILL'd runners that left slots in `merging`/`review_active`). **Only run for blocked tasks** (`blocked_conflict`/`blocked_error`) — `failed` and `disputed` tasks may have branches with diagnostic value or active work:
 
 ```typescript
 import { deleteTaskBranchFromSlot } from '../workspace/git-lifecycle.js';
 import { releaseSlot } from '../workspace/pool.js';
 
-// After the DB transaction, clean up stale task branches from blocked tasks only.
-// Blocked tasks have no live runners (terminal status — runner can't pick them up),
-// so the slot's runner is guaranteed dead or absent.
+// ---- ORDERING CONSTRAINT: clean branches BEFORE the DB transaction ----
+// While tasks are still in blocked status, no runner can pick them up.
+// If we cleaned after the transaction (task = pending), a runner could
+// claim the slot between the transaction commit and branch deletion.
 const blockedTasks = fullyValidatedTasks.filter(
   t => t.status === 'blocked_conflict' || t.status === 'blocked_error'
 );
-if (blockedTasks.length === 0) return; // skip branch cleanup for non-blocked resets
+// Branch cleanup only — skip if no blocked tasks
 
 const { db: globalDb2, close: closeGlobal2 } = openGlobalDatabase();
 try {
@@ -465,7 +471,7 @@ git commit -m "fix: delete stale task branch on rebase conflict to prevent infin
 ### Task 3: Wire branch cleanup into `tasks-reset.ts` + fix `conflict_count` reset SQL
 
 **Files:**
-- Modify: `src/commands/tasks-reset.ts` (add branch cleanup after DB transaction)
+- Modify: `src/commands/tasks-reset.ts` (add branch cleanup BEFORE DB transaction)
 - Create: `tests/tasks-reset-branch-cleanup.test.ts`
 
 **Step 1: Write the failing test**
@@ -525,11 +531,13 @@ conflict_count = CASE WHEN ? = 'blocked_conflict' THEN 0 ELSE conflict_count END
 conflict_count = 0
 ```
 
-**Sub-step 3b:** After the `db.transaction()()` block (after line 176), add branch cleanup for blocked tasks only:
+**Sub-step 3b:** **BEFORE** the `db.transaction()()` block (before line 148), add branch cleanup for blocked tasks only. This eliminates the race with runner pickup — while tasks are still in blocked status, no runner can claim them:
 
 ```typescript
-    // Clean up stale task branches — only for blocked tasks (not failed/disputed).
-    // Blocked tasks have no live runners (terminal status), so slots are safe to touch.
+    // ---- ORDERING CONSTRAINT: clean branches BEFORE the DB transaction ----
+    // While tasks are still blocked, no runner can pick them up. If we cleaned
+    // after the transaction (task = pending), a runner could claim the slot
+    // between the transaction commit and branch deletion.
     const blockedTasks = fullyValidatedTasks.filter(
       t => t.status === 'blocked_conflict' || t.status === 'blocked_error'
     );
@@ -688,3 +696,11 @@ All 8 lifecycle paths traced and verified safe:
 - (e) No commits: not reached. (f) Reviewer reject: branch intact.
 - (g) SIGTERM during merge: pre-existing risk, not worsened.
 - (h) Multiple runners: slot exclusivity prevents race.
+
+### Round 4 — Final Verification
+
+| # | Source | Finding | Severity | Decision |
+|---|--------|---------|----------|----------|
+| R4-F1 | Codex R4 | Branch deleted on terminal `blocked_conflict` (3rd conflict) — "data loss" because local branch is only copy | CRITICAL→NON-ISSUE | **REJECT** — Stale branch has no diagnostic value: it contains code from a stale fork point that cannot rebase. The human's path is always `tasks reset` (which regenerates fresh code), never manual cherry-pick from a stale branch. If we preserved on block but deleted on reset, we'd add complexity for zero benefit. Coder invocation logs preserve the work product for inspection. |
+| R4-F2 | Codex R4 | Race in tasks-reset: DB transaction sets task to `pending` before branch cleanup → runner could claim slot | HIGH | **ADOPT** — move branch cleanup BEFORE the DB transaction. While task is still `blocked`, no runner can pick it up. Zero-cost fix. |
+| R4-F3 | Claude R4 | Design code sketch lacks explicit `return` statements — could mislead literal implementation | MEDIUM | **ADOPT** — added `return` statements and "preserve early-return structure" note to design sketch |
