@@ -212,6 +212,8 @@ describe('deleteTaskBranchFromSlot', () => {
   beforeEach(() => {
     repoDir = mkdtempSync(join(tmpdir(), 'stale-branch-test-'));
     git(repoDir, ['init']);
+    git(repoDir, ['config', 'user.email', 'test@test.com']);
+    git(repoDir, ['config', 'user.name', 'Test']);
     git(repoDir, ['commit', '--allow-empty', '-m', 'init']);
     git(repoDir, ['checkout', '-b', 'steroids/task-abc123']);
     git(repoDir, ['commit', '--allow-empty', '-m', 'task work']);
@@ -492,6 +494,8 @@ describe('tasks reset branch cleanup', () => {
     const repoDir = mkdtempSync(join(tmpdir(), 'reset-branch-test-'));
     try {
       git(repoDir, ['init']);
+      git(repoDir, ['config', 'user.email', 'test@test.com']);
+      git(repoDir, ['config', 'user.name', 'Test']);
       git(repoDir, ['commit', '--allow-empty', '-m', 'init']);
       git(repoDir, ['checkout', '-b', 'steroids/task-deadbeef']);
       git(repoDir, ['commit', '--allow-empty', '-m', 'work']);
@@ -704,3 +708,12 @@ All 8 lifecycle paths traced and verified safe:
 | R4-F1 | Codex R4 | Branch deleted on terminal `blocked_conflict` (3rd conflict) — "data loss" because local branch is only copy | CRITICAL→NON-ISSUE | **REJECT** — Stale branch has no diagnostic value: it contains code from a stale fork point that cannot rebase. The human's path is always `tasks reset` (which regenerates fresh code), never manual cherry-pick from a stale branch. If we preserved on block but deleted on reset, we'd add complexity for zero benefit. Coder invocation logs preserve the work product for inspection. |
 | R4-F2 | Codex R4 | Race in tasks-reset: DB transaction sets task to `pending` before branch cleanup → runner could claim slot | HIGH | **ADOPT** — move branch cleanup BEFORE the DB transaction. While task is still `blocked`, no runner can pick it up. Zero-cost fix. |
 | R4-F3 | Claude R4 | Design code sketch lacks explicit `return` statements — could mislead literal implementation | MEDIUM | **ADOPT** — added `return` statements and "preserve early-return structure" note to design sketch |
+
+### Round 5 — Final Verification
+
+| # | Source | Finding | Severity | Decision |
+|---|--------|---------|----------|----------|
+| R5-F1 | Codex R5 | Test fixtures omit `git config user.email`/`user.name` — commits fail in environments without global git identity | MEDIUM | **ADOPT** — added `git config` lines to both test snippets |
+
+**Claude R5:** "No critical, high, or medium findings. Design is ready for implementation."
+**Codex R5:** No CRITICAL or HIGH findings. One MEDIUM (test fixture setup) — adopted.
