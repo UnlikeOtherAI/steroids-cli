@@ -19,6 +19,11 @@ import {
 } from '../../../dist/runners/projects.js';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 import { hasActiveParallelSessionForProjectDb } from '../../../dist/runners/parallel-session-state.js';
+import {
+  getInstructionFilesList,
+  readInstructionOverrides,
+  writeInstructionOverrides,
+} from '../../../dist/prompts/instruction-files.js';
 import { isValidProjectPath, validatePathRequest } from '../utils/validation.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
 import { getCachedListStorage } from '../utils/storage-cache.js';
@@ -39,6 +44,13 @@ interface ProjectLiveData {
   last_task_added_at: string | null;
   isBlocked: boolean;
   isUnreachable: boolean;
+}
+
+type InstructionToggleKey = 'agentsMd' | 'claudeMd' | 'geminiMd';
+const instructionToggleKeys: readonly InstructionToggleKey[] = ['agentsMd', 'claudeMd', 'geminiMd'];
+
+function isInstructionToggleKey(value: string): value is InstructionToggleKey {
+  return (instructionToggleKeys as readonly string[]).includes(value);
 }
 
 /**
@@ -768,10 +780,6 @@ router.get('/projects/instructions', (req: Request, res: Response) => {
       res.status(403).json({ success: false, error: 'Invalid project path' });
       return;
     }
-
-    // Dynamically import from compiled dist to avoid circular build issues
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getInstructionFilesList, readInstructionOverrides } = require('../../../dist/prompts/instruction-files.js');
     const files = getInstructionFilesList(projectPath);
     const overrides = readInstructionOverrides(projectPath);
 
@@ -814,25 +822,21 @@ router.post('/projects/instructions', (req: Request, res: Response) => {
       return;
     }
 
-    const validKeys = ['agentsMd', 'claudeMd', 'geminiMd'];
     const updatingFile = key !== undefined;
     const updatingCustom = customInstructions !== undefined;
 
-    if (updatingFile && !validKeys.includes(key!)) {
-      res.status(400).json({ success: false, error: `key must be one of: ${validKeys.join(', ')}` });
+    if (updatingFile && (!key || !isInstructionToggleKey(key))) {
+      res.status(400).json({ success: false, error: `key must be one of: ${instructionToggleKeys.join(', ')}` });
       return;
     }
     if (!updatingFile && !updatingCustom) {
       res.status(400).json({ success: false, error: 'Provide either key+enabled or customInstructions' });
       return;
     }
-
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { readInstructionOverrides, writeInstructionOverrides } = require('../../../dist/prompts/instruction-files.js');
     const overrides = readInstructionOverrides(projectPath);
 
-    if (updatingFile) {
-      overrides[key!] = enabled;
+    if (updatingFile && key) {
+      overrides[key] = enabled;
     }
     if (updatingCustom) {
       overrides.customInstructions = customInstructions;

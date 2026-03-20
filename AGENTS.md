@@ -101,6 +101,10 @@ Treat the intake phase contract as a core-engine invariant. If you add or change
 
 Feature work is incomplete until `README.md`, `AGENTS.md`, and relevant schema/config docs are updated. When adding or changing CLI flags or subcommands, update the help text in `src/commands/`.
 
+### Pulled WebUI Clone (CRITICAL)
+
+Treat `~/.steroids/webui` as a pulled runtime artifact, not a development workspace. Commit and release dashboard/API fixes from this repo only; never rely on uncommitted edits inside `~/.steroids/webui`.
+
 ### Prompt Composition (CRITICAL)
 
 For orchestrator-generated coder/reviewer/coordinator prompts:
