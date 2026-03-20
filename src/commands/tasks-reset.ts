@@ -10,6 +10,7 @@ import type { GlobalFlags } from '../cli/flags.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
 import { deleteTaskBranchFromSlot } from '../workspace/git-lifecycle.js';
 import { releaseSlot } from '../workspace/pool.js';
+import { getProjectHash } from '../parallel/clone.js';
 
 export async function resetTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'tasks', subcommand: 'reset', flags });
@@ -155,40 +156,35 @@ DESCRIPTION:
     );
 
     if (blockedTasks.length > 0) {
+      const projectId = getProjectHash(projectPath);
       const { db: globalDb2, close: closeGlobal2 } = openGlobalDatabase();
       try {
-        const project = globalDb2
-          .prepare('SELECT id FROM projects WHERE path = ?')
-          .get(projectPath) as { id: string } | undefined;
+        for (const task of blockedTasks) {
+          const taskBranch = `steroids/task-${task.id}`;
 
-        if (project) {
-          for (const task of blockedTasks) {
-            const taskBranch = `steroids/task-${task.id}`;
+          // Find slots that are idle OR still bound to this task (SIGKILL'd runner)
+          const slots = globalDb2
+            .prepare(
+              `SELECT id, slot_path, remote_url, status, task_id
+               FROM workspace_pool_slots
+               WHERE project_id = ? AND (status = 'idle' OR task_id = ?)`
+            )
+            .all(projectId, task.id) as Array<{
+              id: number; slot_path: string; remote_url: string | null;
+              status: string; task_id: string | null;
+            }>;
 
-            // Find slots that are idle OR still bound to this task (SIGKILL'd runner)
-            const slots = globalDb2
-              .prepare(
-                `SELECT id, slot_path, remote_url, status, task_id
-                 FROM workspace_pool_slots
-                 WHERE project_id = ? AND (status = 'idle' OR task_id = ?)`
-              )
-              .all(project.id, task.id) as Array<{
-                id: number; slot_path: string; remote_url: string | null;
-                status: string; task_id: string | null;
-              }>;
+          for (const slot of slots) {
+            if (!slot.slot_path || !existsSync(join(slot.slot_path, '.git'))) continue;
 
-            for (const slot of slots) {
-              if (!slot.slot_path || !existsSync(join(slot.slot_path, '.git'))) continue;
+            deleteTaskBranchFromSlot(slot.slot_path, taskBranch, {
+              deleteRemote: true,
+              remoteUrl: slot.remote_url,
+            });
 
-              deleteTaskBranchFromSlot(slot.slot_path, taskBranch, {
-                deleteRemote: true,
-                remoteUrl: slot.remote_url,
-              });
-
-              // Release non-idle slots that were bound to this task
-              if (slot.status !== 'idle' && slot.task_id === task.id) {
-                releaseSlot(globalDb2, slot.id);
-              }
+            // Release non-idle slots that were bound to this task
+            if (slot.status !== 'idle' && slot.task_id === task.id) {
+              releaseSlot(globalDb2, slot.id);
             }
           }
         }
