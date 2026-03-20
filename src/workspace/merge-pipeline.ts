@@ -7,6 +7,7 @@
 import type Database from 'better-sqlite3';
 import type { PoolSlotContext } from './types.js';
 import type { MergeResult } from './git-lifecycle.js';
+import { deleteTaskBranchFromSlot } from './git-lifecycle.js';
 import {
   incrementTaskConflictCount,
   incrementMergeFailureCount,
@@ -34,11 +35,9 @@ export function handleMergeFailure(
   taskId: string,
   mergeResult: MergeResult & { ok: false }
 ): MergeFailureResult {
-  // Release the pool slot back to idle
-  releaseSlot(ctx.globalDb, ctx.slot.id);
-
-  // Infrastructure failure (e.g. missing remote base branch) — block immediately
+  // Infrastructure failure (e.g. missing remote base branch) — block immediately, PRESERVE branch for diagnosis
   if (mergeResult.infrastructure) {
+    releaseSlot(ctx.globalDb, ctx.slot.id);
     setTaskBlocked(
       projectDb,
       taskId,
@@ -53,6 +52,16 @@ export function handleMergeFailure(
   }
 
   if (mergeResult.conflict) {
+    // ---- ORDERING CONSTRAINT: delete branch BEFORE releaseSlot ----
+    // releaseSlot clears task_branch in DB; we read from the in-memory
+    // ctx.slot which still has the value. Once the slot is idle, another
+    // runner could claim it, so the branch must be gone first.
+    const slot = ctx.slot;
+    if (slot.task_branch && slot.slot_path) {
+      deleteTaskBranchFromSlot(slot.slot_path, slot.task_branch);
+    }
+    releaseSlot(ctx.globalDb, ctx.slot.id);
+
     // Rebase conflict path
     const conflictCount = incrementTaskConflictCount(projectDb, taskId);
 
@@ -83,7 +92,8 @@ export function handleMergeFailure(
     };
   }
 
-  // General merge failure (push failure, ff-only failure, etc.)
+  // General merge failure — PRESERVE branch, only release slot
+  releaseSlot(ctx.globalDb, ctx.slot.id);
   const mergeFailureCount = incrementMergeFailureCount(projectDb, taskId);
 
   if (mergeFailureCount >= MAX_MERGE_FAILURE_COUNT) {
