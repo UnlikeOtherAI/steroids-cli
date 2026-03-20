@@ -3,9 +3,11 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { checkLockStatus, removeLock } from './lock.js';
 import { findStaleRunners } from './heartbeat.js';
+import { isProcessAlive } from './lock.js';
 import { openDatabase } from '../database/connection.js';
 import { killProcess } from './wakeup-runner.js';
 import type { WakeupLogger, WakeupResult } from './wakeup-types.js';
+import { cleanupStaleRemoteTaskBranches } from '../workspace/remote-branch-cleanup.js';
 
 interface GlobalMaintenanceOptions {
   globalDb: any;
@@ -52,17 +54,45 @@ function cleanupStaleRunners(globalDb: any, dryRun: boolean, log: WakeupLogger):
 
   try {
     const staleRunners = findStaleRunners(globalDb);
-    if (staleRunners.length === 0) {
+    const deadRunners = globalDb.prepare(
+      `SELECT r.id, r.pid, r.heartbeat_at, r.current_task_id,
+              COALESCE(ps.project_path, r.project_path) AS project_path,
+              r.parallel_session_id
+       FROM runners r
+       LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
+       WHERE r.status != 'idle'`
+    ).all() as Array<{
+      id: string;
+      pid: number | null;
+      heartbeat_at: string;
+      current_task_id: string | null;
+      project_path: string | null;
+      parallel_session_id: string | null;
+    }>;
+
+    const abandonedById = new Map<string, typeof deadRunners[number]>();
+    for (const runner of staleRunners) {
+      abandonedById.set(runner.id, runner);
+    }
+    for (const runner of deadRunners) {
+      if (runner.pid !== null && isProcessAlive(runner.pid)) {
+        continue;
+      }
+      abandonedById.set(runner.id, runner);
+    }
+
+    const abandonedRunners = [...abandonedById.values()];
+    if (abandonedRunners.length === 0) {
       return results;
     }
 
-    log(`Found ${staleRunners.length} stale runner(s), cleaning up...`);
+    log(`Found ${abandonedRunners.length} abandoned runner(s), cleaning up...`);
 
     if (!dryRun) {
-      for (const runner of staleRunners) {
+      for (const runner of abandonedRunners) {
         cleanupStaleRunnerTaskState(runner);
 
-        if (runner.pid) {
+        if (runner.pid && isProcessAlive(runner.pid)) {
           killProcess(runner.pid);
         }
 
@@ -78,8 +108,8 @@ function cleanupStaleRunners(globalDb: any, dryRun: boolean, log: WakeupLogger):
 
     results.push({
       action: 'cleaned',
-      reason: `Cleaned ${staleRunners.length} stale runner(s)`,
-      staleRunners: staleRunners.length,
+      reason: `Cleaned ${abandonedRunners.length} abandoned runner(s)`,
+      staleRunners: abandonedRunners.length,
     });
   } catch {
     // Ignore global DB issues; wakeup will still attempt per-project checks.
@@ -355,6 +385,7 @@ export async function performWakeupGlobalMaintenance(
   await reconcileStaleWorkspaces(globalDb, log);
   cleanupZombieLock(dryRun, log);
   cleanStaleProviderHomes(dryRun, log);
+  cleanupStaleRemoteTaskBranches(dryRun, log);
   await pruneCompletedWorkspaces(globalDb, dryRun, log);
 
   return results;

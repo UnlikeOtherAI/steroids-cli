@@ -35,6 +35,7 @@ const mockRunReviewerPhase = jest.fn();
 const mockHandleCreditExhaustion = jest.fn();
 const mockCheckBatchCreditExhaustion = jest.fn();
 const mockExecSync = jest.fn();
+const mockExecFileSync = jest.fn();
 
 // ── Module mocks ────────────────────────────────────────────────────────
 
@@ -147,6 +148,7 @@ jest.unstable_mockModule('../src/runners/credit-pause.js', () => ({
 
 jest.unstable_mockModule('node:child_process', () => ({
   execSync: mockExecSync,
+  execFileSync: mockExecFileSync,
 }));
 
 // ── Import module under test ────────────────────────────────────────────

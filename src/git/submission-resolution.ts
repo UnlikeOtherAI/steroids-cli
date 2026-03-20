@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { openGlobalDatabase } from '../runners/global-db.js';
+import { getProjectHash } from '../parallel/clone.js';
 import { isCommitReachable, isCommitReachableWithFetch } from './status.js';
 
 interface WorkstreamSource {
@@ -70,7 +70,7 @@ function getParallelWorkstreamSources(projectPath: string): WorkstreamSource[] {
     const sources: WorkstreamSource[] = [];
     for (const row of rows) {
       if (!row.clone_path) continue;
-      const resolvedClonePath = resolve(row.clone_path);
+      const resolvedClonePath = getProjectRepoId(row.clone_path);
       if (resolvedClonePath === normalizedProjectPath) continue;
       if (!existsSync(row.clone_path)) continue;
 
@@ -82,6 +82,47 @@ function getParallelWorkstreamSources(projectPath: string): WorkstreamSource[] {
         branchName: row.branch_name,
       });
     }
+    return sources;
+  });
+}
+
+export function getPoolSlotSources(projectPath: string): WorkstreamSource[] {
+  const normalizedProjectPath = getProjectRepoId(projectPath);
+  const projectId = getProjectHash(normalizedProjectPath);
+
+  return withGlobalDatabase((db) => {
+    const rows = db
+      .prepare(
+        `
+        SELECT slot_path, task_branch
+        FROM workspace_pool_slots
+        WHERE project_id = ?
+          AND slot_path IS NOT NULL
+          AND task_branch IS NOT NULL
+        `
+      )
+      .all(projectId) as Array<{
+      slot_path: string;
+      task_branch: string;
+    }>;
+
+    const seen = new Set<string>();
+    const sources: WorkstreamSource[] = [];
+    for (const row of rows) {
+      if (!row.slot_path || !row.task_branch) continue;
+      const resolvedSlotPath = getProjectRepoId(row.slot_path);
+      if (resolvedSlotPath === normalizedProjectPath) continue;
+      if (!existsSync(row.slot_path)) continue;
+
+      const key = `${resolvedSlotPath}::${row.task_branch}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sources.push({
+        clonePath: row.slot_path,
+        branchName: row.task_branch,
+      });
+    }
+
     return sources;
   });
 }
@@ -219,6 +260,16 @@ export function resolveSubmissionCommitHistoryWithRecovery(
   let sources: WorkstreamSource[] = [];
   try {
     sources = getParallelWorkstreamSources(projectPath);
+    for (const poolSource of getPoolSlotSources(projectPath)) {
+      const duplicate = sources.some(
+        (source) =>
+          resolve(source.clonePath) === resolve(poolSource.clonePath) &&
+          source.branchName === poolSource.branchName
+      );
+      if (!duplicate) {
+        sources.push(poolSource);
+      }
+    }
   } catch {
     return {
       latestReachableSha: normalizedShas.find(sha => reachableSet.has(sha)) ?? null,

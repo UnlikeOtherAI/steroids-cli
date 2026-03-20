@@ -28,6 +28,7 @@ import { withGlobalDatabase, openGlobalDatabase } from './global-db.js';
 import { ensureWorkspaceSteroidsSymlink, getProjectHash } from '../parallel/clone.js';
 import type { PoolSlotContext } from '../workspace/types.js';
 import { claimSlot, finalizeSlotPath, releaseSlot, partialReleaseSlot, resolveRemoteUrl, refreshSlotHeartbeat, getSlot } from '../workspace/pool.js';
+import { pushWithRetries } from '../workspace/git-helpers.js';
 import { refreshWorkspaceMergeLockHeartbeat } from '../workspace/merge-lock.js';
 import { waitForPressureRelief } from './system-pressure.js';
 
@@ -544,7 +545,37 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             // For all other statuses (including after reviewer merge) do a full release.
             const currentSlot = getSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
             if (currentSlot?.status === 'awaiting_review') {
-              partialReleaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+              let durabilityPushFailed = false;
+              if (currentSlot.slot_path && currentSlot.task_branch && currentSlot.remote_url) {
+                const pushResult = pushWithRetries(
+                  currentSlot.slot_path,
+                  'origin',
+                  currentSlot.task_branch,
+                  2,
+                  [2000, 8000],
+                  true
+                );
+                if (!pushResult.success) {
+                  durabilityPushFailed = true;
+                  console.warn(
+                    `[pool] Failed to push ${currentSlot.task_branch} before partial release: ${pushResult.error ?? 'unknown error'}`
+                  );
+                }
+              }
+
+              if (durabilityPushFailed) {
+                incrementTaskFailureCount(db, task.id);
+                updateTaskStatus(
+                  db,
+                  task.id,
+                  'pending',
+                  'orchestrator',
+                  'Returned to pending because task branch push failed before review handoff'
+                );
+                releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+              } else {
+                partialReleaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+              }
             } else {
               releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
             }
