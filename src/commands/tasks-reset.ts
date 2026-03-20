@@ -8,6 +8,8 @@ import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
 import type { GlobalFlags } from '../cli/flags.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
+import { deleteTaskBranchFromSlot } from '../workspace/git-lifecycle.js';
+import { releaseSlot } from '../workspace/pool.js';
 
 export async function resetTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'tasks', subcommand: 'reset', flags });
@@ -144,6 +146,57 @@ DESCRIPTION:
       process.exit(1);
     }
 
+    // 2b. Clean up stale task branches — BEFORE DB transaction.
+    // While tasks are still in blocked status, no runner can pick them up.
+    // If we cleaned after the transaction (task = pending), a runner could
+    // claim the slot between the transaction commit and branch deletion.
+    const blockedTasks = fullyValidatedTasks.filter(
+      t => t.status === 'blocked_conflict' || t.status === 'blocked_error'
+    );
+
+    if (blockedTasks.length > 0) {
+      const { db: globalDb2, close: closeGlobal2 } = openGlobalDatabase();
+      try {
+        const project = globalDb2
+          .prepare('SELECT id FROM projects WHERE path = ?')
+          .get(projectPath) as { id: string } | undefined;
+
+        if (project) {
+          for (const task of blockedTasks) {
+            const taskBranch = `steroids/task-${task.id}`;
+
+            // Find slots that are idle OR still bound to this task (SIGKILL'd runner)
+            const slots = globalDb2
+              .prepare(
+                `SELECT id, slot_path, remote_url, status, task_id
+                 FROM workspace_pool_slots
+                 WHERE project_id = ? AND (status = 'idle' OR task_id = ?)`
+              )
+              .all(project.id, task.id) as Array<{
+                id: number; slot_path: string; remote_url: string | null;
+                status: string; task_id: string | null;
+              }>;
+
+            for (const slot of slots) {
+              if (!slot.slot_path || !existsSync(join(slot.slot_path, '.git'))) continue;
+
+              deleteTaskBranchFromSlot(slot.slot_path, taskBranch, {
+                deleteRemote: true,
+                remoteUrl: slot.remote_url,
+              });
+
+              // Release non-idle slots that were bound to this task
+              if (slot.status !== 'idle' && slot.task_id === task.id) {
+                releaseSlot(globalDb2, slot.id);
+              }
+            }
+          }
+        }
+      } finally {
+        closeGlobal2();
+      }
+    }
+
     // 3. Atomic Database Transaction across ALL validated tasks
     db.transaction(() => {
       for (const task of fullyValidatedTasks) {
@@ -151,9 +204,9 @@ DESCRIPTION:
         // Also clear conflict_count when resetting blocked_conflict tasks
         db.prepare(
           `UPDATE tasks SET status = 'pending', rejection_count = 0, failure_count = 0, merge_failure_count = 0,
-           conflict_count = CASE WHEN ? = 'blocked_conflict' THEN 0 ELSE conflict_count END
+           conflict_count = 0
            WHERE id = ?`
-        ).run(task.status, task.id);
+        ).run(task.id);
 
         // Auto-resolve open disputes
         db.prepare(`UPDATE disputes SET status = 'resolved', resolution = 'custom', resolution_notes = 'Bulk reset via CLI', resolved_at = datetime('now') WHERE task_id = ? AND status = 'open'`).run(task.id);
