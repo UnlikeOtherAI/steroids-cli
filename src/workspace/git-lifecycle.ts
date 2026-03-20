@@ -31,6 +31,43 @@ import {
 } from './merge-lock.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Standalone helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Delete a task branch from a pool slot (local only by default).
+ * Uses `git checkout --detach` to avoid "cannot delete checked out branch"
+ * without assuming any specific base branch name.
+ * Tolerates missing branches. Used after rebase conflict to prevent
+ * stale branch reuse on retry.
+ */
+export function deleteTaskBranchFromSlot(
+  slotPath: string,
+  taskBranch: string,
+  options?: { deleteRemote?: boolean; remoteUrl?: string | null }
+): boolean {
+  console.log(`[workspace] Deleting stale task branch ${taskBranch} from ${slotPath}`);
+
+  // Detach HEAD -- works regardless of what branches exist
+  execGit(slotPath, ['checkout', '--detach'], { tolerateFailure: true });
+
+  // Delete local branch
+  const deleted = execGit(slotPath, ['branch', '-D', taskBranch], { tolerateFailure: true });
+  if (deleted === null) {
+    console.warn(`[workspace] WARNING: failed to delete ${taskBranch} from ${slotPath} — stale branch may persist`);
+    return false;
+  }
+
+  // Delete remote only when explicitly requested (manual reset path)
+  if (options?.deleteRemote && options?.remoteUrl) {
+    execGit(slotPath, ['push', 'origin', '--delete', taskBranch], {
+      tolerateFailure: true,
+    });
+  }
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Result types
 // ─────────────────────────────────────────────────────────────────────────────
 
