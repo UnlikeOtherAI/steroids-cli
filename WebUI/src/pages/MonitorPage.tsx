@@ -125,16 +125,16 @@ export const MonitorPage: React.FC = () => {
   const [triggering, setTriggering] = useState(false);
   const [scanResult, setScanResult] = useState<MonitorScanResult | null>(null);
 
-  // UI sections — persist collapse state
+  // UI sections — persist collapse state via cookie
   const [configOpen, setConfigOpen] = useState(() => {
-    const saved = localStorage.getItem('monitor_config_open');
-    return saved !== null ? saved === 'true' : true;
+    const match = document.cookie.match(/(?:^|;\s*)monitor_config_open=(\w+)/);
+    return match ? match[1] === 'true' : true;
   });
 
   const toggleConfig = () => {
     setConfigOpen(prev => {
       const next = !prev;
-      localStorage.setItem('monitor_config_open', String(next));
+      document.cookie = `monitor_config_open=${next}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
       return next;
     });
   };
