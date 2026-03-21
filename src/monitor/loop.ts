@@ -28,7 +28,7 @@ interface MonitorConfig {
 }
 
 export interface MonitorCycleResult {
-  outcome: 'clean' | 'anomalies_found' | 'first_responder_dispatched' | 'project_disabled' | 'skipped' | 'error';
+  outcome: 'clean' | 'anomalies_found' | 'first_responder_dispatched' | 'skipped' | 'error';
   runId?: number;
   anomalyCount: number;
   escalationReason?: string;
@@ -215,21 +215,6 @@ function recordRemediationAttempt(projectPath: string, fingerprint: string): voi
   }
 }
 
-/**
- * Disable a project via CLI.
- */
-function disableProject(projectPath: string): void {
-  const entrypoint = resolveCliEntrypoint();
-  if (!entrypoint) return;
-
-  const child = spawn(
-    process.execPath,
-    [entrypoint, 'projects', 'disable', '--path', projectPath],
-    { detached: false, stdio: 'ignore' },
-  );
-  child.unref();
-}
-
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -260,26 +245,6 @@ export async function monitorCheck(): Promise<void> {
   // Create run row
   const agents = safeJsonParse<Array<{ provider: string; model: string }>>(config.first_responder_agents, []);
   const needsFirstResponder = decision.escalate && agents.length > 0;
-
-  // Check remediation attempts per affected project before dispatching
-  if (needsFirstResponder) {
-    const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
-    let allDisabled = true;
-    for (const projectPath of affectedProjects) {
-      const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
-      const attempts = countRemediationAttempts(projectPath, fingerprint);
-      if (attempts >= 3) {
-        disableProject(projectPath);
-      } else {
-        allDisabled = false;
-      }
-    }
-    if (allDisabled && affectedProjects.length > 0) {
-      createRunRow(scanResult, decision.reason ?? null, false, 'project_disabled');
-      pruneOldRuns(500);
-      return;
-    }
-  }
 
   const runId = createRunRow(scanResult, decision.escalate ? decision.reason : null, needsFirstResponder);
 
@@ -321,31 +286,6 @@ export async function runMonitorCycle(options?: { manual?: boolean; preset?: str
       config?.first_responder_agents ?? null, [],
     );
     const needsFirstResponder = !!(decision.escalate || options?.forceDispatch) && agents.length > 0 && scanResult.anomalies.length > 0;
-
-    // Check remediation attempts per affected project before dispatching
-    if (needsFirstResponder) {
-      const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
-      let allDisabled = true;
-      for (const projectPath of affectedProjects) {
-        const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
-        const attempts = countRemediationAttempts(projectPath, fingerprint);
-        if (attempts >= 3) {
-          disableProject(projectPath);
-        } else {
-          allDisabled = false;
-        }
-      }
-      if (allDisabled && affectedProjects.length > 0) {
-        const runId = createRunRow(scanResult, decision.reason ?? null, false, 'project_disabled');
-        pruneOldRuns(500);
-        return {
-          outcome: 'project_disabled',
-          runId,
-          anomalyCount: scanResult.anomalies.length,
-          escalationReason: decision.reason,
-        };
-      }
-    }
 
     const runId = createRunRow(scanResult, decision.escalate ? decision.reason : null, needsFirstResponder);
 

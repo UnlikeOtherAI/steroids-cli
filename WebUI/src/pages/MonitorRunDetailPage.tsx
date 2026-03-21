@@ -381,24 +381,46 @@ export const MonitorRunDetailPage: React.FC = () => {
             Actions Taken ({run.action_results.length})
           </h2>
           <div className="bg-bg-surface border border-border rounded-lg divide-y divide-border">
-            {run.action_results.map((action: any, i: number) => (
-              <div key={i} className="p-4 flex items-center gap-3">
-                {action.success ? (
-                  <CheckCircleIcon className="w-5 h-5 text-green-600 flex-shrink-0" />
-                ) : (
-                  <XCircleIcon className="w-5 h-5 text-red-600 flex-shrink-0" />
-                )}
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-text-primary">{action.action}</p>
-                  <p className="text-xs text-text-muted mt-0.5">
-                    {action.reason || action.error || 'Completed'}
-                  </p>
-                </div>
-                <span className={`text-xs px-2 py-0.5 rounded ${action.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                  {action.success ? 'Success' : 'Failed'}
-                </span>
-              </div>
-            ))}
+            {run.action_results.map((action: any, i: number) => {
+              const hasOutput = action.output && (typeof action.output === 'object' ? Object.keys(action.output).length > 0 : true);
+              return (
+                <details key={i} className="group">
+                  <summary className="p-4 flex items-center gap-3 cursor-pointer hover:bg-bg-base transition-colors list-none [&::-webkit-details-marker]:hidden">
+                    {action.success ? (
+                      <CheckCircleIcon className="w-5 h-5 text-green-600 flex-shrink-0" />
+                    ) : (
+                      <XCircleIcon className="w-5 h-5 text-red-600 flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-text-primary">
+                        {action.action?.replace(/_/g, ' ')}
+                        {hasOutput && <span className="ml-2 text-text-muted text-xs">click for details</span>}
+                      </p>
+                      <p className="text-xs text-text-muted mt-0.5 truncate">
+                        {action.reason || action.error || 'Completed'}
+                      </p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded flex-shrink-0 ${action.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      {action.success ? 'Success' : 'Failed'}
+                    </span>
+                  </summary>
+                  {(hasOutput || action.error) && (
+                    <div className="px-4 pb-4 pt-0">
+                      {action.error && (
+                        <div className="text-xs text-red-700 bg-red-50 rounded p-2 mb-2 font-mono">
+                          {action.error}
+                        </div>
+                      )}
+                      {hasOutput && (
+                        <pre className="text-xs text-text-secondary bg-bg-base rounded p-3 overflow-x-auto max-h-64 overflow-y-auto font-mono whitespace-pre-wrap">
+                          {typeof action.output === 'string' ? action.output : JSON.stringify(action.output, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </details>
+              );
+            })}
           </div>
         </div>
       )}
