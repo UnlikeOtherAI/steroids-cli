@@ -5,26 +5,23 @@
 
 import { openDatabase, getDbPath } from '../database/connection.js';
 import { autoMigrate } from '../migrations/index.js';
-import { getTask, getSection, incrementTaskFailureCount, updateTaskStatus, listTasks, getInvocationCount, countConsecutivePushFailures } from '../database/queries.js';
+import { getTask, getSection, incrementTaskFailureCount, clearTaskFailureCount, updateTaskStatus, listTasks, getInvocationCount } from '../database/queries.js';
 import {
   selectNextTask,
   selectNextTaskWithLock,
-  selectTaskBatch,
   markTaskInProgress,
   releaseTaskLockAfterCompletion,
   getTaskCounts,
   type SelectedTaskWithLock,
 } from '../orchestrator/task-selector.js';
-import { invokeCoderBatch } from '../orchestrator/coder.js';
 import { loadConfig } from '../config/loader.js';
-import { invokeReviewerBatch } from '../orchestrator/reviewer.js';
 import { logActivity } from './activity-log.js';
 import { getRegisteredProject } from './projects.js';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { runCoderPhase, runReviewerPhase, type CreditExhaustionResult } from '../commands/loop-phases.js';
-import { handleCreditExhaustion, checkBatchCreditExhaustion } from './credit-pause.js';
-import { pushToRemote } from '../git/push.js';
+import { handleCreditExhaustion } from './credit-pause.js';
 import { withGlobalDatabase, openGlobalDatabase } from './global-db.js';
+import { runBatchIteration, type BatchResult } from './orchestrator-batch.js';
 import { ensureWorkspaceSteroidsSymlink, getProjectHash } from '../parallel/clone.js';
 import type { PoolSlotContext } from '../workspace/types.js';
 import { claimSlot, finalizeSlotPath, releaseSlot, partialReleaseSlot, resolveRemoteUrl, refreshSlotHeartbeat, getSlot } from '../workspace/pool.js';
@@ -188,217 +185,14 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
         break;
       }
       // Batch mode: process multiple pending tasks at once
-      // Only active when not focusing on a specific section and batch mode is enabled
       if (batchMode && !activeSectionIds) {
-        const batch = selectTaskBatch(db, maxBatchSize);
-        if (batch && batch.tasks.length > 0) {
-          console.log(`[BATCH MODE] Section "${batch.sectionName}" - ${batch.tasks.length} tasks`);
-
-          // Mark all tasks as in_progress
-          if (!refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId)) {
-            console.log('Lease ownership lost during batch processing; stopping loop.');
-            break;
-          }
-          for (const task of batch.tasks) {
-            markTaskInProgress(db, task.id);
-            options.onTaskStart?.(task.id, 'batch');
-          }
-
-          // Invoke batch coder
-          ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
-          console.log('\n>>> Invoking BATCH CODER...\n');
-          const batchCoderResult = await invokeCoderBatch(batch.tasks, batch.sectionName, projectPath);
-
-          // Always check for credit/rate_limit exhaustion (returns null on success)
-          const coderCreditAlert = await checkBatchCreditExhaustion(batchCoderResult, 'coder', projectPath);
-          if (coderCreditAlert) {
-            const pauseResult = await handleCreditExhaustion({
-              ...coderCreditAlert,
-              projectPath,
-              runnerId: options.runnerId ?? 'daemon',
-              db,
-              shouldStop: options.shouldStop ?? (() => false),
-              onHeartbeat: options.onHeartbeat,
-              onceMode: options.once ?? false,
-            });
-            if (!pauseResult.resolved) break;
-            continue;
-          }
-
-          if (batchCoderResult.timedOut || !batchCoderResult.success) {
-            const coderConfig = loadConfig(projectPath).ai?.coder;
-            const providerName = coderConfig?.provider ?? 'unknown';
-            const modelName = coderConfig?.model ?? 'unknown';
-            const output = (batchCoderResult.stderr || batchCoderResult.stdout || '').trim();
-            handleBatchProviderFailure(
-              db,
-              batch.tasks,
-              'coder',
-              providerName,
-              modelName,
-              batchCoderResult.exitCode ?? 1,
-              output
-            );
-
-            const batchHasWork = batch.tasks.some((task) => {
-              const current = getTask(db, task.id);
-              return !!current && current.status === 'pending';
-            });
-            if (batchHasWork) {
-              continue;
-            }
-
-            break;
-          }
-
-          // Check which tasks are now in review status
-          const tasksInReview = batch.tasks
-            .map(t => getTask(db, t.id))
-            .filter((t): t is NonNullable<typeof t> => t !== null && t.status === 'review');
-
-          if (tasksInReview.length > 0) {
-            console.log(`\n[BATCH MODE] ${tasksInReview.length} tasks ready for batch review\n`);
-
-            // Invoke batch reviewer
-            ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
-            console.log('\n>>> Invoking BATCH REVIEWER...\n');
-            const batchReviewerResult = await invokeReviewerBatch(tasksInReview, batch.sectionName, projectPath);
-
-            // Always check for credit/rate_limit exhaustion (returns null on success)
-            const reviewerCreditAlert = await checkBatchCreditExhaustion(batchReviewerResult, 'reviewer', projectPath);
-            if (reviewerCreditAlert) {
-              const pauseResult = await handleCreditExhaustion({
-                ...reviewerCreditAlert,
-                projectPath,
-                runnerId: options.runnerId ?? 'daemon',
-                db,
-                shouldStop: options.shouldStop ?? (() => false),
-                onHeartbeat: options.onHeartbeat,
-                onceMode: options.once ?? false,
-              });
-              if (!pauseResult.resolved) break;
-              continue;
-            }
-
-            if (batchReviewerResult.timedOut || !batchReviewerResult.success) {
-              const reviewerConfig = loadConfig(projectPath).ai?.reviewer;
-              const providerName = reviewerConfig?.provider ?? 'unknown';
-              const modelName = reviewerConfig?.model ?? 'unknown';
-              const output = (batchReviewerResult.stderr || batchReviewerResult.stdout || '').trim();
-              handleBatchProviderFailure(
-                db,
-                tasksInReview,
-                'reviewer',
-                providerName,
-                modelName,
-                batchReviewerResult.exitCode ?? 1,
-                output
-              );
-
-              const batchHasWork = tasksInReview.some((task) => {
-                const current = getTask(db, task.id);
-                return !!current && current.status === 'pending';
-              });
-              if (batchHasWork) {
-                continue;
-              }
-
-              break;
-            }
-
-            // Handle results for each reviewed task
-            for (const task of tasksInReview) {
-              const updatedTask = getTask(db, task.id);
-              if (!updatedTask) continue;
-
-              const section = task.section_id ? getSection(db, task.section_id) : null;
-              const sectionName = section?.name ?? null;
-
-              if (updatedTask.status === 'completed' && options.runnerId) {
-                // Get commit message for activity log
-                let commitMessage: string | null = null;
-                try {
-                  commitMessage = execSync('git log -1 --format=%B', {
-                    cwd: projectPath,
-                    encoding: 'utf-8',
-                  }).trim();
-                } catch {
-                  // Ignore error
-                }
-
-                logActivity(
-                  projectPath,
-                  options.runnerId,
-                  task.id,
-                  task.title,
-                  sectionName,
-                  'completed',
-                  commitMessage
-                );
-              } else if (updatedTask.status === 'failed' && options.runnerId) {
-                logActivity(
-                  projectPath,
-                  options.runnerId,
-                  task.id,
-                  task.title,
-                  sectionName,
-                  'failed'
-                );
-              } else if (updatedTask.status === 'disputed' && options.runnerId) {
-                logActivity(
-                  projectPath,
-                  options.runnerId,
-                  task.id,
-                  task.title,
-                  sectionName,
-                  'disputed'
-                );
-              } else if (updatedTask.status === 'skipped' && options.runnerId) {
-                logActivity(
-                  projectPath,
-                  options.runnerId,
-                  task.id,
-                  task.title,
-                  sectionName,
-                  'skipped'
-                );
-              }
-            }
-
-            // Push changes after batch review if any tasks were approved
-            const approvedTasks = tasksInReview.filter(t => {
-              const updated = getTask(db, t.id);
-              return updated?.status === 'completed';
-            });
-
-            if (approvedTasks.length > 0) {
-              if (!refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId)) {
-                console.log('Lease ownership lost before batch push; skipping remaining work in this runner.');
-                break;
-              }
-              const pushResult = pushToRemote(projectPath, 'origin', branchName);
-              if (pushResult.success) {
-                console.log('Pushing batch changes to git...');
-                console.log(`Pushed ${approvedTasks.length} approved task(s)`);
-              } else {
-                console.warn('Failed to push batch changes:', pushResult.error);
-              }
-            }
-          }
-
-          // Notify completion for each task
-          for (const task of batch.tasks) {
-            options.onTaskComplete?.(task.id);
-          }
-
-          if (once) {
-            console.log('\n[--once] Stopping after one batch');
-            break;
-          }
-
-          await sleep(1000);
-          continue;
-        }
+        const batchResult: BatchResult = await runBatchIteration({
+          db, projectPath, branchName, options, once,
+          refreshLease: () => refreshParallelWorkstreamLease(options.parallelSessionId, projectPath, options.runnerId),
+          ensureSteroids: () => ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath),
+        }, maxBatchSize);
+        if (batchResult === 'break') break;
+        if (batchResult === 'continue') { await sleep(1000); continue; }
       }
 
       // Select next task — use locking when a runnerId is present (parallel mode)
@@ -432,7 +226,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       console.log(`Status: ${task.status}`);
 
       // ── Invocation cap: prevent runaway loops from burning API quota ──
-      const maxInvocations = config.health?.maxInvocationsPerTask ?? 50;
+      const maxInvocations = config.health?.maxInvocationsPerTask ?? 150;
       if (maxInvocations > 0) {
         const invCounts = getInvocationCount(db, task.id);
         if (invCounts.total >= maxInvocations) {
@@ -582,29 +376,19 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
               }
 
               if (durabilityPushFailed) {
-                const consecutivePushFails = countConsecutivePushFailures(db, task.id) + 1;
-                const pushFailCap = config.health?.maxRecoveryAttempts ?? 3;
-                if (consecutivePushFails >= pushFailCap) {
-                  updateTaskStatus(
-                    db,
-                    task.id,
-                    'skipped',
-                    'orchestrator',
-                    `Auto-skipped: task branch push failed ${consecutivePushFails} consecutive times before review handoff. Remote may be unreachable or misconfigured.`
-                  );
-                  console.warn(`[pool] Push failure cap reached (${consecutivePushFails}/${pushFailCap}); task skipped to stop loop.`);
+                const failCount = incrementTaskFailureCount(db, task.id);
+                const maxAttempts = config.health?.maxRecoveryAttempts ?? 3;
+                if (failCount >= maxAttempts) {
+                  updateTaskStatus(db, task.id, 'skipped', 'orchestrator',
+                    `Auto-skipped: task branch push failed ${failCount} times. Remote may be unreachable or misconfigured.`);
+                  console.warn(`[pool] Push failure cap reached (${failCount}/${maxAttempts}); task skipped.`);
                 } else {
-                  incrementTaskFailureCount(db, task.id);
-                  updateTaskStatus(
-                    db,
-                    task.id,
-                    'pending',
-                    'orchestrator',
-                    `Returned to pending because task branch push failed before review handoff (${consecutivePushFails}/${pushFailCap})`
-                  );
+                  updateTaskStatus(db, task.id, 'pending', 'orchestrator',
+                    `Returned to pending because task branch push failed before review handoff (${failCount}/${maxAttempts})`);
                 }
                 releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
               } else {
+                clearTaskFailureCount(db, task.id);
                 partialReleaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
               }
             } else {
@@ -649,7 +433,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           let commitMessage: string | null = null;
           if (updatedTask.status === 'completed') {
             try {
-              commitMessage = execSync('git log -1 --format=%B', {
+              commitMessage = execFileSync('git', ['log', '-1', '--format=%B'], {
                 cwd: projectPath,
                 encoding: 'utf-8',
               }).trim();
@@ -694,40 +478,3 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
   }
 }
 
-function formatBatchProviderFailureMessage(
-  taskId: string,
-  role: 'coder' | 'reviewer',
-  provider: string,
-  model: string,
-  exitCode: number,
-  output: string
-): string {
-  const sanitizedOutput = output || 'provider invocation failed with no output.';
-  return `Task ${taskId}: provider ${provider}/${model} exited with non-zero status ${exitCode} during ${role} phase: ${sanitizedOutput}`;
-}
-
-function handleBatchProviderFailure(
-  db: any,
-  tasks: Array<{ id: string }>,
-  role: 'coder' | 'reviewer',
-  provider: string,
-  model: string,
-  exitCode: number,
-  output: string
-): void {
-  for (const task of tasks) {
-    const failureCount = incrementTaskFailureCount(db, task.id);
-    const message = formatBatchProviderFailureMessage(task.id, role, provider, model, exitCode, output);
-
-    if (failureCount >= 3) {
-      const reason = `${message} (provider invocation failed ${failureCount} time(s). Task failed.)`;
-      updateTaskStatus(db, task.id, 'failed', 'orchestrator', reason);
-      console.log(`\n✗ Task failed (${reason})`);
-    } else {
-      updateTaskStatus(db, task.id, 'pending', 'orchestrator', `${message} (attempt ${failureCount}/3, retrying)`);
-    }
-  }
-}
-
-// Note: runCoderPhase and runReviewerPhase are now imported from ../commands/loop-phases.js
-// They implement the orchestrator-driven architecture where the orchestrator makes all status decisions

@@ -177,7 +177,11 @@ export async function runCoderPhase(
     return;
   }
 
-  clearTaskFailureCount(db, task.id);
+  // In pool mode, defer failure count clear to the orchestrator loop's finally block.
+  // Clearing here would reset push-failure accumulation (the push happens after this returns).
+  if (!poolSlotContext) {
+    clearTaskFailureCount(db, task.id);
+  }
 
   // ── Pool slot: post-coder verification gate ──
   if (poolSlotContext && poolStartingSha) {

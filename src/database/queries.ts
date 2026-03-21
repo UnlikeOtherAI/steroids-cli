@@ -1680,37 +1680,6 @@ export function getInvocationCount(
 }
 
 /**
- * Count consecutive push-failure resets (audit entries where the task was returned
- * to pending due to branch push failure). Walks backwards from the latest audit entry.
- */
-export function countConsecutivePushFailures(
-  db: Database.Database,
-  taskId: string
-): number {
-  const PUSH_FAIL_NOTE = 'task branch push failed before review handoff';
-  const rows = db
-    .prepare(
-      `SELECT notes, from_status, to_status FROM audit
-       WHERE task_id = ? AND actor = 'orchestrator'
-       ORDER BY id DESC
-       LIMIT 200`
-    )
-    .all(taskId) as Array<{ notes: string | null; from_status: string; to_status: string }>;
-
-  let count = 0;
-  for (const row of rows) {
-    if (row.notes?.includes(PUSH_FAIL_NOTE)) {
-      count++;
-    } else if (row.from_status !== row.to_status) {
-      // A real status transition that isn't a push failure — stop counting
-      break;
-    }
-    // Skip non-transition audit entries (decisions, etc.) — keep looking
-  }
-  return count;
-}
-
-/**
  * Find a resumable session for a task and role
  */
 export function findResumableSession(

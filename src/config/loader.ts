@@ -167,7 +167,7 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
     invocationStaleness: 600,
     autoRecover: true,
     maxRecoveryAttempts: 3,
-    maxInvocationsPerTask: 50,
+    maxInvocationsPerTask: 150,
     maxIncidentsPerHour: 10,
   },
   projects: {
