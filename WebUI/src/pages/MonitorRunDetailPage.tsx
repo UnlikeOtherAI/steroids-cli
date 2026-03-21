@@ -37,6 +37,7 @@ function outcomeConfig(outcome: string) {
     case 'first_responder_dispatched':
       return { color: 'bg-blue-100 text-blue-800', icon: <ArrowPathIcon className="w-5 h-5 text-blue-600 animate-spin" />, label: 'First Responder In Progress' };
     case 'first_responder_complete':
+    case 'investigation_complete':
       return { color: 'bg-purple-100 text-purple-800', icon: <CheckCircleIcon className="w-5 h-5 text-purple-600" />, label: 'First Responder Complete' };
     case 'error':
       return { color: 'bg-red-100 text-red-800', icon: <XCircleIcon className="w-5 h-5 text-red-600" />, label: 'Error' };
@@ -130,7 +131,7 @@ export const MonitorRunDetailPage: React.FC = () => {
   const anomalies: MonitorAnomaly[] = run.scan_results?.anomalies ?? [];
   const isInProgress = run.outcome === 'first_responder_dispatched';
   const canDispatch = run.outcome === 'anomalies_found' || run.outcome === 'error';
-  const canRedispatch = run.outcome === 'first_responder_complete' && anomalies.length > 0;
+  const canRedispatch = (run.outcome === 'first_responder_complete' || run.outcome === 'investigation_complete') && anomalies.length > 0;
 
   return (
     <div className="p-8 max-w-5xl mx-auto">

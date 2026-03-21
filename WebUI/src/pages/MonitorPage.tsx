@@ -83,6 +83,7 @@ function outcomeVariant(outcome: string): { color: string; icon: React.ReactNode
     case 'first_responder_dispatched':
       return { color: 'bg-blue-100 text-blue-800', icon: <MagnifyingGlassIcon className="w-4 h-4" /> };
     case 'first_responder_complete':
+    case 'investigation_complete':
       return { color: 'bg-purple-100 text-purple-800', icon: <CheckCircleIcon className="w-4 h-4" /> };
     case 'error':
       return { color: 'bg-red-100 text-red-800', icon: <XCircleIcon className="w-4 h-4" /> };
@@ -635,7 +636,7 @@ export const MonitorPage: React.FC = () => {
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${ov.color}`}>
                             {ov.icon}
-                            {run.outcome.replace(/_/g, ' ')}
+                            {(run.outcome === 'investigation_complete' ? 'first_responder_complete' : run.outcome).replace(/_/g, ' ')}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-text-secondary">
