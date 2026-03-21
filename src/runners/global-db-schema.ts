@@ -9,16 +9,22 @@ import {
   GLOBAL_SCHEMA_V18_SQL,
   GLOBAL_SCHEMA_V19_SQL,
   GLOBAL_SCHEMA_V20_SQL,
-  GLOBAL_SCHEMA_VERSION,
 } from './global-db-schema-migrations-v17-v20.js';
+import {
+  GLOBAL_SCHEMA_V21_SQL,
+  GLOBAL_SCHEMA_VERSION,
+} from './global-db-schema-migrations-v21.js';
 
 export {
   GLOBAL_SCHEMA_V17_SQL,
   GLOBAL_SCHEMA_V18_SQL,
   GLOBAL_SCHEMA_V19_SQL,
   GLOBAL_SCHEMA_V20_SQL,
-  GLOBAL_SCHEMA_VERSION,
 } from './global-db-schema-migrations-v17-v20.js';
+export {
+  GLOBAL_SCHEMA_V21_SQL,
+  GLOBAL_SCHEMA_VERSION,
+} from './global-db-schema-migrations-v21.js';
 
 /**
  * Schema for global database (runners and locks)
@@ -274,6 +280,10 @@ export function applyGlobalSchemaV19(db: Database.Database): void {
 
 export function applyGlobalSchemaV20(db: Database.Database): void {
   db.exec(GLOBAL_SCHEMA_V20_SQL);
+}
+
+export function applyGlobalSchemaV21(db: Database.Database): void {
+  db.exec(GLOBAL_SCHEMA_V21_SQL);
 }
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {

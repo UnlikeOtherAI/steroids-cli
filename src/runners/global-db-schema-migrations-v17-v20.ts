@@ -101,5 +101,3 @@ CREATE TABLE IF NOT EXISTS ollama_paired_models (
   UNIQUE(model_name, runtime, endpoint)
 );
 `;
-
-export const GLOBAL_SCHEMA_VERSION = '20';
