@@ -522,3 +522,98 @@ export const configApi = {
     });
   },
 };
+
+// ── Monitor API ──────────────────────────────────────────────────────────────
+
+export interface MonitorAgentConfig {
+  provider: string;
+  model: string;
+}
+
+export interface EscalationRules {
+  min_severity: 'info' | 'warning' | 'critical';
+}
+
+export interface MonitorConfig {
+  enabled: boolean;
+  interval_seconds: number;
+  investigator_agents: MonitorAgentConfig[];
+  response_preset: string;
+  custom_prompt: string | null;
+  escalation_rules: EscalationRules;
+  investigation_timeout_seconds: number;
+  updated_at: number;
+}
+
+export interface MonitorAnomaly {
+  type: string;
+  severity: 'info' | 'warning' | 'critical';
+  projectPath: string;
+  projectName: string;
+  taskId?: string;
+  taskTitle?: string;
+  runnerId?: string;
+  details: string;
+  context: Record<string, unknown>;
+}
+
+export interface MonitorScanResult {
+  timestamp: number;
+  projectCount: number;
+  anomalies: MonitorAnomaly[];
+  summary: string;
+}
+
+export interface MonitorRun {
+  id: number;
+  started_at: number;
+  completed_at: number | null;
+  outcome: string;
+  scan_results: MonitorScanResult | null;
+  escalation_reason: string | null;
+  investigation_needed: boolean;
+  investigator_agent: string | null;
+  investigator_actions: unknown[] | null;
+  investigator_report: string | null;
+  action_results: unknown[] | null;
+  error: string | null;
+  duration_ms: number | null;
+}
+
+export const monitorApi = {
+  async getConfig(): Promise<MonitorConfig | null> {
+    const response = await fetchJson<{ success: boolean; config: MonitorConfig | null }>('/api/monitor/config');
+    return response.config;
+  },
+
+  async updateConfig(updates: Partial<MonitorConfig>): Promise<void> {
+    await fetchJson('/api/monitor/config', {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  },
+
+  async listRuns(limit = 50, offset = 0): Promise<{ total: number; runs: MonitorRun[] }> {
+    return fetchJson(`/api/monitor/runs?limit=${limit}&offset=${offset}`);
+  },
+
+  async getRun(id: number): Promise<MonitorRun> {
+    const response = await fetchJson<{ success: boolean; run: MonitorRun }>(`/api/monitor/runs/${id}`);
+    return response.run;
+  },
+
+  async clearRuns(): Promise<{ deleted: number }> {
+    return fetchJson('/api/monitor/runs/clear', { method: 'POST' });
+  },
+
+  async triggerScan(): Promise<MonitorScanResult> {
+    const response = await fetchJson<{ success: boolean; scan: MonitorScanResult }>('/api/monitor/scan', {
+      method: 'POST',
+    });
+    return response.scan;
+  },
+
+  async triggerRun(): Promise<unknown> {
+    return fetchJson('/api/monitor/run', { method: 'POST' });
+  },
+};

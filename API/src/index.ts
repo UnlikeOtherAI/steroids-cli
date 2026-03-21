@@ -51,6 +51,7 @@ import { creditAlertRoutes } from './routes/credit-alerts.js';
 import modelUsageRouter from './routes/model-usage.js';
 import huggingFaceRouter from './routes/huggingface.js';
 import ollamaRouter from './routes/ollama.js';
+import monitorRouter from './routes/monitor.js';
 
 const PORT = process.env.PORT || 3501;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -112,6 +113,7 @@ export function createApp(): express.Express {
   app.use('/api', modelUsageRouter);
   app.use('/api', huggingFaceRouter);
   app.use('/api', ollamaRouter);
+  app.use('/api', monitorRouter);
   app.use('/api/credit-alerts', creditAlertRoutes);
 
   // Health check
@@ -177,6 +179,13 @@ export function createApp(): express.Express {
         'PATCH /api/hf/ready-models',
         'POST /api/hf/ready-models/runtime',
         'DELETE /api/hf/ready-models',
+        'GET /api/monitor/config',
+        'PUT /api/monitor/config',
+        'GET /api/monitor/runs?limit=<n>&offset=<n>',
+        'GET /api/monitor/runs/<id>',
+        'POST /api/monitor/runs/clear',
+        'POST /api/monitor/scan',
+        'POST /api/monitor/run',
         'GET /api/credit-alerts?project=<path>',
         'POST /api/credit-alerts/<id>/dismiss',
         'POST /api/credit-alerts/<id>/retry',

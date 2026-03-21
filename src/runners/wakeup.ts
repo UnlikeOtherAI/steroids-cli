@@ -95,6 +95,14 @@ export async function wakeup(options: WakeupOptions = {}): Promise<WakeupResult[
         );
       }
 
+      // Run monitor check (deterministic scanner + rules, <5s)
+      try {
+        const { monitorCheck } = await import('../monitor/loop.js');
+        await monitorCheck();
+      } catch {
+        // Monitor check is non-critical — don't fail the wakeup cycle
+      }
+
       if (results.length === 0) {
         results.push({
           action: 'none',

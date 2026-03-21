@@ -38,6 +38,7 @@ import { workspacesCommand } from './commands/workspaces.js';
 import { skillsCommand } from './commands/skills.js';
 import { hfCommand } from './commands/hf.js';
 import { statusCommand } from './commands/status.js';
+import { monitorCommand } from './commands/monitor.js';
 import { resetProject } from './commands/project-reset.js';
 import { checkForNewVersion } from './cli/version-check.js';
 
@@ -261,6 +262,9 @@ async function main(): Promise<void> {
         break;
       case 'status':
         await statusCommand(commandArgs, flags);
+        break;
+      case 'monitor':
+        await monitorCommand(commandArgs, flags);
         break;
       case 'reset-project':
         await resetProject(commandArgs, flags);

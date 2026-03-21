@@ -16,6 +16,7 @@ import {
   CpuChipIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ShieldCheckIcon,
 } from '@heroicons/react/24/outline';
 import { runnersApi, WakeupResult } from '../../services/api';
 import { WakeupModal } from '../molecules/WakeupModal';
@@ -63,6 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
     { to: '/projects', icon: FolderIcon, label: 'Projects' },
     { to: '/runners', icon: PlayIcon, label: 'Runners' },
+    { to: '/monitor', icon: ShieldCheckIcon, label: 'Monitor' },
     { to: '/intake', icon: ExclamationTriangleIcon, label: 'Intake' },
     { to: '/model-usage', icon: ChartBarIcon, label: 'Model Usage' },
     { to: '/logs', icon: DocumentTextIcon, label: 'System Logs' },
