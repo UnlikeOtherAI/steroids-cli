@@ -35,4 +35,22 @@ CREATE TABLE IF NOT EXISTS monitor_runs (
 CREATE INDEX IF NOT EXISTS idx_monitor_runs_started ON monitor_runs(started_at DESC);
 `;
 
-export const GLOBAL_SCHEMA_VERSION = '21';
+export const GLOBAL_SCHEMA_V22_SQL = `
+ALTER TABLE monitor_config RENAME COLUMN investigator_agents TO first_responder_agents;
+ALTER TABLE monitor_config RENAME COLUMN investigation_timeout_seconds TO first_responder_timeout_seconds;
+ALTER TABLE monitor_runs RENAME COLUMN investigation_needed TO first_responder_needed;
+ALTER TABLE monitor_runs RENAME COLUMN investigator_agent TO first_responder_agent;
+ALTER TABLE monitor_runs RENAME COLUMN investigator_actions TO first_responder_actions;
+ALTER TABLE monitor_runs RENAME COLUMN investigator_report TO first_responder_report;
+
+CREATE TABLE IF NOT EXISTS monitor_remediation_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_path TEXT NOT NULL,
+  anomaly_fingerprint TEXT NOT NULL,
+  attempted_at INTEGER NOT NULL,
+  outcome TEXT NOT NULL DEFAULT 'attempted'
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_remediation_project ON monitor_remediation_attempts(project_path, anomaly_fingerprint);
+`;
+
+export const GLOBAL_SCHEMA_VERSION = '22';

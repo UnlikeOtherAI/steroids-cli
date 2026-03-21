@@ -1,9 +1,9 @@
 /**
- * Monitor loop — ties scanner, rules engine, and investigator together.
+ * Monitor loop — ties scanner, rules engine, and first responder together.
  *
  * Two entry points:
  * 1. monitorCheck() — called from wakeup, must complete in <5s.
- *    Runs scanner + rules, spawns detached investigate process if needed.
+ *    Runs scanner + rules, spawns detached first responder process if needed.
  * 2. runMonitorCycle() — manual trigger from API/CLI.
  *    Runs scanner + rules inline, returns result (no LLM invocation inline).
  */
@@ -19,16 +19,16 @@ import { shouldEscalate, type EscalationRules } from './rules.js';
 interface MonitorConfig {
   enabled: number;
   interval_seconds: number;
-  investigator_agents: string;
+  first_responder_agents: string;
   response_preset: string;
   custom_prompt: string | null;
   escalation_rules: string;
-  investigation_timeout_seconds: number;
+  first_responder_timeout_seconds: number;
   updated_at: number;
 }
 
 export interface MonitorCycleResult {
-  outcome: 'clean' | 'anomalies_found' | 'investigation_dispatched' | 'skipped' | 'error';
+  outcome: 'clean' | 'anomalies_found' | 'first_responder_dispatched' | 'project_disabled' | 'skipped' | 'error';
   runId?: number;
   anomalyCount: number;
   escalationReason?: string;
@@ -67,11 +67,11 @@ function getLastRunStartedAt(): number {
   }
 }
 
-function hasActiveInvestigation(timeoutSeconds: number): boolean {
+function hasActiveFirstResponder(timeoutSeconds: number): boolean {
   const { db, close } = openGlobalDatabase();
   try {
     const row = db.prepare(
-      "SELECT id, started_at FROM monitor_runs WHERE outcome = 'investigation_dispatched' LIMIT 1"
+      "SELECT id, started_at FROM monitor_runs WHERE outcome = 'first_responder_dispatched' LIMIT 1"
     ).get() as { id: number; started_at: number } | undefined;
 
     if (!row) return false;
@@ -81,7 +81,7 @@ function hasActiveInvestigation(timeoutSeconds: number): boolean {
     if (ageMs > timeoutSeconds * 1000) {
       // Mark as timed out
       db.prepare(
-        "UPDATE monitor_runs SET outcome = 'error', error = 'Investigation timed out', completed_at = ? WHERE id = ?"
+        "UPDATE monitor_runs SET outcome = 'error', error = 'First responder timed out', completed_at = ? WHERE id = ?"
       ).run(Date.now(), row.id);
       return false;
     }
@@ -119,25 +119,27 @@ function isDuplicateOfLastRun(scanResult: ScanResult): boolean {
   }
 }
 
-function createRunRow(scanResult: ScanResult, escalationReason: string | null, investigationNeeded: boolean): number {
+function createRunRow(scanResult: ScanResult, escalationReason: string | null, firstResponderNeeded: boolean, outcomeOverride?: string): number {
   const { db, close } = openGlobalDatabase();
   try {
-    const outcome = investigationNeeded
-      ? 'investigation_dispatched'
-      : scanResult.anomalies.length > 0
-        ? 'anomalies_found'
-        : 'clean';
+    const outcome = outcomeOverride
+      ? outcomeOverride
+      : firstResponderNeeded
+        ? 'first_responder_dispatched'
+        : scanResult.anomalies.length > 0
+          ? 'anomalies_found'
+          : 'clean';
 
     const result = db.prepare(
-      `INSERT INTO monitor_runs (started_at, completed_at, outcome, scan_results, escalation_reason, investigation_needed)
+      `INSERT INTO monitor_runs (started_at, completed_at, outcome, scan_results, escalation_reason, first_responder_needed)
        VALUES (?, ?, ?, ?, ?, ?)`
     ).run(
       scanResult.timestamp,
-      investigationNeeded ? null : Date.now(),
+      firstResponderNeeded ? null : Date.now(),
       outcome,
       JSON.stringify(scanResult),
       escalationReason,
-      investigationNeeded ? 1 : 0,
+      firstResponderNeeded ? 1 : 0,
     );
     return Number(result.lastInsertRowid);
   } finally {
@@ -158,14 +160,69 @@ function pruneOldRuns(maxRows: number): void {
   }
 }
 
-function spawnInvestigator(runId: number): void {
+function spawnFirstResponder(runId: number): void {
   const entrypoint = resolveCliEntrypoint();
   if (!entrypoint) return;
 
   const child = spawn(
     process.execPath,
-    [entrypoint, 'monitor', 'investigate', '--run-id', String(runId)],
+    [entrypoint, 'monitor', 'respond', '--run-id', String(runId)],
     { detached: true, stdio: 'ignore' },
+  );
+  child.unref();
+}
+
+/**
+ * Compute anomaly fingerprint for a project: sorted anomaly types joined.
+ */
+function computeAnomalyFingerprint(scanResult: ScanResult, projectPath: string): string {
+  return scanResult.anomalies
+    .filter(a => a.projectPath === projectPath)
+    .map(a => a.type)
+    .sort()
+    .join(',');
+}
+
+/**
+ * Count previous remediation attempts for a project+fingerprint.
+ */
+function countRemediationAttempts(projectPath: string, fingerprint: string): number {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db.prepare(
+      'SELECT COUNT(*) as count FROM monitor_remediation_attempts WHERE project_path = ? AND anomaly_fingerprint = ?'
+    ).get(projectPath, fingerprint) as { count: number };
+    return row.count;
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Record a remediation attempt.
+ */
+function recordRemediationAttempt(projectPath: string, fingerprint: string): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare(
+      'INSERT INTO monitor_remediation_attempts (project_path, anomaly_fingerprint, attempted_at) VALUES (?, ?, ?)'
+    ).run(projectPath, fingerprint, Date.now());
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Disable a project via CLI.
+ */
+function disableProject(projectPath: string): void {
+  const entrypoint = resolveCliEntrypoint();
+  if (!entrypoint) return;
+
+  const child = spawn(
+    process.execPath,
+    [entrypoint, 'projects', 'disable', '--path', projectPath],
+    { detached: false, stdio: 'ignore' },
   );
   child.unref();
 }
@@ -174,7 +231,7 @@ function spawnInvestigator(runId: number): void {
 
 /**
  * Called from wakeup. Must complete in <5s (no LLM calls).
- * If escalation needed, spawns detached `steroids monitor investigate`.
+ * If escalation needed, spawns detached `steroids monitor respond`.
  */
 export async function monitorCheck(): Promise<void> {
   const config = readConfig();
@@ -184,8 +241,8 @@ export async function monitorCheck(): Promise<void> {
   const lastRun = getLastRunStartedAt();
   if (Date.now() - lastRun < config.interval_seconds * 1000) return;
 
-  // Check for active investigation (with stale timeout)
-  if (hasActiveInvestigation(config.investigation_timeout_seconds)) return;
+  // Check for active first responder (with stale timeout)
+  if (hasActiveFirstResponder(config.first_responder_timeout_seconds)) return;
 
   // Run scan
   const scanResult = await runScan();
@@ -198,23 +255,48 @@ export async function monitorCheck(): Promise<void> {
   const decision = shouldEscalate(scanResult.anomalies, rules);
 
   // Create run row
-  const agents = safeJsonParse<Array<{ provider: string; model: string }>>(config.investigator_agents, []);
-  const needsInvestigation = decision.escalate && agents.length > 0;
+  const agents = safeJsonParse<Array<{ provider: string; model: string }>>(config.first_responder_agents, []);
+  const needsFirstResponder = decision.escalate && agents.length > 0;
 
-  const runId = createRunRow(scanResult, decision.escalate ? decision.reason : null, needsInvestigation);
+  // Check remediation attempts per affected project before dispatching
+  if (needsFirstResponder) {
+    const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
+    let allDisabled = true;
+    for (const projectPath of affectedProjects) {
+      const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
+      const attempts = countRemediationAttempts(projectPath, fingerprint);
+      if (attempts >= 3) {
+        disableProject(projectPath);
+      } else {
+        allDisabled = false;
+      }
+    }
+    if (allDisabled && affectedProjects.length > 0) {
+      createRunRow(scanResult, decision.reason ?? null, false, 'project_disabled');
+      pruneOldRuns(500);
+      return;
+    }
+  }
+
+  const runId = createRunRow(scanResult, decision.escalate ? decision.reason : null, needsFirstResponder);
 
   // Prune old runs
   pruneOldRuns(500);
 
-  // If investigation needed, spawn detached process
-  if (needsInvestigation) {
-    spawnInvestigator(runId);
+  // If first responder needed, spawn detached process and record attempt
+  if (needsFirstResponder) {
+    const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
+    for (const projectPath of affectedProjects) {
+      const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
+      recordRemediationAttempt(projectPath, fingerprint);
+    }
+    spawnFirstResponder(runId);
   }
 }
 
 /**
  * Manual trigger from API. Runs scan + rules inline and returns result.
- * Does NOT invoke the investigator LLM (that's a separate detached process).
+ * Does NOT invoke the first responder LLM (that's a separate detached process).
  */
 export async function runMonitorCycle(options?: { manual?: boolean }): Promise<MonitorCycleResult> {
   try {
@@ -233,18 +315,48 @@ export async function runMonitorCycle(options?: { manual?: boolean }): Promise<M
     const decision = shouldEscalate(scanResult.anomalies, rules);
 
     const agents = safeJsonParse<Array<{ provider: string; model: string }>>(
-      config?.investigator_agents ?? null, [],
+      config?.first_responder_agents ?? null, [],
     );
-    const needsInvestigation = decision.escalate && agents.length > 0;
+    const needsFirstResponder = decision.escalate && agents.length > 0;
 
-    const runId = createRunRow(scanResult, decision.escalate ? decision.reason : null, needsInvestigation);
+    // Check remediation attempts per affected project before dispatching
+    if (needsFirstResponder) {
+      const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
+      let allDisabled = true;
+      for (const projectPath of affectedProjects) {
+        const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
+        const attempts = countRemediationAttempts(projectPath, fingerprint);
+        if (attempts >= 3) {
+          disableProject(projectPath);
+        } else {
+          allDisabled = false;
+        }
+      }
+      if (allDisabled && affectedProjects.length > 0) {
+        const runId = createRunRow(scanResult, decision.reason ?? null, false, 'project_disabled');
+        pruneOldRuns(500);
+        return {
+          outcome: 'project_disabled',
+          runId,
+          anomalyCount: scanResult.anomalies.length,
+          escalationReason: decision.reason,
+        };
+      }
+    }
+
+    const runId = createRunRow(scanResult, decision.escalate ? decision.reason : null, needsFirstResponder);
 
     pruneOldRuns(500);
 
-    if (needsInvestigation) {
-      spawnInvestigator(runId);
+    if (needsFirstResponder) {
+      const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
+      for (const projectPath of affectedProjects) {
+        const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
+        recordRemediationAttempt(projectPath, fingerprint);
+      }
+      spawnFirstResponder(runId);
       return {
-        outcome: 'investigation_dispatched',
+        outcome: 'first_responder_dispatched',
         runId,
         anomalyCount: scanResult.anomalies.length,
         escalationReason: decision.reason,

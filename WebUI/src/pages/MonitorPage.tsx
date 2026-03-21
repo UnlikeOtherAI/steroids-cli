@@ -41,7 +41,7 @@ const PRESET_LABELS: Record<ResponsePreset, { label: string; description: string
   },
   custom: {
     label: 'Custom Prompt',
-    description: 'Provide your own instructions for the investigator.',
+    description: 'Provide your own instructions for the first responder.',
   },
 };
 
@@ -80,9 +80,9 @@ function outcomeVariant(outcome: string): { color: string; icon: React.ReactNode
       return { color: 'bg-green-100 text-green-800', icon: <CheckCircleIcon className="w-4 h-4" /> };
     case 'anomalies_found':
       return { color: 'bg-yellow-100 text-yellow-800', icon: <ExclamationTriangleIcon className="w-4 h-4" /> };
-    case 'investigation_dispatched':
+    case 'first_responder_dispatched':
       return { color: 'bg-blue-100 text-blue-800', icon: <MagnifyingGlassIcon className="w-4 h-4" /> };
-    case 'investigation_complete':
+    case 'first_responder_complete':
       return { color: 'bg-purple-100 text-purple-800', icon: <CheckCircleIcon className="w-4 h-4" /> };
     case 'error':
       return { color: 'bg-red-100 text-red-800', icon: <XCircleIcon className="w-4 h-4" /> };
@@ -152,7 +152,7 @@ export const MonitorPage: React.FC = () => {
       if (cfg) {
         setEnabled(cfg.enabled);
         setIntervalSeconds(cfg.interval_seconds);
-        setAgents(cfg.investigator_agents.length > 0 ? cfg.investigator_agents : []);
+        setAgents(cfg.first_responder_agents.length > 0 ? cfg.first_responder_agents : []);
         setResponsePreset(cfg.response_preset as ResponsePreset);
         setCustomPrompt(cfg.custom_prompt || '');
         setMinSeverity(cfg.escalation_rules?.min_severity || 'critical');
@@ -216,7 +216,7 @@ export const MonitorPage: React.FC = () => {
       await monitorApi.updateConfig({
         enabled,
         interval_seconds: intervalSeconds,
-        investigator_agents: agents,
+        first_responder_agents: agents,
         response_preset: responsePreset,
         custom_prompt: responsePreset === 'custom' ? customPrompt : null,
         escalation_rules: { min_severity: minSeverity as 'info' | 'warning' | 'critical' },
@@ -345,7 +345,7 @@ export const MonitorPage: React.FC = () => {
     );
   }
 
-  const hasInvestigationInProgress = runs.some(r => r.outcome === 'investigation_dispatched');
+  const hasInvestigationInProgress = runs.some(r => r.outcome === 'first_responder_dispatched');
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -384,7 +384,7 @@ export const MonitorPage: React.FC = () => {
             onClick={handleRun}
             disabled={triggering || hasInvestigationInProgress}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white hover:bg-accent/90 text-sm font-medium transition-colors disabled:opacity-50"
-            title={hasInvestigationInProgress ? 'Investigation in progress' : 'Run full monitor cycle'}
+            title={hasInvestigationInProgress ? 'First responder in progress' : 'Run full monitor cycle'}
           >
             {triggering ? (
               <ArrowPathIcon className="w-4 h-4 animate-spin" />
@@ -456,13 +456,13 @@ export const MonitorPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Investigator Agents */}
+            {/* First Responder Agents */}
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <i className="fa-solid fa-user-secret text-accent"></i>
                   <span className="font-medium text-text-primary text-sm uppercase tracking-wider">
-                    Investigator Agents
+                    First Responder Agents
                   </span>
                   <span className="text-[10px] text-text-muted">(fallback chain, first = preferred)</span>
                 </div>
@@ -472,7 +472,7 @@ export const MonitorPage: React.FC = () => {
                 {agents.map((agent, i) => (
                   <AISetupRoleSelector
                     key={i}
-                    label={`Investigator ${i + 1}`}
+                    label={`First Responder ${i + 1}`}
                     icon="fa-user-secret"
                     config={agent}
                     providers={providers}
@@ -494,7 +494,7 @@ export const MonitorPage: React.FC = () => {
                   className="w-full py-2 border border-dashed border-border rounded-lg text-xs text-text-muted hover:text-accent hover:border-accent transition-colors flex items-center justify-center gap-1"
                 >
                   <PlusIcon className="w-3 h-3" />
-                  Add Investigator (Fallback)
+                  Add First Responder (Fallback)
                 </button>
               </div>
             </div>
@@ -536,7 +536,7 @@ export const MonitorPage: React.FC = () => {
                 <textarea
                   value={customPrompt}
                   onChange={e => setCustomPrompt(e.target.value)}
-                  placeholder="Enter custom instructions for the investigator agent..."
+                  placeholder="Enter custom instructions for the first responder agent..."
                   rows={4}
                   className="w-full mt-3 px-3 py-2 bg-bg-base border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent resize-y"
                 />

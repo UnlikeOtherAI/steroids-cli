@@ -1,5 +1,5 @@
 /**
- * Investigator Agent — structured action interface with provider fallback chain.
+ * First Responder Agent — structured action interface with provider fallback chain.
  *
  * Receives scan results, builds a prompt for an LLM, parses its structured
  * JSON response into actions, and executes them programmatically.
@@ -15,24 +15,25 @@ import type { ScanResult } from './scanner.js';
 // Types
 // ---------------------------------------------------------------------------
 
-export type InvestigatorAction =
+export type FirstResponderAction =
   | { action: 'reset_task'; projectPath: string; taskId: string; reason: string }
   | { action: 'reset_project'; projectPath: string; reason: string }
   | { action: 'kill_runner'; runnerId: string; reason: string }
   | { action: 'stop_all_runners'; reason: string }
   | { action: 'trigger_wakeup'; reason: string }
+  | { action: 'disable_project'; projectPath: string; reason: string }
   | { action: 'report_only'; diagnosis: string };
 
-export interface InvestigatorResponse {
+export interface FirstResponderResponse {
   diagnosis: string;
-  actions: InvestigatorAction[];
+  actions: FirstResponderAction[];
 }
 
-export interface InvestigatorResult {
+export interface FirstResponderResult {
   success: boolean;
   agentUsed: string | null;
   diagnosis: string;
-  actions: InvestigatorAction[];
+  actions: FirstResponderAction[];
   actionResults: Array<{ action: string; success: boolean; reason?: string; error?: string }>;
   error?: string;
 }
@@ -47,6 +48,7 @@ const ALLOWED_ACTIONS: Record<string, string[]> = {
   kill_runner: ['runnerId', 'reason'],
   stop_all_runners: ['reason'],
   trigger_wakeup: ['reason'],
+  disable_project: ['projectPath', 'reason'],
   report_only: ['diagnosis'],
 };
 
@@ -60,10 +62,11 @@ const PRESET_INSTRUCTIONS: Record<string, string> = {
   fix_and_monitor: 'Attempt to fix issues by resetting stuck tasks or killing zombie runners. Only stop all runners as a last resort.',
 };
 
-export function buildInvestigatorPrompt(
+export function buildFirstResponderPrompt(
   scanResult: ScanResult,
   preset: string,
   customPrompt: string | null,
+  remediationContext?: string,
 ): string {
   const presetText = preset === 'custom' && customPrompt
     ? customPrompt
@@ -79,7 +82,11 @@ export function buildInvestigatorPrompt(
       `   Context: ${JSON.stringify(a.context)}`,
     ).join('\n\n');
 
-  return `You are an automated investigator for the Steroids task runner system.
+  const remediationSection = remediationContext
+    ? `\n## Remediation History\n\n${remediationContext}\n`
+    : '';
+
+  return `You are an automated first responder for the Steroids task runner system.
 
 ## Situation
 
@@ -90,7 +97,7 @@ Summary: ${scanResult.summary}
 ## Anomalies
 
 ${anomalyList}
-
+${remediationSection}
 ## Response Preset
 
 ${presetText}
@@ -124,6 +131,9 @@ Analyze the anomalies above and respond with a JSON object matching this schema:
 - { "action": "trigger_wakeup", "reason": "<why>" }
   Triggers the wakeup cycle to restart runners and recover from idle states.
 
+- { "action": "disable_project", "projectPath": "<path>", "reason": "<why>" }
+  Disables an entire project. Use when repeated remediation attempts have failed (2-3 times) and the issue likely requires a code change to steroids itself, or the project is burning tokens in circles.
+
 - { "action": "report_only", "diagnosis": "<summary>" }
   No action taken, just report findings. Use when anomalies are informational.
 
@@ -132,14 +142,17 @@ Analyze the anomalies above and respond with a JSON object matching this schema:
 - You have NO shell access. You can ONLY use the actions listed above.
 - Respond with valid JSON only — no markdown fences, no commentary outside the JSON.
 - If no action is needed, use a single report_only action.
-- Be conservative: prefer report_only over destructive actions unless the preset says otherwise.`;
+- Be conservative: prefer report_only over destructive actions unless the preset says otherwise.
+- Only act on ENABLED projects. If a project is disabled, skip it.
+- If you see the same anomalies for a project that have been attempted before (check the remediation context), and this is the 3rd+ attempt, use disable_project instead of trying to fix again.
+- Blocking issues (blocked_task, idle_project, orphaned_task) MUST be acted upon — do NOT use report_only for these.`;
 }
 
 // ---------------------------------------------------------------------------
 // Response parser
 // ---------------------------------------------------------------------------
 
-export function parseInvestigatorResponse(raw: string): InvestigatorResponse {
+export function parseFirstResponderResponse(raw: string): FirstResponderResponse {
   // Strip markdown code fences if present
   let cleaned = raw.trim();
   const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
@@ -171,11 +184,11 @@ export function parseInvestigatorResponse(raw: string): InvestigatorResponse {
     return { diagnosis, actions: [{ action: 'report_only', diagnosis }] };
   }
 
-  const validActions: InvestigatorAction[] = [];
+  const validActions: FirstResponderAction[] = [];
 
   for (const item of obj.actions) {
     if (typeof item !== 'object' || item === null) {
-      console.warn('[investigator] Skipping non-object action entry');
+      console.warn('[first-responder] Skipping non-object action entry');
       continue;
     }
 
@@ -184,17 +197,17 @@ export function parseInvestigatorResponse(raw: string): InvestigatorResponse {
     const requiredFields = ALLOWED_ACTIONS[actionName];
 
     if (!requiredFields) {
-      console.warn(`[investigator] Skipping unknown action: ${actionName}`);
+      console.warn(`[first-responder] Skipping unknown action: ${actionName}`);
       continue;
     }
 
     const missingFields = requiredFields.filter((f) => entry[f] === undefined || entry[f] === null);
     if (missingFields.length > 0) {
-      console.warn(`[investigator] Skipping ${actionName}: missing fields ${missingFields.join(', ')}`);
+      console.warn(`[first-responder] Skipping ${actionName}: missing fields ${missingFields.join(', ')}`);
       continue;
     }
 
-    validActions.push(entry as unknown as InvestigatorAction);
+    validActions.push(entry as unknown as FirstResponderAction);
   }
 
   if (validActions.length === 0 && obj.actions.length > 0) {
@@ -209,7 +222,7 @@ export function parseInvestigatorResponse(raw: string): InvestigatorResponse {
 // ---------------------------------------------------------------------------
 
 export async function executeActions(
-  actions: InvestigatorAction[],
+  actions: FirstResponderAction[],
 ): Promise<Array<{ action: string; success: boolean; reason?: string; error?: string }>> {
   const results: Array<{ action: string; success: boolean; reason?: string; error?: string }> = [];
 
@@ -345,6 +358,36 @@ export async function executeActions(
         break;
       }
 
+      case 'disable_project': {
+        try {
+          const entrypoint = resolveCliEntrypoint();
+          if (!entrypoint) {
+            results.push({ action: 'disable_project', success: false, error: 'Could not resolve CLI entrypoint' });
+            break;
+          }
+          const child = spawn(
+            process.execPath,
+            [entrypoint, 'projects', 'disable', '--path', entry.projectPath],
+            { stdio: 'ignore', detached: false },
+          );
+          await new Promise<void>((resolve, reject) => {
+            child.on('close', (code) => {
+              if (code === 0 || code === null) resolve();
+              else reject(new Error(`projects disable exited with code ${code}`));
+            });
+            child.on('error', reject);
+          });
+          results.push({ action: 'disable_project', success: true, reason: entry.reason });
+        } catch (err) {
+          results.push({
+            action: 'disable_project',
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      }
+
       case 'report_only': {
         results.push({ action: 'report_only', success: true, reason: entry.diagnosis });
         break;
@@ -364,14 +407,15 @@ function isRetryableError(err: unknown): boolean {
   return msg.includes('rate') || msg.includes('limit') || msg.includes('timeout') || msg.includes('network');
 }
 
-export async function runInvestigation(
+export async function runFirstResponder(
   agents: Array<{ provider: string; model: string }>,
   scanResult: ScanResult,
   preset: string,
   customPrompt: string | null,
-): Promise<InvestigatorResult> {
+  remediationContext?: string,
+): Promise<FirstResponderResult> {
   const registry = await getProviderRegistry();
-  const prompt = buildInvestigatorPrompt(scanResult, preset, customPrompt);
+  const prompt = buildFirstResponderPrompt(scanResult, preset, customPrompt, remediationContext);
 
   for (const agent of agents) {
     let provider;
@@ -385,7 +429,7 @@ export async function runInvestigation(
     // Check availability
     try {
       if (!(await provider.isAvailable())) {
-        console.warn(`[investigator] Provider ${agent.provider} not available, skipping`);
+        console.warn(`[first-responder] Provider ${agent.provider} not available, skipping`);
         continue;
       }
     } catch {
@@ -397,7 +441,7 @@ export async function runInvestigation(
       const { getProviderBackoffRemainingMs } = await import('../runners/global-db-backoffs.js');
       const remaining = getProviderBackoffRemainingMs(agent.provider);
       if (remaining > 0) {
-        console.warn(`[investigator] Provider ${agent.provider} backed off for ${Math.ceil(remaining / 1000)}s, skipping`);
+        console.warn(`[first-responder] Provider ${agent.provider} backed off for ${Math.ceil(remaining / 1000)}s, skipping`);
         continue;
       }
     } catch {
@@ -411,7 +455,7 @@ export async function runInvestigation(
         const classified = provider.classifyResult(result);
         const errMsg = classified?.message ?? result.stderr.slice(0, 200);
         if (classified?.retryable) {
-          console.warn(`[investigator] Retryable error from ${agent.provider}: ${errMsg}`);
+          console.warn(`[first-responder] Retryable error from ${agent.provider}: ${errMsg}`);
           continue;
         }
         return {
@@ -424,7 +468,7 @@ export async function runInvestigation(
         };
       }
 
-      const response = parseInvestigatorResponse(result.stdout);
+      const response = parseFirstResponderResponse(result.stdout);
       const actionResults = await executeActions(response.actions);
 
       return {
@@ -436,7 +480,7 @@ export async function runInvestigation(
       };
     } catch (err) {
       if (isRetryableError(err)) {
-        console.warn(`[investigator] Retryable error from ${agent.provider}: ${err instanceof Error ? err.message : err}`);
+        console.warn(`[first-responder] Retryable error from ${agent.provider}: ${err instanceof Error ? err.message : err}`);
         continue;
       }
       return {

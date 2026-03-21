@@ -537,11 +537,11 @@ export interface EscalationRules {
 export interface MonitorConfig {
   enabled: boolean;
   interval_seconds: number;
-  investigator_agents: MonitorAgentConfig[];
+  first_responder_agents: MonitorAgentConfig[];
   response_preset: string;
   custom_prompt: string | null;
   escalation_rules: EscalationRules;
-  investigation_timeout_seconds: number;
+  first_responder_timeout_seconds: number;
   updated_at: number;
 }
 
@@ -571,10 +571,10 @@ export interface MonitorRun {
   outcome: string;
   scan_results: MonitorScanResult | null;
   escalation_reason: string | null;
-  investigation_needed: boolean;
-  investigator_agent: string | null;
-  investigator_actions: unknown[] | null;
-  investigator_report: string | null;
+  first_responder_needed: boolean;
+  first_responder_agent: string | null;
+  first_responder_actions: unknown[] | null;
+  first_responder_report: string | null;
   action_results: unknown[] | null;
   error: string | null;
   duration_ms: number | null;

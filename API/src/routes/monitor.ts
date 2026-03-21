@@ -14,11 +14,11 @@ interface MonitorConfigRow {
   id: number;
   enabled: number;
   interval_seconds: number;
-  investigator_agents: string;
+  first_responder_agents: string;
   response_preset: string;
   custom_prompt: string | null;
   escalation_rules: string;
-  investigation_timeout_seconds: number;
+  first_responder_timeout_seconds: number;
   updated_at: number;
 }
 
@@ -29,10 +29,10 @@ interface MonitorRunRow {
   outcome: string;
   scan_results: string | null;
   escalation_reason: string | null;
-  investigation_needed: number;
-  investigator_agent: string | null;
-  investigator_actions: string | null;
-  investigator_report: string | null;
+  first_responder_needed: number;
+  first_responder_agent: string | null;
+  first_responder_actions: string | null;
+  first_responder_report: string | null;
   action_results: string | null;
   error: string | null;
 }
@@ -52,11 +52,11 @@ router.get('/monitor/config', (_req: Request, res: Response) => {
       config: {
         enabled: Boolean(row.enabled),
         interval_seconds: row.interval_seconds,
-        investigator_agents: safeJsonParse(row.investigator_agents, []),
+        first_responder_agents: safeJsonParse(row.first_responder_agents, []),
         response_preset: row.response_preset,
         custom_prompt: row.custom_prompt,
         escalation_rules: safeJsonParse(row.escalation_rules, { min_severity: 'critical' }),
-        investigation_timeout_seconds: row.investigation_timeout_seconds,
+        first_responder_timeout_seconds: row.first_responder_timeout_seconds,
         updated_at: row.updated_at,
       },
     });
@@ -75,11 +75,11 @@ router.put('/monitor/config', (req: Request, res: Response) => {
   const {
     enabled,
     interval_seconds,
-    investigator_agents,
+    first_responder_agents,
     response_preset,
     custom_prompt,
     escalation_rules,
-    investigation_timeout_seconds,
+    first_responder_timeout_seconds,
   } = req.body;
 
   const { db, close } = openGlobalDatabase();
@@ -95,9 +95,9 @@ router.put('/monitor/config', (req: Request, res: Response) => {
       sets.push('interval_seconds = ?');
       params.push(Number(interval_seconds));
     }
-    if (investigator_agents !== undefined) {
-      sets.push('investigator_agents = ?');
-      params.push(JSON.stringify(investigator_agents));
+    if (first_responder_agents !== undefined) {
+      sets.push('first_responder_agents = ?');
+      params.push(JSON.stringify(first_responder_agents));
     }
     if (response_preset !== undefined) {
       sets.push('response_preset = ?');
@@ -111,9 +111,9 @@ router.put('/monitor/config', (req: Request, res: Response) => {
       sets.push('escalation_rules = ?');
       params.push(JSON.stringify(escalation_rules));
     }
-    if (investigation_timeout_seconds !== undefined) {
-      sets.push('investigation_timeout_seconds = ?');
-      params.push(Number(investigation_timeout_seconds));
+    if (first_responder_timeout_seconds !== undefined) {
+      sets.push('first_responder_timeout_seconds = ?');
+      params.push(Number(first_responder_timeout_seconds));
     }
 
     if (sets.length === 0) {
@@ -225,17 +225,17 @@ router.post('/monitor/scan', async (_req: Request, res: Response) => {
 });
 
 router.post('/monitor/run', async (_req: Request, res: Response) => {
-  // Idempotency: reject if investigation already in progress
+  // Idempotency: reject if first responder already in progress
   const { db, close } = openGlobalDatabase();
   try {
     const active = db
-      .prepare("SELECT id FROM monitor_runs WHERE outcome = 'investigation_dispatched'")
+      .prepare("SELECT id FROM monitor_runs WHERE outcome = 'first_responder_dispatched'")
       .get() as { id: number } | undefined;
 
     if (active) {
       res.status(409).json({
         success: false,
-        error: 'Investigation already in progress',
+        error: 'First responder already in progress',
         run_id: active.id,
       });
       close();
@@ -256,7 +256,7 @@ router.post('/monitor/run', async (_req: Request, res: Response) => {
   }
 });
 
-// ── Investigate a specific run ────────────────────────────────────────────────
+// ── Dispatch first responder for a specific run ──────────────────────────────
 
 router.post('/monitor/runs/:id/investigate', async (req: Request, res: Response) => {
   const runId = Number(req.params.id);
@@ -272,28 +272,28 @@ router.post('/monitor/runs/:id/investigate', async (req: Request, res: Response)
       return;
     }
 
-    // Check if already investigating
+    // Check if first responder already active
     const active = db
-      .prepare("SELECT id FROM monitor_runs WHERE outcome = 'investigation_dispatched'")
+      .prepare("SELECT id FROM monitor_runs WHERE outcome = 'first_responder_dispatched'")
       .get() as { id: number } | undefined;
 
     if (active) {
       res.status(409).json({
         success: false,
-        error: 'Investigation already in progress',
+        error: 'First responder already in progress',
         run_id: active.id,
       });
       close();
       return;
     }
 
-    // Mark this run as investigation_dispatched
+    // Mark this run as first_responder_dispatched
     db.prepare(
-      "UPDATE monitor_runs SET outcome = 'investigation_dispatched', completed_at = NULL WHERE id = ?"
+      "UPDATE monitor_runs SET outcome = 'first_responder_dispatched', completed_at = NULL WHERE id = ?"
     ).run(runId);
     close();
 
-    // Spawn detached investigator process
+    // Spawn detached first responder process
     const { spawn } = await import('node:child_process');
     const { resolveCliEntrypoint } = await import('../../../dist/cli/entrypoint.js');
     const entrypoint = resolveCliEntrypoint();
@@ -309,17 +309,18 @@ router.post('/monitor/runs/:id/investigate', async (req: Request, res: Response)
 
     const child = spawn(
       process.execPath,
-      [entrypoint, 'monitor', 'investigate', '--run-id', String(runId)],
+      [entrypoint, 'monitor', 'respond', '--run-id', String(runId)],
       { detached: true, stdio: 'ignore' },
     );
     child.unref();
 
-    res.json({ success: true, run_id: runId, status: 'investigation_dispatched' });
+    res.json({ success: true, run_id: runId, status: 'first_responder_dispatched' });
+
   } catch (error) {
     try { close(); } catch { /* already closed */ }
     res.status(500).json({
       success: false,
-      error: 'Failed to start investigation',
+      error: 'Failed to start first responder',
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
@@ -344,10 +345,10 @@ function formatRunRow(row: MonitorRunRow) {
     outcome: row.outcome,
     scan_results: safeJsonParse(row.scan_results, null),
     escalation_reason: row.escalation_reason,
-    investigation_needed: Boolean(row.investigation_needed),
-    investigator_agent: row.investigator_agent,
-    investigator_actions: safeJsonParse(row.investigator_actions, null),
-    investigator_report: row.investigator_report,
+    first_responder_needed: Boolean(row.first_responder_needed),
+    first_responder_agent: row.first_responder_agent,
+    first_responder_actions: safeJsonParse(row.first_responder_actions, null),
+    first_responder_report: row.first_responder_report,
     action_results: safeJsonParse(row.action_results, null),
     error: row.error,
     duration_ms: row.completed_at ? row.completed_at - row.started_at : null,

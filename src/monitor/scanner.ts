@@ -234,7 +234,7 @@ function scanFailedAndSkippedTasks(
 
   return rows.map((row) => ({
     type: (row.status === 'failed' ? 'failed_task' : 'skipped_task') as Anomaly['type'],
-    severity: 'warning' as const,
+    severity: 'info' as const,
     projectPath,
     projectName,
     taskId: row.id,
@@ -341,7 +341,7 @@ function scanBlockedTasks(
 
   return rows.map((row) => ({
     type: 'blocked_task' as const,
-    severity: 'warning' as const,
+    severity: 'critical' as const,
     projectPath,
     projectName,
     taskId: row.id,
@@ -428,7 +428,7 @@ export async function runScan(): Promise<ScanResult> {
         const cronActive = cronStatus().installed;
         anomalies.push({
           type: 'idle_project',
-          severity: cronActive ? 'warning' : 'info',
+          severity: cronActive ? 'critical' : 'info',
           projectPath,
           projectName,
           details: cronActive

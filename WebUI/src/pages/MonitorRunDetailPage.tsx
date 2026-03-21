@@ -33,10 +33,10 @@ function outcomeConfig(outcome: string) {
       return { color: 'bg-green-100 text-green-800', icon: <CheckCircleIcon className="w-5 h-5 text-green-600" />, label: 'Clean' };
     case 'anomalies_found':
       return { color: 'bg-yellow-100 text-yellow-800', icon: <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600" />, label: 'Anomalies Found' };
-    case 'investigation_dispatched':
-      return { color: 'bg-blue-100 text-blue-800', icon: <ArrowPathIcon className="w-5 h-5 text-blue-600 animate-spin" />, label: 'Investigation In Progress' };
-    case 'investigation_complete':
-      return { color: 'bg-purple-100 text-purple-800', icon: <CheckCircleIcon className="w-5 h-5 text-purple-600" />, label: 'Investigation Complete' };
+    case 'first_responder_dispatched':
+      return { color: 'bg-blue-100 text-blue-800', icon: <ArrowPathIcon className="w-5 h-5 text-blue-600 animate-spin" />, label: 'First Responder In Progress' };
+    case 'first_responder_complete':
+      return { color: 'bg-purple-100 text-purple-800', icon: <CheckCircleIcon className="w-5 h-5 text-purple-600" />, label: 'First Responder Complete' };
     case 'error':
       return { color: 'bg-red-100 text-red-800', icon: <XCircleIcon className="w-5 h-5 text-red-600" />, label: 'Error' };
     default:
@@ -78,9 +78,9 @@ export const MonitorRunDetailPage: React.FC = () => {
     fetchRun();
   }, [fetchRun]);
 
-  // Poll while investigation is in progress
+  // Poll while first responder is in progress
   useEffect(() => {
-    const isActive = run?.outcome === 'investigation_dispatched';
+    const isActive = run?.outcome === 'first_responder_dispatched';
     if (isActive) {
       intervalRef.current = window.setInterval(fetchRun, 3000);
     }
@@ -100,7 +100,7 @@ export const MonitorRunDetailPage: React.FC = () => {
       await monitorApi.investigate(run.id);
       await fetchRun();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start investigation');
+      setError(err instanceof Error ? err.message : 'Failed to dispatch first responder');
     } finally {
       setInvestigating(false);
     }
@@ -127,7 +127,7 @@ export const MonitorRunDetailPage: React.FC = () => {
 
   const oc = outcomeConfig(run.outcome);
   const anomalies: MonitorAnomaly[] = run.scan_results?.anomalies ?? [];
-  const isInProgress = run.outcome === 'investigation_dispatched';
+  const isInProgress = run.outcome === 'first_responder_dispatched';
   const canInvestigate = run.outcome === 'anomalies_found' || run.outcome === 'error';
 
   return (
@@ -168,16 +168,16 @@ export const MonitorRunDetailPage: React.FC = () => {
         </div>
       )}
 
-      {/* Investigation In Progress Banner */}
+      {/* First Responder In Progress Banner */}
       {isInProgress && (
         <div className="mb-6 p-6 bg-blue-50 border border-blue-200 rounded-lg">
           <div className="flex items-center gap-3 mb-2">
             <ArrowPathIcon className="w-6 h-6 text-blue-600 animate-spin" />
-            <h3 className="text-lg font-semibold text-blue-900">Investigation In Progress</h3>
+            <h3 className="text-lg font-semibold text-blue-900">First Responder In Progress</h3>
           </div>
           <p className="text-sm text-blue-700">
-            The investigator agent is analyzing the anomalies and determining corrective actions.
-            This page will update automatically when the investigation completes.
+            The first responder agent is analyzing the anomalies and determining corrective actions.
+            This page will update automatically when the first responder completes.
           </p>
           <div className="mt-3 flex items-center gap-2">
             <div className="flex space-x-1">
@@ -190,7 +190,7 @@ export const MonitorRunDetailPage: React.FC = () => {
         </div>
       )}
 
-      {/* Investigate Button */}
+      {/* First Responder Button */}
       {canInvestigate && (
         <div className="mb-6">
           <button
@@ -203,7 +203,7 @@ export const MonitorRunDetailPage: React.FC = () => {
             ) : (
               <PlayIcon className="w-5 h-5" />
             )}
-            {investigating ? 'Starting Investigation...' : 'Run Investigation'}
+            {investigating ? 'Dispatching First Responder...' : 'Dispatch First Responder'}
           </button>
         </div>
       )}
@@ -272,19 +272,19 @@ export const MonitorRunDetailPage: React.FC = () => {
         </div>
       )}
 
-      {/* Investigator Report */}
-      {run.investigator_report && (
+      {/* First Responder Report */}
+      {run.first_responder_report && (
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2">
             <MagnifyingGlassIcon className="w-5 h-5 text-purple-600" />
-            Investigation Report
-            {run.investigator_agent && (
-              <span className="text-sm font-normal text-text-muted">({run.investigator_agent})</span>
+            First Responder Report
+            {run.first_responder_agent && (
+              <span className="text-sm font-normal text-text-muted">({run.first_responder_agent})</span>
             )}
           </h2>
           <div className="bg-bg-surface border border-border rounded-lg p-5">
             <pre className="text-sm text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">
-              {run.investigator_report}
+              {run.first_responder_report}
             </pre>
           </div>
         </div>

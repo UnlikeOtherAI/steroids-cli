@@ -1,13 +1,14 @@
 /**
- * steroids monitor - Monitor system health and investigate anomalies
+ * steroids monitor - Monitor system health and dispatch first responder
  *
  * Subcommands:
  *   status       Show current monitor configuration and state
  *   enable       Enable the monitor
  *   disable      Disable the monitor
  *   scan         Run a scan and print results
- *   run          Run full cycle (scan + rules, no investigation)
- *   investigate  Run investigation for a specific run (detached from wakeup)
+ *   run          Run full cycle (scan + rules, no first responder)
+ *   respond      Dispatch first responder for a specific run (detached from wakeup)
+ *   investigate  Alias for respond (backward compat)
  */
 
 import { parseArgs } from 'node:util';
@@ -21,11 +22,11 @@ interface MonitorConfigRow {
   id: number;
   enabled: number;
   interval_seconds: number;
-  investigator_agents: string;
+  first_responder_agents: string;
   response_preset: string;
   custom_prompt: string | null;
   escalation_rules: string;
-  investigation_timeout_seconds: number;
+  first_responder_timeout_seconds: number;
   updated_at: number;
 }
 
@@ -36,10 +37,10 @@ interface MonitorRunRow {
   outcome: string;
   scan_results: string | null;
   escalation_reason: string | null;
-  investigation_needed: number;
-  investigator_agent: string | null;
-  investigator_actions: string | null;
-  investigator_report: string | null;
+  first_responder_needed: number;
+  first_responder_agent: string | null;
+  first_responder_actions: string | null;
+  first_responder_report: string | null;
   action_results: string | null;
   error: string | null;
 }
@@ -48,21 +49,22 @@ interface MonitorRunRow {
 
 const HELP = generateHelp({
   command: 'monitor',
-  description: 'Monitor system health and investigate anomalies',
+  description: 'Monitor system health and dispatch first responder',
   details: `The monitor periodically scans all registered projects for anomalies
 (stuck tasks, zombie runners, idle projects, etc.) and can dispatch an
-AI investigator agent when escalation rules are triggered.`,
+AI first responder agent when escalation rules are triggered.`,
   usage: ['steroids monitor <subcommand> [options]'],
   subcommands: [
     { name: 'status', description: 'Show current monitor configuration and state' },
     { name: 'enable', description: 'Enable the monitor' },
     { name: 'disable', description: 'Disable the monitor' },
     { name: 'scan', description: 'Run a scan and print anomaly results' },
-    { name: 'run', description: 'Run full cycle (scan + rules, no investigation)' },
-    { name: 'investigate', args: '--run-id <id>', description: 'Run investigation for a monitor run' },
+    { name: 'run', description: 'Run full cycle (scan + rules, no first responder)' },
+    { name: 'respond', args: '--run-id <id>', description: 'Dispatch first responder for a monitor run' },
+    { name: 'investigate', args: '--run-id <id>', description: 'Alias for respond' },
   ],
   options: [
-    { long: 'run-id', description: 'Monitor run ID to investigate', values: '<id>' },
+    { long: 'run-id', description: 'Monitor run ID for first responder dispatch', values: '<id>' },
   ],
   examples: [
     { command: 'steroids monitor status', description: 'Show config and last run' },
@@ -70,7 +72,7 @@ AI investigator agent when escalation rules are triggered.`,
     { command: 'steroids monitor disable', description: 'Disable the monitor' },
     { command: 'steroids monitor scan', description: 'Run a scan now' },
     { command: 'steroids monitor run', description: 'Run full scan+rules cycle' },
-    { command: 'steroids monitor investigate --run-id 42', description: 'Investigate run 42' },
+    { command: 'steroids monitor respond --run-id 42', description: 'Dispatch first responder for run 42' },
   ],
   related: [
     { command: 'steroids health', description: 'Project health checks' },
@@ -110,8 +112,9 @@ export async function monitorCommand(args: string[], flags: GlobalFlags): Promis
     case 'run':
       await runCycleCmd(subArgs, flags);
       break;
+    case 'respond':
     case 'investigate':
-      await runInvestigateCmd(subArgs, flags);
+      await runRespondCmd(subArgs, flags);
       break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
@@ -144,7 +147,7 @@ async function runStatus(_args: string[], flags: GlobalFlags): Promise<void> {
     }
 
     const escalation = safeJsonParse(config.escalation_rules);
-    const agents = safeJsonParse(config.investigator_agents);
+    const agents = safeJsonParse(config.first_responder_agents);
 
     console.log('MONITOR STATUS');
     console.log('='.repeat(50));
@@ -153,7 +156,7 @@ async function runStatus(_args: string[], flags: GlobalFlags): Promise<void> {
     console.log(`  Agent count:        ${Array.isArray(agents) ? agents.length : 0}`);
     console.log(`  Response preset:    ${config.response_preset}`);
     console.log(`  Min severity:       ${escalation?.min_severity ?? 'unknown'}`);
-    console.log(`  Invest. timeout:    ${config.investigation_timeout_seconds}s`);
+    console.log(`  FR timeout:         ${config.first_responder_timeout_seconds}s`);
     console.log(`  Last config update: ${config.updated_at ? new Date(config.updated_at).toISOString() : 'never'}`);
     console.log('');
 
@@ -252,9 +255,9 @@ async function runCycleCmd(_args: string[], flags: GlobalFlags): Promise<void> {
   }
 }
 
-// ── investigate ────────────────────────────────────────────────────────────
+// ── respond (first responder) ──────────────────────────────────────────────
 
-async function runInvestigateCmd(args: string[], flags: GlobalFlags): Promise<void> {
+async function runRespondCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -266,13 +269,13 @@ async function runInvestigateCmd(args: string[], flags: GlobalFlags): Promise<vo
 
   if (values.help || flags.help) {
     console.log(`
-steroids monitor investigate - Run investigation for a monitor run
+steroids monitor respond - Dispatch first responder for a monitor run
 
 USAGE:
-  steroids monitor investigate --run-id <id>
+  steroids monitor respond --run-id <id>
 
 OPTIONS:
-  --run-id <id>   Monitor run ID to investigate (required)
+  --run-id <id>   Monitor run ID to dispatch first responder for (required)
   -h, --help      Show help
 `);
     return;
@@ -319,23 +322,23 @@ OPTIONS:
     process.exit(1);
   }
 
-  // Parse investigator agents and response preset from config
-  const agents = safeJsonParse(config.investigator_agents) as
+  // Parse first responder agents and response preset from config
+  const agents = safeJsonParse(config.first_responder_agents) as
     Array<{ provider: string; model: string }> | null;
   const responsePreset = config.response_preset;
 
   if (!Array.isArray(agents) || agents.length === 0) {
-    updateRunError(runId, 'No investigator agents configured');
-    console.error('Error: no investigator agents configured');
+    updateRunError(runId, 'No first responder agents configured');
+    console.error('Error: no first responder agents configured');
     process.exit(1);
   }
 
-  // Dynamically import the investigator agent module
-  const { runInvestigation } = await import('../monitor/investigator-agent.js');
+  // Dynamically import the first responder agent module
+  const { runFirstResponder } = await import('../monitor/investigator-agent.js');
 
-  // Run the investigation
+  // Run the first responder
   try {
-    const result = await runInvestigation(
+    const result = await runFirstResponder(
       agents,
       scanResults,
       responsePreset,
@@ -343,7 +346,7 @@ OPTIONS:
     );
 
     // Determine outcome based on result
-    const outcome = result.success ? 'investigation_complete' : 'error';
+    const outcome = result.success ? 'first_responder_complete' : 'error';
 
     // Update the monitor_runs row with results
     const { db: db2, close: close2 } = openGlobalDatabase();
@@ -351,9 +354,9 @@ OPTIONS:
       db2.prepare(
         `UPDATE monitor_runs
          SET outcome = ?,
-             investigator_agent = ?,
-             investigator_report = ?,
-             investigator_actions = ?,
+             first_responder_agent = ?,
+             first_responder_report = ?,
+             first_responder_actions = ?,
              action_results = ?,
              completed_at = ?,
              error = ?
@@ -385,14 +388,14 @@ OPTIONS:
       }, null, 2));
     } else {
       if (result.success) {
-        console.log(`Investigation complete for run ${runId}.`);
+        console.log(`First responder complete for run ${runId}.`);
         console.log(`  Agent:   ${result.agentUsed}`);
         console.log(`  Actions: ${result.actions.length}`);
         console.log('');
         console.log('DIAGNOSIS:');
         console.log(result.diagnosis);
       } else {
-        console.error(`Investigation failed for run ${runId}: ${result.error}`);
+        console.error(`First responder failed for run ${runId}: ${result.error}`);
       }
     }
 
@@ -400,13 +403,13 @@ OPTIONS:
       process.exit(1);
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown investigation error';
+    const msg = err instanceof Error ? err.message : 'Unknown first responder error';
     updateRunError(runId, msg);
 
     if (flags.json) {
       console.log(JSON.stringify({ success: false, runId, error: msg }, null, 2));
     } else {
-      console.error(`Investigation failed for run ${runId}: ${msg}`);
+      console.error(`First responder failed for run ${runId}: ${msg}`);
     }
     process.exit(1);
   }
