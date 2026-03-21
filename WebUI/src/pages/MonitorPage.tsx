@@ -120,6 +120,8 @@ export const MonitorPage: React.FC = () => {
   const [runs, setRuns] = useState<MonitorRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [runsLoading, setRunsLoading] = useState(true);
+  const [runsPage, setRunsPage] = useState(0);
+  const RUNS_PAGE_SIZE = 20;
   // Manual trigger state
   const [scanning, setScanning] = useState(false);
   const [triggering, setTriggering] = useState(false);
@@ -183,10 +185,10 @@ export const MonitorPage: React.FC = () => {
     }
   }, []);
 
-  const loadRuns = useCallback(async () => {
+  const loadRuns = useCallback(async (page = runsPage) => {
     setRunsLoading(true);
     try {
-      const result = await monitorApi.listRuns(50);
+      const result = await monitorApi.listRuns(RUNS_PAGE_SIZE, page * RUNS_PAGE_SIZE);
       setRuns(result.runs);
       setRunsTotal(result.total);
     } catch {
@@ -194,7 +196,7 @@ export const MonitorPage: React.FC = () => {
     } finally {
       setRunsLoading(false);
     }
-  }, []);
+  }, [runsPage]);
 
   useEffect(() => {
     loadConfig();
@@ -203,7 +205,7 @@ export const MonitorPage: React.FC = () => {
 
   // Poll runs every 10s
   useEffect(() => {
-    const interval = setInterval(loadRuns, 10_000);
+    const interval = setInterval(() => loadRuns(), 10_000);
     return () => clearInterval(interval);
   }, [loadRuns]);
 
@@ -651,7 +653,7 @@ export const MonitorPage: React.FC = () => {
               </button>
             )}
             <button
-              onClick={loadRuns}
+              onClick={() => loadRuns()}
               disabled={runsLoading}
               className="p-1.5 rounded-lg hover:bg-bg-surface2 text-text-secondary"
             >
@@ -718,6 +720,30 @@ export const MonitorPage: React.FC = () => {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {/* Pagination */}
+        {runsTotal > RUNS_PAGE_SIZE && (
+          <div className="flex items-center justify-between mt-3">
+            <span className="text-xs text-text-muted">
+              {runsPage * RUNS_PAGE_SIZE + 1}–{Math.min((runsPage + 1) * RUNS_PAGE_SIZE, runsTotal)} of {runsTotal}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { const p = runsPage - 1; setRunsPage(p); loadRuns(p); }}
+                disabled={runsPage === 0}
+                className="px-3 py-1 rounded border border-border text-xs text-text-secondary hover:bg-bg-surface2 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => { const p = runsPage + 1; setRunsPage(p); loadRuns(p); }}
+                disabled={(runsPage + 1) * RUNS_PAGE_SIZE >= runsTotal}
+                className="px-3 py-1 rounded border border-border text-xs text-text-secondary hover:bg-bg-surface2 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -23,6 +23,7 @@ import {
   openGlobalDatabase,
   type GlobalDatabaseConnection,
 } from '../runners/global-db-connection.js';
+import { cronStatus } from '../runners/cron.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -387,15 +388,18 @@ export async function runScan(): Promise<ScanResult> {
       // 4. Repeated failures
       anomalies.push(...scanRepeatedFailures(projectDb, projectPath, projectName));
 
-      // 5. Idle project check
+      // 5. Idle project check — warning if cron is running (should have spawned a runner)
       if (hasPendingWork(projectDb) && !hasActiveRunner(globalDb, projectPath)) {
+        const cronActive = cronStatus().installed;
         anomalies.push({
           type: 'idle_project',
-          severity: 'info',
+          severity: cronActive ? 'warning' : 'info',
           projectPath,
           projectName,
-          details: `Project "${projectName}" has pending work but no active runner`,
-          context: {},
+          details: cronActive
+            ? `Project "${projectName}" has pending work but no active runner (cron is running — this should be resolved)`
+            : `Project "${projectName}" has pending work but no active runner`,
+          context: { cronActive },
         });
       }
     } catch {

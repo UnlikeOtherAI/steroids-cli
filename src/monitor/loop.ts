@@ -92,6 +92,33 @@ function hasActiveInvestigation(timeoutSeconds: number): boolean {
   }
 }
 
+/**
+ * Returns true if the new scan's anomalies are identical to the most recent run.
+ * Compares a normalised fingerprint: sorted type+severity+projectPath+taskId tuples.
+ */
+function isDuplicateOfLastRun(scanResult: ScanResult): boolean {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db.prepare(
+      'SELECT scan_results FROM monitor_runs ORDER BY started_at DESC LIMIT 1'
+    ).get() as { scan_results: string | null } | undefined;
+    if (!row?.scan_results) return false;
+
+    const prev = safeJsonParse<ScanResult | null>(row.scan_results, null);
+    if (!prev) return false;
+
+    const fingerprint = (s: ScanResult) =>
+      s.anomalies
+        .map(a => `${a.type}|${a.severity}|${a.projectPath}|${a.taskId ?? ''}|${a.runnerId ?? ''}`)
+        .sort()
+        .join('\n');
+
+    return fingerprint(scanResult) === fingerprint(prev);
+  } finally {
+    close();
+  }
+}
+
 function createRunRow(scanResult: ScanResult, escalationReason: string | null, investigationNeeded: boolean): number {
   const { db, close } = openGlobalDatabase();
   try {
@@ -163,6 +190,9 @@ export async function monitorCheck(): Promise<void> {
   // Run scan
   const scanResult = await runScan();
 
+  // Skip if anomalies are identical to the last run (no new information)
+  if (isDuplicateOfLastRun(scanResult)) return;
+
   // Apply rules
   const rules = safeJsonParse<EscalationRules>(config.escalation_rules, { min_severity: 'critical' });
   const decision = shouldEscalate(scanResult.anomalies, rules);
@@ -190,6 +220,11 @@ export async function runMonitorCycle(options?: { manual?: boolean }): Promise<M
   try {
     const config = readConfig();
     const scanResult = await runScan();
+
+    // Skip duplicate unless this is a manual trigger
+    if (!options?.manual && isDuplicateOfLastRun(scanResult)) {
+      return { outcome: 'skipped', anomalyCount: scanResult.anomalies.length };
+    }
 
     const rules = safeJsonParse<EscalationRules>(
       config?.escalation_rules ?? null,
