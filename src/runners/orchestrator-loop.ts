@@ -5,7 +5,7 @@
 
 import { openDatabase, getDbPath } from '../database/connection.js';
 import { autoMigrate } from '../migrations/index.js';
-import { getTask, getSection, incrementTaskFailureCount, updateTaskStatus, listTasks } from '../database/queries.js';
+import { getTask, getSection, incrementTaskFailureCount, updateTaskStatus, listTasks, getInvocationCount, countConsecutivePushFailures } from '../database/queries.js';
 import {
   selectNextTask,
   selectNextTaskWithLock,
@@ -431,6 +431,24 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
       console.log(`Action: ${action}`);
       console.log(`Status: ${task.status}`);
 
+      // ── Invocation cap: prevent runaway loops from burning API quota ──
+      const maxInvocations = config.health?.maxInvocationsPerTask ?? 50;
+      if (maxInvocations > 0) {
+        const invCounts = getInvocationCount(db, task.id);
+        if (invCounts.total >= maxInvocations) {
+          console.warn(`\n✗ Task ${task.id} reached invocation cap (${invCounts.total}/${maxInvocations}). Skipping to prevent quota waste.`);
+          updateTaskStatus(
+            db,
+            task.id,
+            'skipped',
+            'orchestrator',
+            `Auto-skipped: invocation cap reached (${invCounts.total} invocations, limit ${maxInvocations}). Likely stuck in a loop. Review task history and reset manually if needed.`
+          );
+          if (lockHeartbeat) lockHeartbeat.stop();
+          continue;
+        }
+      }
+
       // ── System pressure gate: wait for memory/disk headroom ──
       const pressureOk = await waitForPressureRelief();
       if (!pressureOk) {
@@ -564,14 +582,27 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
               }
 
               if (durabilityPushFailed) {
-                incrementTaskFailureCount(db, task.id);
-                updateTaskStatus(
-                  db,
-                  task.id,
-                  'pending',
-                  'orchestrator',
-                  'Returned to pending because task branch push failed before review handoff'
-                );
+                const consecutivePushFails = countConsecutivePushFailures(db, task.id) + 1;
+                const pushFailCap = config.health?.maxRecoveryAttempts ?? 3;
+                if (consecutivePushFails >= pushFailCap) {
+                  updateTaskStatus(
+                    db,
+                    task.id,
+                    'skipped',
+                    'orchestrator',
+                    `Auto-skipped: task branch push failed ${consecutivePushFails} consecutive times before review handoff. Remote may be unreachable or misconfigured.`
+                  );
+                  console.warn(`[pool] Push failure cap reached (${consecutivePushFails}/${pushFailCap}); task skipped to stop loop.`);
+                } else {
+                  incrementTaskFailureCount(db, task.id);
+                  updateTaskStatus(
+                    db,
+                    task.id,
+                    'pending',
+                    'orchestrator',
+                    `Returned to pending because task branch push failed before review handoff (${consecutivePushFails}/${pushFailCap})`
+                  );
+                }
                 releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
               } else {
                 partialReleaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);

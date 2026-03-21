@@ -304,6 +304,11 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _type: 'number',
       _default: 3,
     },
+    maxInvocationsPerTask: {
+      _description: 'Maximum total provider invocations (coder+reviewer) per task before auto-skipping. Prevents runaway loops from burning API quota.',
+      _type: 'number',
+      _default: 50,
+    },
     maxIncidentsPerHour: {
       _description: 'Safety limit: stop auto-recovery if too many incidents occur in one hour',
       _type: 'number',

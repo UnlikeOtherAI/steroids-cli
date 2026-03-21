@@ -70,6 +70,7 @@ export interface SteroidsConfig {
     invocationStaleness?: number;
     autoRecover?: boolean;
     maxRecoveryAttempts?: number;
+    maxInvocationsPerTask?: number;
     maxIncidentsPerHour?: number;
   };
   projects?: {
@@ -166,6 +167,7 @@ export const DEFAULT_CONFIG: SteroidsConfig = {
     invocationStaleness: 600,
     autoRecover: true,
     maxRecoveryAttempts: 3,
+    maxInvocationsPerTask: 50,
     maxIncidentsPerHour: 10,
   },
   projects: {
