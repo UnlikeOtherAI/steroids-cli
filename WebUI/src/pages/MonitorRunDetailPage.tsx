@@ -10,6 +10,7 @@ import {
   MagnifyingGlassIcon,
   ClockIcon,
   PlayIcon,
+  WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
 import { monitorApi, MonitorRun, MonitorAnomaly } from '../services/api';
 
@@ -92,12 +93,12 @@ export const MonitorRunDetailPage: React.FC = () => {
     };
   }, [run?.outcome, fetchRun]);
 
-  const handleInvestigate = async () => {
+  const handleDispatch = async (preset?: string) => {
     if (!run) return;
     setInvestigating(true);
     setError(null);
     try {
-      await monitorApi.investigate(run.id);
+      await monitorApi.investigate(run.id, preset);
       await fetchRun();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to dispatch first responder');
@@ -128,7 +129,8 @@ export const MonitorRunDetailPage: React.FC = () => {
   const oc = outcomeConfig(run.outcome);
   const anomalies: MonitorAnomaly[] = run.scan_results?.anomalies ?? [];
   const isInProgress = run.outcome === 'first_responder_dispatched';
-  const canInvestigate = run.outcome === 'anomalies_found' || run.outcome === 'error';
+  const canDispatch = run.outcome === 'anomalies_found' || run.outcome === 'error';
+  const canRedispatch = run.outcome === 'first_responder_complete' && anomalies.length > 0;
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -190,11 +192,11 @@ export const MonitorRunDetailPage: React.FC = () => {
         </div>
       )}
 
-      {/* First Responder Button */}
-      {canInvestigate && (
-        <div className="mb-6">
+      {/* First Responder Buttons */}
+      {canDispatch && (
+        <div className="mb-6 flex items-center gap-3">
           <button
-            onClick={handleInvestigate}
+            onClick={() => handleDispatch()}
             disabled={investigating}
             className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-accent text-white hover:bg-accent/90 font-medium transition-colors disabled:opacity-50"
           >
@@ -203,7 +205,40 @@ export const MonitorRunDetailPage: React.FC = () => {
             ) : (
               <PlayIcon className="w-5 h-5" />
             )}
-            {investigating ? 'Dispatching First Responder...' : 'Dispatch First Responder'}
+            {investigating ? 'Dispatching...' : 'Dispatch First Responder'}
+          </button>
+          <button
+            onClick={() => handleDispatch('fix_and_monitor')}
+            disabled={investigating}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-purple-600 text-white hover:bg-purple-700 font-medium transition-colors disabled:opacity-50"
+          >
+            <WrenchScrewdriverIcon className="w-5 h-5" />
+            Investigate & Fix
+          </button>
+        </div>
+      )}
+
+      {/* Re-dispatch after completion */}
+      {canRedispatch && (
+        <div className="mb-6 flex items-center gap-3">
+          <button
+            onClick={() => handleDispatch('fix_and_monitor')}
+            disabled={investigating}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-purple-600 text-white hover:bg-purple-700 font-medium transition-colors disabled:opacity-50"
+          >
+            {investigating ? (
+              <ArrowPathIcon className="w-5 h-5 animate-spin" />
+            ) : (
+              <WrenchScrewdriverIcon className="w-5 h-5" />
+            )}
+            {investigating ? 'Dispatching...' : 'Try to Fix'}
+          </button>
+          <button
+            onClick={() => handleDispatch('stop_on_error')}
+            disabled={investigating}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-red-300 text-red-700 hover:bg-red-50 font-medium transition-colors disabled:opacity-50"
+          >
+            Stop All Runners
           </button>
         </div>
       )}

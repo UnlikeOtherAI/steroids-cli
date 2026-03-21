@@ -5,11 +5,28 @@ import { Project } from '../types';
 import { ProjectCard } from '../components/molecules/ProjectCard';
 import { Button } from '../components/atoms/Button';
 
+const INCLUDE_DISABLED_COOKIE = 'steroids_projects_include_disabled';
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+
+function getCookieBoolean(name: string, defaultValue: boolean): boolean {
+  if (typeof document === 'undefined') return defaultValue;
+  const entries = document.cookie.split(';').map((s) => s.trim()).filter(Boolean);
+  const found = entries.find((e) => e.startsWith(`${name}=`));
+  if (!found) return defaultValue;
+  const v = found.slice(name.length + 1);
+  return v === '1' ? true : v === '0' ? false : defaultValue;
+}
+
+function setCookieBoolean(name: string, value: boolean): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=${value ? '1' : '0'}; path=/; max-age=${COOKIE_MAX_AGE}`;
+}
+
 export const ProjectsPage: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [includeDisabled, setIncludeDisabled] = useState(true);
+  const [includeDisabled, setIncludeDisabled] = useState(() => getCookieBoolean(INCLUDE_DISABLED_COOKIE, true));
 
   const loadProjects = async () => {
     try {
@@ -50,7 +67,7 @@ export const ProjectsPage: React.FC = () => {
             control={
               <Switch
                 checked={includeDisabled}
-                onChange={(e) => setIncludeDisabled(e.target.checked)}
+                onChange={(e) => { setIncludeDisabled(e.target.checked); setCookieBoolean(INCLUDE_DISABLED_COOKIE, e.target.checked); }}
                 color="primary"
               />
             }

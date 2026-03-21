@@ -262,6 +262,7 @@ async function runRespondCmd(args: string[], flags: GlobalFlags): Promise<void> 
     args,
     options: {
       'run-id': { type: 'string' },
+      preset: { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
     },
     allowPositionals: false,
@@ -272,11 +273,12 @@ async function runRespondCmd(args: string[], flags: GlobalFlags): Promise<void> 
 steroids monitor respond - Dispatch first responder for a monitor run
 
 USAGE:
-  steroids monitor respond --run-id <id>
+  steroids monitor respond --run-id <id> [--preset <preset>]
 
 OPTIONS:
-  --run-id <id>   Monitor run ID to dispatch first responder for (required)
-  -h, --help      Show help
+  --run-id <id>      Monitor run ID to dispatch first responder for (required)
+  --preset <preset>  Override response preset (stop_on_error, investigate_and_stop, fix_and_monitor, custom)
+  -h, --help         Show help
 `);
     return;
   }
@@ -325,7 +327,8 @@ OPTIONS:
   // Parse first responder agents and response preset from config
   const agents = safeJsonParse(config.first_responder_agents) as
     Array<{ provider: string; model: string }> | null;
-  const responsePreset = config.response_preset;
+  const presetOverride = values.preset as string | undefined;
+  const responsePreset = presetOverride || config.response_preset;
 
   if (!Array.isArray(agents) || agents.length === 0) {
     updateRunError(runId, 'No first responder agents configured');

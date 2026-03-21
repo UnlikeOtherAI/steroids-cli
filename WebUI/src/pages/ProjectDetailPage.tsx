@@ -94,6 +94,10 @@ interface ProjectRangeStats {
   completed: number;
   failed: number;
   disputed: number;
+  skipped: number;
+  partial: number;
+  blocked_error: number;
+  blocked_conflict: number;
   total: number;
   tasks_per_hour: number;
   success_rate: number;
@@ -224,9 +228,13 @@ export const ProjectDetailPage: React.FC = () => {
       const completed = counts.completed ?? 0;
       const failed = counts.failed ?? 0;
       const disputed = counts.disputed ?? 0;
-      const total = pending + inProgress + review + completed + failed + disputed;
+      const skipped = counts.skipped ?? 0;
+      const partial = counts.partial ?? 0;
+      const blockedError = counts.blocked_error ?? 0;
+      const blockedConflict = counts.blocked_conflict ?? 0;
+      const total = pending + inProgress + review + completed + failed + disputed + skipped + partial + blockedError + blockedConflict;
       // Only terminal-state tasks count toward rate and success rate
-      const finalized = completed + failed + disputed;
+      const finalized = completed + failed + disputed + skipped + partial;
       const tasksPerHour = selectedHours > 0
         ? Math.round((finalized / selectedHours) * 100) / 100
         : 0;
@@ -241,6 +249,10 @@ export const ProjectDetailPage: React.FC = () => {
         completed,
         failed,
         disputed,
+        skipped,
+        partial,
+        blocked_error: blockedError,
+        blocked_conflict: blockedConflict,
         total,
         tasks_per_hour: tasksPerHour,
         success_rate: successRate,
@@ -757,16 +769,11 @@ export const ProjectDetailPage: React.FC = () => {
               onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=pending&hours=${selectedHours}`)}
             />
             <StatTile
-              label="In Progress"
-              value={stats.in_progress}
+              label="In Progress / Review"
+              value={stats.in_progress + stats.review}
+              description={stats.review > 0 ? `${stats.in_progress} active, ${stats.review} in review` : undefined}
               variant="info"
               onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=in_progress&hours=${selectedHours}`)}
-            />
-            <StatTile
-              label="Review"
-              value={stats.review}
-              variant="warning"
-              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=review&hours=${selectedHours}`)}
             />
             <StatTile
               label="Completed"
@@ -775,16 +782,25 @@ export const ProjectDetailPage: React.FC = () => {
               onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=completed&hours=${selectedHours}`)}
             />
             <StatTile
-              label="Failed"
-              value={stats.failed}
+              label="Failed / Disputed"
+              value={stats.failed + stats.disputed}
+              description={stats.disputed > 0 ? `${stats.failed} failed, ${stats.disputed} disputed` : undefined}
               variant="danger"
               onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=failed&hours=${selectedHours}`)}
             />
             <StatTile
-              label="Disputed"
-              value={stats.disputed}
+              label="Skipped / Partial"
+              value={stats.skipped + stats.partial}
+              description={stats.partial > 0 ? `${stats.skipped} skipped, ${stats.partial} partial` : undefined}
+              variant="warning"
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=skipped&hours=${selectedHours}`)}
+            />
+            <StatTile
+              label="Blocked"
+              value={stats.blocked_error + stats.blocked_conflict}
+              description={stats.blocked_error + stats.blocked_conflict > 0 ? `${stats.blocked_conflict} conflict, ${stats.blocked_error} error` : undefined}
               variant="danger"
-              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=disputed&hours=${selectedHours}`)}
+              onClick={() => navigate(`/project/${encodeURIComponent(decodedPath)}/tasks?status=blocked_conflict&hours=${selectedHours}`)}
             />
           </div>
         )}

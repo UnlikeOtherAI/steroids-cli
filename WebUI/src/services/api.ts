@@ -617,7 +617,10 @@ export const monitorApi = {
     return fetchJson('/api/monitor/run', { method: 'POST' });
   },
 
-  async investigate(runId: number): Promise<{ success: boolean; run_id: number; status: string }> {
-    return fetchJson(`/api/monitor/runs/${runId}/investigate`, { method: 'POST' });
+  async investigate(runId: number, preset?: string): Promise<{ success: boolean; run_id: number; status: string }> {
+    return fetchJson(`/api/monitor/runs/${runId}/investigate`, {
+      method: 'POST',
+      body: JSON.stringify(preset ? { preset } : {}),
+    });
   },
 };

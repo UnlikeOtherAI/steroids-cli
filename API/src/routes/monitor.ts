@@ -260,6 +260,7 @@ router.post('/monitor/run', async (_req: Request, res: Response) => {
 
 router.post('/monitor/runs/:id/investigate', async (req: Request, res: Response) => {
   const runId = Number(req.params.id);
+  const preset = typeof req.body?.preset === 'string' ? req.body.preset : undefined;
   const { db, close } = openGlobalDatabase();
   try {
     const row = db
@@ -307,9 +308,12 @@ router.post('/monitor/runs/:id/investigate', async (req: Request, res: Response)
       return;
     }
 
+    const cliArgs = [entrypoint, 'monitor', 'respond', '--run-id', String(runId)];
+    if (preset) cliArgs.push('--preset', preset);
+
     const child = spawn(
       process.execPath,
-      [entrypoint, 'monitor', 'respond', '--run-id', String(runId)],
+      cliArgs,
       { detached: true, stdio: 'ignore' },
     );
     child.unref();
