@@ -362,4 +362,97 @@ function formatRunRow(row: MonitorRunRow) {
   };
 }
 
+// ── GitHub integration ────────────────────────────────────────────────────────
+
+router.get('/monitor/gh-available', async (_req: Request, res: Response) => {
+  try {
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('gh', ['auth', 'status'], { stdio: 'pipe', timeout: 5000 });
+    res.json({ available: true });
+  } catch {
+    res.json({ available: false });
+  }
+});
+
+router.post('/monitor/runs/:id/report-issue', async (req: Request, res: Response) => {
+  const runId = Number(req.params.id);
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db
+      .prepare('SELECT * FROM monitor_runs WHERE id = ?')
+      .get(runId) as MonitorRunRow | undefined;
+    close();
+
+    if (!row) {
+      res.status(404).json({ success: false, error: 'Run not found' });
+      return;
+    }
+
+    const scanResults = safeJsonParse(row.scan_results, null) as {
+      anomalies?: Array<{ type: string; severity: string; message: string; projectName?: string }>;
+    } | null;
+    const anomalies = scanResults?.anomalies ?? [];
+    if (anomalies.length === 0) {
+      res.status(400).json({ success: false, error: 'No anomalies to report' });
+      return;
+    }
+
+    const report = row.first_responder_report ?? '';
+    const actions = safeJsonParse(row.first_responder_actions, []) as Array<{ tool: string; input: string }>;
+    const actionResults = safeJsonParse(row.action_results, []) as Array<{ success: boolean; output?: string }>;
+
+    // Build issue body
+    const anomalyList = anomalies
+      .map((a, i) => `${i + 1}. **[${a.severity}]** ${a.message}${a.projectName ? ` (${a.projectName})` : ''}`)
+      .join('\n');
+
+    const actionList = actions.length > 0
+      ? actions.map((a, i) => {
+          const result = actionResults[i];
+          return `- **${a.tool}**: ${result?.success ? 'Success' : 'Failed'}`;
+        }).join('\n')
+      : '_No actions taken_';
+
+    const body = `## Monitor Run #${runId}
+
+**Detected at:** ${new Date(row.started_at).toISOString()}
+**Outcome:** ${row.outcome}
+
+### Anomalies
+
+${anomalyList}
+
+### First Responder Report
+
+${report || '_No report available_'}
+
+### Actions Taken
+
+${actionList}
+
+---
+_Auto-reported by steroids monitor_`;
+
+    const title = `[Monitor] ${anomalies.length} anomaly/anomalies detected (run #${runId})`;
+
+    // Use gh to create issue (execFileSync prevents shell injection)
+    const { execFileSync } = await import('node:child_process');
+    const result = execFileSync(
+      'gh',
+      ['issue', 'create', '--title', title, '--body', body, '--label', 'monitor,auto-reported'],
+      { stdio: 'pipe', timeout: 30000, encoding: 'utf-8' }
+    );
+
+    const issueUrl = result.trim();
+    res.json({ success: true, issueUrl });
+  } catch (error) {
+    try { close(); } catch { /* already closed */ }
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create issue',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 export default router;

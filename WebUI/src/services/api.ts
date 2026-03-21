@@ -626,4 +626,17 @@ export const monitorApi = {
       body: JSON.stringify(preset ? { preset } : {}),
     });
   },
+
+  async checkGhAvailable(): Promise<boolean> {
+    try {
+      const result = await fetchJson<{ available: boolean }>('/api/monitor/gh-available');
+      return result.available;
+    } catch {
+      return false;
+    }
+  },
+
+  async reportIssue(runId: number): Promise<{ success: boolean; issueUrl?: string; error?: string }> {
+    return fetchJson(`/api/monitor/runs/${runId}/report-issue`, { method: 'POST' });
+  },
 };
