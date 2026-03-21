@@ -41,7 +41,8 @@ export interface Anomaly {
     | 'skipped_task'
     | 'idle_project'
     | 'high_invocations'
-    | 'repeated_failures';
+    | 'repeated_failures'
+    | 'blocked_task';
   severity: 'info' | 'warning' | 'critical';
   projectPath: string;
   projectName: string;
@@ -105,7 +106,7 @@ function hasPendingWork(projectDb: Database.Database): boolean {
   const row = projectDb
     .prepare(
       `SELECT COUNT(*) as count FROM tasks
-       WHERE status IN ('pending', 'in_progress', 'review')`
+       WHERE status IN ('pending', 'in_progress', 'review', 'disputed')`
     )
     .get() as { count: number };
   return row.count > 0;
@@ -263,7 +264,7 @@ function scanHighInvocations(
       `SELECT t.id, t.title, COUNT(i.id) as invocation_count
        FROM tasks t
        JOIN task_invocations i ON i.task_id = t.id
-       WHERE t.status NOT IN ('completed', 'skipped', 'failed')
+       WHERE t.status NOT IN ('completed', 'skipped', 'failed', 'blocked_conflict', 'blocked_error')
        GROUP BY t.id
        HAVING invocation_count >= ?`
     )
@@ -301,7 +302,7 @@ function scanRepeatedFailures(
     .prepare(
       `SELECT id, title, failure_count, rejection_count
        FROM tasks
-       WHERE status NOT IN ('completed', 'skipped', 'failed')
+       WHERE status NOT IN ('completed', 'skipped', 'failed', 'blocked_conflict', 'blocked_error')
          AND (failure_count >= 2 OR rejection_count >= 5)`
     )
     .all() as RepeatedFailureRow[];
@@ -318,6 +319,37 @@ function scanRepeatedFailures(
       failureCount: row.failure_count,
       rejectionCount: row.rejection_count,
     },
+  }));
+}
+
+interface BlockedTaskRow {
+  id: string;
+  title: string;
+  status: string;
+}
+
+function scanBlockedTasks(
+  projectDb: Database.Database,
+  projectPath: string,
+  projectName: string,
+): Anomaly[] {
+  const rows = projectDb
+    .prepare(
+      `SELECT id, title, status FROM tasks WHERE status IN ('blocked_conflict', 'blocked_error')`
+    )
+    .all() as BlockedTaskRow[];
+
+  return rows.map((row) => ({
+    type: 'blocked_task' as const,
+    severity: 'warning' as const,
+    projectPath,
+    projectName,
+    taskId: row.id,
+    taskTitle: row.title,
+    details: row.status === 'blocked_conflict'
+      ? `Task "${row.title}" blocked by merge conflict — needs reset or manual resolution`
+      : `Task "${row.title}" blocked by error — needs reset`,
+    context: { status: row.status },
   }));
 }
 
@@ -388,7 +420,10 @@ export async function runScan(): Promise<ScanResult> {
       // 4. Repeated failures
       anomalies.push(...scanRepeatedFailures(projectDb, projectPath, projectName));
 
-      // 5. Idle project check — warning if cron is running (should have spawned a runner)
+      // 5. Blocked tasks (merge conflicts or errors needing reset)
+      anomalies.push(...scanBlockedTasks(projectDb, projectPath, projectName));
+
+      // 6. Idle project check — warning if cron is running (should have spawned a runner)
       if (hasPendingWork(projectDb) && !hasActiveRunner(globalDb, projectPath)) {
         const cronActive = cronStatus().installed;
         anomalies.push({

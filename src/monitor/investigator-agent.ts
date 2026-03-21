@@ -17,6 +17,7 @@ import type { ScanResult } from './scanner.js';
 
 export type InvestigatorAction =
   | { action: 'reset_task'; projectPath: string; taskId: string; reason: string }
+  | { action: 'reset_project'; projectPath: string; reason: string }
   | { action: 'kill_runner'; runnerId: string; reason: string }
   | { action: 'stop_all_runners'; reason: string }
   | { action: 'trigger_wakeup'; reason: string }
@@ -42,6 +43,7 @@ export interface InvestigatorResult {
 
 const ALLOWED_ACTIONS: Record<string, string[]> = {
   reset_task: ['projectPath', 'taskId', 'reason'],
+  reset_project: ['projectPath', 'reason'],
   kill_runner: ['runnerId', 'reason'],
   stop_all_runners: ['reason'],
   trigger_wakeup: ['reason'],
@@ -108,6 +110,10 @@ Analyze the anomalies above and respond with a JSON object matching this schema:
 
 - { "action": "reset_task", "projectPath": "<path>", "taskId": "<id>", "reason": "<why>" }
   Resets a stuck/failed task to pending (clears failure and rejection counts).
+
+- { "action": "reset_project", "projectPath": "<path>", "reason": "<why>" }
+  Resets ALL blocked/failed/skipped tasks in a project to pending and re-enables the project.
+  Use when a project has multiple blocked_conflict or blocked_error tasks that need bulk recovery.
 
 - { "action": "kill_runner", "runnerId": "<pid>", "reason": "<why>" }
   Sends SIGTERM to a specific runner process by PID.
@@ -231,6 +237,36 @@ export async function executeActions(
         } catch (err) {
           results.push({
             action: 'reset_task',
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      }
+
+      case 'reset_project': {
+        try {
+          const entrypoint = resolveCliEntrypoint();
+          if (!entrypoint) {
+            results.push({ action: 'reset_project', success: false, error: 'Could not resolve CLI entrypoint' });
+            break;
+          }
+          const child = spawn(
+            process.execPath,
+            [entrypoint, 'tasks', 'reset', '--blocked', '--project', entry.projectPath],
+            { stdio: 'ignore', detached: false },
+          );
+          await new Promise<void>((resolve, reject) => {
+            child.on('close', (code) => {
+              if (code === 0 || code === null) resolve();
+              else reject(new Error(`tasks reset exited with code ${code}`));
+            });
+            child.on('error', reject);
+          });
+          results.push({ action: 'reset_project', success: true, reason: entry.reason });
+        } catch (err) {
+          results.push({
+            action: 'reset_project',
             success: false,
             error: err instanceof Error ? err.message : String(err),
           });
