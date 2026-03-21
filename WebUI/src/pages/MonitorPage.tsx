@@ -607,6 +607,86 @@ export const MonitorPage: React.FC = () => {
         )}
       </div>
 
+      {/* Current Status Card */}
+      {(() => {
+        const latestRun = runs[0];
+        const anomalies = latestRun?.scan_results?.anomalies ?? [];
+        const criticals = anomalies.filter(a => a.severity === 'critical').length;
+        const warnings = anomalies.filter(a => a.severity === 'warning').length;
+        const infos = anomalies.filter(a => a.severity === 'info').length;
+        const hasIssues = anomalies.length > 0;
+        const isHealthy = latestRun && anomalies.length === 0;
+        const projectsAffected = new Set(anomalies.map(a => a.projectPath)).size;
+
+        return (
+          <div
+            onClick={() => navigate('/monitor/issues')}
+            className={`mb-8 p-5 rounded-lg border cursor-pointer transition-all hover:shadow-md ${
+              !latestRun
+                ? 'bg-bg-surface border-border'
+                : isHealthy
+                  ? 'bg-green-50 border-green-200 hover:border-green-300'
+                  : criticals > 0
+                    ? 'bg-red-50 border-red-200 hover:border-red-300'
+                    : 'bg-yellow-50 border-yellow-200 hover:border-yellow-300'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                {!latestRun ? (
+                  <ShieldCheckIcon className="w-10 h-10 text-text-muted" />
+                ) : isHealthy ? (
+                  <CheckCircleIcon className="w-10 h-10 text-green-500" />
+                ) : (
+                  <ExclamationTriangleIcon className="w-10 h-10 text-orange-500" />
+                )}
+                <div>
+                  <h3 className="text-lg font-semibold text-text-primary">
+                    {!latestRun
+                      ? 'No scans yet'
+                      : isHealthy
+                        ? 'All Systems Healthy'
+                        : `${anomalies.length} Issue${anomalies.length !== 1 ? 's' : ''} Detected`}
+                  </h3>
+                  <p className="text-sm text-text-muted mt-0.5">
+                    {!latestRun
+                      ? 'Run a scan to check system health'
+                      : isHealthy
+                        ? `${latestRun.scan_results?.projectCount ?? 0} projects scanned — no anomalies`
+                        : `${projectsAffected} project${projectsAffected !== 1 ? 's' : ''} affected`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                {hasIssues && (
+                  <div className="flex items-center gap-3">
+                    {criticals > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                        <span className="text-sm font-medium text-red-700">{criticals}</span>
+                      </div>
+                    )}
+                    {warnings > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>
+                        <span className="text-sm font-medium text-yellow-700">{warnings}</span>
+                      </div>
+                    )}
+                    {infos > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                        <span className="text-sm font-medium text-blue-700">{infos}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <ChevronRightIcon className="w-5 h-5 text-text-muted" />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Run History */}
       <div>
         <div className="flex items-center justify-between mb-4">
