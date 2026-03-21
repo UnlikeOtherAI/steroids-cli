@@ -238,7 +238,9 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             'orchestrator',
             `Auto-skipped: invocation cap reached (${invCounts.total} invocations, limit ${maxInvocations}). Likely stuck in a loop. Review task history and reset manually if needed.`
           );
-          if (lockHeartbeat) lockHeartbeat.stop();
+          if (options.runnerId) {
+            releaseTaskLockAfterCompletion(db, task.id, options.runnerId, lockHeartbeat);
+          }
           continue;
         }
       }
@@ -376,6 +378,8 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
               }
 
               if (durabilityPushFailed) {
+                // failure_count is shared across provider failures and push failures.
+                // Both accumulate toward maxRecoveryAttempts; cleared only on push success.
                 const failCount = incrementTaskFailureCount(db, task.id);
                 const maxAttempts = config.health?.maxRecoveryAttempts ?? 3;
                 if (failCount >= maxAttempts) {
