@@ -289,7 +289,28 @@ export function applyGlobalSchemaV21(db: Database.Database): void {
 }
 
 export function applyGlobalSchemaV22(db: Database.Database): void {
-  db.exec(GLOBAL_SCHEMA_V22_SQL);
+  // Only run column renames if old columns still exist (idempotent)
+  if (hasColumn(db, 'monitor_config', 'investigator_agents')) {
+    db.exec('ALTER TABLE monitor_config RENAME COLUMN investigator_agents TO first_responder_agents;');
+    db.exec('ALTER TABLE monitor_config RENAME COLUMN investigation_timeout_seconds TO first_responder_timeout_seconds;');
+  }
+  if (hasColumn(db, 'monitor_runs', 'investigation_needed')) {
+    db.exec('ALTER TABLE monitor_runs RENAME COLUMN investigation_needed TO first_responder_needed;');
+    db.exec('ALTER TABLE monitor_runs RENAME COLUMN investigator_agent TO first_responder_agent;');
+    db.exec('ALTER TABLE monitor_runs RENAME COLUMN investigator_actions TO first_responder_actions;');
+    db.exec('ALTER TABLE monitor_runs RENAME COLUMN investigator_report TO first_responder_report;');
+  }
+  // Always create the remediation_attempts table (IF NOT EXISTS is safe)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS monitor_remediation_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_path TEXT NOT NULL,
+      anomaly_fingerprint TEXT NOT NULL,
+      attempted_at INTEGER NOT NULL,
+      outcome TEXT NOT NULL DEFAULT 'attempted'
+    );
+    CREATE INDEX IF NOT EXISTS idx_monitor_remediation_project ON monitor_remediation_attempts(project_path, anomaly_fingerprint);
+  `);
 }
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
