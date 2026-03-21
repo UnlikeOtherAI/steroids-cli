@@ -613,8 +613,11 @@ export const monitorApi = {
     return response.scan;
   },
 
-  async triggerRun(): Promise<{ result: { outcome: string; runId?: number; anomalyCount: number } }> {
-    return fetchJson('/api/monitor/run', { method: 'POST' });
+  async triggerRun(options?: { preset?: string; forceDispatch?: boolean }): Promise<{ result: { outcome: string; runId?: number; anomalyCount: number } }> {
+    return fetchJson('/api/monitor/run', {
+      method: 'POST',
+      body: options ? JSON.stringify(options) : undefined,
+    });
   },
 
   async investigate(runId: number, preset?: string): Promise<{ success: boolean; run_id: number; status: string }> {

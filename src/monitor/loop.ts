@@ -160,13 +160,16 @@ function pruneOldRuns(maxRows: number): void {
   }
 }
 
-function spawnFirstResponder(runId: number): void {
+function spawnFirstResponder(runId: number, preset?: string): void {
   const entrypoint = resolveCliEntrypoint();
   if (!entrypoint) return;
 
+  const args = [entrypoint, 'monitor', 'respond', '--run-id', String(runId)];
+  if (preset) args.push('--preset', preset);
+
   const child = spawn(
     process.execPath,
-    [entrypoint, 'monitor', 'respond', '--run-id', String(runId)],
+    args,
     { detached: true, stdio: 'ignore' },
   );
   child.unref();
@@ -298,7 +301,7 @@ export async function monitorCheck(): Promise<void> {
  * Manual trigger from API. Runs scan + rules inline and returns result.
  * Does NOT invoke the first responder LLM (that's a separate detached process).
  */
-export async function runMonitorCycle(options?: { manual?: boolean }): Promise<MonitorCycleResult> {
+export async function runMonitorCycle(options?: { manual?: boolean; preset?: string; forceDispatch?: boolean }): Promise<MonitorCycleResult> {
   try {
     const config = readConfig();
     const scanResult = await runScan();
@@ -317,7 +320,7 @@ export async function runMonitorCycle(options?: { manual?: boolean }): Promise<M
     const agents = safeJsonParse<Array<{ provider: string; model: string }>>(
       config?.first_responder_agents ?? null, [],
     );
-    const needsFirstResponder = decision.escalate && agents.length > 0;
+    const needsFirstResponder = !!(decision.escalate || options?.forceDispatch) && agents.length > 0 && scanResult.anomalies.length > 0;
 
     // Check remediation attempts per affected project before dispatching
     if (needsFirstResponder) {
@@ -354,12 +357,12 @@ export async function runMonitorCycle(options?: { manual?: boolean }): Promise<M
         const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
         recordRemediationAttempt(projectPath, fingerprint);
       }
-      spawnFirstResponder(runId);
+      spawnFirstResponder(runId, options?.preset);
       return {
         outcome: 'first_responder_dispatched',
         runId,
         anomalyCount: scanResult.anomalies.length,
-        escalationReason: decision.reason,
+        escalationReason: decision.reason ?? 'Manual dispatch',
       };
     }
 

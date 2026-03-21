@@ -13,6 +13,7 @@ import {
   MagnifyingGlassIcon,
   ClockIcon,
   PlusIcon,
+  WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
 import {
   monitorApi,
@@ -124,6 +125,7 @@ export const MonitorPage: React.FC = () => {
   const RUNS_PAGE_SIZE = 20;
   // Manual trigger state
   const [triggering, setTriggering] = useState(false);
+  const [triggeringFix, setTriggeringFix] = useState(false);
 
   // UI sections — persist collapse state via cookie
   const [configOpen, setConfigOpen] = useState(() => {
@@ -313,6 +315,23 @@ export const MonitorPage: React.FC = () => {
     }
   };
 
+  const handleTryToFix = async () => {
+    setTriggeringFix(true);
+    setError(null);
+    try {
+      const { result } = await monitorApi.triggerRun({ preset: 'fix_and_monitor', forceDispatch: true });
+      if (result.runId) {
+        navigate(`/monitor/run/${result.runId}`);
+      } else {
+        await loadRuns();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Fix run failed');
+    } finally {
+      setTriggeringFix(false);
+    }
+  };
+
   const handleClearHistory = async () => {
     try {
       await monitorApi.clearRuns();
@@ -383,7 +402,7 @@ export const MonitorPage: React.FC = () => {
           {/* Run Now */}
           <button
             onClick={handleRun}
-            disabled={triggering || hasInvestigationInProgress}
+            disabled={triggering || triggeringFix || hasInvestigationInProgress}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white hover:bg-accent/90 text-sm font-medium transition-colors disabled:opacity-50"
             title={hasInvestigationInProgress ? 'First responder in progress' : 'Run full monitor cycle'}
           >
@@ -393,6 +412,21 @@ export const MonitorPage: React.FC = () => {
               <PlayIcon className="w-4 h-4" />
             )}
             Run Now
+          </button>
+
+          {/* Try to Fix - global action */}
+          <button
+            onClick={handleTryToFix}
+            disabled={triggeringFix || triggering || hasInvestigationInProgress}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700 text-sm font-medium transition-colors disabled:opacity-50"
+            title={hasInvestigationInProgress ? 'First responder in progress' : 'Scan and fix all outstanding issues'}
+          >
+            {triggeringFix ? (
+              <ArrowPathIcon className="w-4 h-4 animate-spin" />
+            ) : (
+              <WrenchScrewdriverIcon className="w-4 h-4" />
+            )}
+            Try to Fix
           </button>
         </div>
       </div>

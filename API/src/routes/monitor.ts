@@ -224,7 +224,10 @@ router.post('/monitor/scan', async (_req: Request, res: Response) => {
   }
 });
 
-router.post('/monitor/run', async (_req: Request, res: Response) => {
+router.post('/monitor/run', async (req: Request, res: Response) => {
+  const preset = typeof req.body?.preset === 'string' ? req.body.preset : undefined;
+  const forceDispatch = req.body?.forceDispatch === true;
+
   // Idempotency: reject if first responder already in progress
   const { db, close } = openGlobalDatabase();
   try {
@@ -244,7 +247,7 @@ router.post('/monitor/run', async (_req: Request, res: Response) => {
     close();
 
     const { runMonitorCycle } = await import('../../../dist/monitor/loop.js');
-    const result = await runMonitorCycle({ manual: true });
+    const result = await runMonitorCycle({ manual: true, preset, forceDispatch });
     res.json({ success: true, result });
   } catch (error) {
     try { close(); } catch { /* already closed */ }
