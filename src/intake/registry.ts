@@ -1,9 +1,11 @@
 import type { SteroidsConfig } from '../config/loader.js';
 import { GitHubIssuesConnector } from './github-issues-connector.js';
+import { SentryConnector } from './sentry-connector.js';
 import type {
   GitHubIntakeConnectorConfig,
   IntakeConnector,
   IntakeSource,
+  SentryIntakeConnectorConfig,
 } from './types.js';
 
 export interface CreateIntakeRegistryOptions {
@@ -59,6 +61,16 @@ function normalizeGitHubConfig(
   return config;
 }
 
+function normalizeSentryConfig(
+  config: SentryIntakeConnectorConfig | undefined
+): SentryIntakeConnectorConfig | null {
+  if (!config?.enabled) {
+    return null;
+  }
+
+  return config;
+}
+
 export function createIntakeRegistry(
   config: Partial<SteroidsConfig>,
   options: CreateIntakeRegistryOptions = {}
@@ -76,8 +88,13 @@ export function createIntakeRegistry(
     );
   }
 
-  if (connectors?.sentry?.enabled) {
-    throw new Error("Intake connector 'sentry' is enabled but not implemented in this workspace");
+  const sentryConfig = normalizeSentryConfig(connectors?.sentry);
+  if (sentryConfig) {
+    registry.register(
+      new SentryConnector(sentryConfig, {
+        env: options.env,
+      })
+    );
   }
 
   return registry;

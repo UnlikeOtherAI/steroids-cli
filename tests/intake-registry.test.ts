@@ -73,7 +73,7 @@ describe('IntakeRegistry', () => {
     expect(registry.get('github').source).toBe('github');
   });
 
-  it('throws a source-specific error for enabled unsupported connectors', () => {
+  it('registers sentry connector when enabled', () => {
     const config: Partial<SteroidsConfig> = {
       intake: {
         connectors: {
@@ -88,8 +88,11 @@ describe('IntakeRegistry', () => {
       },
     };
 
-    expect(() => createIntakeRegistry(config)).toThrow(
-      "Intake connector 'sentry' is enabled but not implemented in this workspace"
-    );
+    const registry = createIntakeRegistry(config, {
+      env: { SENTRY_AUTH_TOKEN: 'secret' },
+    });
+
+    expect(registry.getSources()).toEqual(['sentry']);
+    expect(registry.get('sentry').source).toBe('sentry');
   });
 });
