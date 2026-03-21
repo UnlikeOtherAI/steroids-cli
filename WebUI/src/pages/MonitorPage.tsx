@@ -18,7 +18,6 @@ import {
   monitorApi,
   aiApi,
   MonitorRun,
-  MonitorScanResult,
   MonitorAgentConfig,
   AIProvider,
   AIModel,
@@ -123,9 +122,7 @@ export const MonitorPage: React.FC = () => {
   const [runsPage, setRunsPage] = useState(0);
   const RUNS_PAGE_SIZE = 20;
   // Manual trigger state
-  const [scanning, setScanning] = useState(false);
   const [triggering, setTriggering] = useState(false);
-  const [scanResult, setScanResult] = useState<MonitorScanResult | null>(null);
 
   // UI sections — persist collapse state via cookie
   const [configOpen, setConfigOpen] = useState(() => {
@@ -298,26 +295,16 @@ export const MonitorPage: React.FC = () => {
 
   // ── Manual triggers ────────────────────────────────────────────────────────
 
-  const handleScan = async () => {
-    setScanning(true);
-    setError(null);
-    setScanResult(null);
-    try {
-      const result = await monitorApi.triggerScan();
-      setScanResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Scan failed');
-    } finally {
-      setScanning(false);
-    }
-  };
-
   const handleRun = async () => {
     setTriggering(true);
     setError(null);
     try {
-      await monitorApi.triggerRun();
-      await loadRuns();
+      const { result } = await monitorApi.triggerRun();
+      if (result.runId) {
+        navigate(`/monitor/run/${result.runId}`);
+      } else {
+        await loadRuns();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Run failed');
     } finally {
@@ -392,20 +379,6 @@ export const MonitorPage: React.FC = () => {
             {enabled ? 'Enabled' : 'Disabled'}
           </span>
 
-          {/* Scan Only */}
-          <button
-            onClick={handleScan}
-            disabled={scanning}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-text-secondary hover:bg-bg-surface2 text-sm transition-colors disabled:opacity-50"
-          >
-            {scanning ? (
-              <ArrowPathIcon className="w-4 h-4 animate-spin" />
-            ) : (
-              <MagnifyingGlassIcon className="w-4 h-4" />
-            )}
-            Scan
-          </button>
-
           {/* Run Now */}
           <button
             onClick={handleRun}
@@ -431,44 +404,6 @@ export const MonitorPage: React.FC = () => {
           <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">
             <i className="fa-solid fa-xmark"></i>
           </button>
-        </div>
-      )}
-
-      {/* Scan Result */}
-      {scanResult && (
-        <div className="mb-6 p-4 bg-bg-surface border border-border rounded-lg">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-text-primary">Scan Results</h3>
-            <button onClick={() => setScanResult(null)} className="text-text-muted hover:text-text-secondary">
-              <i className="fa-solid fa-xmark"></i>
-            </button>
-          </div>
-          <p className="text-sm text-text-secondary mb-2">{scanResult.summary}</p>
-          <div className="flex items-center gap-4 text-xs text-text-muted">
-            <span>{scanResult.projectCount} projects scanned</span>
-            <span>{scanResult.anomalies.length} anomalies found</span>
-          </div>
-          {scanResult.anomalies.length > 0 && (
-            <div className="mt-3 space-y-2 max-h-60 overflow-y-auto">
-              {scanResult.anomalies.map((a, i) => (
-                <div key={i} className="flex items-start gap-2 text-sm p-2 bg-bg-base rounded">
-                  <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                    a.severity === 'critical' ? 'bg-red-100 text-red-800' :
-                    a.severity === 'warning' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}>
-                    {a.severity}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-text-primary">{a.details}</span>
-                    <div className="text-xs text-text-muted mt-0.5">
-                      {a.projectName} {a.taskTitle ? `/ ${a.taskTitle}` : ''}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 

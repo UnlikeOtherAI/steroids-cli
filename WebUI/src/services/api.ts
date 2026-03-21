@@ -613,7 +613,7 @@ export const monitorApi = {
     return response.scan;
   },
 
-  async triggerRun(): Promise<unknown> {
+  async triggerRun(): Promise<{ result: { outcome: string; runId?: number; anomalyCount: number } }> {
     return fetchJson('/api/monitor/run', { method: 'POST' });
   },
 
