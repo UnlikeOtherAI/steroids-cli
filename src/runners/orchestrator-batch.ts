@@ -29,6 +29,8 @@ export type BatchResult = 'continue' | 'break' | 'not_applicable';
 
 export async function runBatchIteration(ctx: BatchContext, maxBatchSize: number): Promise<BatchResult> {
   const { db, projectPath, branchName, options } = ctx;
+  const config = loadConfig(projectPath);
+  const maxRecoveryAttempts = config.health?.maxRecoveryAttempts ?? 3;
 
   const batch = selectTaskBatch(db, maxBatchSize);
   if (!batch || batch.tasks.length === 0) {
@@ -66,10 +68,11 @@ export async function runBatchIteration(ctx: BatchContext, maxBatchSize: number)
   }
 
   if (batchCoderResult.timedOut || !batchCoderResult.success) {
-    const coderConfig = loadConfig(projectPath).ai?.coder;
+    const coderConfig = config.ai?.coder;
     handleBatchProviderFailure(db, batch.tasks, 'coder',
       coderConfig?.provider ?? 'unknown', coderConfig?.model ?? 'unknown',
-      batchCoderResult.exitCode ?? 1, (batchCoderResult.stderr || batchCoderResult.stdout || '').trim());
+      batchCoderResult.exitCode ?? 1, (batchCoderResult.stderr || batchCoderResult.stdout || '').trim(),
+      maxRecoveryAttempts);
 
     const batchHasWork = batch.tasks.some((task) => {
       const current = getTask(db, task.id);
@@ -105,10 +108,11 @@ export async function runBatchIteration(ctx: BatchContext, maxBatchSize: number)
     }
 
     if (batchReviewerResult.timedOut || !batchReviewerResult.success) {
-      const reviewerConfig = loadConfig(projectPath).ai?.reviewer;
+      const reviewerConfig = config.ai?.reviewer;
       handleBatchProviderFailure(db, tasksInReview, 'reviewer',
         reviewerConfig?.provider ?? 'unknown', reviewerConfig?.model ?? 'unknown',
-        batchReviewerResult.exitCode ?? 1, (batchReviewerResult.stderr || batchReviewerResult.stdout || '').trim());
+        batchReviewerResult.exitCode ?? 1, (batchReviewerResult.stderr || batchReviewerResult.stdout || '').trim(),
+        maxRecoveryAttempts);
 
       const batchHasWork = tasksInReview.some((task) => {
         const current = getTask(db, task.id);
@@ -188,18 +192,19 @@ function handleBatchProviderFailure(
   provider: string,
   model: string,
   exitCode: number,
-  output: string
+  output: string,
+  maxAttempts: number
 ): void {
   for (const task of tasks) {
     const failureCount = incrementTaskFailureCount(db, task.id);
     const sanitizedOutput = output || 'provider invocation failed with no output.';
     const message = `Task ${task.id}: provider ${provider}/${model} exited with non-zero status ${exitCode} during ${role} phase: ${sanitizedOutput}`;
 
-    if (failureCount >= 3) {
+    if (failureCount >= maxAttempts) {
       updateTaskStatus(db, task.id, 'failed', 'orchestrator', `${message} (provider invocation failed ${failureCount} time(s). Task failed.)`);
       console.log(`\n✗ Task failed (${message})`);
     } else {
-      updateTaskStatus(db, task.id, 'pending', 'orchestrator', `${message} (attempt ${failureCount}/3, retrying)`);
+      updateTaskStatus(db, task.id, 'pending', 'orchestrator', `${message} (attempt ${failureCount}/${maxAttempts}, retrying)`);
     }
   }
 }

@@ -31,8 +31,10 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   getTask: jest.fn(),
   getSection: jest.fn().mockReturnValue(null),
   incrementTaskFailureCount: mockIncrementTaskFailureCount,
+  clearTaskFailureCount: jest.fn(),
   updateTaskStatus: mockUpdateTaskStatus,
   listTasks: jest.fn().mockReturnValue([]),
+  getInvocationCount: jest.fn().mockReturnValue({ coder: 0, reviewer: 0, total: 0 }),
 }));
 
 jest.unstable_mockModule('../src/orchestrator/task-selector.js', () => ({
@@ -180,6 +182,7 @@ describe('orchestrator loop pool partial release', () => {
 
   it('returns the task to pending and fully releases the slot when the durability push fails', async () => {
     mockPushWithRetries.mockReturnValue({ success: false, error: 'push failed' });
+    mockIncrementTaskFailureCount.mockReturnValue(1);
 
     await runOrchestratorLoop({
       projectPath: '/tmp/test',
@@ -192,7 +195,7 @@ describe('orchestrator loop pool partial release', () => {
       'task-1',
       'pending',
       'orchestrator',
-      'Returned to pending because task branch push failed before review handoff'
+      'Returned to pending because task branch push failed before review handoff (1/3)'
     );
     expect(mockReleaseSlot).toHaveBeenCalledWith({}, 1);
     expect(mockPartialReleaseSlot).not.toHaveBeenCalled();
