@@ -616,4 +616,8 @@ export const monitorApi = {
   async triggerRun(): Promise<unknown> {
     return fetchJson('/api/monitor/run', { method: 'POST' });
   },
+
+  async investigate(runId: number): Promise<{ success: boolean; run_id: number; status: string }> {
+    return fetchJson(`/api/monitor/runs/${runId}/investigate`, { method: 'POST' });
+  },
 };

@@ -256,6 +256,75 @@ router.post('/monitor/run', async (_req: Request, res: Response) => {
   }
 });
 
+// ── Investigate a specific run ────────────────────────────────────────────────
+
+router.post('/monitor/runs/:id/investigate', async (req: Request, res: Response) => {
+  const runId = Number(req.params.id);
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db
+      .prepare('SELECT * FROM monitor_runs WHERE id = ?')
+      .get(runId) as MonitorRunRow | undefined;
+
+    if (!row) {
+      res.status(404).json({ success: false, error: 'Run not found' });
+      close();
+      return;
+    }
+
+    // Check if already investigating
+    const active = db
+      .prepare("SELECT id FROM monitor_runs WHERE outcome = 'investigation_dispatched'")
+      .get() as { id: number } | undefined;
+
+    if (active) {
+      res.status(409).json({
+        success: false,
+        error: 'Investigation already in progress',
+        run_id: active.id,
+      });
+      close();
+      return;
+    }
+
+    // Mark this run as investigation_dispatched
+    db.prepare(
+      "UPDATE monitor_runs SET outcome = 'investigation_dispatched', completed_at = NULL WHERE id = ?"
+    ).run(runId);
+    close();
+
+    // Spawn detached investigator process
+    const { spawn } = await import('node:child_process');
+    const { resolveCliEntrypoint } = await import('../../../dist/cli/entrypoint.js');
+    const entrypoint = resolveCliEntrypoint();
+    if (!entrypoint) {
+      // Revert outcome
+      const { db: db2, close: close2 } = openGlobalDatabase();
+      try {
+        db2.prepare("UPDATE monitor_runs SET outcome = 'error', error = 'CLI entrypoint not found' WHERE id = ?").run(runId);
+      } finally { close2(); }
+      res.status(500).json({ success: false, error: 'CLI entrypoint not found' });
+      return;
+    }
+
+    const child = spawn(
+      process.execPath,
+      [entrypoint, 'monitor', 'investigate', '--run-id', String(runId)],
+      { detached: true, stdio: 'ignore' },
+    );
+    child.unref();
+
+    res.json({ success: true, run_id: runId, status: 'investigation_dispatched' });
+  } catch (error) {
+    try { close(); } catch { /* already closed */ }
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start investigation',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function safeJsonParse(str: string | null, fallback: unknown): unknown {

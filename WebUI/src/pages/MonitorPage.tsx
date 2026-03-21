@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ArrowPathIcon,
   ShieldCheckIcon,
@@ -92,6 +93,8 @@ function outcomeVariant(outcome: string): { color: string; icon: React.ReactNode
 }
 
 export const MonitorPage: React.FC = () => {
+  const navigate = useNavigate();
+
   // Config state
   const [configLoading, setConfigLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -117,15 +120,24 @@ export const MonitorPage: React.FC = () => {
   const [runs, setRuns] = useState<MonitorRun[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [runsLoading, setRunsLoading] = useState(true);
-  const [expandedRun, setExpandedRun] = useState<number | null>(null);
-
   // Manual trigger state
   const [scanning, setScanning] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const [scanResult, setScanResult] = useState<MonitorScanResult | null>(null);
 
-  // UI sections
-  const [configOpen, setConfigOpen] = useState(true);
+  // UI sections — persist collapse state
+  const [configOpen, setConfigOpen] = useState(() => {
+    const saved = localStorage.getItem('monitor_config_open');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const toggleConfig = () => {
+    setConfigOpen(prev => {
+      const next = !prev;
+      localStorage.setItem('monitor_config_open', String(next));
+      return next;
+    });
+  };
 
   // ── Load config + providers ────────────────────────────────────────────────
 
@@ -461,7 +473,7 @@ export const MonitorPage: React.FC = () => {
       {/* Configuration Section */}
       <div className="mb-8">
         <button
-          onClick={() => setConfigOpen(!configOpen)}
+          onClick={toggleConfig}
           className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
         >
           {configOpen ? (
@@ -672,14 +684,13 @@ export const MonitorPage: React.FC = () => {
               <tbody>
                 {runs.map(run => {
                   const ov = outcomeVariant(run.outcome);
-                  const isExpanded = expandedRun === run.id;
                   const anomalyCount = run.scan_results?.anomalies?.length ?? 0;
 
                   return (
-                    <React.Fragment key={run.id}>
                       <tr
+                        key={run.id}
                         className="border-b border-border/50 hover:bg-bg-base cursor-pointer transition-colors"
-                        onClick={() => setExpandedRun(isExpanded ? null : run.id)}
+                        onClick={() => navigate(`/monitor/run/${run.id}`)}
                       >
                         <td className="px-4 py-3 text-text-secondary">
                           {formatEpochMs(run.started_at)}
@@ -700,86 +711,9 @@ export const MonitorPage: React.FC = () => {
                           {formatDuration(run.duration_ms)}
                         </td>
                         <td className="px-4 py-3 text-text-muted">
-                          {isExpanded ? (
-                            <ChevronDownIcon className="w-4 h-4" />
-                          ) : (
-                            <ChevronRightIcon className="w-4 h-4" />
-                          )}
+                          <ChevronRightIcon className="w-4 h-4" />
                         </td>
                       </tr>
-
-                      {/* Expanded details */}
-                      {isExpanded && (
-                        <tr>
-                          <td colSpan={6} className="px-4 py-4 bg-bg-base border-b border-border">
-                            <div className="space-y-4 text-sm">
-                              {/* Scan results */}
-                              {run.scan_results && run.scan_results.anomalies.length > 0 && (
-                                <div>
-                                  <h4 className="text-xs font-medium text-text-muted uppercase mb-2">Anomalies Detected</h4>
-                                  <div className="space-y-1.5">
-                                    {run.scan_results.anomalies.map((a, i) => (
-                                      <div key={i} className="flex items-start gap-2 text-sm">
-                                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${
-                                          a.severity === 'critical' ? 'bg-red-100 text-red-800' :
-                                          a.severity === 'warning' ? 'bg-yellow-100 text-yellow-800' :
-                                          'bg-gray-100 text-gray-800'
-                                        }`}>
-                                          {a.severity}
-                                        </span>
-                                        <span className="text-text-primary">{a.details}</span>
-                                        <span className="text-text-muted text-xs ml-auto flex-shrink-0">{a.projectName}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Investigator report */}
-                              {run.investigator_report && (
-                                <div>
-                                  <h4 className="text-xs font-medium text-text-muted uppercase mb-2">
-                                    Investigator Report
-                                    {run.investigator_agent && (
-                                      <span className="ml-2 font-normal text-text-muted">({run.investigator_agent})</span>
-                                    )}
-                                  </h4>
-                                  <pre className="text-xs text-text-secondary bg-bg-surface p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">
-                                    {run.investigator_report}
-                                  </pre>
-                                </div>
-                              )}
-
-                              {/* Actions taken */}
-                              {run.action_results && Array.isArray(run.action_results) && run.action_results.length > 0 && (
-                                <div>
-                                  <h4 className="text-xs font-medium text-text-muted uppercase mb-2">Actions Taken</h4>
-                                  <div className="space-y-1">
-                                    {run.action_results.map((action: any, i: number) => (
-                                      <div key={i} className="flex items-center gap-2 text-xs">
-                                        {action.success ? (
-                                          <CheckCircleIcon className="w-4 h-4 text-green-600 flex-shrink-0" />
-                                        ) : (
-                                          <XCircleIcon className="w-4 h-4 text-red-600 flex-shrink-0" />
-                                        )}
-                                        <span className="text-text-secondary">{action.action}: {action.reason || action.error || 'OK'}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Error */}
-                              {run.error && (
-                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
-                                  {run.error}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
                   );
                 })}
               </tbody>

@@ -19,6 +19,7 @@ const SkillsPage = lazy(() => import('./pages/SkillsPage').then(({ SkillsPage })
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(({ ProjectsPage }) => ({ default: ProjectsPage })));
 const SystemLogsPage = lazy(() => import('./pages/SystemLogsPage').then(({ SystemLogsPage }) => ({ default: SystemLogsPage })));
 const MonitorPage = lazy(() => import('./pages/MonitorPage').then(({ MonitorPage }) => ({ default: MonitorPage })));
+const MonitorRunDetailPage = lazy(() => import('./pages/MonitorRunDetailPage').then(({ MonitorRunDetailPage }) => ({ default: MonitorRunDetailPage })));
 const IntakePage = lazy(() => import('./pages/IntakePage').then(({ IntakePage }) => ({ default: IntakePage })));
 const ModelUsagePage = lazy(() => import('./pages/ModelUsagePage').then(({ ModelUsagePage }) => ({ default: ModelUsagePage })));
 const HFAccountPage = lazy(() => import('./pages/HFAccountPage').then(({ HFAccountPage }) => ({ default: HFAccountPage })));
@@ -84,6 +85,7 @@ function App() {
     if (location.pathname.includes('/tasks') && location.pathname.startsWith('/project/')) return 'Project Tasks';
     if (location.pathname.startsWith('/project/')) return 'Project Details';
     if (location.pathname.startsWith('/task/')) return 'Task Details';
+    if (location.pathname.startsWith('/monitor/run/')) return 'Monitor Run';
     if (location.pathname.startsWith('/monitor')) return 'Monitor';
     if (location.pathname.startsWith('/intake')) return 'Intake';
     if (location.pathname === '/hf/account') return 'Hugging Face Account';
@@ -160,6 +162,7 @@ function App() {
               <Route path="/activity" element={<ActivityListPage />} />
               <Route path="/task/:taskId" element={<TaskDetailPage />} />
               <Route path="/monitor" element={<MonitorPage />} />
+              <Route path="/monitor/run/:runId" element={<MonitorRunDetailPage />} />
               <Route path="/runners" element={<RunnersPage />} />
               <Route path="/logs" element={<SystemLogsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
