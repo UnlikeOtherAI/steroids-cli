@@ -210,6 +210,10 @@ DESCRIPTION:
         // Delete task_locks
         db.prepare(`DELETE FROM task_locks WHERE task_id = ?`).run(task.id);
 
+        // Clear invocation history — the invocation cap counts all-time invocations,
+        // so a hard reset must clear these to avoid penalizing the fresh attempt.
+        db.prepare(`DELETE FROM task_invocations WHERE task_id = ?`).run(task.id);
+
         // Insert audit log
         db.prepare(`INSERT INTO audit (task_id, from_status, to_status, actor, notes) VALUES (?, ?, 'pending', 'human:cli', 'Human-initiated bulk reset via CLI')`).run(task.id, task.status);
       }
