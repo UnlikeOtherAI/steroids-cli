@@ -36,6 +36,7 @@ const mockCreateIntegrationWorkspace = jest.fn((options: { projectPath: string }
 }));
 
 jest.unstable_mockModule('../../src/parallel/clone.js', () => ({
+  ensureWorkspaceSteroidsSymlink: jest.fn(),
   getDefaultWorkspaceRoot: mockGetDefaultWorkspaceRoot,
   getProjectHash: mockGetProjectHash,
   createIntegrationWorkspace: mockCreateIntegrationWorkspace,
