@@ -5,7 +5,8 @@ import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
 import { cleanupInvocationLogs } from '../cleanup/invocation-logs.js';
 import { pollIntakeProject } from '../intake/poller.js';
 import { syncGitHubIntakeGate } from '../intake/github-gate.js';
-import { getProviderBackoffRemainingMs } from './global-db.js';
+import { getProviderBackoffRemainingMs, clearProviderBackoff } from './global-db.js';
+import { getProviderBackoffInfo } from './global-db-backoffs.js';
 import {
   SanitiseSummary,
   runPeriodicSanitiseForProject,
@@ -189,6 +190,57 @@ function getProviderBackoff(projectPath: string): { provider: string; remainingM
   return null;
 }
 
+/**
+ * For auth-error backoffs, probe the provider with a quick "say hi" invocation.
+ * If it succeeds, clear the backoff and return true (provider recovered).
+ * If it fails, keep the backoff and return false.
+ */
+async function probeAuthErrorProviders(projectPath: string, log: WakeupLogger): Promise<boolean> {
+  const projectConfig = loadConfig(projectPath);
+  const coderProvider = projectConfig.ai?.coder?.provider;
+  const reviewerProvider = projectConfig.ai?.reviewer?.provider;
+  const providersToCheck = [...new Set([coderProvider, reviewerProvider].filter(Boolean) as string[])];
+
+  for (const providerName of providersToCheck) {
+    const info = getProviderBackoffInfo(providerName);
+    if (!info || info.reasonType !== 'auth_error') continue;
+
+    // This provider has an auth-error backoff — probe it
+    log(`Probing ${providerName} for auth recovery...`);
+    try {
+      const { getProviderRegistry } = await import('../providers/registry.js');
+      const registry = await getProviderRegistry();
+      const provider = registry.tryGet(providerName);
+      if (!provider) continue;
+
+      const model = (providerName === coderProvider
+        ? projectConfig.ai?.coder?.model
+        : projectConfig.ai?.reviewer?.model) ?? 'default';
+
+      const result = await provider.invoke('Say "ok".', { model, timeout: 30_000 });
+
+      if (result.success) {
+        log(`Provider ${providerName} auth recovered — clearing backoff`);
+        clearProviderBackoff(providerName);
+      } else {
+        const classified = provider.classifyResult(result);
+        if (classified?.type === 'auth_error') {
+          log(`Provider ${providerName} still auth-failed: ${classified.message}`);
+        } else {
+          // Non-auth error on probe (rate limit, etc.) — clear auth backoff anyway
+          log(`Provider ${providerName} probe failed (${classified?.type ?? 'unknown'}) but not auth — clearing auth backoff`);
+          clearProviderBackoff(providerName);
+        }
+      }
+    } catch (err) {
+      log(`Provider ${providerName} probe error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Re-check if any provider is still backed off
+  return getProviderBackoff(projectPath) === null;
+}
+
 export async function processWakeupProject(
   options: ProcessProjectOptions
 ): Promise<WakeupResult> {
@@ -214,16 +266,35 @@ export async function processWakeupProject(
 
   const providerBackoff = getProviderBackoff(projectPath);
   if (providerBackoff) {
-    const remainingMinutes = Math.ceil(providerBackoff.remainingMs / 60000);
-    log(
-      `Skipping ${projectPath}: Provider '${providerBackoff.provider}' ` +
-      `is in backoff for ${remainingMinutes}m`
-    );
-    return {
-      action: 'skipped',
-      reason: `Provider '${providerBackoff.provider}' backed off for ${remainingMinutes}m`,
-      projectPath,
-    };
+    // If this is an auth-error backoff, probe the provider to check recovery
+    const info = getProviderBackoffInfo(providerBackoff.provider);
+    if (info?.reasonType === 'auth_error') {
+      const recovered = await probeAuthErrorProviders(projectPath, log);
+      if (!recovered) {
+        const remainingMinutes = Math.ceil(providerBackoff.remainingMs / 60000);
+        log(
+          `Skipping ${projectPath}: Provider '${providerBackoff.provider}' ` +
+          `auth still failing (backoff ${remainingMinutes}m)`
+        );
+        return {
+          action: 'skipped',
+          reason: `Provider '${providerBackoff.provider}' auth error (backoff ${remainingMinutes}m)`,
+          projectPath,
+        };
+      }
+      // Auth recovered — fall through to normal runner spawn
+    } else {
+      const remainingMinutes = Math.ceil(providerBackoff.remainingMs / 60000);
+      log(
+        `Skipping ${projectPath}: Provider '${providerBackoff.provider}' ` +
+        `is in backoff for ${remainingMinutes}m`
+      );
+      return {
+        action: 'skipped',
+        reason: `Provider '${providerBackoff.provider}' backed off for ${remainingMinutes}m`,
+        projectPath,
+      };
+    }
   }
 
   const parallelEnabled = projectConfig.runners?.parallel?.enabled === true;

@@ -59,6 +59,21 @@ export function getProviderBackoffRemainingMs(provider: string): number {
 }
 
 /**
+ * Get full backoff info including reason_type (for auth probes).
+ */
+export function getProviderBackoffInfo(provider: string): { remainingMs: number; reasonType: string | null } | null {
+  return withGlobalDatabase((db) => {
+    const row = db
+      .prepare('SELECT backoff_until_ms, reason_type FROM provider_backoffs WHERE provider = ?')
+      .get(provider) as { backoff_until_ms: number; reason_type: string | null } | undefined;
+    if (!row) return null;
+    const remainingMs = Math.max(0, row.backoff_until_ms - Date.now());
+    if (remainingMs <= 0) return null;
+    return { remainingMs, reasonType: row.reason_type ?? null };
+  });
+}
+
+/**
  * Clear a provider's backoff record (called after a successful invocation).
  */
 export function clearProviderBackoff(provider: string): void {

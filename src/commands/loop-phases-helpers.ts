@@ -109,7 +109,7 @@ export async function invokeWithLeaseHeartbeat<T>(
 }
 
 export interface CreditExhaustionResult {
-  action: 'pause_credit_exhaustion' | 'rate_limit';
+  action: 'pause_credit_exhaustion' | 'rate_limit' | 'pause_auth_error';
   provider: string;
   model: string;
   role: 'coder' | 'reviewer';

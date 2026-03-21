@@ -155,6 +155,9 @@ export async function runCoderPhase(
       if (classified?.type === 'rate_limit') {
         return { action: 'rate_limit', provider: providerName, model: modelName, role: 'coder', message: classified.message, retryAfterMs: classified.retryAfterMs };
       }
+      if (classified?.type === 'auth_error') {
+        return { action: 'pause_auth_error', provider: providerName, model: modelName, role: 'coder', message: classified.message };
+      }
     }
 
     const output = (coderResult.stderr || coderResult.stdout || '').trim();

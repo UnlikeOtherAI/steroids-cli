@@ -201,6 +201,9 @@ export async function runReviewerPhase(
         if (classified?.type === 'rate_limit') {
           return { action: 'rate_limit', provider: providerName, model: modelName, role: 'reviewer', message: classified.message, retryAfterMs: classified.retryAfterMs };
         }
+        if (classified?.type === 'auth_error') {
+          return { action: 'pause_auth_error', provider: providerName, model: modelName, role: 'reviewer', message: classified.message };
+        }
       }
       // Non-credit/rate-limit reviewer failure: fall through to orchestrator
     } else {

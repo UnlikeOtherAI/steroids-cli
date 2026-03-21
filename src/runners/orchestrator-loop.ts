@@ -19,7 +19,7 @@ import { logActivity } from './activity-log.js';
 import { getRegisteredProject } from './projects.js';
 import { execFileSync } from 'node:child_process';
 import { runCoderPhase, runReviewerPhase, type CreditExhaustionResult } from '../commands/loop-phases.js';
-import { handleCreditExhaustion } from './credit-pause.js';
+import { handleCreditExhaustion, handleAuthError } from './credit-pause.js';
 import { withGlobalDatabase, openGlobalDatabase } from './global-db.js';
 import { runBatchIteration, type BatchResult } from './orchestrator-batch.js';
 import { ensureWorkspaceSteroidsSymlink, getProjectHash } from '../parallel/clone.js';
@@ -411,9 +411,9 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
         }
       }
 
-      // Handle credit exhaustion result from single-task phase
+      // Handle credit exhaustion or auth error result from single-task phase
       if (creditResult) {
-        const pauseResult = await handleCreditExhaustion({
+        const pauseOptions = {
           ...creditResult,
           projectPath,
           runnerId: options.runnerId ?? 'daemon',
@@ -421,7 +421,10 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           shouldStop: options.shouldStop ?? (() => false),
           onHeartbeat: options.onHeartbeat,
           onceMode: options.once ?? false,
-        });
+        };
+        const pauseResult = creditResult.action === 'pause_auth_error'
+          ? await handleAuthError(pauseOptions)
+          : await handleCreditExhaustion(pauseOptions);
         if (!pauseResult.resolved) break;
         continue;
       }

@@ -107,6 +107,42 @@ export async function handleCreditExhaustion(
   return { resolved: false, resolution: 'hibernating' };
 }
 
+/** 24-hour backoff for auth errors — long enough that wakeup probes handle recovery */
+const AUTH_BACKOFF_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Handle an authentication error.
+ *
+ * Records a long backoff (24h) so the runner exits and wakeup won't respawn.
+ * Wakeup will probe the provider periodically; if auth succeeds, the backoff is cleared.
+ */
+export async function handleAuthError(
+  options: CreditPauseOptions
+): Promise<CreditPauseResult> {
+  const { provider, model, role, message } = options;
+  const safeMessage = sanitizeMessage(message);
+
+  const backoffUntilMs = Date.now() + AUTH_BACKOFF_MS;
+
+  console.log('');
+  console.log('============================================================');
+  console.log('  PROVIDER AUTHENTICATION FAILED');
+  console.log('============================================================');
+  console.log('');
+  console.log(`  Provider: ${provider} (model: ${model})`);
+  console.log(`  Role:     ${role}`);
+  console.log(`  Message:  ${safeMessage}`);
+  console.log('');
+  console.log('  The provider is entering auth-error backoff (24h).');
+  console.log('  Wakeup will probe the provider and clear backoff when auth succeeds.');
+  console.log('  The runner will now exit.');
+  console.log('============================================================');
+
+  recordProviderBackoff(provider, backoffUntilMs, safeMessage, 'auth_error');
+
+  return { resolved: false, resolution: 'hibernating' };
+}
+
 /**
  * Sleep that can be interrupted by shouldStop returning true.
  * Returns true if the full sleep completed, false if interrupted.
@@ -167,6 +203,16 @@ export async function checkBatchCreditExhaustion(
       role,
       message: classification.message,
       retryAfterMs: classification.retryAfterMs,
+    };
+  }
+
+  if (classification?.type === 'auth_error') {
+    return {
+      action: 'pause_auth_error',
+      provider: providerName,
+      model: modelName,
+      role,
+      message: classification.message,
     };
   }
 
