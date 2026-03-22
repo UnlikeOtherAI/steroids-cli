@@ -2,6 +2,7 @@
 
 > Generated from analysis of 92 monitor runs (2026-03-21 15:44 — 2026-03-22 07:52).
 > 301 total anomaly occurrences, 28 unique task-level issues, 7 affected projects.
+> Three independent adversarial reviews conducted. All findings consolidated below.
 
 ---
 
@@ -9,34 +10,25 @@
 
 These are bugs in the monitor subsystem itself — the scanner, the loop, the first responder dispatch, and the retry/remediation logic. All changes are contained within `src/monitor/` and `src/commands/monitor.ts`.
 
+Ordered by effort-to-impact ratio — easiest wins first.
+
 ---
 
 ### [ ] M1: Follow-up scan creates an infinite dispatch chain
 
 **Severity:** Critical — this burned 30+ consecutive FR invocations overnight (runs 59-92).
 
-**What happens:** After a successful first responder run, `src/commands/monitor.ts:406-413` triggers a follow-up scan:
+**What happens:** After a successful first responder run, `src/commands/monitor.ts:406-413` triggers a follow-up scan with `runMonitorCycle({ manual: true })`. The `manual: true` bypasses the duplicate-detection gate at `loop.ts:274-276`. If any anomaly persists, the follow-up dispatches another FR, which completes, triggers another follow-up... ad infinitum.
 
-```ts
-// monitor.ts:406-413
-if (result.success) {
-  const { runMonitorCycle } = await import('../monitor/loop.js');
-  await runMonitorCycle({ manual: true });
-}
-```
+**Root cause:** Commit `d0c41e7` (published as v0.12.24 at 23:19:04 UTC) removed the `project_disabled` code path — the only circuit breaker that existed. Run 57 (23:14) was the last run under the old code. Run 58 (23:19:41) was the first run on v0.12.24. Run 59 (23:21:51) was the first run in the infinite chain. The removal directly caused the chain. Even without the follow-up mechanism, cron-triggered scans every 5 min would have dispatched FR indefinitely — just slower.
 
-`runMonitorCycle({ manual: true })` bypasses the duplicate-detection gate at `loop.ts:274-276`:
+**Evidence:**
+- Runs 59-90 form a continuous chain — each run's `started_at` equals the previous run's `completed_at`. 32 consecutive FR dispatches over 2.2 hours.
+- 21 of 36 duplicate scans (58%) still dispatched FR due to the `manual: true` bypass.
+- Runs 68-85: 18 consecutive scans with the exact same fingerprint — all dispatched FR, all produced reports, all issued `trigger_wakeup` + `report_only`, zero resolution.
+- The chain consumed 78% of all report output (51,329 of 65,681 total chars) and an estimated $0.43 of the $0.71 total token cost.
 
-```ts
-// loop.ts:274-276
-if (!options?.manual && isDuplicateOfLastRun(scanResult)) {
-  return { outcome: 'skipped', anomalyCount: scanResult.anomalies.length };
-}
-```
-
-If any anomaly persists (like the false-positive `idle_project`), the follow-up scan finds it, escalates, spawns a new FR, which completes, triggers another follow-up scan... ad infinitum.
-
-**Evidence:** Runs 59 through 90 form a continuous chain with no gap — each run's `started_at` equals the previous run's `completed_at`. 30+ FR invocations over ~2 hours, all diagnosing the same two `idle_project` false positives.
+**Early detection:** Detectable at run 23 (18:00), when the first repeat dispatch happened for an identical anomaly set. The `countRemediationAttempts()` function existed as dead code.
 
 **Fix:** Remove `manual: true` from the follow-up scan call so the duplicate gate applies. Alternatively, replace the follow-up scan entirely with a simple row insert that records the post-fix scan results without triggering dispatch. The follow-up was only meant to refresh the dashboard, not to restart the loop.
 
@@ -48,22 +40,19 @@ If any anomaly persists (like the false-positive `idle_project`), the follow-up 
 
 **Severity:** High — the system retries the same failing remediation indefinitely.
 
-**What happens:** `loop.ts:192-201` defines `countRemediationAttempts()` and `loop.ts:207-216` defines `recordRemediationAttempt()`. Every dispatch records an attempt. But the count is **never checked before dispatching**. The function `countRemediationAttempts` is dead code.
-
-The `monitor_remediation_attempts` table shows **43+ attempts** for warehouse/`idle_project` and 43+ for prompter/`idle_project` — all doing the same `trigger_wakeup` that accomplishes nothing.
+**What happens:** `loop.ts:192-201` defines `countRemediationAttempts()` and `loop.ts:207-216` defines `recordRemediationAttempt()`. Every dispatch records an attempt. But the count is **never checked before dispatching**. The function `countRemediationAttempts` is dead code. The old `project_disabled` code path used to check it, but that was removed in `d0c41e7`.
 
 **Evidence:**
-```sql
-SELECT project_path, anomaly_fingerprint, COUNT(*) as attempts
-FROM monitor_remediation_attempts
-GROUP BY project_path, anomaly_fingerprint
-ORDER BY attempts DESC;
--- warehouse / idle_project: 43+
--- prompter / idle_project,skipped_task: 20+
--- prompter / idle_project,repeated_failures: 15+
-```
+- 83 remediation attempts recorded: 42 for warehouse/idle_project, 34 for prompter/idle_project+skipped_task, 7 for prompter/idle_project alone.
+- `trigger_wakeup` was issued 54 times for idle_project across 92 runs. It resolved idle_project exactly **0 times** — 0% success rate.
+- 23 out of 57 FR dispatches (40%) were "pure futility" — only `trigger_wakeup` + `report_only`, no task-level action.
+- The longest unbroken futility streak was 8 runs (72-79, 00:24 to 00:47).
 
-**Fix:** In both `monitorCheck()` (loop.ts:254-262) and `runMonitorCycle()` (loop.ts:294-300), before dispatching the FR, call `countRemediationAttempts()` for each affected project. If any project+fingerprint has >= 5 attempts, skip the dispatch for that project. Record outcome as `max_remediation_attempts` and log it. Also add a TTL-based cleanup — clear old remediation attempts after 24h so the system can retry after a real fix is deployed.
+**Early detection:** A `count >= 3` check would have stopped this at run 25 (18:11), saving 29+ FR invocations. The infrastructure was already built — just never wired in.
+
+**Circuit breaker granularity note:** The old `project_disabled` mechanism operated at project granularity. When warehouse/prompter hit 3 attempts for `idle_project`, ALL anomalies for those projects were suppressed — including task-level anomalies that had never been addressed. 8 of 17 `project_disabled` runs had collateral task-level anomaly suppression. The new circuit breaker must operate per anomaly fingerprint, not per project.
+
+**Fix:** In both `monitorCheck()` (loop.ts:254-262) and `runMonitorCycle()` (loop.ts:294-300), before dispatching the FR, call `countRemediationAttempts()` for each affected project. If any project+fingerprint has >= 5 attempts, skip the dispatch for that project. Record outcome as `max_remediation_attempts`. Add a TTL-based cleanup — clear old remediation attempts after 24h so the system can retry after a real fix is deployed.
 
 **Files:** `src/monitor/loop.ts:192-201` (existing dead code), `src/monitor/loop.ts:254-262` (wakeup path), `src/monitor/loop.ts:294-300` (manual path)
 
@@ -71,92 +60,69 @@ ORDER BY attempts DESC;
 
 ### [ ] M3: Auth failure kills the entire provider fallback chain
 
-**Severity:** Medium — caused 3 failed runs (20, 91, 92).
+**Severity:** Medium — caused 3 failed runs (20, 91, 92). **Must be implemented AFTER M1+M2.**
 
-**What happens:** When a provider returns a non-retryable error (like "Authentication failed"), `investigator-agent.ts:558-573` immediately returns failure instead of trying the next provider in the chain:
+**What happens:** When a provider returns a non-retryable error (like "Authentication failed"), `investigator-agent.ts:558-573` immediately returns failure instead of trying the next provider in the chain.
 
-```ts
-// investigator-agent.ts:558-573
-if (!result.success) {
-  const classified = provider.classifyResult(result);
-  const errMsg = classified?.message ?? result.stderr.slice(0, 200);
-  if (classified?.retryable) {
-    console.warn(...);
-    continue; // <-- only retryable errors fall through
-  }
-  return { success: false, ... }; // <-- non-retryable = hard stop
-}
-```
+**Evidence:** Run 20 (17:41), run 91 (01:35), run 92 (07:52) — all "Authentication failed". The config has 3 agents but only claude was tried. Run 91's auth failure was the only thing that stopped the infinite chain. A 6.3-hour blind spot followed (01:35-07:52) — no monitor retry after auth failure, no scan at all until the morning cron at 07:52.
 
-The `isRetryableError` helper (line 509-511) checks for "rate", "limit", "timeout", "network" but not "auth" or "authentication". An auth failure is not retryable on the **same** provider, but should absolutely fall through to the **next** provider.
+**Ordering constraint:** If M3 were implemented alone (without M1/M2 circuit breakers), it would just shift the burn to the next provider.
 
-**Evidence:** Run 20 (17:41), run 91 (01:35), run 92 (07:52) — all "Authentication failed". The config has 3 agents (claude, codex/gpt-5.4, codex/gpt-5.3-codex-spark) but only claude was tried.
-
-**Fix:** In the non-retryable branch at line 564, instead of returning, check if the error is auth-related. If so, `continue` to the next agent. Alternatively, simplify: always `continue` to the next agent on any error (retryable or not), and only `return` failure after all agents are exhausted. The for-loop already handles exhaustion at line 601-608.
+**Fix:** Always `continue` to the next agent on any error (retryable or not). Only `return` failure after all agents are exhausted. The for-loop already handles exhaustion at line 601-608.
 
 **Files:** `src/monitor/investigator-agent.ts:558-573`, `src/monitor/investigator-agent.ts:509-511`
 
 ---
 
-### [ ] M4: First responder ignores "MUST act on blocking issues" instruction
+### [ ] M4: No cooldown between FR dispatches
 
-**Severity:** Low — the prompt is clear but the FR LLM sometimes ignores it.
+**Severity:** Medium — compounds M1 but is independently useful as defense-in-depth.
 
-**What happens:** The prompt at `investigator-prompt.ts:129` says:
+**What happens:** Neither `monitorCheck()` nor `runMonitorCycle()` checks how recently the last FR was dispatched. A completed FR triggers a new scan immediately, which dispatches a new FR immediately.
 
-```
-Blocking issues (blocked_task, idle_project, orphaned_task) MUST be acted upon — do NOT use report_only for these.
-```
+**Evidence:** Runs 72-78 each started the instant the previous one completed. 7 consecutive FR invocations in 20 minutes. The escalation_reason was identical across 70 consecutive runs (23-92): "2-3 anomalies at or above severity warning (highest: critical)" — the system had no progressive escalation, just binary dispatch/don't-dispatch.
 
-But run 16's FR returned `report_only` for 9 `blocked_task` anomalies. The instruction is not enforced programmatically.
+**Fix:** Add a minimum FR dispatch cooldown (e.g., 10 minutes). Before dispatching, check the most recent FR-complete run. If it completed less than 10 minutes ago and the current scan's fingerprint matches, skip dispatch.
 
-**Evidence:** Run 16 — FR returned a single `report_only` action for 9 blocked tasks + 2 idle projects. All 11 anomalies were left unresolved.
-
-**Fix:** In `investigator-agent.ts`, after parsing the FR response (`parseFirstResponderResponse`), validate that blocking anomaly types from the scan have a corresponding non-`report_only` action. If the FR only returned `report_only` for a scan containing blocking issues, either re-prompt (expensive) or inject a default `reset_task`/`trigger_wakeup` action automatically. The simpler approach: after `executeActions()`, check if any blocking anomalies were left unaddressed and append a `trigger_wakeup` as a safety net.
-
-**Files:** `src/monitor/investigator-agent.ts:575-577` (after parseFirstResponderResponse), `src/monitor/investigator-prompt.ts:129`
+**Files:** `src/monitor/loop.ts:254-262` (wakeup path), `src/monitor/loop.ts:294-300` (manual path)
 
 ---
 
-### [ ] M5: Duplicate detection fingerprint doesn't account for context changes
+### [ ] M5: `project_disabled` outcome type is orphaned
 
-**Severity:** Low — causes unnecessary skips or unnecessary dispatches.
+**Severity:** Cosmetic — confusing but not breaking. One-line fix.
 
-**What happens:** `isDuplicateOfLastRun()` at `loop.ts:99-120` compares anomaly fingerprints using `type|severity|projectPath|taskId|runnerId`. This misses context changes — e.g., a task's invocation count increasing from 116 to 130 produces the same fingerprint, so the scan is skipped even though the situation worsened. Conversely, a runner PID change creates a different fingerprint even when the anomaly is semantically identical.
+**What happens:** `MonitorCycleResult` at `loop.ts:31` still includes `'project_disabled'`, and 17 DB rows have this outcome, but the code that produced it was removed in `d0c41e7`. Additionally, the disable/re-enable oscillation pattern across runs 27-57 showed that the old mechanism was ineffective — 9 transitions from `project_disabled` back to `first_responder_complete` as projects were re-enabled between cycles.
 
-**Fix:** Include meaningful context fields in the fingerprint (invocation count ranges, failure counts) and exclude volatile fields (runnerId, exact PID). Consider a "severity escalation" check: if any anomaly's context shows worsening metrics vs. the previous run, treat it as non-duplicate.
-
-**Files:** `src/monitor/loop.ts:99-120`
-
----
-
-### [ ] M6: `project_disabled` outcome type is orphaned
-
-**Severity:** Cosmetic — confusing but not breaking.
-
-**What happens:** The `MonitorCycleResult` type at `loop.ts:31` still includes `'project_disabled'` as a valid outcome, and 17 DB rows have this outcome. But the code that produced it (introduced in commit `e894f83`, later removed in `d0c41e7`) no longer exists. The type is a lie — this outcome can never be produced by current code.
-
-**Evidence:** `grep -r "project_disabled" src/` returns nothing. But `SELECT COUNT(*) FROM monitor_runs WHERE outcome = 'project_disabled'` returns 17.
-
-**Fix:** Remove `'project_disabled'` from the `MonitorCycleResult` type union. The existing DB rows are fine — they're historical records. If the disable-project-after-N-attempts feature should come back, reimplement it properly (see M2 — the circuit breaker is the right abstraction).
+**Fix:** Remove `'project_disabled'` from the type union.
 
 **Files:** `src/monitor/loop.ts:31`
 
 ---
 
-### [ ] M7: No cooldown between FR dispatches
+### [ ] M6: First responder ignores "MUST act on blocking issues" instruction
 
-**Severity:** Medium — compounds M1 but is independently useful.
+**Severity:** Medium — caused 3 projects to go permanently unaddressed.
 
-**What happens:** Neither `monitorCheck()` nor `runMonitorCycle()` checks how recently the last FR was dispatched. The `monitorCheck` path has an interval check (`loop.ts:229-230`) but that's based on the last *scan* start time, not the last *FR dispatch* time. The follow-up scan path (`monitor.ts:409`) bypasses even that.
+**What happens:** The prompt says blocking issues MUST be acted upon. But the FR returned `report_only` for blocking anomalies in runs 15, 16, 51, 68, 72-79, 81-82, 85-88. Run 16 was the worst: `report_only` for 9 `blocked_task` + 2 `idle_project` — all 11 anomalies left unresolved.
 
-A completed FR triggers a new scan immediately, which dispatches a new FR immediately. There's no minimum gap.
+**Impact:** Three projects (Technician, monorepo, translatemy.world) had `blocked_task` anomalies detected in run 16 but were NEVER acted upon. The FR chose `report_only`, and the projects were disabled before any corrective action. Detection-to-action latency for these projects was effectively infinite.
 
-**Evidence:** Runs 72-78 each started the instant the previous one completed. 7 consecutive FR invocations in 20 minutes.
+**Fix:** After `parseFirstResponderResponse()`, validate that blocking anomaly types have a corresponding non-`report_only` action. If not, inject a default `reset_task`/`trigger_wakeup` automatically.
 
-**Fix:** Add a minimum FR dispatch cooldown (e.g., 10 minutes). Before dispatching in both `monitorCheck()` and `runMonitorCycle()`, check the most recent `monitor_runs` row with `outcome IN ('first_responder_complete', 'first_responder_dispatched', 'investigation_complete')`. If it completed less than 10 minutes ago and the current scan's fingerprint matches, skip dispatch.
+**Files:** `src/monitor/investigator-agent.ts:575-577`, `src/monitor/investigator-prompt.ts:129`
 
-**Files:** `src/monitor/loop.ts:254-262` (wakeup path), `src/monitor/loop.ts:294-300` (manual path)
+---
+
+### [ ] M7: Duplicate detection fingerprint doesn't account for context changes
+
+**Severity:** Low — causes unnecessary skips or dispatches.
+
+**What happens:** `isDuplicateOfLastRun()` at `loop.ts:99-120` compares `type|severity|projectPath|taskId|runnerId`. Task `d871ce3c` appeared under 4 different anomaly types (`skipped_task`, `repeated_failures`, `blocked_task`, `blocked_error`) — each type change defeated the fingerprint, causing a fresh FR dispatch even though it was the same underlying problem. The FR has no cross-run memory of this task.
+
+**Fix:** Include meaningful context fields (invocation count ranges, failure counts), exclude volatile fields (runnerId, PID). Consider a stable "issue ID" that persists across anomaly type changes for the same task.
+
+**Files:** `src/monitor/loop.ts:99-120`
 
 ---
 
@@ -164,13 +130,127 @@ A completed FR triggers a new scan immediately, which dispatches a new FR immedi
 
 **Severity:** Medium — the system silently burns API credits on unfixable issues.
 
-**What happens:** When the FR fails to resolve an issue after multiple attempts, there is no way to notify the user. The system either keeps retrying (M2) or silently stops (if the project gets disabled). The "Initialize Android project" task in prompter was reset by the FR **at least 10 times** across 51 run appearances without ever making progress.
+**What happens:** The FR has no way to notify the user. It wrote "requires human" or "cannot be fixed by" in 12 run reports. Task `d871ce3c` in prompter was reset 13 times across 51 appearances without progress. The FR's strategy only changed from `reset_task` to `update_task` at run 63 (after 10 resets, not 3), and even then oscillated between `blocked_error` and `skipped` across 4 consecutive runs (63-66) as different FR invocations disagreed on the correct terminal state.
 
-**Evidence:** Task `d871ce3c` in prompter cycled through `repeated_failures` -> FR reset -> fail -> `skipped` -> FR reset -> `blocked_error` -> FR reset, appearing in nearly every run from 22 to 92. Currently sitting at `pending` with zeroed counters — will fail again on next runner pickup.
+**Fix:** After M2's circuit breaker prevents further dispatches, write to a `monitor_alerts` table. The WebUI can poll for notifications. The `steroids monitor status` command should surface unacknowledged alerts.
 
-**Fix:** After the circuit breaker (M2) prevents further FR dispatches, write an entry to a new `monitor_alerts` table (or a simple JSON file at `~/.steroids/alerts/`). The WebUI dashboard can poll this for user-facing notifications. Minimal schema: `{ project_path, anomaly_fingerprint, attempts, last_attempted_at, acknowledged }`. The `steroids monitor status` command should also surface unacknowledged alerts.
+**Files:** New table in global DB migration, `src/monitor/loop.ts`, `src/commands/monitor.ts`
 
-**Files:** New table in global DB migration, `src/monitor/loop.ts` (after circuit breaker logic), `src/commands/monitor.ts` (status subcommand)
+---
+
+### [ ] M9: FR needs a `suppress_anomaly` action for known false positives
+
+**Severity:** Medium — 11 runs where FR diagnosed false positive but still acted.
+
+**What happens:** In runs 68, 72-74, 77, 82-85, 87, 89, the FR explicitly stated "FALSE POSITIVES" in its report but still issued `trigger_wakeup` because no suppress action exists. The FR correctly diagnosed the scanner bug but was forced to take a useless action because the prompt says blocking issues MUST be acted upon and `trigger_wakeup` is the only available action for `idle_project`.
+
+**Fix:** Add `suppress_anomaly` action: `{ action: "suppress_anomaly", projectPath, anomalyType, duration_hours, reason }`. Scanner checks suppressions before emitting. This lets M2's circuit breaker distinguish "tried and failed" from "known false positive."
+
+**Files:** `src/monitor/investigator-agent.ts` (new action), `src/monitor/investigator-prompt.ts`, `src/monitor/scanner.ts`
+
+---
+
+### [ ] M10: Default escalation threshold should be `warning`, not `critical`
+
+**Severity:** Medium — caused a 1h18m blind window at initial deployment.
+
+**What happens:** Runs 1-14 detected anomalies at `warning`/`info` severity but the default threshold was `critical`, so no FR was dispatched for 78 minutes. The user manually triggered runs 15-16 from the WebUI 28 minutes before automatic dispatch kicked in (after config change at 17:24). Technician's Prisma task burned 34+ extra invocations (116 to 150) during this window because the FR never reset or skipped it.
+
+**Fix:** Change the hardcoded default at `loop.ts:242` from `{ min_severity: 'critical' }` to `{ min_severity: 'warning' }`.
+
+**Files:** `src/monitor/loop.ts:242`
+
+---
+
+### [ ] M11: FR response parser fails on "text + JSON" output
+
+**Severity:** Low — 1.8% failure rate, but lost the deepest single-run analysis.
+
+**What happens:** Run 75 produced a 3,294-char report — the longest and deepest in the dataset. But the FR output thinking text before the JSON response. `parseFirstResponderResponse` at `investigator-agent.ts:90-106` expects the entire output to be valid JSON or markdown-fenced JSON. The thinking preamble caused `JSON.parse` to fail, so all actions were lost and replaced with `report_only: "Failed to parse response"`.
+
+**Fix:** Scan the raw output for the last `{...}` block that parses as valid JSON, rather than requiring the entire output to be JSON. The regex at line 93 already handles markdown fences but doesn't handle arbitrary preamble text.
+
+**Files:** `src/monitor/investigator-agent.ts:90-106`
+
+---
+
+### [ ] M12: `reset_project` action has 0% success rate
+
+**Severity:** Low — the action is broken and the FR wastes action slots on it.
+
+**What happens:** `reset_project` was attempted 3 times (runs 24, 71, 71). All 3 failed with "tasks reset exited with code 1". In run 71, the FR correctly diagnosed both projects as "deregistered from the global project registry" and tried `reset_project` as recovery — but `reset_project` can only reset task statuses within registered projects, not re-register them. After each failure, the FR silently fell back to `trigger_wakeup` without retrying or adjusting strategy.
+
+**Fix:** Investigate why `steroids tasks reset --project <path>` exits non-zero for these projects (likely unregistered). Either fix the command to handle unregistered projects gracefully, or remove `reset_project` from the FR's action set and replace it with individual `reset_task` calls (which have 100% success rate). Also: after a failed action, the FR should be informed and given a chance to try an alternative.
+
+**Files:** `src/monitor/investigator-agent.ts:196-223` (reset_project executor), `src/commands/tasks.ts` (reset command)
+
+---
+
+### [ ] M13: Scanner lacks task-level detail in anomalies
+
+**Severity:** Medium — amplifies all other false-state loops.
+
+**What happens:** The scan anomalies for `repeated_failures`, `failed_task`, and `skipped_task` do not include task IDs — only aggregate project-level metrics. The FR had to issue `query_db` actions to discover which specific task was failing. Before `d0c41e7` added deep debugging (run 59), the FR had no way to investigate and blindly reset the first task it found.
+
+**Concrete impact:** The f06f7cad death spiral (prompter "Build Android Session Entry", 35 invocations, 7+ rejection cycles) was invisible to the scanner because `repeated_failures` is a project-level anomaly. The FR focused on d871ce3c (a different, more visible task) for 32 runs (48-79) while f06f7cad burned invocations undetected. Only at run 80 did the FR discover it via `query_db`.
+
+**Fix:** The scanner's `repeated_failures` anomaly should include the task ID and title of the worst-offending task (highest failure_count + rejection_count). Same for `failed_task` and `skipped_task`. This lets the FR prioritize without needing `query_db` round-trips.
+
+**Files:** `src/monitor/scanner.ts` (anomaly construction for repeated_failures, failed_task, skipped_task)
+
+---
+
+### [ ] M14: No `completed_at` timestamp on monitor runs
+
+**Severity:** Low — makes debugging and cost analysis harder.
+
+**What happens:** The `monitor_runs` table has no `completed_at` column for the overall run. Actual FR execution time cannot be separated from inter-cycle gaps. The schema defines `completed_at` but it's only set when the FR respond command finishes — not for scan-only runs or error runs. Mean "duration" appears to be 304s but this includes cron wait time.
+
+**Fix:** Set `completed_at` on all run outcomes, not just FR-dispatched runs.
+
+**Files:** `src/monitor/loop.ts:133-148` (createRunRow function)
+
+---
+
+### FR Effectiveness Summary
+
+Data to inform prioritization of the above issues.
+
+**Overall action statistics (160 total executions):**
+
+| Action | Executions | Success | Effective | Notes |
+|--------|:---------:|:-------:|:---------:|-------|
+| trigger_wakeup | 54 | 100% | **0%** | Never resolved idle_project in 92 runs |
+| reset_task | 39 | 100% | **94.9%** | 37/39 resolved the issue; 2 failures on d871ce3c (infra issue) |
+| report_only | 24 | 100% | N/A | Informational only |
+| add_task_feedback | 17 | 100% | High when actionable | Effective for dispute resolution; useless for infra issues |
+| update_task | 15 | 100% | **60%** | 9/15 resolved; 6 failures on d871ce3c (scanner still flags) |
+| query_db | 8 | 100% | **100%** | Every query returned useful data; only used in runs 59+ |
+| **reset_project** | **3** | **0%** | **0%** | All 3 failed with exit code 1 |
+
+**35% of all FR invocations were wasted** — only trigger_wakeup/report_only with no task-level action.
+
+**Actions the FR should have taken but didn't:**
+
+| Situation | What FR did | What it should have done |
+|-----------|-------------|-------------------------|
+| Run 16: 9 blocked tasks across 4 projects | `report_only` | `reset_project` for each project |
+| Run 15: Technician at 116/150 invocations | `report_only` | `update_task` to skip |
+| Runs 23-58: Repeated idle_project false positive | `trigger_wakeup` (every time) | After 3rd attempt: suppress or stop |
+| Run 86: orphaned_task (warehouse Image handler) | `trigger_wakeup` | `reset_task` (wakeup doesn't fix orphans) |
+| Runs 22-62: Android init reset loop (13 resets) | `reset_task` (13 times) | After 3rd reset: `update_task` to skip |
+| Runs 48-79: f06f7cad death spiral (32-run blind window) | Nothing | `query_db` to find the worst-offending task |
+
+**FR quality improved dramatically after `d0c41e7`:**
+
+| Metric | Early (runs 15-25) | Late (runs 73-90) | Change |
+|--------|:-:|:-:|:-:|
+| Mean report length | 649 chars | 1,646 chars | +153% |
+| Used `query_db` | 0 | 2 | New capability |
+| Identified false positives | 0 | 9 (50%) | New pattern |
+| Mentioned "root cause" | 1 | 8 (44%) | Deeper analysis |
+
+The irony: late-phase reports are qualitatively excellent but the FR intelligence is trapped without an action channel (M9). The best diagnostic reports were produced during the worst operational phase.
 
 ---
 
@@ -182,51 +262,17 @@ These are bugs in the scanner's data sources, the runner lifecycle, and the wake
 
 ### [ ] S1: Scanner `hasActiveRunner()` misses parallel-session runners
 
-**Severity:** Critical — this is the single root cause of 189 out of 301 anomaly occurrences.
+**Severity:** Critical — single root cause of 189 out of 301 anomaly occurrences.
 
-**What happens:** `scanner.ts:93-103` checks only the `runners` table:
+**What happens:** `scanner.ts:93-103` checks only the `runners` table. Parallel session runners (via `parallel_sessions` and `workstreams` tables) and freshly-spawned runners are invisible. The anomaly count never dropped below 2 across all 92 runs — a permanent noise floor of `idle_project` for warehouse and prompter. No correlation exists between FR actions and anomaly count reduction because these structural false positives dominate.
 
-```ts
-function hasActiveRunner(globalDb: Database.Database, projectPath: string): boolean {
-  const row = globalDb
-    .prepare(
-      `SELECT 1 FROM runners
-       WHERE project_path = ?
-         AND status != 'stopped'
-         AND heartbeat_at > datetime('now', '-5 minutes')`)
-    .get(projectPath);
-  return row !== undefined;
-}
-```
+**FR evidence:**
+- Run 73: "Runners are started with workspace-prefixed paths (e.g., /warehouse/ca15f1449f147eb2/ws-688389ea-2) which may not be recognized by the scanner's runner-detection logic."
+- Run 85: Found 3 active runners (2 warehouse, 1 prompter) with fresh heartbeats within 2 min of scan time.
 
-Parallel session runners (managed through `parallel_sessions` and `workstreams` tables) and freshly-spawned runners that haven't registered a heartbeat yet are invisible to this query. The FR itself diagnosed this in multiple runs:
+**Fix:** Expand runner detection to also check `parallel_sessions` (status='running') and `task_invocations` (status='running', recent started_at_ms).
 
-- **Run 73:** "Both idle_project CRITICAL anomalies are FALSE POSITIVES. Investigation shows: Warehouse: Runner PID 45123 is active, working on task..."
-- **Run 85:** "Both projects have active runners with fresh heartbeats (within 2 minutes of scan time). Runners operate on parallel workspace copies which the scan may not recognize as active."
-
-**Evidence:** warehouse and prompter flagged as `idle_project` in **all 92 runs**. The FR's own `query_db` actions confirmed active runners in the project databases.
-
-**Fix:** Expand the runner detection to also check:
-
-1. `parallel_sessions` table for `status = 'running'` matching the project path (with fresh `updated_at`)
-2. `task_invocations` in the project DB for any `status = 'running'` with `started_at_ms` within the last 10 minutes
-
-The query should be:
-
-```sql
--- Check 1: Direct runner registration (existing)
-SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped' AND heartbeat_at > datetime('now', '-5 minutes')
-
--- Check 2: Active parallel session
-SELECT 1 FROM parallel_sessions WHERE project_path = ? AND status = 'running'
-
--- Check 3: Active task invocation in project DB (requires project DB access)
-SELECT 1 FROM task_invocations WHERE status = 'running' AND started_at_ms > ?
-```
-
-If any of the three returns a row, the project has active work.
-
-**Files:** `src/monitor/scanner.ts:93-103` (primary fix), `src/monitor/scanner.ts:427-439` (idle_project anomaly creation)
+**Files:** `src/monitor/scanner.ts:93-103`, `src/monitor/scanner.ts:427-439`
 
 ---
 
@@ -234,20 +280,13 @@ If any of the three returns a row, the project has active work.
 
 **Severity:** High — tasks can stay orphaned for hours.
 
-**What happens:** The live scan right now shows prompter's "Build Android Dashboard and Editor screens" task orphaned for 5356+ seconds (~89 minutes) with no active runner. The wakeup sanitiser (`src/runners/wakeup-sanitise.ts`) should clean this up, but either:
+**What happens:** The live scan shows prompter's "Build Android Dashboard and Editor screens" task orphaned for 89+ minutes. The sanitiser skips it due to the `hasActiveParallelContext` guard.
 
-1. The sanitiser is skipping it due to the `hasActiveParallelContext` guard (documented in MEMORY.md under "Runner SIGTERM Death Loop Fix")
-2. The wakeup cron isn't running effectively for this project
+**Additional finding:** Two orphan instances in the data (runs 86, 89) had different root causes. Run 86: task completed 12 seconds before scan (race condition false positive) — FR wrongly issued `trigger_wakeup` instead of `reset_task`. Run 89: task was set to `in_progress` but never had an invocation created (invocation_count=0, runner crash between lock and invocation). The FR correctly diagnosed and reset it.
 
-**Evidence:** Live scan output: `[CRITICAL] orphaned_task: prompter — Task "Build Android Dashboard and Editor screens" orphaned for 5356s with no active runner`
+**Fix:** Sanitiser should clean up orphaned tasks regardless of parallel session state if orphaned > 30 minutes. Time-based override.
 
-The task is `in_progress` in the prompter DB but has no corresponding running invocation or runner.
-
-**Investigation needed:** Check `parallel_sessions` for prompter — if there's a stale `status='running'` row, the sanitiser skips orphan cleanup for the entire project. This is the known `hasActiveParallelContext` guard issue.
-
-**Fix:** The sanitiser should clean up orphaned tasks **regardless** of parallel session state if the task has been orphaned for > 30 minutes. The parallel session guard was meant to prevent killing active runners during normal parallel work, but a 30-minute orphan is clearly not "normal." Add a time-based override to `wakeup-sanitise.ts`.
-
-**Files:** `src/runners/wakeup-sanitise.ts` (sanitiser logic), `src/health/stuck-task-detector.ts` (orphan detection threshold)
+**Files:** `src/runners/wakeup-sanitise.ts`, `src/health/stuck-task-detector.ts`
 
 ---
 
@@ -255,17 +294,11 @@ The task is `in_progress` in the prompter DB but has no corresponding running in
 
 **Severity:** Medium — task blocks all siblings in its section.
 
-**What happens:** The FR discovered in run 90 that warehouse task `581e0906` ("Pending request admin API") was stuck in `disputed` status due to an arbitration provider crash (exit code 143), not a genuine coder-reviewer disagreement:
+**What happens:** The FR discovered in run 90 that warehouse task `581e0906` was stuck in `disputed` status due to an arbitration provider crash (exit 143). The FR tried contradictory fixes across runs: run 84 set status to `review`, run 90 reverted to `pending`. The task still reappeared in run 92. The FR needs a proper `resolve_dispute` action rather than hacking status via `update_task`.
 
-> "Task is stuck in 'disputed' status due to an arbitration provider crash (exit 143), not a real disagreement. Both reviewers subsequently approved the coder's work (success=1)."
+**Fix:** Dispute timeout: auto-reset to `pending` after 30 minutes with no active arbitration. Also consider a `resolve_dispute` FR action that properly updates the disputes table.
 
-The task-selector (`src/orchestrator/task-selector.ts:177`) skips sections with `active_count > 0` (in_progress/review/disputed), so a stuck `disputed` task blocks all sibling tasks.
-
-**Evidence:** Run 90 FR report. The task currently shows 3 failures and is back to `pending` (FR reset it), but the underlying issue — arbitration crashes leaving tasks in `disputed` forever — is unaddressed.
-
-**Fix:** The dispute resolution logic should have a timeout. If a task has been `disputed` for > 30 minutes with no active arbitration invocation, auto-reset to `pending`. This could be added to `wakeup-sanitise.ts` or to `stuck-task-detector.ts`.
-
-**Files:** `src/orchestrator/task-selector.ts` (section skip logic), `src/runners/wakeup-sanitise.ts` or `src/health/stuck-task-detector.ts` (timeout-based auto-reset)
+**Files:** `src/orchestrator/task-selector.ts`, `src/runners/wakeup-sanitise.ts` or `src/health/stuck-task-detector.ts`
 
 ---
 
@@ -273,154 +306,37 @@ The task-selector (`src/orchestrator/task-selector.ts:177`) skips sections with 
 
 **Severity:** Medium — 15 occurrences across 4 projects, no auto-recovery.
 
-**What happens:** When a task branch diverges from the target branch and the runner's merge/rebase fails, the task transitions to `blocked_conflict`. There is no automatic recovery — the FR can reset the task to `pending`, which makes the runner retry with a fresh checkout, but if the conflict recurs (because the branch still diverges), it blocks again.
+**What happens:** 9 `blocked_conflict` tasks in run 16 across steroids-cli (1), Technician (6), monorepo (1), translatemy.world (1). The FR chose `report_only` (M6), the old circuit breaker then disabled the projects as collateral damage (suppressing both idle_project AND task-level anomalies), and the tasks were never resolved.
 
-**Evidence:** Run 16 had 9 `blocked_conflict` tasks across steroids-cli (1), Technician (6), monorepo (1), and translatemy.world (1). Technician had 6 tasks blocked simultaneously, suggesting its main branch moved significantly while multiple task branches were in flight.
+**Fix:** Branch reset strategy (delete task branch, recreate from main) before blocking. Or bulk `steroids tasks reset --blocked` with branch cleanup.
 
-**Current state:** Technician and monorepo are disabled (`enabled=0`). The steroids-cli task was reset by the FR and resolved. translatemy.world was disabled.
-
-**Fix options:**
-1. When a task hits `blocked_conflict`, the runner should attempt a branch reset (delete the task branch, recreate from current main) before blocking. This is a "start fresh" strategy.
-2. Add a `steroids tasks reset --blocked` command that bulk-resets all `blocked_conflict` tasks with branch cleanup. The FR already knows to call this via `reset_project`.
-3. For the currently disabled projects: decide whether to re-enable them and let the runner retry, or manually resolve the conflicts.
-
-**Files:** `src/orchestrator/` (coder phase merge logic), `src/commands/tasks.ts` (reset command)
+**Files:** `src/orchestrator/` (coder phase merge logic), `src/commands/tasks.ts`
 
 ---
 
 ### [ ] S5: Persistent task failures with no learning (prompter Android init)
 
-**Severity:** Medium — affects task completion rates for complex environment-dependent tasks.
+**Severity:** Medium — 25 FR actions on a single unfixable task.
 
-**What happens:** The "Initialize Android project with Jetpack Compose, Gradle dependencies, and AppReveal debug-only" task in prompter appeared in **51 monitor runs** (runs 22-92). It cycled through: `repeated_failures` -> FR reset -> fail -> `skipped` -> FR reset -> `blocked_error` -> FR reset -> repeat. The FR added feedback notes multiple times but the coder never succeeded.
+**What happens:** Task `d871ce3c` received 25 FR actions over 6h6m (runs 22-67): 13 resets, 5 update_task, 7 add_task_feedback. The FR's strategy escalated too slowly — 10 blind resets before first investigation (run 62's `query_db` revealed 31+ coder invocations, zero reviewer invocations). Then status oscillated 4 times in 5 runs (63-67) as different FR invocations disagreed.
 
-**Root cause hypothesis:** Android/Gradle initialization requires specific SDK paths, Java versions, and environment variables that aren't available in the runner's isolated environment. No amount of retry or feedback will fix a missing Android SDK.
+**Root cause (FR run 73):** Cross-device link error — project on /System/Volumes/Data, workspaces on /Users/dictator/.steroids/workspaces (different APFS volumes). Infrastructure issue, not code issue.
 
-**Evidence:** 51 appearances across 70 runs. Task currently at `pending` with zeroed counters — will fail again immediately.
+**Fix:** Runner should detect environment-specific failures and transition to `blocked_error` with a clear message. M2 (circuit breaker) and M8 (human escalation) prevent the reset loop.
 
-**Fix:** This is partially addressed by M2 (circuit breaker) and M8 (human escalation). The deeper fix is for the runner to detect environment-specific failures (missing SDK, missing build tools) and transition the task to `blocked_error` with a clear message, rather than allowing infinite retries. The coder prompt could also be enhanced to check for prerequisites before attempting the task.
-
-**Files:** `src/orchestrator/coder.ts` (failure classification), `src/prompts/coder.ts` (prerequisite checking guidance)
+**Files:** `src/orchestrator/coder.ts`, `src/prompts/coder.ts`
 
 ---
 
 ### [ ] S6: Wakeup cron runs but doesn't spawn runners for idle projects
 
-**Severity:** High — directly causes S1's false positives to be partially real.
+**Severity:** High — partially real problem underneath S1's false positives.
 
-**What happens:** While S1 describes the scanner's false-positive detection, the reality is mixed. Some of the `idle_project` alerts ARE real — the wakeup cron fires, but runners don't spawn for warehouse/prompter. The FR's `trigger_wakeup` action spawns a wakeup cycle, which may or may not result in a runner.
+**What happens:** Some `idle_project` alerts ARE real. Investigation needed into system-pressure.ts thresholds, provider backoffs, and unmet task dependencies.
 
-Possible causes:
-1. System pressure guard (`src/runners/system-pressure.ts`) blocking spawns due to low disk space or memory
-2. Provider backoff preventing runner from doing useful work (so it exits immediately)
-3. All pending tasks have unmet dependencies (nothing to pick up)
+**Additional finding:** A 6.3-hour blind spot exists after auth failure (runs 91-92, 01:35-07:52). The wakeup cron didn't trigger any monitor scan overnight. No retry mechanism exists after auth failure.
 
-**Evidence:** Run 85 FR found 3 active runners (2 for warehouse, 1 for prompter). Run 73 found active runners too. But the scanner still reported `idle_project`. Some runs genuinely had no runners — the FR's `trigger_wakeup` was the correct action for those.
-
-**Investigation needed:** Check `~/.steroids/logs/api.log` for wakeup-time entries showing why runners weren't spawned. Check `system-pressure.ts` thresholds against current system state. Check `provider_backoffs` table for active backoffs.
-
-**Files:** `src/runners/wakeup.ts` (spawning logic), `src/runners/system-pressure.ts` (pressure guard), `src/runners/global-db-backoffs.ts` (backoff table)
-
----
-
-## Part 3: Early Detection Gaps & FR Effectiveness
-
-Analysis of whether issues could have been caught sooner and whether the FR's actions actually resolved them.
-
----
-
-### Detection Gap: 1h18m blind window (runs 1-14)
-
-The monitor was deployed with `escalation_rules.min_severity = "critical"` (the hardcoded default at `loop.ts:242`). Runs 1-14 (15:44 — 16:54) detected anomalies at `warning` and `info` severity only — so no FR was ever dispatched.
-
-The config was updated to `min_severity: "warning"` at **17:24** (commit `e894f83` also reclassified `idle_project` with active cron from `info` to `critical`). The first automatic FR dispatch happened at run 18 (17:30).
-
-**What was missed during the blind window:**
-- **Technician Prisma task** at 116/150 invocations — detected at run 1 (15:44) but no action until run 15 (17:02, manually triggered). Even then the FR only issued `report_only`. The task was never reset and eventually hit `blocked_conflict` in run 16. **Could have been caught 1h18m earlier** if the initial escalation threshold was `warning`.
-- **warehouse + prompter idle_project** — detected at run 1 (15:44) as `info` severity. No action until run 15 (17:02). The severity was wrong — an idle project with active cron is not "informational", it's a real problem. The reclassification to `critical` in commit `e894f83` was correct but came too late.
-- **prompter iOS Camera repeated_failures** (6 rejections) — detected at run 1, first reset at run 19 (17:36). **1h52m gap.** The task eventually completed after reset, so earlier action would have unblocked it sooner.
-
-**Lesson:** The default escalation threshold should be `warning`, not `critical`. The `info` severity should be reserved for things that genuinely require no action (skipped tasks, completed tasks with high counts). Anything the system _could_ fix should be at least `warning`.
-
----
-
-### Detection Gap: Blocked tasks — FR chose inaction
-
-Run 16 (17:07) detected **9 `blocked_conflict` tasks across 4 projects**. The FR was dispatched and diagnosed all of them correctly. But it chose `report_only`:
-
-> "Blocked tasks will need reset_project/reset_task actions or manual conflict resolution in a follow-up if the user wants to recover them."
-
-This directly contradicted the prompt instruction at `investigator-prompt.ts:129`: _"Blocking issues MUST be acted upon — do NOT use report_only for these."_
-
-**Impact:** The steroids-cli Sentry connector task wasn't reset until run 18 — a 23-minute delay. The Technician, monorepo, and translatemy.world tasks were **never** reset by the FR; those projects were eventually disabled manually. If the FR had issued `reset_project` for all 4 projects in run 16, some tasks might have recovered via fresh checkout.
-
-**Lesson:** See M4 — the prompt instruction needs programmatic enforcement, not just LLM compliance.
-
----
-
-### FR Effectiveness: Reset actions
-
-**19 unique tasks were reset by the FR.** Success rate:
-
-| Outcome | Count | Tasks |
-|---------|:-----:|-------|
-| RESOLVED (never reappeared) | 15 | steroids-cli/Sentry, warehouse/Tablet screens, warehouse/OCR, prompter/iOS Camera, prompter/iOS Controller, prompter/WebRTC pipeline, prompter/iPad portrait, prompter/takeover test, warehouse/Category API, warehouse/AppReveal e2e, warehouse/Meta webhook, warehouse/Offline sync, prompter/Android Session Entry, warehouse/Stock level, warehouse/Image handler |
-| MOSTLY RESOLVED (1-2 reappearances) | 1 | warehouse/Pending request admin API |
-| NEVER RESOLVED (reset loop) | 1 | prompter/Initialize Android project (13 resets, 29 reappearances after last reset) |
-| RESOLVED after multiple resets | 2 | warehouse/GET events API (4 resets), prompter/Android Dashboard (2 resets) |
-
-**78% (15/19) of tasks were resolved by a single FR reset.** The FR's `reset_task` action is effective for transient failures. The problem is the 1 task that entered an infinite reset loop (M2), and the initial 1h18m delay before any resets started.
-
----
-
-### FR Effectiveness: trigger_wakeup action
-
-`trigger_wakeup` was the most common FR action (issued in nearly every run). **It resolved idle_project exactly 0 times across 92 runs.** Both warehouse and prompter were flagged as `idle_project` in all 92 runs — no single recovery was ever observed from a wakeup.
-
-The FR itself identified this in run 73: _"The scanner likely flagged both projects as idle because the runner registration mechanism doesn't match the process detection — the runners are started with workspace-prefixed paths which may not be recognized by the scanner's runner-detection logic."_
-
-Despite correctly diagnosing the problem as a false positive (scanner bug, not a runner bug), the FR still issued `trigger_wakeup` because:
-1. It has no action available to "suppress this anomaly" or "mark as false positive"
-2. The prompt says blocking issues MUST be acted upon
-3. `trigger_wakeup` is the only action that makes sense for `idle_project`, even when the FR knows it won't help
-
-**Lesson:** The FR needs a `suppress_anomaly` or `acknowledge_false_positive` action that marks an anomaly as known-benign for a time window, so the circuit breaker (M2) can distinguish "tried and failed" from "known false positive."
-
----
-
-### FR Effectiveness: Deeper diagnostic actions (runs 73, 85, 90)
-
-The FR's best work came in later runs when it used `query_db` to investigate before acting:
-
-- **Run 73:** Queried project DBs to find active runner PIDs and heartbeats. Correctly identified both idle_project alerts as false positives. Documented the scanner's workspace-path mismatch as root cause.
-- **Run 85:** Found 3 active runners (2 warehouse, 1 prompter) with fresh heartbeats. Confirmed the scanner bug.
-- **Run 90:** Found a `disputed` task stuck due to arbitration crash (exit 143). Used `update_task` to fix the status. Found a review loop (35 invocations, 7+ rejection cycles) and force-completed the task with `add_task_feedback` for audit trail.
-
-Run 90 is the gold standard — the FR diagnosed a non-obvious root cause (arbitration crash leaving task in limbo), took a surgical fix (`update_task` to change status), and documented its reasoning. This is exactly what the FR should do every time.
-
-**However:** These deep investigations only happened in late runs (73+). Earlier runs (18-50) mostly did shallow `reset_task` + `trigger_wakeup` without investigation. The difference is likely prompt quality — the deep debugging capabilities were added in commit `d0c41e7` ("empower first responder agent with deep debugging capabilities").
-
----
-
-### FR Effectiveness: Actions the FR should have taken but didn't
-
-| Situation | What FR did | What it should have done |
-|-----------|-------------|-------------------------|
-| Run 16: 9 blocked tasks | `report_only` | `reset_project` for each affected project |
-| Run 15: Technician at 116/150 invocations | `report_only` | `update_task` to skip the task, or `add_task_feedback` with guidance |
-| Runs 23-58: Repeated idle_project false positive | `trigger_wakeup` (every time) | After 3rd attempt: `report_only` acknowledging false positive, stop retrying |
-| Run 86: orphaned_task (warehouse Image handler) | `trigger_wakeup` | `reset_task` (the task was orphaned, wakeup doesn't fix that) |
-| Runs 22-62: Android init reset loop | `reset_task` (13 times) | After 3rd reset: `update_task` to skip, with `add_task_feedback` explaining why |
-
----
-
-### Timeline: Could the auth failures have been prevented?
-
-The 3 auth failures (runs 20, 91, 92) all hit Claude's OAuth. Run 20 was isolated (17:41) and the FR recovered on the next cycle. Runs 91-92 happened after the overnight infinite chain (M1) burned through Claude's rate/token window.
-
-Run 91's auth failure at 01:35 **was the only thing that stopped the infinite chain.** Without it, runs would have continued indefinitely. The auth failure was accidental mitigation — the system has no intentional mechanism to stop itself.
-
-If M3 (auth fallthrough to next provider) had been implemented, the chain would have continued via codex, potentially burning that provider's quota too. So paradoxically, M3 must be implemented **together with** M1/M2/M7 — you need the circuit breaker before you improve the fallback chain.
+**Files:** `src/runners/wakeup.ts`, `src/runners/system-pressure.ts`, `src/runners/global-db-backoffs.ts`
 
 ---
 
@@ -428,27 +344,31 @@ If M3 (auth fallthrough to next provider) had been implemented, the chain would 
 
 | Phase | Runs | Period | What happened |
 |-------|------|--------|---------------|
-| Initial scans | 1-14 | 15:44-16:54 | Anomalies found, below escalation threshold. 2 warnings (Technician high invocations, prompter rejections), 2 idle projects. No FR dispatched. |
-| First FR wave | 15-22 | 17:02-17:49 | FR dispatched. Trigger wakeups for idle projects. Reset blocked tasks. Reset failed tasks in warehouse/prompter. |
-| Auth failure | 20 | 17:41 | Claude auth failed. No fallback to codex. |
-| Remediation loop | 23-58 | 18:00-23:19 | Mix of `first_responder_complete` (FR runs, resets tasks, triggers wakeups) and `project_disabled` (all affected projects already disabled). Same 2-3 anomalies repeating. |
-| Infinite chain | 59-90 | 23:21-01:35 | Follow-up scan triggers next FR, continuously. 30+ consecutive dispatches. All diagnosing the same idle_project false positives. FR correctly identifies them as false positives but still triggers wakeup each time. |
-| Auth failure | 91 | 01:35 | Claude auth expired after 2+ hours of continuous use. Chain broken. |
-| Morning probe | 92 | 07:52 | Wakeup-triggered scan. Auth still failed. |
+| Initial scans | 1-14 | 15:44-16:54 | Anomalies found, below escalation threshold. 2 warnings, 2 idle projects. No FR dispatched. 78-min blind window (M10). |
+| Manual FR | 15-16 | 17:02-17:07 | User manually triggered from WebUI. FR issued `report_only` for 9 blocked tasks (M6). |
+| First auto wave | 18-22 | 17:30-17:49 | First automatic dispatches after config change. Reset blocked/failed tasks. Auth failure at run 20. |
+| Remediation loop | 23-58 | 18:00-23:19 | Alternation: `first_responder_complete` / `project_disabled`. Circuit breaker suppressed task-level anomalies as collateral. d871ce3c reset 10 times without investigation. |
+| Infinite chain | 59-90 | 23:21-01:35 | v0.12.24 removed circuit breaker. 32 consecutive FR dispatches. FR diagnoses false positives but triggers wakeup anyway. Deepest analysis produced during worst operational phase. |
+| Auth failure | 91 | 01:35 | Claude auth expired. Chain broken accidentally. No fallback to codex (M3). |
+| Blind spot | 91-92 | 01:35-07:52 | 6.3-hour gap. No retry. Morning cron at 07:52 still fails auth. |
 
 ## Appendix: Currently Active Issues (live scan)
 
 | Anomaly | Severity | Project | Task | Action Needed |
 |---------|----------|---------|------|---------------|
-| `repeated_failures` | warning | warehouse | "Pending request admin API" (3 failures) | Investigate failure cause in runner logs |
-| `idle_project` | critical | warehouse | - | Fix S1 (scanner detection) and S6 (wakeup spawning) |
-| `orphaned_task` | critical | prompter | "Build Android Dashboard and Editor screens" (89+ min) | Fix S2 (sanitiser guard) or manually reset |
-| `idle_project` | critical | prompter | - | Fix S1 (scanner detection) and S6 (wakeup spawning) |
+| `repeated_failures` | warning | warehouse | "Pending request admin API" (3 failures) | Investigate runner logs |
+| `idle_project` | critical | warehouse | - | Fix S1 + S6 |
+| `orphaned_task` | critical | prompter | "Build Android Dashboard and Editor screens" (89+ min) | Fix S2 or manually reset |
+| `idle_project` | critical | prompter | - | Fix S1 + S6 |
 
 ## Appendix: Disabled Projects
 
 | Project | Reason |
 |---------|--------|
-| Technician | 6 merge-conflict-blocked tasks, high invocations on Prisma task |
-| monorepo (@kilomayo) | 1 merge-conflict-blocked task |
-| flatu | Unknown (not seen in monitor data) |
+| Technician | 6 merge-conflict-blocked tasks, high invocations on Prisma task. Never acted on by FR (M6). |
+| monorepo (@kilomayo) | 1 merge-conflict-blocked task. Never acted on by FR. |
+| flatu | Unknown (not in monitor data) |
+
+## Appendix: Companion Audit
+
+Detailed timing, cost, and duration analysis available in [`monitor-timing-cost-audit.md`](./monitor-timing-cost-audit.md).
