@@ -87,18 +87,55 @@ export { buildFirstResponderPrompt } from './investigator-prompt.js';
 // Response parser
 // ---------------------------------------------------------------------------
 
-export function parseFirstResponderResponse(raw: string): FirstResponderResponse {
-  // Strip markdown code fences if present
-  let cleaned = raw.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+/**
+ * Extract the last valid JSON object from a string that may contain
+ * preamble text, thinking output, or markdown fences before the JSON.
+ */
+function extractJsonObject(raw: string): unknown | null {
+  const trimmed = raw.trim();
+
+  // Try the whole string first (fast path)
+  try { return JSON.parse(trimmed); } catch { /* fall through */ }
+
+  // Try markdown-fenced JSON
+  const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
   if (fenceMatch) {
-    cleaned = fenceMatch[1].trim();
+    try { return JSON.parse(fenceMatch[1].trim()); } catch { /* fall through */ }
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
+  // Scan for the last top-level { ... } block (handles "thinking text" + JSON)
+  let depth = 0;
+  let lastEnd = -1;
+  let lastStart = -1;
+  let inString = false;
+  for (let i = trimmed.length - 1; i >= 0; i--) {
+    if (trimmed[i] === '"' && (i === 0 || trimmed[i - 1] !== '\\')) {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (trimmed[i] === '}') {
+      if (depth === 0) lastEnd = i;
+      depth++;
+    } else if (trimmed[i] === '{') {
+      depth--;
+      if (depth === 0 && lastEnd !== -1) {
+        lastStart = i;
+        break;
+      }
+    }
+  }
+  if (lastStart !== -1 && lastEnd !== -1) {
+    try { return JSON.parse(trimmed.slice(lastStart, lastEnd + 1)); } catch { /* fall through */ }
+  }
+
+  return null;
+}
+
+export function parseFirstResponderResponse(raw: string): FirstResponderResponse {
+  const parsed = extractJsonObject(raw);
+
+  if (parsed === null) {
     return {
       diagnosis: raw,
       actions: [{ action: 'report_only', diagnosis: 'Failed to parse response' }],
@@ -559,6 +596,30 @@ export async function runFirstResponder(
       }
 
       const response = parseFirstResponderResponse(result.stdout);
+
+      // M6: If FR returned only report_only but scan has actionable anomalies, inject fallback actions.
+      // Uses reset_task for task-level anomalies (94.9% success) over trigger_wakeup (0% for idle_project).
+      // Known limitation: injected actions count toward M2 circuit breaker until M9 (suppress_anomaly) exists.
+      const ACTIONABLE_TYPES = new Set(['blocked_task', 'failed_task', 'orphaned_task', 'hanging_invocation', 'zombie_runner', 'dead_runner']);
+      const actionableAnomalies = scanResult.anomalies.filter(a => ACTIONABLE_TYPES.has(a.type));
+      const onlyReportOnly = response.actions.length === 0 || response.actions.every(a => a.action === 'report_only');
+      if (actionableAnomalies.length > 0 && onlyReportOnly) {
+        const taskAnomaly = actionableAnomalies.find(a => a.taskId);
+        if (taskAnomaly) {
+          response.actions.push({
+            action: 'reset_task',
+            projectPath: taskAnomaly.projectPath,
+            taskId: taskAnomaly.taskId!,
+            reason: 'M6: FR returned only report_only for actionable anomalies; injecting reset_task',
+          });
+        } else {
+          response.actions.push({
+            action: 'trigger_wakeup',
+            reason: 'M6: FR returned only report_only for actionable anomalies; injecting wakeup',
+          });
+        }
+      }
+
       const actionResults = await executeActions(response.actions);
 
       return {

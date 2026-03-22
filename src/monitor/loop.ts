@@ -128,9 +128,15 @@ function isDuplicateOfLastRun(scanResult: ScanResult): boolean {
     const prev = safeJsonParse<ScanResult | null>(row.scan_results, null);
     if (!prev) return false;
 
+    // M7: Exclude volatile runnerId. Canonicalize "stuck task" types so type-flapping
+    // (skipped→blocked→failed for same task) deduplicates, but genuinely different
+    // problems (orphaned vs hanging) remain distinct.
+    // Task statuses blocked_error/blocked_conflict both map to anomaly type blocked_task in the scanner
+    const STUCK_TASK_TYPES = new Set(['blocked_task', 'failed_task', 'skipped_task']);
+    const canonType = (type: string) => STUCK_TASK_TYPES.has(type) ? 'stuck_task' : type;
     const fingerprint = (s: ScanResult) =>
       s.anomalies
-        .map(a => `${a.type}|${a.severity}|${a.projectPath}|${a.taskId ?? ''}|${a.runnerId ?? ''}`)
+        .map(a => `${canonType(a.type)}|${a.severity}|${a.projectPath}|${a.taskId ?? ''}`)
         .sort()
         .join('\n');
 

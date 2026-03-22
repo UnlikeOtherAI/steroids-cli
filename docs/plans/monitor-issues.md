@@ -124,7 +124,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M6: First responder ignores "MUST act on blocking issues" instruction
+### [x] M6: First responder ignores "MUST act on blocking issues" instruction
 
 **Severity:** Medium — caused 3 projects to go permanently unaddressed.
 
@@ -138,7 +138,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M7: Duplicate detection fingerprint doesn't account for context changes
+### [x] M7: Duplicate detection fingerprint doesn't account for context changes
 
 **Severity:** Low — causes unnecessary skips or dispatches.
 
@@ -186,7 +186,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M11: FR response parser fails on "text + JSON" output
+### [x] M11: FR response parser fails on "text + JSON" output
 
 **Severity:** Low — 1.8% failure rate, but lost the deepest single-run analysis.
 
