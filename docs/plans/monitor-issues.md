@@ -323,6 +323,107 @@ Possible causes:
 
 ---
 
+## Part 3: Early Detection Gaps & FR Effectiveness
+
+Analysis of whether issues could have been caught sooner and whether the FR's actions actually resolved them.
+
+---
+
+### Detection Gap: 1h18m blind window (runs 1-14)
+
+The monitor was deployed with `escalation_rules.min_severity = "critical"` (the hardcoded default at `loop.ts:242`). Runs 1-14 (15:44 — 16:54) detected anomalies at `warning` and `info` severity only — so no FR was ever dispatched.
+
+The config was updated to `min_severity: "warning"` at **17:24** (commit `e894f83` also reclassified `idle_project` with active cron from `info` to `critical`). The first automatic FR dispatch happened at run 18 (17:30).
+
+**What was missed during the blind window:**
+- **Technician Prisma task** at 116/150 invocations — detected at run 1 (15:44) but no action until run 15 (17:02, manually triggered). Even then the FR only issued `report_only`. The task was never reset and eventually hit `blocked_conflict` in run 16. **Could have been caught 1h18m earlier** if the initial escalation threshold was `warning`.
+- **warehouse + prompter idle_project** — detected at run 1 (15:44) as `info` severity. No action until run 15 (17:02). The severity was wrong — an idle project with active cron is not "informational", it's a real problem. The reclassification to `critical` in commit `e894f83` was correct but came too late.
+- **prompter iOS Camera repeated_failures** (6 rejections) — detected at run 1, first reset at run 19 (17:36). **1h52m gap.** The task eventually completed after reset, so earlier action would have unblocked it sooner.
+
+**Lesson:** The default escalation threshold should be `warning`, not `critical`. The `info` severity should be reserved for things that genuinely require no action (skipped tasks, completed tasks with high counts). Anything the system _could_ fix should be at least `warning`.
+
+---
+
+### Detection Gap: Blocked tasks — FR chose inaction
+
+Run 16 (17:07) detected **9 `blocked_conflict` tasks across 4 projects**. The FR was dispatched and diagnosed all of them correctly. But it chose `report_only`:
+
+> "Blocked tasks will need reset_project/reset_task actions or manual conflict resolution in a follow-up if the user wants to recover them."
+
+This directly contradicted the prompt instruction at `investigator-prompt.ts:129`: _"Blocking issues MUST be acted upon — do NOT use report_only for these."_
+
+**Impact:** The steroids-cli Sentry connector task wasn't reset until run 18 — a 23-minute delay. The Technician, monorepo, and translatemy.world tasks were **never** reset by the FR; those projects were eventually disabled manually. If the FR had issued `reset_project` for all 4 projects in run 16, some tasks might have recovered via fresh checkout.
+
+**Lesson:** See M4 — the prompt instruction needs programmatic enforcement, not just LLM compliance.
+
+---
+
+### FR Effectiveness: Reset actions
+
+**19 unique tasks were reset by the FR.** Success rate:
+
+| Outcome | Count | Tasks |
+|---------|:-----:|-------|
+| RESOLVED (never reappeared) | 15 | steroids-cli/Sentry, warehouse/Tablet screens, warehouse/OCR, prompter/iOS Camera, prompter/iOS Controller, prompter/WebRTC pipeline, prompter/iPad portrait, prompter/takeover test, warehouse/Category API, warehouse/AppReveal e2e, warehouse/Meta webhook, warehouse/Offline sync, prompter/Android Session Entry, warehouse/Stock level, warehouse/Image handler |
+| MOSTLY RESOLVED (1-2 reappearances) | 1 | warehouse/Pending request admin API |
+| NEVER RESOLVED (reset loop) | 1 | prompter/Initialize Android project (13 resets, 29 reappearances after last reset) |
+| RESOLVED after multiple resets | 2 | warehouse/GET events API (4 resets), prompter/Android Dashboard (2 resets) |
+
+**78% (15/19) of tasks were resolved by a single FR reset.** The FR's `reset_task` action is effective for transient failures. The problem is the 1 task that entered an infinite reset loop (M2), and the initial 1h18m delay before any resets started.
+
+---
+
+### FR Effectiveness: trigger_wakeup action
+
+`trigger_wakeup` was the most common FR action (issued in nearly every run). **It resolved idle_project exactly 0 times across 92 runs.** Both warehouse and prompter were flagged as `idle_project` in all 92 runs — no single recovery was ever observed from a wakeup.
+
+The FR itself identified this in run 73: _"The scanner likely flagged both projects as idle because the runner registration mechanism doesn't match the process detection — the runners are started with workspace-prefixed paths which may not be recognized by the scanner's runner-detection logic."_
+
+Despite correctly diagnosing the problem as a false positive (scanner bug, not a runner bug), the FR still issued `trigger_wakeup` because:
+1. It has no action available to "suppress this anomaly" or "mark as false positive"
+2. The prompt says blocking issues MUST be acted upon
+3. `trigger_wakeup` is the only action that makes sense for `idle_project`, even when the FR knows it won't help
+
+**Lesson:** The FR needs a `suppress_anomaly` or `acknowledge_false_positive` action that marks an anomaly as known-benign for a time window, so the circuit breaker (M2) can distinguish "tried and failed" from "known false positive."
+
+---
+
+### FR Effectiveness: Deeper diagnostic actions (runs 73, 85, 90)
+
+The FR's best work came in later runs when it used `query_db` to investigate before acting:
+
+- **Run 73:** Queried project DBs to find active runner PIDs and heartbeats. Correctly identified both idle_project alerts as false positives. Documented the scanner's workspace-path mismatch as root cause.
+- **Run 85:** Found 3 active runners (2 warehouse, 1 prompter) with fresh heartbeats. Confirmed the scanner bug.
+- **Run 90:** Found a `disputed` task stuck due to arbitration crash (exit 143). Used `update_task` to fix the status. Found a review loop (35 invocations, 7+ rejection cycles) and force-completed the task with `add_task_feedback` for audit trail.
+
+Run 90 is the gold standard — the FR diagnosed a non-obvious root cause (arbitration crash leaving task in limbo), took a surgical fix (`update_task` to change status), and documented its reasoning. This is exactly what the FR should do every time.
+
+**However:** These deep investigations only happened in late runs (73+). Earlier runs (18-50) mostly did shallow `reset_task` + `trigger_wakeup` without investigation. The difference is likely prompt quality — the deep debugging capabilities were added in commit `d0c41e7` ("empower first responder agent with deep debugging capabilities").
+
+---
+
+### FR Effectiveness: Actions the FR should have taken but didn't
+
+| Situation | What FR did | What it should have done |
+|-----------|-------------|-------------------------|
+| Run 16: 9 blocked tasks | `report_only` | `reset_project` for each affected project |
+| Run 15: Technician at 116/150 invocations | `report_only` | `update_task` to skip the task, or `add_task_feedback` with guidance |
+| Runs 23-58: Repeated idle_project false positive | `trigger_wakeup` (every time) | After 3rd attempt: `report_only` acknowledging false positive, stop retrying |
+| Run 86: orphaned_task (warehouse Image handler) | `trigger_wakeup` | `reset_task` (the task was orphaned, wakeup doesn't fix that) |
+| Runs 22-62: Android init reset loop | `reset_task` (13 times) | After 3rd reset: `update_task` to skip, with `add_task_feedback` explaining why |
+
+---
+
+### Timeline: Could the auth failures have been prevented?
+
+The 3 auth failures (runs 20, 91, 92) all hit Claude's OAuth. Run 20 was isolated (17:41) and the FR recovered on the next cycle. Runs 91-92 happened after the overnight infinite chain (M1) burned through Claude's rate/token window.
+
+Run 91's auth failure at 01:35 **was the only thing that stopped the infinite chain.** Without it, runs would have continued indefinitely. The auth failure was accidental mitigation — the system has no intentional mechanism to stop itself.
+
+If M3 (auth fallthrough to next provider) had been implemented, the chain would have continued via codex, potentially burning that provider's quota too. So paradoxically, M3 must be implemented **together with** M1/M2/M7 — you need the circuit breaker before you improve the fallback chain.
+
+---
+
 ## Appendix: Run-by-Run Timeline
 
 | Phase | Runs | Period | What happened |
