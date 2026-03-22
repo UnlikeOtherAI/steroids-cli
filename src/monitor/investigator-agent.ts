@@ -506,11 +506,6 @@ export async function executeActions(
 // Main entry point — fallback chain
 // ---------------------------------------------------------------------------
 
-function isRetryableError(err: unknown): boolean {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  return msg.includes('rate') || msg.includes('limit') || msg.includes('timeout') || msg.includes('network');
-}
-
 export async function runFirstResponder(
   agents: Array<{ provider: string; model: string }>,
   scanResult: ScanResult,
@@ -558,18 +553,9 @@ export async function runFirstResponder(
       if (!result.success) {
         const classified = provider.classifyResult(result);
         const errMsg = classified?.message ?? result.stderr.slice(0, 200);
-        if (classified?.retryable) {
-          console.warn(`[first-responder] Retryable error from ${agent.provider}: ${errMsg}`);
-          continue;
-        }
-        return {
-          success: false,
-          agentUsed: `${agent.provider}/${agent.model}`,
-          diagnosis: `Provider invocation failed: ${errMsg}`,
-          actions: [],
-          actionResults: [],
-          error: errMsg,
-        };
+        // M3: Always try next provider on failure — don't hard-stop on non-retryable errors
+        console.warn(`[first-responder] Error from ${agent.provider}: ${errMsg}`);
+        continue;
       }
 
       const response = parseFirstResponderResponse(result.stdout);
@@ -583,18 +569,9 @@ export async function runFirstResponder(
         actionResults,
       };
     } catch (err) {
-      if (isRetryableError(err)) {
-        console.warn(`[first-responder] Retryable error from ${agent.provider}: ${err instanceof Error ? err.message : err}`);
-        continue;
-      }
-      return {
-        success: false,
-        agentUsed: `${agent.provider}/${agent.model}`,
-        diagnosis: '',
-        actions: [],
-        actionResults: [],
-        error: err instanceof Error ? err.message : String(err),
-      };
+      // M3: Always try next provider on any error
+      console.warn(`[first-responder] Error from ${agent.provider}: ${err instanceof Error ? err.message : err}`);
+      continue;
     }
   }
 
@@ -604,6 +581,6 @@ export async function runFirstResponder(
     diagnosis: '',
     actions: [],
     actionResults: [],
-    error: 'All agents exhausted — no provider was available or all returned retryable errors',
+    error: 'All agents exhausted — no provider was available or all returned errors',
   };
 }

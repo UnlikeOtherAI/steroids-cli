@@ -19,6 +19,15 @@ Every task below must pass all four gates before its checkbox is ticked:
 
 Only when all four gates pass: tick the checkbox `[x]` and move to the next task.
 
+## Coding & Review Standards
+
+All implementers and reviewers **must** read and follow [`AGENTS.md`](../../AGENTS.md). Key rules that apply to every fix here:
+
+- **Root-Cause First** — do not patch around a failure. Diagnose the broken invariant and fix it directly. Fallbacks only as temporary containment with an explicit follow-up.
+- **Simplification First** — before patching, ask whether the right fix is to simplify. Every change must reduce or hold total complexity. Two code paths answering the same question must share one source of truth.
+- **Determinism First** — no fuzzy matching, regex parsing of LLM output, or nested fallback chains without deep justification.
+- **No over-engineering** — fix the bug, nothing more. No speculative abstractions, no feature flags for one-off changes.
+
 ---
 
 ## Part 1: Monitor Issues (low-hanging fruit)
@@ -73,7 +82,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M3: Auth failure kills the entire provider fallback chain
+### [x] M3: Auth failure kills the entire provider fallback chain
 
 **Severity:** Medium — caused 3 failed runs (20, 91, 92). **Must be implemented AFTER M1+M2.**
 
@@ -89,7 +98,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M4: No cooldown between FR dispatches
+### [x] M4: No cooldown between FR dispatches
 
 **Severity:** Medium — compounds M1 but is independently useful as defense-in-depth.
 
@@ -103,7 +112,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M5: `project_disabled` outcome type is orphaned
+### [x] M5: `project_disabled` outcome type is orphaned (already resolved)
 
 **Severity:** Cosmetic — confusing but not breaking. One-line fix.
 

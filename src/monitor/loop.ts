@@ -92,6 +92,27 @@ function hasActiveFirstResponder(timeoutSeconds: number): boolean {
   }
 }
 
+const FR_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes between FR dispatches
+
+/**
+ * Returns the completed_at timestamp of the most recent FR run (complete or error).
+ * Used to enforce a minimum cooldown between FR dispatches (M4).
+ */
+function getLastFRCompletedAt(): number {
+  const { db, close } = openGlobalDatabase();
+  try {
+    const row = db.prepare(
+      `SELECT completed_at FROM monitor_runs
+       WHERE outcome IN ('first_responder_complete', 'error')
+         AND completed_at IS NOT NULL
+       ORDER BY completed_at DESC LIMIT 1`
+    ).get() as { completed_at: number } | undefined;
+    return row?.completed_at ?? 0;
+  } finally {
+    close();
+  }
+}
+
 /**
  * Returns true if the new scan's anomalies are identical to the most recent run.
  * Compares a normalised fingerprint: sorted type+severity+projectPath+taskId tuples.
@@ -270,6 +291,11 @@ export async function monitorCheck(): Promise<void> {
   const agents = safeJsonParse<Array<{ provider: string; model: string }>>(config.first_responder_agents, []);
   let needsFirstResponder = decision.escalate && agents.length > 0;
 
+  // M4: Cooldown — don't dispatch FR too soon after the last one completed (scan still records)
+  if (needsFirstResponder && Date.now() - getLastFRCompletedAt() < FR_COOLDOWN_MS) {
+    needsFirstResponder = false;
+  }
+
   // M2: Circuit breaker — check BEFORE creating the run row to avoid dangling dispatched rows
   let uncappedProjects: string[] = [];
   if (needsFirstResponder) {
@@ -314,6 +340,11 @@ export async function runMonitorCycle(options?: { manual?: boolean; preset?: str
       config?.first_responder_agents ?? null, [],
     );
     let needsFirstResponder = !!(decision.escalate || options?.forceDispatch) && agents.length > 0 && scanResult.anomalies.length > 0;
+
+    // M4: Cooldown — skip FR dispatch if too soon after last completion (unless forceDispatch)
+    if (needsFirstResponder && !options?.forceDispatch && Date.now() - getLastFRCompletedAt() < FR_COOLDOWN_MS) {
+      needsFirstResponder = false;
+    }
 
     // M2: Circuit breaker — check BEFORE creating the run row to avoid dangling dispatched rows
     let uncappedProjects: string[] = [];
