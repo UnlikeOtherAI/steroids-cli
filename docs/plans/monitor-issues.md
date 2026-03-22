@@ -352,6 +352,62 @@ These are bugs in the scanner's data sources, the runner lifecycle, and the wake
 | Auth failure | 91 | 01:35 | Claude auth expired. Chain broken accidentally. No fallback to codex (M3). |
 | Blind spot | 91-92 | 01:35-07:52 | 6.3-hour gap. No retry. Morning cron at 07:52 still fails auth. |
 
+### [ ] S7: FR reset_task forces full coder restart — wastes 80 coder invocations
+
+**Severity:** Critical — 74% of all FR resets wasted coder invocations on tasks where the coder had already succeeded.
+
+**What happens:** The FR's `reset_task` action (`investigator-agent.ts:166-192`) unconditionally sets status to `pending` and zeroes all counters:
+
+```sql
+UPDATE tasks SET status = 'pending', failure_count = 0, rejection_count = 0, ...
+```
+
+The task selector (`task-selector.ts:420-435`) treats all `pending` tasks as fresh work with `action: 'start'`. The orchestrator loop (`orchestrator-loop.ts:296-314`) dispatches `action === 'start'` to `runCoderPhase(mode='start')` — a full coder run from scratch.
+
+There is **no check** for whether the coder already succeeded. Even if a task failed only at the reviewer, arbitration, or push phase, the reset forces it back through the entire coder pipeline.
+
+**Evidence across all 39 reset_task actions:**
+
+| Category | Tasks | Wasted Coder Runs | Root Cause |
+|----------|:-----:|:-----------------:|------------|
+| Arbitration crash (exit 143) | 4 | 15 | Coder + reviewer both succeeded; dispute resolution crashed |
+| Reviewer failure/rejection | 4 | 12 | Coder succeeded; reviewer rejected or hit rate limits |
+| Post-coder failure (push/merge) | 3 | 10 | Coder succeeded; git push or merge to main failed |
+| Push failure loop (d871ce3c) | 1 | **35** | Coder succeeded 36 times; push always failed; reset 13 times |
+| Review death spiral (f06f7cad) | 1 | 8 | Coder succeeded; reviewer trapped in 7+ rejection cycles |
+| **Total unnecessary coder runs** | **14 tasks** | **80** | |
+| Justified resets (0 coder success) | 5 tasks | 0 | Correct: no prior work to preserve |
+
+**Worst cases:**
+
+- **d871ce3c** (prompter, Android init): 38 total coder invocations, 36 successful. Zero reviewer invocations ever — the task always failed at the push step after coding completed. FR reset it 13 times; each time the coder re-ran from scratch. 35 wasted coder invocations on a single task.
+- **f06f7cad** (prompter, Android Session Entry): 11 coder invocations. The coder succeeded on the first try. Then 21 reviewer invocations followed (3 failures, 18 in a rejection cycle about out-of-scope async tests). FR reset at run 48 — coder ran again 8 more times unnecessarily.
+- **ff275dfb** (warehouse, GET events API): 4 resets, 4 wasted coder runs. Coder succeeded each time; the task was stuck in `disputed` from an arbitration crash.
+
+**The fix has two parts:**
+
+**Part A — Smart reset in the FR (monitor layer fix):**
+
+In `investigator-agent.ts:166-192`, before setting status to `pending`, check if the task has successful coder invocations:
+
+```sql
+SELECT COUNT(*) as count FROM task_invocations
+WHERE task_id = ? AND role = 'coder' AND success = 1
+```
+
+If `count > 0`, set status to `review` instead of `pending`. This routes the task to `runReviewerPhase` instead of `runCoderPhase`. Also preserve the `rejection_count` when the issue was a reviewer failure — zeroing it loses context.
+
+**Part B — Prior-work-aware task selection (engine fix):**
+
+In `task-selector.ts`, when selecting a `pending` task for `action: 'start'`, check if the task has prior successful coder invocations. If so, return `action: 'resume'` or `action: 'review'` instead of `action: 'start'`. This makes the fix work for ALL resets (not just FR resets), including manual `steroids tasks reset` and wakeup sanitiser resets.
+
+**Files:**
+- `src/monitor/investigator-agent.ts:166-192` (Part A: smart reset)
+- `src/orchestrator/task-selector.ts:420-435` (Part B: prior-work-aware selection)
+- `src/runners/orchestrator-loop.ts:296-314` (action dispatch — no change needed if task-selector returns correct action)
+
+---
+
 ## Appendix: Currently Active Issues (live scan)
 
 | Anomaly | Severity | Project | Task | Action Needed |
