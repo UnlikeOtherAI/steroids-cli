@@ -402,11 +402,12 @@ OPTIONS:
       }
     }
 
-    // After successful fix, trigger a follow-up scan so the dashboard shows fresh state
+    // After successful fix, trigger a follow-up scan so the dashboard shows fresh state.
+    // Do NOT pass manual:true — that bypasses duplicate detection and causes infinite dispatch chains (M1).
     if (result.success) {
       try {
         const { runMonitorCycle } = await import('../monitor/loop.js');
-        await runMonitorCycle({ manual: true });
+        await runMonitorCycle();
       } catch {
         // Follow-up scan is best-effort; don't fail the respond command
       }

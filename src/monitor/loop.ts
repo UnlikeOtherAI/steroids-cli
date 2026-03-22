@@ -186,30 +186,54 @@ function computeAnomalyFingerprint(scanResult: ScanResult, projectPath: string):
     .join(',');
 }
 
+const MAX_REMEDIATION_ATTEMPTS = 5;
+const REMEDIATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 /**
- * Count previous remediation attempts for a project+fingerprint.
+ * Check circuit breaker for a list of projects. Returns the set of projects
+ * that have NOT hit the remediation cap (within the TTL window).
+ * Single DB connection for all projects — avoids N+1 queries.
  */
-function countRemediationAttempts(projectPath: string, fingerprint: string): number {
+function getUncappedProjects(scanResult: ScanResult, projectPaths: string[]): string[] {
+  if (projectPaths.length === 0) return [];
   const { db, close } = openGlobalDatabase();
   try {
-    const row = db.prepare(
-      'SELECT COUNT(*) as count FROM monitor_remediation_attempts WHERE project_path = ? AND anomaly_fingerprint = ?'
-    ).get(projectPath, fingerprint) as { count: number };
-    return row.count;
+    const cutoff = Date.now() - REMEDIATION_TTL_MS;
+    // Prune stale attempts while we have the connection
+    db.prepare('DELETE FROM monitor_remediation_attempts WHERE attempted_at < ?').run(cutoff);
+
+    const uncapped: string[] = [];
+    const stmt = db.prepare(
+      'SELECT COUNT(*) as count FROM monitor_remediation_attempts WHERE project_path = ? AND anomaly_fingerprint = ? AND attempted_at >= ?'
+    );
+    for (const projectPath of projectPaths) {
+      const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
+      const row = stmt.get(projectPath, fingerprint, cutoff) as { count: number };
+      if (row.count < MAX_REMEDIATION_ATTEMPTS) {
+        uncapped.push(projectPath);
+      }
+    }
+    return uncapped;
   } finally {
     close();
   }
 }
 
 /**
- * Record a remediation attempt.
+ * Record remediation attempts for the given projects (single DB connection).
  */
-function recordRemediationAttempt(projectPath: string, fingerprint: string): void {
+function recordRemediationAttempts(scanResult: ScanResult, projectPaths: string[]): void {
+  if (projectPaths.length === 0) return;
   const { db, close } = openGlobalDatabase();
   try {
-    db.prepare(
+    const stmt = db.prepare(
       'INSERT INTO monitor_remediation_attempts (project_path, anomaly_fingerprint, attempted_at) VALUES (?, ?, ?)'
-    ).run(projectPath, fingerprint, Date.now());
+    );
+    const now = Date.now();
+    for (const projectPath of projectPaths) {
+      const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
+      stmt.run(projectPath, fingerprint, now);
+    }
   } finally {
     close();
   }
@@ -239,25 +263,29 @@ export async function monitorCheck(): Promise<void> {
   if (isDuplicateOfLastRun(scanResult)) return;
 
   // Apply rules
-  const rules = safeJsonParse<EscalationRules>(config.escalation_rules, { min_severity: 'critical' });
+  const rules = safeJsonParse<EscalationRules>(config.escalation_rules, { min_severity: 'warning' });
   const decision = shouldEscalate(scanResult.anomalies, rules);
 
-  // Create run row
+  // Determine if FR dispatch is needed
   const agents = safeJsonParse<Array<{ provider: string; model: string }>>(config.first_responder_agents, []);
-  const needsFirstResponder = decision.escalate && agents.length > 0;
+  let needsFirstResponder = decision.escalate && agents.length > 0;
 
-  const runId = createRunRow(scanResult, decision.escalate ? decision.reason : null, needsFirstResponder);
-
-  // Prune old runs
-  pruneOldRuns(500);
-
-  // If first responder needed, spawn detached process and record attempt
+  // M2: Circuit breaker — check BEFORE creating the run row to avoid dangling dispatched rows
+  let uncappedProjects: string[] = [];
   if (needsFirstResponder) {
     const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
-    for (const projectPath of affectedProjects) {
-      const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
-      recordRemediationAttempt(projectPath, fingerprint);
+    uncappedProjects = getUncappedProjects(scanResult, affectedProjects);
+    if (uncappedProjects.length === 0) {
+      needsFirstResponder = false; // all capped — record as anomalies_found, not dispatched
     }
+  }
+
+  const runId = createRunRow(scanResult, decision.escalate ? decision.reason : null, needsFirstResponder);
+  pruneOldRuns(500);
+
+  if (needsFirstResponder) {
+    // Only record attempts for uncapped projects
+    recordRemediationAttempts(scanResult, uncappedProjects);
     spawnFirstResponder(runId);
   }
 }
@@ -278,25 +306,30 @@ export async function runMonitorCycle(options?: { manual?: boolean; preset?: str
 
     const rules = safeJsonParse<EscalationRules>(
       config?.escalation_rules ?? null,
-      { min_severity: 'critical' },
+      { min_severity: 'warning' },
     );
     const decision = shouldEscalate(scanResult.anomalies, rules);
 
     const agents = safeJsonParse<Array<{ provider: string; model: string }>>(
       config?.first_responder_agents ?? null, [],
     );
-    const needsFirstResponder = !!(decision.escalate || options?.forceDispatch) && agents.length > 0 && scanResult.anomalies.length > 0;
+    let needsFirstResponder = !!(decision.escalate || options?.forceDispatch) && agents.length > 0 && scanResult.anomalies.length > 0;
+
+    // M2: Circuit breaker — check BEFORE creating the run row to avoid dangling dispatched rows
+    let uncappedProjects: string[] = [];
+    if (needsFirstResponder) {
+      const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
+      uncappedProjects = getUncappedProjects(scanResult, affectedProjects);
+      if (uncappedProjects.length === 0) {
+        needsFirstResponder = false; // all capped
+      }
+    }
 
     const runId = createRunRow(scanResult, decision.escalate ? decision.reason : null, needsFirstResponder);
-
     pruneOldRuns(500);
 
     if (needsFirstResponder) {
-      const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
-      for (const projectPath of affectedProjects) {
-        const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
-        recordRemediationAttempt(projectPath, fingerprint);
-      }
+      recordRemediationAttempts(scanResult, uncappedProjects);
       spawnFirstResponder(runId, options?.preset);
       return {
         outcome: 'first_responder_dispatched',

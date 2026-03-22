@@ -13,6 +13,7 @@ import {
 import {
   GLOBAL_SCHEMA_V21_SQL,
   GLOBAL_SCHEMA_V22_SQL,
+  GLOBAL_SCHEMA_V23_SQL,
   GLOBAL_SCHEMA_VERSION,
 } from './global-db-schema-migrations-v21.js';
 
@@ -25,6 +26,7 @@ export {
 export {
   GLOBAL_SCHEMA_V21_SQL,
   GLOBAL_SCHEMA_V22_SQL,
+  GLOBAL_SCHEMA_V23_SQL,
   GLOBAL_SCHEMA_VERSION,
 } from './global-db-schema-migrations-v21.js';
 
@@ -286,6 +288,10 @@ export function applyGlobalSchemaV20(db: Database.Database): void {
 
 export function applyGlobalSchemaV21(db: Database.Database): void {
   db.exec(GLOBAL_SCHEMA_V21_SQL);
+}
+
+export function applyGlobalSchemaV23(db: Database.Database): void {
+  db.exec(GLOBAL_SCHEMA_V23_SQL);
 }
 
 export function applyGlobalSchemaV22(db: Database.Database): void {

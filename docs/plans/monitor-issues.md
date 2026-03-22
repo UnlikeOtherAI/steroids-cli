@@ -6,6 +6,21 @@
 
 ---
 
+## Definition of Done (per task)
+
+Every task below must pass all four gates before its checkbox is ticked:
+
+1. **Implement** — write the fix, ensure `npm run build` compiles cleanly.
+2. **Playwright verification** — use browser automation to confirm any UI-facing changes render correctly and the monitor dashboard/status reflects the fix. If the fix is backend-only, verify via the WebUI monitor panel that no regressions appear.
+3. **Cross-provider code review** — dispatch two independent sub-agent reviewers:
+   - **Claude** (`superpowers:code-reviewer`) — adversarial review of the diff.
+   - **Gemini** (`gemini` CLI) — adversarial review of the same diff.
+4. **Consensus gate** — both reviewers must agree the implementation is correct. If either raises a valid objection, address it before ticking off. If they disagree with each other, assess the dispute and document the resolution inline.
+
+Only when all four gates pass: tick the checkbox `[x]` and move to the next task.
+
+---
+
 ## Part 1: Monitor Issues (low-hanging fruit)
 
 These are bugs in the monitor subsystem itself — the scanner, the loop, the first responder dispatch, and the retry/remediation logic. All changes are contained within `src/monitor/` and `src/commands/monitor.ts`.
@@ -14,7 +29,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M1: Follow-up scan creates an infinite dispatch chain
+### [x] M1: Follow-up scan creates an infinite dispatch chain
 
 **Severity:** Critical — this burned 30+ consecutive FR invocations overnight (runs 59-92).
 
@@ -36,7 +51,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M2: Remediation attempt tracking exists but is never used as a circuit breaker
+### [x] M2: Remediation attempt tracking exists but is never used as a circuit breaker
 
 **Severity:** High — the system retries the same failing remediation indefinitely.
 
@@ -150,7 +165,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M10: Default escalation threshold should be `warning`, not `critical`
+### [x] M10: Default escalation threshold should be `warning`, not `critical`
 
 **Severity:** Medium — caused a 1h18m blind window at initial deployment.
 

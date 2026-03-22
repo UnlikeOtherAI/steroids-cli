@@ -53,4 +53,8 @@ CREATE TABLE IF NOT EXISTS monitor_remediation_attempts (
 CREATE INDEX IF NOT EXISTS idx_monitor_remediation_project ON monitor_remediation_attempts(project_path, anomaly_fingerprint);
 `;
 
-export const GLOBAL_SCHEMA_VERSION = '22';
+export const GLOBAL_SCHEMA_V23_SQL = `
+UPDATE monitor_config SET escalation_rules = '{"min_severity":"warning"}' WHERE escalation_rules = '{"min_severity":"critical"}';
+`;
+
+export const GLOBAL_SCHEMA_VERSION = '23';
