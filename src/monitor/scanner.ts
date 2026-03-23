@@ -24,6 +24,8 @@ import {
   type GlobalDatabaseConnection,
 } from '../runners/global-db-connection.js';
 import { cronStatus } from '../runners/cron.js';
+import { getProviderBackoffRemainingMs } from '../runners/global-db-backoffs.js';
+import { loadConfig } from '../config/loader.js';
 import {
   scanFailedAndSkippedTasks,
   scanHighInvocations,
@@ -155,27 +157,25 @@ function hasPendingWork(projectDb: Database.Database): boolean {
 // ---------------------------------------------------------------------------
 
 function getActiveProviderBackoff(
-  globalDb: Database.Database,
-): { provider: string; remainingMs: number; reasonType: string | null } | null {
+  projectPath: string,
+): { provider: string; remainingMs: number } | null {
   try {
-    const now = Date.now();
-    const row = globalDb
-      .prepare(
-        `SELECT provider, backoff_until_ms, reason_type
-         FROM provider_backoffs
-         WHERE backoff_until_ms > ?
-         ORDER BY backoff_until_ms DESC
-         LIMIT 1`
-      )
-      .get(now) as { provider: string; backoff_until_ms: number; reason_type: string | null } | undefined;
-    if (!row) return null;
-    return {
-      provider: row.provider,
-      remainingMs: row.backoff_until_ms - now,
-      reasonType: row.reason_type ?? null,
-    };
+    // S6 fix: Only check providers this project actually uses (mirrors wakeup-project.ts).
+    // Previous implementation checked ALL providers globally, which could silence idle_project
+    // alerts for project B because an unrelated provider for project A was backed off.
+    const projectConfig = loadConfig(projectPath);
+    const coderProvider = projectConfig.ai?.coder?.provider;
+    const reviewerProvider = projectConfig.ai?.reviewer?.provider;
+    const providersToCheck = [...new Set([coderProvider, reviewerProvider].filter(Boolean) as string[])];
+
+    for (const provider of providersToCheck) {
+      const remainingMs = getProviderBackoffRemainingMs(provider);
+      if (remainingMs > 0) {
+        return { provider, remainingMs };
+      }
+    }
+    return null;
   } catch {
-    // Table may not exist on older schema — safe to ignore
     return null;
   }
 }
@@ -355,7 +355,7 @@ export async function runScan(): Promise<ScanResult> {
 
         // S6: Check if any provider is backed off — this legitimately prevents wakeup
         // from spawning a runner. Downgrade severity so FR doesn't waste actions.
-        const providerBackoff = getActiveProviderBackoff(globalDb);
+        const providerBackoff = getActiveProviderBackoff(projectPath);
         const isBackedOff = providerBackoff !== null;
         const severity: Anomaly['severity'] = isBackedOff ? 'info' : (cronActive ? 'critical' : 'info');
 
