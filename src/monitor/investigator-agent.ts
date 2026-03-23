@@ -16,6 +16,7 @@
 
 import { spawn } from 'node:child_process';
 import { openDatabase } from '../database/connection.js';
+import { openGlobalDatabase } from '../runners/global-db-connection.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import { resolveCliEntrypoint } from '../cli/entrypoint.js';
 import { buildFirstResponderPrompt } from './investigator-prompt.js';
@@ -35,6 +36,7 @@ export type FirstResponderAction =
   | { action: 'update_task'; projectPath: string; taskId: string; fields: Record<string, unknown>; reason: string }
   | { action: 'add_dependency'; projectPath: string; sectionId: string; dependsOnSectionId: string; reason: string }
   | { action: 'add_task_feedback'; projectPath: string; taskId: string; feedback: string; reason: string }
+  | { action: 'suppress_anomaly'; projectPath: string; anomalyType: string; duration_hours: number; reason: string }
   | { action: 'report_only'; diagnosis: string };
 
 export interface FirstResponderResponse {
@@ -65,6 +67,7 @@ const ALLOWED_ACTIONS: Record<string, string[]> = {
   update_task: ['projectPath', 'taskId', 'fields', 'reason'],
   add_dependency: ['projectPath', 'sectionId', 'dependsOnSectionId', 'reason'],
   add_task_feedback: ['projectPath', 'taskId', 'feedback', 'reason'],
+  suppress_anomaly: ['projectPath', 'anomalyType', 'duration_hours', 'reason'],
   report_only: ['diagnosis'],
 };
 
@@ -78,6 +81,13 @@ const UPDATABLE_TASK_FIELDS = new Set([
 const VALID_TASK_STATUSES = new Set([
   'pending', 'in_progress', 'review', 'completed', 'failed', 'skipped',
   'disputed', 'blocked_conflict', 'blocked_error',
+]);
+
+// Valid anomaly types for suppress_anomaly
+const VALID_ANOMALY_TYPES = new Set([
+  'orphaned_task', 'hanging_invocation', 'zombie_runner', 'dead_runner',
+  'db_inconsistency', 'credit_exhaustion', 'failed_task', 'skipped_task',
+  'idle_project', 'high_invocations', 'repeated_failures', 'blocked_task',
 ]);
 
 // Re-export for backward compatibility
@@ -230,25 +240,30 @@ export async function executeActions(
       }
 
       case 'reset_project': {
+        // M12: Direct DB update instead of spawning CLI (which fails for unregistered projects)
         try {
-          const entrypoint = resolveCliEntrypoint();
-          if (!entrypoint) {
-            results.push({ action: 'reset_project', success: false, error: 'Could not resolve CLI entrypoint' });
-            break;
-          }
-          const child = spawn(
-            process.execPath,
-            [entrypoint, 'tasks', 'reset', '--blocked', '--project', entry.projectPath],
-            { stdio: 'ignore', detached: false },
-          );
-          await new Promise<void>((resolve, reject) => {
-            child.on('close', (code) => {
-              if (code === 0 || code === null) resolve();
-              else reject(new Error(`tasks reset exited with code ${code}`));
+          const { db, close } = openDatabase(entry.projectPath);
+          try {
+            const result = db.prepare(
+              `UPDATE tasks
+               SET status = 'pending',
+                   failure_count = 0,
+                   rejection_count = 0,
+                   merge_failure_count = 0,
+                   conflict_count = 0,
+                   last_failure_at = NULL,
+                   updated_at = datetime('now')
+               WHERE status IN ('failed', 'skipped', 'blocked_conflict', 'blocked_error')`
+            ).run();
+            results.push({
+              action: 'reset_project',
+              success: true,
+              reason: entry.reason,
+              output: { tasksReset: result.changes },
             });
-            child.on('error', reject);
-          });
-          results.push({ action: 'reset_project', success: true, reason: entry.reason });
+          } finally {
+            close();
+          }
         } catch (err) {
           results.push({
             action: 'reset_project',
@@ -529,6 +544,46 @@ export async function executeActions(
         break;
       }
 
+      case 'suppress_anomaly': {
+        if (!VALID_ANOMALY_TYPES.has(entry.anomalyType)) {
+          results.push({
+            action: 'suppress_anomaly',
+            success: false,
+            error: `Invalid anomaly type: ${entry.anomalyType}. Valid: ${[...VALID_ANOMALY_TYPES].join(', ')}`,
+          });
+          break;
+        }
+        try {
+          const { db, close } = openGlobalDatabase();
+          try {
+            const hours = Math.max(1, Math.min(Number(entry.duration_hours) || 1, 168));
+            const now = Date.now();
+            const expiresAt = now + hours * 60 * 60 * 1000;
+            // Upsert: extend expiry if suppression already exists
+            db.prepare(
+              `INSERT INTO monitor_suppressions (project_path, anomaly_type, reason, created_at, expires_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(project_path, anomaly_type) DO UPDATE SET reason = excluded.reason, expires_at = excluded.expires_at`
+            ).run(entry.projectPath, entry.anomalyType, entry.reason, now, expiresAt);
+            results.push({
+              action: 'suppress_anomaly',
+              success: true,
+              reason: entry.reason,
+              output: { projectPath: entry.projectPath, anomalyType: entry.anomalyType, expiresInHours: hours },
+            });
+          } finally {
+            close();
+          }
+        } catch (err) {
+          results.push({
+            action: 'suppress_anomaly',
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      }
+
       case 'report_only': {
         results.push({ action: 'report_only', success: true, reason: entry.diagnosis });
         break;
@@ -599,7 +654,6 @@ export async function runFirstResponder(
 
       // M6: If FR returned only report_only but scan has actionable anomalies, inject fallback actions.
       // Uses reset_task for task-level anomalies (94.9% success) over trigger_wakeup (0% for idle_project).
-      // Known limitation: injected actions count toward M2 circuit breaker until M9 (suppress_anomaly) exists.
       const ACTIONABLE_TYPES = new Set(['blocked_task', 'failed_task', 'orphaned_task', 'hanging_invocation', 'zombie_runner', 'dead_runner']);
       const actionableAnomalies = scanResult.anomalies.filter(a => ACTIONABLE_TYPES.has(a.type));
       const onlyReportOnly = response.actions.length === 0 || response.actions.every(a => a.action === 'report_only');

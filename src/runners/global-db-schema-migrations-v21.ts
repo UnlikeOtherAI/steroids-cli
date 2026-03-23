@@ -57,4 +57,29 @@ export const GLOBAL_SCHEMA_V23_SQL = `
 UPDATE monitor_config SET escalation_rules = '{"min_severity":"warning"}' WHERE escalation_rules = '{"min_severity":"critical"}';
 `;
 
-export const GLOBAL_SCHEMA_VERSION = '23';
+export const GLOBAL_SCHEMA_V24_SQL = `
+CREATE TABLE IF NOT EXISTS monitor_alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  alert_type TEXT NOT NULL,
+  project_path TEXT,
+  anomaly_fingerprint TEXT,
+  message TEXT NOT NULL,
+  acknowledged INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  acknowledged_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_alerts_unacked ON monitor_alerts(acknowledged, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS monitor_suppressions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_path TEXT NOT NULL,
+  anomaly_type TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  UNIQUE(project_path, anomaly_type)
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_suppressions_lookup ON monitor_suppressions(project_path, anomaly_type);
+`;
+
+export const GLOBAL_SCHEMA_VERSION = '24';

@@ -266,6 +266,40 @@ function recordRemediationAttempts(scanResult: ScanResult, projectPaths: string[
   }
 }
 
+/**
+ * M8: Write alert when circuit breaker caps a project.
+ * Deduplicates — skips if an unacknowledged alert already exists for the same fingerprint.
+ */
+function writeCircuitBreakerAlerts(scanResult: ScanResult, cappedProjects: string[]): void {
+  if (cappedProjects.length === 0) return;
+  const { db, close } = openGlobalDatabase();
+  try {
+    const insertStmt = db.prepare(
+      `INSERT INTO monitor_alerts (alert_type, project_path, anomaly_fingerprint, message, created_at)
+       SELECT @alert_type, @project_path, @fingerprint, @message, @created_at
+       WHERE NOT EXISTS (
+         SELECT 1 FROM monitor_alerts WHERE project_path = @project_path AND anomaly_fingerprint = @fingerprint AND acknowledged = 0
+       )`
+    );
+    const now = Date.now();
+    for (const projectPath of cappedProjects) {
+      const fingerprint = computeAnomalyFingerprint(scanResult, projectPath);
+      const types = [...new Set(scanResult.anomalies.filter(a => a.projectPath === projectPath).map(a => a.type))].join(', ');
+      insertStmt.run({
+        alert_type: 'circuit_breaker',
+        project_path: projectPath,
+        fingerprint,
+        message: `Remediation capped after ${MAX_REMEDIATION_ATTEMPTS} attempts for: ${types}. Manual intervention required.`,
+        created_at: now,
+      });
+    }
+  } catch {
+    // Best-effort — don't block the monitor loop
+  } finally {
+    close();
+  }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -307,6 +341,9 @@ export async function monitorCheck(): Promise<void> {
   if (needsFirstResponder) {
     const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
     uncappedProjects = getUncappedProjects(scanResult, affectedProjects);
+    // M8: Alert for newly-capped projects
+    const cappedProjects = affectedProjects.filter(p => !uncappedProjects.includes(p));
+    writeCircuitBreakerAlerts(scanResult, cappedProjects);
     if (uncappedProjects.length === 0) {
       needsFirstResponder = false; // all capped — record as anomalies_found, not dispatched
     }
@@ -357,6 +394,9 @@ export async function runMonitorCycle(options?: { manual?: boolean; preset?: str
     if (needsFirstResponder) {
       const affectedProjects = [...new Set(scanResult.anomalies.map(a => a.projectPath))];
       uncappedProjects = getUncappedProjects(scanResult, affectedProjects);
+      // M8: Alert for newly-capped projects
+      const cappedProjects = affectedProjects.filter(p => !uncappedProjects.includes(p));
+      writeCircuitBreakerAlerts(scanResult, cappedProjects);
       if (uncappedProjects.length === 0) {
         needsFirstResponder = false; // all capped
       }

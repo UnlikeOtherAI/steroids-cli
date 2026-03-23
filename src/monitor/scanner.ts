@@ -448,6 +448,24 @@ export async function runScan(): Promise<ScanResult> {
     }
   }
 
+  // M9: Filter out suppressed anomalies
+  try {
+    const now = Date.now();
+    const rows = globalDb.prepare(
+      'SELECT project_path, anomaly_type FROM monitor_suppressions WHERE expires_at > ?'
+    ).all(now) as Array<{ project_path: string; anomaly_type: string }>;
+    if (rows.length > 0) {
+      const suppressed = new Set(rows.map(r => `${r.project_path}|${r.anomaly_type}`));
+      for (let i = anomalies.length - 1; i >= 0; i--) {
+        if (suppressed.has(`${anomalies[i].projectPath}|${anomalies[i].type}`)) {
+          anomalies.splice(i, 1);
+        }
+      }
+    }
+  } catch {
+    // Suppression table may not exist on older schema — skip
+  }
+
   globalConn.close();
 
   // Build summary

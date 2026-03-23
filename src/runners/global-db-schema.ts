@@ -14,6 +14,7 @@ import {
   GLOBAL_SCHEMA_V21_SQL,
   GLOBAL_SCHEMA_V22_SQL,
   GLOBAL_SCHEMA_V23_SQL,
+  GLOBAL_SCHEMA_V24_SQL,
   GLOBAL_SCHEMA_VERSION,
 } from './global-db-schema-migrations-v21.js';
 
@@ -27,6 +28,7 @@ export {
   GLOBAL_SCHEMA_V21_SQL,
   GLOBAL_SCHEMA_V22_SQL,
   GLOBAL_SCHEMA_V23_SQL,
+  GLOBAL_SCHEMA_V24_SQL,
   GLOBAL_SCHEMA_VERSION,
 } from './global-db-schema-migrations-v21.js';
 
@@ -292,6 +294,17 @@ export function applyGlobalSchemaV21(db: Database.Database): void {
 
 export function applyGlobalSchemaV23(db: Database.Database): void {
   db.exec(GLOBAL_SCHEMA_V23_SQL);
+}
+
+export function applyGlobalSchemaV24(db: Database.Database): void {
+  db.exec(GLOBAL_SCHEMA_V24_SQL);
+  // Ensure UNIQUE constraint exists for ON CONFLICT upsert in suppress_anomaly.
+  // CREATE TABLE IF NOT EXISTS won't alter an existing table, so add the index separately.
+  try {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_monitor_suppressions_unique ON monitor_suppressions(project_path, anomaly_type)');
+  } catch {
+    // Already has the constraint from fresh install — safe to ignore
+  }
 }
 
 export function applyGlobalSchemaV22(db: Database.Database): void {

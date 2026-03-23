@@ -111,6 +111,14 @@ Analyze the anomalies above and respond with a JSON object matching this schema:
 - { "action": "trigger_wakeup", "reason": "<why>" }
   Triggers the wakeup cycle to restart runners and recover from idle states.
 
+**Suppression:**
+
+- { "action": "suppress_anomaly", "projectPath": "<path>", "anomalyType": "<type>", "duration_hours": <number>, "reason": "<why>" }
+  Suppress a known false positive anomaly for the specified project and type (max 168 hours = 1 week).
+  The scanner will skip matching anomalies until the suppression expires.
+  Use when you have confirmed an anomaly is a false positive (e.g., idle_project when runners are actually active via parallel sessions).
+  Valid anomaly types: orphaned_task, hanging_invocation, zombie_runner, dead_runner, db_inconsistency, credit_exhaustion, failed_task, skipped_task, idle_project, high_invocations, repeated_failures, blocked_task.
+
 **Report:**
 
 - { "action": "report_only", "diagnosis": "<summary>" }

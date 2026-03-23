@@ -9,12 +9,14 @@
  *   run          Run full cycle (scan + rules, no first responder)
  *   respond      Dispatch first responder for a specific run (detached from wakeup)
  *   investigate  Alias for respond (backward compat)
+ *   ack          Acknowledge monitor alerts
  */
 
-import { parseArgs } from 'node:util';
+import { basename } from 'node:path';
 import type { GlobalFlags } from '../cli/flags.js';
 import { generateHelp } from '../cli/help.js';
 import { openGlobalDatabase } from '../runners/global-db-connection.js';
+import { runRespondCmd, runAckCmd } from './monitor-respond.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -62,9 +64,12 @@ AI first responder agent when escalation rules are triggered.`,
     { name: 'run', description: 'Run full cycle (scan + rules, no first responder)' },
     { name: 'respond', args: '--run-id <id>', description: 'Dispatch first responder for a monitor run' },
     { name: 'investigate', args: '--run-id <id>', description: 'Alias for respond' },
+    { name: 'ack', args: '--alert-id <id> | --all', description: 'Acknowledge monitor alerts' },
   ],
   options: [
     { long: 'run-id', description: 'Monitor run ID for first responder dispatch', values: '<id>' },
+    { long: 'alert-id', description: 'Alert ID to acknowledge', values: '<id>' },
+    { long: 'all', description: 'Acknowledge all unacknowledged alerts' },
   ],
   examples: [
     { command: 'steroids monitor status', description: 'Show config and last run' },
@@ -73,6 +78,8 @@ AI first responder agent when escalation rules are triggered.`,
     { command: 'steroids monitor scan', description: 'Run a scan now' },
     { command: 'steroids monitor run', description: 'Run full scan+rules cycle' },
     { command: 'steroids monitor respond --run-id 42', description: 'Dispatch first responder for run 42' },
+    { command: 'steroids monitor ack --alert-id 1', description: 'Acknowledge alert #1' },
+    { command: 'steroids monitor ack --all', description: 'Acknowledge all alerts' },
   ],
   related: [
     { command: 'steroids health', description: 'Project health checks' },
@@ -116,6 +123,9 @@ export async function monitorCommand(args: string[], flags: GlobalFlags): Promis
     case 'investigate':
       await runRespondCmd(subArgs, flags);
       break;
+    case 'ack':
+      await runAckCmd(subArgs, flags);
+      break;
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
       console.log(HELP);
@@ -136,8 +146,18 @@ async function runStatus(_args: string[], flags: GlobalFlags): Promise<void> {
       'SELECT * FROM monitor_runs ORDER BY started_at DESC LIMIT 1'
     ).get() as MonitorRunRow | undefined;
 
+    // M8: Fetch unacknowledged alerts
+    let alerts: Array<{ id: number; alert_type: string; project_path: string | null; message: string; created_at: number }> = [];
+    try {
+      alerts = db.prepare(
+        'SELECT id, alert_type, project_path, message, created_at FROM monitor_alerts WHERE acknowledged = 0 ORDER BY created_at DESC LIMIT 10'
+      ).all() as typeof alerts;
+    } catch {
+      // Table may not exist on older schema
+    }
+
     if (flags.json) {
-      console.log(JSON.stringify({ config: config ?? null, lastRun: lastRun ?? null }, null, 2));
+      console.log(JSON.stringify({ config: config ?? null, lastRun: lastRun ?? null, alerts }, null, 2));
       return;
     }
 
@@ -175,6 +195,18 @@ async function runStatus(_args: string[], flags: GlobalFlags): Promise<void> {
       }
     } else {
       console.log('No monitor runs recorded yet.');
+    }
+
+    // M8: Show unacknowledged alerts
+    if (alerts.length > 0) {
+      console.log('');
+      console.log('ALERTS (unacknowledged)');
+      console.log('-'.repeat(50));
+      for (const alert of alerts) {
+        const project = alert.project_path ? basename(alert.project_path) : 'system';
+        const age = Math.round((Date.now() - alert.created_at) / 60000);
+        console.log(`  [#${alert.id}] ${project} (${age}m ago): ${alert.message}`);
+      }
     }
   } finally {
     close();
@@ -255,180 +287,6 @@ async function runCycleCmd(_args: string[], flags: GlobalFlags): Promise<void> {
   }
 }
 
-// ── respond (first responder) ──────────────────────────────────────────────
-
-async function runRespondCmd(args: string[], flags: GlobalFlags): Promise<void> {
-  const { values } = parseArgs({
-    args,
-    options: {
-      'run-id': { type: 'string' },
-      preset: { type: 'string' },
-      help: { type: 'boolean', short: 'h', default: false },
-    },
-    allowPositionals: false,
-  });
-
-  if (values.help || flags.help) {
-    console.log(`
-steroids monitor respond - Dispatch first responder for a monitor run
-
-USAGE:
-  steroids monitor respond --run-id <id> [--preset <preset>]
-
-OPTIONS:
-  --run-id <id>      Monitor run ID to dispatch first responder for (required)
-  --preset <preset>  Override response preset (stop_on_error, investigate_and_stop, fix_and_monitor, custom)
-  -h, --help         Show help
-`);
-    return;
-  }
-
-  const runIdStr = values['run-id'] as string | undefined;
-  if (!runIdStr) {
-    console.error('Error: --run-id is required');
-    process.exit(2);
-  }
-
-  const runId = parseInt(runIdStr, 10);
-  if (isNaN(runId) || runId <= 0) {
-    console.error(`Error: invalid run ID "${runIdStr}"`);
-    process.exit(2);
-  }
-
-  // Read the monitor_runs row
-  const { db, close } = openGlobalDatabase();
-  let runRow: MonitorRunRow | undefined;
-  let config: MonitorConfigRow | undefined;
-  try {
-    runRow = db.prepare('SELECT * FROM monitor_runs WHERE id = ?').get(runId) as MonitorRunRow | undefined;
-    config = db.prepare('SELECT * FROM monitor_config WHERE id = 1').get() as MonitorConfigRow | undefined;
-  } finally {
-    close();
-  }
-
-  if (!runRow) {
-    console.error(`Error: monitor run ${runId} not found`);
-    process.exit(4);
-  }
-
-  if (!config) {
-    console.error('Error: monitor_config row not found');
-    process.exit(3);
-  }
-
-  // Parse scan results from the row
-  const scanResults = safeJsonParse(runRow.scan_results);
-  if (!scanResults) {
-    updateRunError(runId, 'No scan_results in monitor_runs row');
-    console.error('Error: no scan_results in monitor_runs row');
-    process.exit(1);
-  }
-
-  // Parse first responder agents and response preset from config
-  const agents = safeJsonParse(config.first_responder_agents) as
-    Array<{ provider: string; model: string }> | null;
-  const presetOverride = values.preset as string | undefined;
-  const responsePreset = presetOverride || config.response_preset;
-
-  if (!Array.isArray(agents) || agents.length === 0) {
-    updateRunError(runId, 'No first responder agents configured');
-    console.error('Error: no first responder agents configured');
-    process.exit(1);
-  }
-
-  // Dynamically import the first responder agent module
-  const { runFirstResponder } = await import('../monitor/investigator-agent.js');
-
-  // Run the first responder
-  try {
-    const result = await runFirstResponder(
-      agents,
-      scanResults,
-      responsePreset,
-      config.custom_prompt,
-    );
-
-    // Determine outcome based on result
-    const outcome = result.success ? 'first_responder_complete' : 'error';
-
-    // Update the monitor_runs row with results
-    const { db: db2, close: close2 } = openGlobalDatabase();
-    try {
-      db2.prepare(
-        `UPDATE monitor_runs
-         SET outcome = ?,
-             first_responder_agent = ?,
-             first_responder_report = ?,
-             first_responder_actions = ?,
-             action_results = ?,
-             completed_at = ?,
-             error = ?
-         WHERE id = ?`
-      ).run(
-        outcome,
-        result.agentUsed,
-        result.diagnosis,
-        JSON.stringify(result.actions),
-        JSON.stringify(result.actionResults),
-        Date.now(),
-        result.error ?? null,
-        runId,
-      );
-    } finally {
-      close2();
-    }
-
-    if (flags.json) {
-      console.log(JSON.stringify({
-        success: result.success,
-        runId,
-        outcome,
-        agent: result.agentUsed,
-        diagnosis: result.diagnosis,
-        actions: result.actions,
-        actionResults: result.actionResults,
-        error: result.error,
-      }, null, 2));
-    } else {
-      if (result.success) {
-        console.log(`First responder complete for run ${runId}.`);
-        console.log(`  Agent:   ${result.agentUsed}`);
-        console.log(`  Actions: ${result.actions.length}`);
-        console.log('');
-        console.log('DIAGNOSIS:');
-        console.log(result.diagnosis);
-      } else {
-        console.error(`First responder failed for run ${runId}: ${result.error}`);
-      }
-    }
-
-    // After successful fix, trigger a follow-up scan so the dashboard shows fresh state.
-    // Do NOT pass manual:true — that bypasses duplicate detection and causes infinite dispatch chains (M1).
-    if (result.success) {
-      try {
-        const { runMonitorCycle } = await import('../monitor/loop.js');
-        await runMonitorCycle();
-      } catch {
-        // Follow-up scan is best-effort; don't fail the respond command
-      }
-    }
-
-    if (!result.success) {
-      process.exit(1);
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown first responder error';
-    updateRunError(runId, msg);
-
-    if (flags.json) {
-      console.log(JSON.stringify({ success: false, runId, error: msg }, null, 2));
-    } else {
-      console.error(`First responder failed for run ${runId}: ${msg}`);
-    }
-    process.exit(1);
-  }
-}
-
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
 function safeJsonParse(str: string | null | undefined): any {
@@ -437,20 +295,5 @@ function safeJsonParse(str: string | null | undefined): any {
     return JSON.parse(str);
   } catch {
     return null;
-  }
-}
-
-function updateRunError(runId: number, error: string): void {
-  try {
-    const { db, close } = openGlobalDatabase();
-    try {
-      db.prepare(
-        `UPDATE monitor_runs SET outcome = 'error', error = ?, completed_at = ? WHERE id = ?`
-      ).run(error, Date.now(), runId);
-    } finally {
-      close();
-    }
-  } catch {
-    // Best-effort — don't mask the original error
   }
 }

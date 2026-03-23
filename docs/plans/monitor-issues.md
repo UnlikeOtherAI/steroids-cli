@@ -150,7 +150,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M8: No escalation-to-human mechanism
+### [x] M8: No escalation-to-human mechanism
 
 **Severity:** Medium — the system silently burns API credits on unfixable issues.
 
@@ -162,7 +162,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M9: FR needs a `suppress_anomaly` action for known false positives
+### [x] M9: FR needs a `suppress_anomaly` action for known false positives
 
 **Severity:** Medium — 11 runs where FR diagnosed false positive but still acted.
 
@@ -198,7 +198,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M12: `reset_project` action has 0% success rate
+### [x] M12: `reset_project` action has 0% success rate
 
 **Severity:** Low — the action is broken and the FR wastes action slots on it.
 
@@ -210,7 +210,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M13: Scanner lacks task-level detail in anomalies
+### [x] M13: Scanner lacks task-level detail in anomalies (already resolved)
 
 **Severity:** Medium — amplifies all other false-state loops.
 
@@ -224,7 +224,7 @@ Ordered by effort-to-impact ratio — easiest wins first.
 
 ---
 
-### [ ] M14: No `completed_at` timestamp on monitor runs
+### [x] M14: No `completed_at` timestamp on monitor runs (already resolved)
 
 **Severity:** Low — makes debugging and cost analysis harder.
 
