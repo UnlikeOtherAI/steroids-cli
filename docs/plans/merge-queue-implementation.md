@@ -587,114 +587,131 @@ Each call site below must be updated. Checked individually:
 - [x] **0.2** Stale lock TTL reduced to 90s for merge queue use
 
 ### Phase 1: Push Restructuring
-- [-] **1.1** `pushTaskBranchForDurability` function exists and is called from coder decision phase
-- [-] **1.1** Called BEFORE `submitForReviewWithDurableRef` (not inside it)
-- [-] **1.1** Push success → task status = `review`
-- [-] **1.1** Push failure → task status = `blocked_error` (never `pending`/`skipped`)
-- [-] **1.1** `approved_sha` is NOT set during push
-- [-] **1.2** `cleanupPoolSlot` performs NO git push
-- [-] **1.2** `cleanupPoolSlot` does NOT modify task status
-- [-] **1.2** `cleanupPoolSlot` finally block safe for all action types
-- [-] **1.3** Tests written and passing
-- [-] **1.3** Reviewer rejection regression test passing
+- [x] **1.1** `pushTaskBranchForDurability` function exists and is called from coder decision phase
+- [x] **1.1** Called BEFORE `submitForReviewWithDurableRef` (not inside it)
+- [x] **1.1** Push success → task status = `review`
+- [x] **1.1** Push failure → task status = `blocked_error` (never `pending`/`skipped`)
+- [x] **1.1** `approved_sha` is NOT set during push
+- [x] **1.2** `cleanupPoolSlot` performs NO git push
+- [x] **1.2** `cleanupPoolSlot` does NOT modify task status
+- [x] **1.2** `cleanupPoolSlot` finally block safe for all action types
+- [x] **1.3** Tests written and passing
+- [x] **1.3** Reviewer rejection regression test passing
 
 ### Phase 2+3: Merge Gate (ATOMIC — all boxes must be ticked simultaneously)
 
 **Schema & Types**
-- [ ] **2.1** Migration uses `ALTER TABLE ADD COLUMN` (non-destructive)
-- [ ] **2.1** Migration adds `merge_phase TEXT`, `approved_sha TEXT`, `rebase_attempts INTEGER DEFAULT 0`
-- [ ] **2.1** Migration runs on fresh and existing databases
-- [ ] **2.2** `TaskStatus` type includes `'merge_pending'`
-- [ ] **2.2** `STATUS_MARKERS` has `merge_pending` entry
-- [ ] **2.2** `SelectedTask.action` type includes `'merge'`
-- [ ] **2.2** `findNextTask` return type includes `'merge'` (in `queries.ts`)
-- [ ] **2.2** Hard casts at `task-selector.ts:101` and `:127` include `'merge'`
+- [x] **2.1** Migration uses `ALTER TABLE ADD COLUMN` (non-destructive)
+- [x] **2.1** Migration adds `merge_phase TEXT`, `approved_sha TEXT`, `rebase_attempts INTEGER DEFAULT 0`
+- [x] **2.1** Migration runs on fresh and existing databases
+- [x] **2.2** `TaskStatus` type includes `'merge_pending'`
+- [x] **2.2** `STATUS_MARKERS` has `merge_pending` entry
+- [x] **2.2** `SelectedTask.action` type includes `'merge'`
+- [x] **2.2** `findNextTask` return type includes `'merge'` (in `queries.ts`)
+- [x] **2.2** Hard casts at `task-selector.ts:101` and `:127` include `'merge'`
 
 **Invocation Logging**
-- [ ] **2.3** `canDbLog` returns true for `role === 'merge'`
-- [ ] **2.3** `metadata.role` type includes `'merge'`
-- [ ] **2.3** Merge invocations appear in `task_invocations` table
+- [x] **2.3** `canDbLog` returns true for `role === 'merge'`
+- [x] **2.3** `metadata.role` type includes `'merge'`
+- [x] **2.3** Merge invocations appear in `task_invocations` table
 
 **Status Propagation (21+ call sites)**
-- [ ] **2.4.1** `hasPendingOrInProgressWork` includes `merge_pending`
-- [ ] **2.4.2** `selectNextTaskWithWait` exit includes `merge_pending` count — BOTH sites (line 504 AND 532-535)
-- [ ] **2.4.3** `selectTaskBatch` active count includes `merge_pending`
-- [ ] **2.4.4** `findNextTask` has P0 block for `merge_pending` → action `merge`
-- [ ] **2.4.5** `findNextTaskSkippingLocked` has P0 block for `merge_pending` → action `merge`
-- [ ] **2.4.6** `getTaskCounts` returns `merge_pending` count (key in counts object + return type)
-- [ ] **2.4.7** Wakeup pending work check includes `merge_pending`
-- [ ] **2.4.8** `getSectionCounts` includes `merge_pending`
-- [ ] **2.4.9** Section "done" check includes `merge_pending`
-- [ ] **2.4.10** `followUpEligibilityFilter` — all 6 instances include `merge_pending`
-- [ ] **2.4.11** `buildParallelRunPlan` correctly includes `merge_pending` as active (exclusion-based — verify)
-- [ ] **2.4.12** `scanHighInvocations` correctly includes `merge_pending` (exclusion-based — verify)
-- [ ] **2.4.13** `hasPendingWork` (scanner) includes `merge_pending`
-- [ ] **2.4.14** `VALID_TASK_STATUSES` (FR) includes `merge_pending`
-- [ ] **2.4.15** `VALID_ANOMALY_TYPES` (FR) includes merge anomaly types
+- [x] **2.4.1** `hasPendingOrInProgressWork` includes `merge_pending`
+- [x] **2.4.2** `selectNextTaskWithWait` exit includes `merge_pending` count — BOTH sites (line 504 AND 532-535)
+- [x] **2.4.3** `selectTaskBatch` active count includes `merge_pending`
+- [x] **2.4.4** `findNextTask` has P0 block for `merge_pending` → action `merge`
+- [x] **2.4.5** `findNextTaskSkippingLocked` has P0 block for `merge_pending` → action `merge`
+- [x] **2.4.6** `getTaskCounts` returns `merge_pending` count (key in counts object + return type)
+- [x] **2.4.7** Wakeup pending work check includes `merge_pending`
+- [x] **2.4.8** `getSectionCounts` includes `merge_pending`
+- [x] **2.4.9** Section "done" check includes `merge_pending`
+- [x] **2.4.10** `followUpEligibilityFilter` — all 6 instances include `merge_pending`
+- [x] **2.4.11** `buildParallelRunPlan` correctly includes `merge_pending` as active (exclusion-based — verified)
+- [x] **2.4.12** `scanHighInvocations` correctly includes `merge_pending` (exclusion-based — verified)
+- [x] **2.4.13** `hasPendingWork` (scanner) includes `merge_pending`
+- [x] **2.4.14** `VALID_TASK_STATUSES` (FR) includes `merge_pending`
+- [x] **2.4.15** `VALID_ANOMALY_TYPES` (FR) includes merge anomaly types
 
 **Dispatch**
-- [ ] **2.5** `orchestrator-loop.ts` dispatches `merge` action to `processMergeQueue`
-- [ ] **2.5** `loop.ts` (foreground) dispatches `merge` action to `processMergeQueue`
-- [ ] **2.5** `cleanupPoolSlot` in finally block is guarded for merge action (no outer slot to clean)
+- [x] **2.5** `orchestrator-loop.ts` dispatches `merge` action to `processMergeQueue`
+- [x] **2.5** `loop.ts` (foreground) dispatches `merge` action to `processMergeQueue`
+- [x] **2.5** `cleanupPoolSlot` in finally block is guarded for merge action (no outer slot to clean)
 
 **Reviewer Transition**
-- [ ] **2.6** Reviewer approval → `merge_pending` with `merge_phase = 'queued'`
-- [ ] **2.6** Reviewer approval records `approved_sha` from remote HEAD
-- [ ] **2.6** `mergeToBase` call completely removed from reviewer phase
-- [ ] **2.6** `mergeToBase` import removed from reviewer file
-- [ ] **2.6** Reviewer rejection → `pending` (regression — unchanged)
+- [x] **2.6** Reviewer approval → `merge_pending` with `merge_phase = 'queued'`
+- [x] **2.6** Reviewer approval records `approved_sha` from remote HEAD
+- [x] **2.6** `mergeToBase` call completely removed from reviewer phase
+- [x] **2.6** `mergeToBase` import removed from reviewer file
+- [x] **2.6** Reviewer rejection → `pending` (regression — unchanged)
 
 **Merge Gate Module**
-- [ ] **2.7** `src/orchestrator/merge-queue.ts` exists
-- [ ] **2.7** `processMergeQueue` routes by `merge_phase`
-- [ ] **2.7** Local-only guard: no remote → skip merge queue
-- [ ] **2.7** Claims own pool slot; releases in finally
-- [ ] **2.7** `handleMergeAttempt` acquires lock (tryOnce, passes runnerId + slotId)
-- [ ] **2.7** Lock contention → return immediately, retry next iteration
-- [ ] **2.7** `fetchAndPrepare` — idempotency check (`merge-base --is-ancestor`)
-- [ ] **2.7** `fetchAndPrepare` — SHA verification (branch HEAD = `approved_sha`)
-- [ ] **2.7** SHA mismatch → `review` with cleared merge state (merge_phase, rebase_attempts, approved_sha)
-- [ ] **2.7** Transient fetch failure → retry next iteration (no `blocked_error`)
-- [ ] **2.7** Permanent fetch failure → `blocked_error`
-- [ ] **2.7** `attemptRebaseAndFastForward` — ff-only first, then deterministic rebase
-- [ ] **2.7** Deterministic rebase succeeds → ff-only → push
-- [ ] **2.7** Deterministic rebase fails (conflicts) → `transitionToRebasing` (stub → `disputed` in Phase 2+3)
-- [ ] **2.7** `pushTargetBranch` — race loss → retry next iteration
-- [ ] **2.7** `pushTargetBranch` — transient failure → retry next iteration
-- [ ] **2.7** `pushTargetBranch` — permanent failure → `blocked_error`
-- [ ] **2.7** `cleanupTaskBranch` — non-fatal failure
-- [ ] **2.7** `markCompleted` — clears `merge_phase`, `rebase_attempts`, `approved_sha`
-- [ ] **2.7** `releaseMergeLock` always called (try/finally)
+- [x] **2.7** `src/orchestrator/merge-queue.ts` exists
+- [x] **2.7** `processMergeQueue` routes by `merge_phase`
+- [x] **2.7** Local-only guard: no remote → skip merge queue
+- [x] **2.7** Claims own pool slot; releases in finally
+- [x] **2.7** `handleMergeAttempt` acquires lock (tryOnce, passes runnerId + slotId)
+- [x] **2.7** Lock contention → return immediately, retry next iteration
+- [x] **2.7** `fetchAndPrepare` — idempotency check (`merge-base --is-ancestor`)
+- [x] **2.7** `fetchAndPrepare` — SHA verification (branch HEAD = `approved_sha`)
+- [x] **2.7** SHA mismatch → `review` with cleared merge state (merge_phase, rebase_attempts, approved_sha)
+- [x] **2.7** Transient fetch failure → retry next iteration (no `blocked_error`)
+- [x] **2.7** Permanent fetch failure → `blocked_error`
+- [x] **2.7** `attemptRebaseAndFastForward` — ff-only first, then deterministic rebase
+- [x] **2.7** Deterministic rebase succeeds → ff-only → push
+- [x] **2.7** Deterministic rebase fails (conflicts) → `transitionToRebasing` (stub → `disputed` in Phase 2+3)
+- [x] **2.7** `pushTargetBranch` — race loss → retry next iteration
+- [x] **2.7** `pushTargetBranch` — transient failure → retry next iteration
+- [x] **2.7** `pushTargetBranch` — permanent failure → `blocked_error`
+- [x] **2.7** `cleanupTaskBranch` — non-fatal failure
+- [x] **2.7** `markCompleted` — clears `merge_phase`, `rebase_attempts`, `approved_sha`
+- [x] **2.7** `releaseMergeLock` always called (try/finally)
 
 **Sanitizer Fixes**
-- [ ] **2.8** Sanitizer queries `workspace_merge_locks` in global DB (not `merge_locks` in project DB)
-- [ ] **2.8** Lock detection uses `heartbeat_at` + TTL (not `expires_at`)
-- [ ] **2.8** Uses existing `globalDb` parameter (no new function signature change)
-- [ ] **2.9** Reviewer-approval recovery → `merge_pending` (not `completed`)
-- [ ] **2.9** Generic recovery status filter includes `merge_pending`
-- [ ] **2.9** Basic `merge` role recovery: reset `merge_phase = 'queued'`
-- [ ] **2.9** Disputed task recovery clears merge columns
+- [x] **2.8** Sanitizer queries `workspace_merge_locks` in global DB (not `merge_locks` in project DB)
+- [x] **2.8** Lock detection uses `heartbeat_at` + TTL (not `expires_at`)
+- [x] **2.8** Uses existing `globalDb` parameter (no new function signature change)
+- [x] **2.9** Reviewer-approval recovery → `merge_pending` (not `completed`)
+- [x] **2.9** Generic recovery status filter includes `merge_pending`
+- [x] **2.9** Basic `merge` role recovery: reset `merge_phase = 'queued'`
+- [x] **2.9** Disputed task recovery clears merge columns
 
 **FR Fixes**
-- [ ] **2.10** `UPDATABLE_TASK_FIELDS` includes merge columns
-- [ ] **2.10** `reset_task` UPDATE clears merge columns
-- [ ] **2.10** `VALID_ANOMALY_TYPES` includes merge anomaly types
+- [x] **2.10** `UPDATABLE_TASK_FIELDS` includes merge columns
+- [x] **2.10** `reset_task` UPDATE clears merge columns
+- [x] **2.10** `VALID_ANOMALY_TYPES` includes merge anomaly types
 
 **Health System**
-- [ ] **2.11** Stuck-task-detector orphan queries handle `merge_pending` + merge roles
-- [ ] **2.11** Hanging invocation query includes `merge_pending`
-- [ ] **2.11** Phase-aware thresholds for `merge_pending` tasks (~5 min queued, ~30 min rebase)
+- [x] **2.11** Stuck-task-detector orphan queries handle `merge_pending` + merge roles
+- [x] **2.11** Hanging invocation query includes `merge_pending`
+- [x] **2.11** Phase-aware thresholds for `merge_pending` tasks (~5 min queued, ~30 min rebase)
+- [x] **2.11** Dead-owner invocation detector includes `merge_pending` (caught by Claude agent review)
 
 **Tests**
-- [ ] **2.12** Happy path test passing
-- [ ] **2.12** SHA mismatch test passing
-- [ ] **2.12** Crash recovery test passing
-- [ ] **2.12** Push race loss test passing
-- [ ] **2.12** Lock contention test passing
-- [ ] **2.12** Transient failure retry tests passing
-- [ ] **2.12** Reviewer rejection regression test passing
-- [ ] **2.12** `getTaskCounts` merge_pending count test passing
-- [ ] **2.12** Local-only project skip test passing
+- [x] **2.12** Happy path test passing
+- [x] **2.12** SHA mismatch test passing
+- [x] **2.12** Crash recovery test passing
+- [x] **2.12** Push race loss test passing
+- [x] **2.12** Lock contention test passing
+- [x] **2.12** Transient failure retry tests passing
+- [x] **2.12** Reviewer rejection regression test passing
+- [x] **2.12** `getTaskCounts` merge_pending count test passing
+- [x] **2.12** Local-only project skip test passing
+
+**Cross-Provider Review (Phase 2+3)**
+
+Gemini + Claude Sonnet agent adversarial reviews completed 2026-03-23.
+
+| Finding | Source | Severity | Decision | Action |
+|---------|--------|----------|----------|--------|
+| Silent fallback on approved_sha resolution | Gemini | Critical | Adopt (partial) | Added warning log on fallback; merge queue independently verifies SHA |
+| Using `disputed` for merge conflicts | Gemini | Arch regression | Reject | Intentional Phase 4 stub; `rebasing` merge_phase is the correct mechanism |
+| Sanitizer recovery missing approved_sha | Gemini + Claude | Critical | Documented | Safe: merge queue transitions to blocked_error on missing SHA |
+| Dead-owner detector misses merge_pending | Claude | Critical | Adopt | Fixed: added merge_pending to IN clause and type |
+| SECTION_DEP_TERMINAL comment gap | Claude | Important | Adopt | Added merge_pending to non-terminal comment |
+| Stale mergeToBase comment | Claude | Important | Adopt | Updated comment text |
+| approvedSha fallback unreliable | Claude | Important | Reject | Local SHA is from pushed branch; merge queue re-verifies independently |
+| Second global DB connection | Claude | Important | Defer | Minor resource concern, not correctness; follow-up task |
+| Integration test gaps | Claude | Suggestion | Defer | Unit tests cover critical step functions; integration tests follow-up |
 
 ### Phase 4: Rebase Cycle
 - [ ] **4.1** `canDbLog` includes `rebase_coder`, `rebase_reviewer`
