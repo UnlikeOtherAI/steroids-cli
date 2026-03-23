@@ -136,9 +136,9 @@ export const AuditLogRow: React.FC<AuditLogRowProps> = ({ entry, isLatest, githu
   );
 };
 
-// ============ InvocationRow ============
+// ============ InvocationCard ============
 
-interface InvocationRowProps {
+interface InvocationCardProps {
   invocation: TaskInvocation;
   taskId: string;
   projectPath: string;
@@ -150,33 +150,38 @@ interface InvocationDetails {
   error: string | null;
 }
 
-export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation, taskId, projectPath }) => {
-  const [showModal, setShowModal] = useState(false);
+function getFirstLines(text: string, n: number): { preview: string; hasMore: boolean } {
+  const lines = text.split('\n');
+  if (lines.length <= n) return { preview: text, hasMore: false };
+  return { preview: lines.slice(0, n).join('\n'), hasMore: true };
+}
+
+export const InvocationCard: React.FC<InvocationCardProps> = ({ invocation, taskId, projectPath }) => {
+  const [expanded, setExpanded] = useState(false);
   const [details, setDetails] = useState<InvocationDetails | null>(null);
   const [loading, setLoading] = useState(false);
-  const [expandedPrompt, setExpandedPrompt] = useState(false);
-  const [expandedResponse, setExpandedResponse] = useState(false);
-  const [expandedError, setExpandedError] = useState(false);
+  const [promptExpanded, setPromptExpanded] = useState(false);
+  const [responseExpanded, setResponseExpanded] = useState(false);
 
   const isSuccess = invocation.success === 1;
   const isTimedOut = invocation.timed_out === 1;
   const isCoder = invocation.role === 'coder';
+  const roleLabel = isCoder ? 'Coder Agent' : 'Reviewer Agent';
 
-  let borderColor = 'border-success';
-  if (isTimedOut) borderColor = 'border-warning';
-  else if (!isSuccess) borderColor = 'border-danger';
+  let accentColor = 'border-success';
+  if (isTimedOut) accentColor = 'border-warning';
+  else if (!isSuccess) accentColor = 'border-danger';
 
-  const provider = invocation.provider.charAt(0).toUpperCase() + invocation.provider.slice(1);
-
-  const handleClick = async () => {
-    setShowModal(true);
-    if (!details) {
+  const handleToggle = async () => {
+    const opening = !expanded;
+    setExpanded(opening);
+    if (opening && !details) {
       setLoading(true);
       try {
-        const response = await fetch(
+        const resp = await fetch(
           `/api/tasks/${taskId}/invocations/${invocation.id}?project=${encodeURIComponent(projectPath)}`
         );
-        const data = await response.json();
+        const data = await resp.json();
         if (data.success) {
           setDetails({
             prompt: data.invocation.prompt,
@@ -184,8 +189,8 @@ export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation, taskId
             error: data.invocation.error,
           });
         }
-      } catch (error) {
-        console.error('Failed to fetch invocation details:', error);
+      } catch (err) {
+        console.error('Failed to fetch invocation details:', err);
       } finally {
         setLoading(false);
       }
@@ -193,150 +198,128 @@ export const InvocationRow: React.FC<InvocationRowProps> = ({ invocation, taskId
   };
 
   return (
-    <>
-      <div
-        className={`p-3 border-l-4 ${borderColor} bg-bg-base cursor-pointer hover:bg-bg-surface transition-colors`}
-        onClick={handleClick}
+    <div className={`border-l-4 ${accentColor} rounded-lg overflow-hidden bg-bg-base`}>
+      {/* Header — always visible */}
+      <button
+        onClick={handleToggle}
+        className="w-full p-3 flex items-center gap-3 hover:bg-bg-surface transition-colors text-left"
       >
-        <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-bg-surface flex items-center justify-center">
-            <i className={`fa-solid ${isCoder ? 'fa-code' : 'fa-magnifying-glass'} text-text-muted text-xs`}></i>
+        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-bg-surface flex items-center justify-center">
+          <i className={`fa-solid ${isCoder ? 'fa-code' : 'fa-magnifying-glass'} text-text-muted text-xs`}></i>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-text-primary text-sm">{roleLabel}</span>
+            <span className="text-text-muted text-xs">{invocation.model}</span>
+            {isSuccess ? (
+              <Badge variant="success">OK</Badge>
+            ) : isTimedOut ? (
+              <Badge variant="warning">Timed Out</Badge>
+            ) : (
+              <Badge variant="danger">Failed (exit {invocation.exit_code})</Badge>
+            )}
+            {isCoder && invocation.rejection_number !== null && invocation.rejection_number > 0 && (
+              <Badge variant="warning">Attempt #{invocation.rejection_number}</Badge>
+            )}
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-medium text-text-primary text-sm capitalize">{invocation.role}</span>
-              <span className="text-text-muted text-xs">{provider} / {invocation.model}</span>
-              {isSuccess ? (
-                <Badge variant="success">OK</Badge>
-              ) : isTimedOut ? (
-                <Badge variant="warning">Timed Out</Badge>
-              ) : (
-                <Badge variant="danger">Failed (exit {invocation.exit_code})</Badge>
-              )}
-              {isCoder && invocation.rejection_number !== null && invocation.rejection_number > 0 && (
-                <span className="text-xs text-warning">
-                  <i className="fa-solid fa-rotate-left mr-1"></i>
-                  Attempt #{invocation.rejection_number}
-                </span>
-              )}
-              <span className="text-xs text-accent ml-auto">
-                <i className="fa-solid fa-eye mr-1"></i>
-                Click to view details
-              </span>
-            </div>
-            <div className="mt-1 flex items-center gap-4 text-xs text-text-muted">
+          <div className="mt-1 flex items-center gap-4 text-xs text-text-muted">
+            <span>
+              <i className="fa-regular fa-clock mr-1"></i>
+              {formatTimestamp(invocation.created_at)}
+            </span>
+            {invocation.duration_ms > 0 && (
               <span>
-                <i className="fa-regular fa-clock mr-1"></i>
-                {formatTimestamp(invocation.created_at)}
+                <i className="fa-solid fa-stopwatch mr-1"></i>
+                {formatDuration(Math.round(invocation.duration_ms / 1000))}
               </span>
-              {invocation.duration_ms > 0 && (
-                <span>
-                  <i className="fa-solid fa-stopwatch mr-1"></i>
-                  {formatDuration(Math.round(invocation.duration_ms / 1000))}
-                </span>
-              )}
-            </div>
+            )}
           </div>
         </div>
-      </div>
+        <i className={`fa-solid ${expanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-text-muted flex-shrink-0`}></i>
+      </button>
 
-      {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-bg-surface rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 border-b border-border flex items-center justify-between bg-bg-base">
-              <h2 className="text-xl font-bold text-text-primary">
-                <i className={`fa-solid ${isCoder ? 'fa-code' : 'fa-magnifying-glass'} mr-2`}></i>
-                {invocation.role.toUpperCase()} Invocation Details
-              </h2>
-              <button
-                onClick={() => setShowModal(false)}
-                className="w-8 h-8 rounded-full hover:bg-bg-surface flex items-center justify-center transition-colors"
-              >
-                <i className="fa-solid fa-times text-text-muted"></i>
-              </button>
+      {/* Expanded body — prompt, response, error */}
+      {expanded && (
+        <div className="border-t border-border p-3 space-y-3">
+          {loading ? (
+            <div className="flex items-center justify-center py-6">
+              <i className="fa-solid fa-spinner fa-spin text-accent text-xl"></i>
             </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {loading ? (
-                <div className="flex items-center justify-center py-8">
-                  <i className="fa-solid fa-spinner fa-spin text-accent text-2xl"></i>
-                </div>
-              ) : details ? (
-                <>
-                  {/* Prompt Section */}
-                  <div className="border border-border rounded-lg overflow-hidden bg-bg-base">
+          ) : details ? (
+            <>
+              {/* Prompt */}
+              <div className="rounded-lg overflow-hidden border border-border">
+                <div className="px-3 py-2 bg-bg-surface flex items-center justify-between">
+                  <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">
+                    <i className="fa-solid fa-paper-plane mr-1"></i>
+                    Prompt sent ({details.prompt.length.toLocaleString()} chars)
+                  </span>
+                  {getFirstLines(details.prompt, 4).hasMore && (
                     <button
-                      onClick={() => setExpandedPrompt(!expandedPrompt)}
-                      className="w-full p-3 flex items-center justify-between hover:bg-bg-surface transition-colors"
+                      onClick={() => setPromptExpanded(!promptExpanded)}
+                      className="text-xs text-accent hover:underline"
                     >
-                      <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-                        <i className="fa-solid fa-file-lines"></i>
-                        PROMPT ({details.prompt.length.toLocaleString()} chars)
-                      </h3>
-                      <i className={`fa-solid ${expandedPrompt ? 'fa-chevron-up' : 'fa-chevron-down'} text-text-muted`}></i>
+                      {promptExpanded ? 'Collapse' : 'Show full prompt'}
                     </button>
-                    {expandedPrompt && (
-                      <div className="border-t border-border">
-                        <pre className="bg-bg-surface p-4 text-sm overflow-x-auto max-h-96">
-                          <code className="text-text-secondary font-mono whitespace-pre-wrap">{details.prompt}</code>
-                        </pre>
-                      </div>
+                  )}
+                </div>
+                <pre className="p-3 text-sm overflow-x-auto bg-bg-base max-h-96">
+                  <code className="text-text-secondary font-mono whitespace-pre-wrap">
+                    {promptExpanded ? details.prompt : getFirstLines(details.prompt, 4).preview}
+                    {!promptExpanded && getFirstLines(details.prompt, 4).hasMore && (
+                      <span className="text-text-muted"> ...</span>
+                    )}
+                  </code>
+                </pre>
+              </div>
+
+              {/* Response */}
+              {details.response && (
+                <div className="rounded-lg overflow-hidden border border-border">
+                  <div className="px-3 py-2 bg-bg-surface flex items-center justify-between">
+                    <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">
+                      <i className="fa-solid fa-reply mr-1"></i>
+                      Agent responded ({details.response.length.toLocaleString()} chars)
+                    </span>
+                    {getFirstLines(details.response, 4).hasMore && (
+                      <button
+                        onClick={() => setResponseExpanded(!responseExpanded)}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        {responseExpanded ? 'Collapse' : 'Show full response'}
+                      </button>
                     )}
                   </div>
-
-                  {/* Response Section */}
-                  {details.response && (
-                    <div className="border border-border rounded-lg overflow-hidden bg-bg-base">
-                      <button
-                        onClick={() => setExpandedResponse(!expandedResponse)}
-                        className="w-full p-3 flex items-center justify-between hover:bg-bg-surface transition-colors"
-                      >
-                        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-                          <i className="fa-solid fa-reply"></i>
-                          RESPONSE ({details.response.length.toLocaleString()} chars)
-                        </h3>
-                        <i className={`fa-solid ${expandedResponse ? 'fa-chevron-up' : 'fa-chevron-down'} text-text-muted`}></i>
-                      </button>
-                      {expandedResponse && (
-                        <div className="border-t border-border">
-                          <pre className="bg-bg-surface p-4 text-sm overflow-x-auto max-h-96">
-                            <code className="text-text-secondary font-mono whitespace-pre-wrap">{details.response}</code>
-                          </pre>
-                        </div>
+                  <pre className="p-3 text-sm overflow-x-auto bg-bg-base max-h-96">
+                    <code className="text-text-secondary font-mono whitespace-pre-wrap">
+                      {responseExpanded ? details.response : getFirstLines(details.response, 4).preview}
+                      {!responseExpanded && getFirstLines(details.response, 4).hasMore && (
+                        <span className="text-text-muted"> ...</span>
                       )}
-                    </div>
-                  )}
+                    </code>
+                  </pre>
+                </div>
+              )}
 
-                  {/* Error Section */}
-                  {details.error && (
-                    <div className="border-2 border-danger rounded-lg overflow-hidden bg-danger/5">
-                      <button
-                        onClick={() => setExpandedError(!expandedError)}
-                        className="w-full p-3 flex items-center justify-between hover:bg-danger/10 transition-colors"
-                      >
-                        <h3 className="text-sm font-semibold text-danger flex items-center gap-2">
-                          <i className="fa-solid fa-triangle-exclamation"></i>
-                          ERROR ({details.error.length.toLocaleString()} chars)
-                        </h3>
-                        <i className={`fa-solid ${expandedError ? 'fa-chevron-up' : 'fa-chevron-down'} text-danger`}></i>
-                      </button>
-                      {expandedError && (
-                        <div className="border-t-2 border-danger">
-                          <pre className="bg-danger/20 p-4 text-sm overflow-x-auto max-h-96">
-                            <code className="text-danger font-mono whitespace-pre-wrap">{details.error}</code>
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : null}
-            </div>
-          </div>
+              {/* Error */}
+              {details.error && (
+                <div className="rounded-lg overflow-hidden border-2 border-danger bg-danger/5">
+                  <div className="px-3 py-2 flex items-center gap-2">
+                    <i className="fa-solid fa-triangle-exclamation text-danger text-xs"></i>
+                    <span className="text-xs font-semibold text-danger uppercase tracking-wide">Error</span>
+                  </div>
+                  <pre className="p-3 text-sm overflow-x-auto bg-danger/10 max-h-48">
+                    <code className="text-danger font-mono whitespace-pre-wrap">{details.error}</code>
+                  </pre>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center text-text-muted text-sm py-4">Failed to load details</div>
+          )}
         </div>
       )}
-    </>
+    </div>
   );
 };
 
@@ -350,35 +333,38 @@ interface InvocationsPanelProps {
 
 export const InvocationsPanel: React.FC<InvocationsPanelProps> = ({ invocations, taskId, projectPath }) => {
   const count = invocations?.length || 0;
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (!invocations || invocations.length === 0) return null;
 
   return (
-    <div className="mt-6">
-      <h2 className="text-lg font-semibold text-text-primary mb-3">
-        <i className="fa-solid fa-layer-group mr-2"></i>
-        Invocations
-        <span className="text-sm font-normal text-text-muted ml-2">({count})</span>
-      </h2>
-      <div className="card overflow-hidden">
-        {!invocations || invocations.length === 0 ? (
-          <div className="p-6 text-center text-text-muted">
-            <p>No invocations recorded yet</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-border">
-            {invocations
-              .slice()
-              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-              .map((inv) => (
-                <InvocationRow
-                  key={`invocation-${inv.id}`}
-                  invocation={inv}
-                  taskId={taskId}
-                  projectPath={projectPath}
-                />
-              ))}
-          </div>
-        )}
-      </div>
+    <div className="mb-6">
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="w-full flex items-center justify-between mb-3 group"
+      >
+        <h2 className="text-lg font-semibold text-text-primary">
+          <i className="fa-solid fa-robot mr-2"></i>
+          Agent Sessions
+          <span className="text-sm font-normal text-text-muted ml-2">({count})</span>
+        </h2>
+        <i className={`fa-solid ${collapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-text-muted group-hover:text-text-primary transition-colors`}></i>
+      </button>
+      {!collapsed && (
+        <div className="space-y-2">
+          {invocations
+            .slice()
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .map((inv) => (
+              <InvocationCard
+                key={`invocation-${inv.id}`}
+                invocation={inv}
+                taskId={taskId}
+                projectPath={projectPath}
+              />
+            ))}
+        </div>
+      )}
     </div>
   );
 };

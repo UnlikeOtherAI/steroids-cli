@@ -93,13 +93,8 @@ export const TaskDetailPage: React.FC = () => {
     }
   }, [taskId, projectPath]);
 
-  useEffect(() => {
-    fetchTask();
-  }, [fetchTask]);
-
-  useEffect(() => {
-    fetchTimeline();
-  }, [fetchTimeline]);
+  useEffect(() => { fetchTask(); }, [fetchTask]);
+  useEffect(() => { fetchTimeline(); }, [fetchTimeline]);
 
   const handleRestart = async (notes?: string) => {
     if (!taskId || !projectPath || restarting || !task) return;
@@ -353,6 +348,9 @@ export const TaskDetailPage: React.FC = () => {
             />
           )}
 
+          {/* Agent Sessions — above timeline, both modes */}
+          <InvocationsPanel invocations={task.invocations} taskId={taskId!} projectPath={projectPath!} />
+
           {/* Live Indicator */}
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold text-text-primary">
@@ -477,10 +475,6 @@ export const TaskDetailPage: React.FC = () => {
               </div>
             )}
           </div>
-
-          {viewMode === 'full' && (
-            <InvocationsPanel invocations={task.invocations} taskId={taskId!} projectPath={projectPath!} />
-          )}
 
           {/* Metadata */}
           <div className="mt-6 text-xs text-text-muted flex items-center gap-4">
