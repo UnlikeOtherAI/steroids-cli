@@ -384,6 +384,7 @@ class ReviewerRunner extends BaseRunner {
     console.log(`${'='.repeat(60)}\n`);
 
     let taskCommits: Array<{ taskId: string; commitHash: string }> = [];
+    let batchFeedbackItems: string[] = [];
     withDatabase(projectPath, (db) => {
       const unresolved: string[] = [];
 
@@ -402,6 +403,16 @@ class ReviewerRunner extends BaseRunner {
       if (unresolved.length > 0) {
         throw new Error(`Missing reachable submission commit hash for batch review tasks: ${unresolved.join(', ')}`);
       }
+
+      for (const t of tasks) {
+        const rows = listTaskFeedback(db, t.id);
+        for (const r of rows) {
+          batchFeedbackItems.push(`[${t.title}] ${r.feedback}`);
+        }
+      }
+      if (batchFeedbackItems.length > 0) {
+        console.log(`Found ${batchFeedbackItems.length} user feedback item(s) across batch review tasks`);
+      }
     });
 
     const context: BatchReviewerPromptContext = {
@@ -411,6 +422,7 @@ class ReviewerRunner extends BaseRunner {
       taskCommits,
       config,
       reviewerCustomInstructions: effectiveReviewerConfig?.customInstructions,
+      userFeedbackItems: batchFeedbackItems.length > 0 ? batchFeedbackItems : undefined,
     };
 
     const prompt = generateBatchReviewerPrompt(context);

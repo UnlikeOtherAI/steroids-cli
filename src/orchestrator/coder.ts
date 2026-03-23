@@ -244,7 +244,27 @@ class CoderRunner extends BaseRunner {
     console.log(`Model: ${coderConfig?.model ?? 'not configured'}`);
     console.log(`${'='.repeat(60)}\n`);
 
-    const prompt = generateBatchCoderPrompt({ tasks, projectPath, sectionName });
+    let batchFeedbackItems: string[] = [];
+    try {
+      withDatabase(projectPath, (db) => {
+        for (const t of tasks) {
+          const rows = listTaskFeedback(db, t.id);
+          for (const r of rows) {
+            batchFeedbackItems.push(`[${t.title}] ${r.feedback}`);
+          }
+        }
+      });
+      if (batchFeedbackItems.length > 0) {
+        console.log(`Found ${batchFeedbackItems.length} user feedback item(s) across batch tasks`);
+      }
+    } catch {
+      // Non-critical — continue without feedback
+    }
+
+    const prompt = generateBatchCoderPrompt({
+      tasks, projectPath, sectionName,
+      userFeedbackItems: batchFeedbackItems.length > 0 ? batchFeedbackItems : undefined,
+    });
     const promptFile = this.writePromptToTempFile(prompt, 'prompt');
 
     try {
