@@ -206,7 +206,10 @@ async function probeAuthErrorProviders(projectPath: string, log: WakeupLogger): 
 
       const model = (providerName === coderProvider
         ? projectConfig.ai?.coder?.model
-        : projectConfig.ai?.reviewer?.model) ?? 'default';
+        : providerName === reviewerProvider
+          ? projectConfig.ai?.reviewer?.model
+          : (projectConfig.ai?.reviewers ?? []).find(r => r.provider === providerName)?.model
+      ) ?? 'default';
 
       const result = await provider.invoke('Say "ok".', { model, timeout: 30_000 });
 

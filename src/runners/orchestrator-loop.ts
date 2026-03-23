@@ -382,21 +382,17 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           }
           ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
 
-          // S7/I1: In pool mode, a fresh slot lacks task_branch/starting_sha metadata
-          // (set by prepareForTask during the coder phase). When S7 skips the coder,
-          // we must prepare the slot so mergeToBase doesn't crash on null assertions.
+          // S7/I1: Fresh slot lacks branch metadata — prepare it so mergeToBase works.
           if (poolSlotCtx && !poolSlotCtx.slot.task_branch) {
-            const config = loadConfig(projectPath);
-            const sectionBranch = resolveEffectiveBranch(db, task.section_id ?? null, config);
-            const configBranch = config.git?.branch ?? null;
             const prepResult = prepareForTask(
-              poolSlotCtx.globalDb, poolSlotCtx.slot, task.id,
-              projectPath, sourceProjectPath, sectionBranch, configBranch
-            );
-            if (!prepResult.ok) {
-              console.warn(`[S7] Pool slot prep failed for review: ${prepResult.reason}`);
-              // Fall through — reviewer preflight will catch the missing branch
-            }
+              poolSlotCtx.globalDb, poolSlotCtx.slot, task.id, projectPath, sourceProjectPath,
+              resolveEffectiveBranch(db, task.section_id ?? null, config), config.git?.branch ?? null);
+            if (prepResult.ok) {
+              Object.assign(poolSlotCtx.slot, {
+                task_branch: prepResult.taskBranch, base_branch: prepResult.baseBranch,
+                starting_sha: prepResult.startingSha,
+              });
+            } else { console.warn(`[S7] Pool slot prep failed: ${prepResult.reason}`); }
           }
 
           creditResult = await runReviewerPhase(

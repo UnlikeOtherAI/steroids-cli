@@ -292,11 +292,21 @@ export function prepareForTask(
 
   // Step 9: Checkout task branch — preserve existing commits if branch exists
   const taskBranch = `steroids/task-${taskId}`;
-  const branchExists = execGit(slotPath, ['rev-parse', '--verify', taskBranch], {
+  const localBranch = execGit(slotPath, ['rev-parse', '--verify', taskBranch], {
     tolerateFailure: true,
   });
-  if (branchExists) {
+  if (localBranch) {
     execGit(slotPath, ['checkout', taskBranch]);
+  } else if (!localOnly) {
+    // Check if the branch exists on the remote (S7: coder work pushed in a previous lifecycle)
+    const remoteBranch = execGit(slotPath, ['rev-parse', '--verify', `${remote}/${taskBranch}`], {
+      tolerateFailure: true,
+    });
+    if (remoteBranch) {
+      execGit(slotPath, ['checkout', '-B', taskBranch, `${remote}/${taskBranch}`]);
+    } else {
+      execGit(slotPath, ['checkout', '-B', taskBranch]);
+    }
   } else {
     execGit(slotPath, ['checkout', '-B', taskBranch]);
   }
