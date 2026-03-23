@@ -182,7 +182,8 @@ function sanitiseProjectState(
     .all(staleCutoffMs, deadRunnerCutoffMs) as Array<StaleInvocationRow>;
 
   for (const row of recentRunningInvocations) {
-    if (activeTaskIds.has(row.task_id) || hasActiveMergeLock) {
+    const isRebaseRole = row.role === 'rebase_coder' || row.role === 'rebase_reviewer';
+    if (activeTaskIds.has(row.task_id) || (hasActiveMergeLock && !isRebaseRole)) {
       continue;
     }
     // Only recover if we can confirm the runner process is dead

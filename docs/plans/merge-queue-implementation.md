@@ -713,8 +713,22 @@ Gemini + Claude Sonnet agent adversarial reviews completed 2026-03-23.
 | Second global DB connection | Claude | Important | Defer | Minor resource concern, not correctness; follow-up task |
 | Integration test gaps | Claude | Suggestion | Defer | Unit tests cover critical step functions; integration tests follow-up |
 
+**Cross-Provider Review (Phase 4)**
+
+Gemini + Claude Sonnet agent adversarial reviews completed 2026-03-23.
+
+| Finding | Source | Severity | Decision | Action |
+|---------|--------|----------|----------|--------|
+| Crashed rebase_coder recovery → sha_mismatch → review | Gemini | High | Defer | Rare edge case; consequence is extra review cycle, not data loss |
+| Sanitizer rebase_reviewer reject bypasses cap check | Gemini + Claude | Medium | Defer | Next transitionToRebasing call catches it; needs new import dependency |
+| Pass 2 dead-runner skip blocks rebase recovery | Claude | Important | Adopt | Added rebase role exemption to inline merge lock check |
+| Dirty merge columns on disputed transitions | Claude | Important | Adopt | Replaced updateTaskStatus with direct SQL that clears merge_phase/approved_sha |
+| Missing scanStaleMergeLock scanner query | Claude | Suggestion | Adopt | Added query to scanner-queries.ts + scanner.ts |
+| Unused taskBranch param in captureConflictFiles | Claude | Suggestion | Reject | Serves as type-safe contract about expected state |
+| invocation-logger.ts at 525 lines | Claude | Suggestion | Defer | Pre-existing issue, not Phase 4 |
+
 ### Phase 4: Rebase Cycle
-- [ ] **4.1** `canDbLog` includes `rebase_coder`, `rebase_reviewer`
+- [x] **4.1** `canDbLog` includes `rebase_coder`, `rebase_reviewer`
 - [x] **4.1** `metadata.role` type includes rebase roles
 - [x] **4.2** `transitionToRebasing` replaces Phase 2+3 stub
 - [x] **4.2** Increments counter on each call, checks cap

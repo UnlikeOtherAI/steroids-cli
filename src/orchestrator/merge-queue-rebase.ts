@@ -183,8 +183,13 @@ export async function handleRebaseCoder(
       ).run(task.id);
       return;
     }
-    updateTaskStatus(db, task.id, 'disputed', 'orchestrator',
-      `[merge_queue] Could not capture conflict files: ${capture.error}`);
+    db.prepare(
+      `UPDATE tasks SET status = 'disputed', merge_phase = NULL, approved_sha = NULL, rebase_attempts = 0, updated_at = datetime('now') WHERE id = ?`
+    ).run(task.id);
+    addAuditEntry(db, task.id, 'merge_pending', 'disputed', 'orchestrator', {
+      actorType: 'orchestrator',
+      notes: `[merge_queue] Could not capture conflict files: ${capture.error}`,
+    });
     return;
   }
 
@@ -254,16 +259,26 @@ export async function handleRebaseCoder(
   }
 
   if (!llmSuccess) {
-    updateTaskStatus(db, task.id, 'disputed', 'orchestrator',
-      '[merge_queue] LLM rebase coder failed — escalating to disputed');
+    db.prepare(
+      `UPDATE tasks SET status = 'disputed', merge_phase = NULL, approved_sha = NULL, rebase_attempts = 0, updated_at = datetime('now') WHERE id = ?`
+    ).run(task.id);
+    addAuditEntry(db, task.id, 'merge_pending', 'disputed', 'orchestrator', {
+      actorType: 'orchestrator',
+      notes: '[merge_queue] LLM rebase coder failed — escalating to disputed',
+    });
     return;
   }
 
   // Step 4: Validate diff fence
   const fence = validateDiffFence(slotPath, capture.conflictFiles, preRebaseSha);
   if (!fence.valid) {
-    updateTaskStatus(db, task.id, 'disputed', 'orchestrator',
-      `[merge_queue] Diff fence violation — LLM modified files outside conflict scope: ${fence.violations.join(', ')}`);
+    db.prepare(
+      `UPDATE tasks SET status = 'disputed', merge_phase = NULL, approved_sha = NULL, rebase_attempts = 0, updated_at = datetime('now') WHERE id = ?`
+    ).run(task.id);
+    addAuditEntry(db, task.id, 'merge_pending', 'disputed', 'orchestrator', {
+      actorType: 'orchestrator',
+      notes: `[merge_queue] Diff fence violation — LLM modified files outside conflict scope: ${fence.violations.join(', ')}`,
+    });
     return;
   }
 
@@ -381,8 +396,13 @@ export async function handleRebaseReview(
   }
 
   if (!reviewerSuccess) {
-    updateTaskStatus(db, task.id, 'disputed', 'orchestrator',
-      '[merge_queue] Rebase reviewer failed — escalating to disputed');
+    db.prepare(
+      `UPDATE tasks SET status = 'disputed', merge_phase = NULL, approved_sha = NULL, rebase_attempts = 0, updated_at = datetime('now') WHERE id = ?`
+    ).run(task.id);
+    addAuditEntry(db, task.id, 'merge_pending', 'disputed', 'orchestrator', {
+      actorType: 'orchestrator',
+      notes: '[merge_queue] Rebase reviewer failed — escalating to disputed',
+    });
     return;
   }
 

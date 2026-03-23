@@ -24,6 +24,7 @@ import {
   type GlobalDatabaseConnection,
 } from '../runners/global-db-connection.js';
 import { cronStatus } from '../runners/cron.js';
+import { getProjectHash } from '../parallel/clone.js';
 import { getProjectProviderBackoff } from '../runners/global-db-backoffs.js';
 import {
   scanFailedAndSkippedTasks,
@@ -32,6 +33,7 @@ import {
   scanBlockedTasks,
   scanStuckMergePhase,
   scanDisputedTasks,
+  scanStaleMergeLocks,
 } from './scanner-queries.js';
 
 // ---------------------------------------------------------------------------
@@ -346,7 +348,11 @@ export async function runScan(): Promise<ScanResult> {
       // 7. Disputed tasks
       anomalies.push(...scanDisputedTasks(projectDb, projectPath, projectName));
 
-      // 8. Idle project check — warning if cron is running (should have spawned a runner)
+      // 8. Stale merge locks (>5 min without heartbeat)
+      const projectId = getProjectHash(projectPath);
+      anomalies.push(...scanStaleMergeLocks(globalDb, projectPath, projectName, projectId));
+
+      // 9. Idle project check — warning if cron is running (should have spawned a runner)
       if (hasPendingWork(projectDb) && !hasActiveRunner(globalDb, projectPath)) {
         const cronActive = cronStatus().installed;
 

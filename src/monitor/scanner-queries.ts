@@ -229,3 +229,42 @@ export function scanDisputedTasks(
     context: {},
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Stale merge locks (global DB query)
+// ---------------------------------------------------------------------------
+
+interface StaleMergeLockRow {
+  project_id: string;
+  runner_id: string;
+  acquired_at: number;
+  heartbeat_at: number;
+}
+
+export function scanStaleMergeLocks(
+  globalDb: Database.Database,
+  projectPath: string,
+  projectName: string,
+  projectId: string,
+): Anomaly[] {
+  const staleCutoffMs = Date.now() - 5 * 60_000; // 5 minutes
+  const row = globalDb
+    .prepare(
+      `SELECT project_id, runner_id, acquired_at, heartbeat_at
+       FROM workspace_merge_locks
+       WHERE project_id = ? AND heartbeat_at < ?`
+    )
+    .get(projectId, staleCutoffMs) as StaleMergeLockRow | undefined;
+
+  if (!row) return [];
+
+  const ageMinutes = Math.round((Date.now() - row.heartbeat_at) / 60_000);
+  return [{
+    type: 'stale_merge_lock' as const,
+    severity: 'warning' as const,
+    projectPath,
+    projectName,
+    details: `Merge lock held for ${ageMinutes}m without heartbeat (runner: ${row.runner_id})`,
+    context: { runnerId: row.runner_id, acquiredAt: row.acquired_at, heartbeatAt: row.heartbeat_at },
+  }];
+}
