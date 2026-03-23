@@ -30,6 +30,8 @@ import {
   scanHighInvocations,
   scanRepeatedFailures,
   scanBlockedTasks,
+  scanStuckMergePhase,
+  scanDisputedTasks,
 } from './scanner-queries.js';
 
 // ---------------------------------------------------------------------------
@@ -49,7 +51,10 @@ export interface Anomaly {
     | 'idle_project'
     | 'high_invocations'
     | 'repeated_failures'
-    | 'blocked_task';
+    | 'blocked_task'
+    | 'stale_merge_lock'
+    | 'stuck_merge_phase'
+    | 'disputed_task';
   severity: 'info' | 'warning' | 'critical';
   projectPath: string;
   projectName: string;
@@ -335,7 +340,13 @@ export async function runScan(): Promise<ScanResult> {
       // 5. Blocked tasks (merge conflicts or errors needing reset)
       anomalies.push(...scanBlockedTasks(projectDb, projectPath, projectName));
 
-      // 6. Idle project check — warning if cron is running (should have spawned a runner)
+      // 6. Stuck merge phase (queued > 15 min, rebasing > 90 min)
+      anomalies.push(...scanStuckMergePhase(projectDb, projectPath, projectName));
+
+      // 7. Disputed tasks
+      anomalies.push(...scanDisputedTasks(projectDb, projectPath, projectName));
+
+      // 8. Idle project check — warning if cron is running (should have spawned a runner)
       if (hasPendingWork(projectDb) && !hasActiveRunner(globalDb, projectPath)) {
         const cronActive = cronStatus().installed;
 

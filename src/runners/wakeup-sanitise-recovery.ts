@@ -76,7 +76,8 @@ export function shouldSkipInvocation(
   globalDb: ReturnType<typeof openGlobalDatabase>['db']
 ): boolean {
   if (activeTaskIds.has(row.task_id)) return true;
-  if (hasActiveMergeLock) return true;
+  // Merge lock only blocks merge-role recovery; rebase roles don't hold the lock
+  if (hasActiveMergeLock && row.role !== 'rebase_coder' && row.role !== 'rebase_reviewer') return true;
   if (hasActiveParallelRunner && row.runner_id) {
     const runnerRow = globalDb
       .prepare('SELECT pid FROM runners WHERE id = ?')
@@ -214,14 +215,38 @@ export function recoverOrphanedInvocation(
           .run(row.task_id);
       }
 
-      // Merge role recovery: reset merge_pending tasks with orphaned merge invocations
-      if (row.role === 'merge' && row.task_status === 'merge_pending') {
-        projectDb
-          .prepare(
-            `UPDATE tasks SET merge_phase = 'queued', updated_at = datetime('now')
-             WHERE id = ? AND status = 'merge_pending'`
-          )
-          .run(row.task_id);
+      // Merge/rebase role recovery: reset merge_pending tasks with orphaned invocations
+      if (row.task_status === 'merge_pending') {
+        if (row.role === 'merge' || row.role === 'rebase_coder') {
+          // Re-queue for merge attempt (will re-discover conflicts if needed)
+          projectDb
+            .prepare(
+              `UPDATE tasks SET merge_phase = 'queued', updated_at = datetime('now')
+               WHERE id = ? AND status = 'merge_pending'`
+            )
+            .run(row.task_id);
+        } else if (row.role === 'rebase_reviewer') {
+          // Parse rebase reviewer decision from log if available
+          const rebaseDecision = parseReviewerDecisionFromLog(projectPath, row.id);
+          if (rebaseDecision === 'approve') {
+            // Approved — re-queue with merge_phase = 'queued'
+            // approved_sha not updated here (requires network); merge queue will re-verify
+            projectDb
+              .prepare(
+                `UPDATE tasks SET merge_phase = 'queued', updated_at = datetime('now')
+                 WHERE id = ? AND status = 'merge_pending'`
+              )
+              .run(row.task_id);
+          } else {
+            // Rejected or unknown — increment rebase_attempts, re-enter rebasing
+            projectDb
+              .prepare(
+                `UPDATE tasks SET merge_phase = 'rebasing', rebase_attempts = COALESCE(rebase_attempts, 0) + 1, updated_at = datetime('now')
+                 WHERE id = ? AND status = 'merge_pending'`
+              )
+              .run(row.task_id);
+          }
+        }
       }
     }
   }

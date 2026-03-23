@@ -9,10 +9,9 @@ import { openDatabase } from '../database/connection.js';
 import { hasSuccessfulCoderWork } from '../database/queries.js';
 import { openGlobalDatabase } from '../runners/global-db-connection.js';
 import { resolveCliEntrypoint } from '../cli/entrypoint.js';
-import { deleteTaskBranchFromSlot } from '../workspace/git-lifecycle.js';
-import { releaseSlot } from '../workspace/pool.js';
 import { getProjectHash } from '../parallel/clone.js';
 import type { FirstResponderAction } from './investigator-agent.js';
+import { cleanupBlockedTaskBranch } from './investigator-helpers.js';
 
 // Fields that update_task is allowed to modify (safety whitelist)
 const UPDATABLE_TASK_FIELDS = new Set([
@@ -439,47 +438,41 @@ export async function executeActions(
         results.push({ action: 'report_only', success: true, reason: entry.diagnosis });
         break;
       }
+
+      case 'release_merge_lock': {
+        try {
+          const pid = getProjectHash(entry.projectPath);
+          const { db: gdb, close } = openGlobalDatabase();
+          try {
+            gdb.prepare('DELETE FROM workspace_merge_locks WHERE project_id = ?').run(pid);
+            results.push({ action: 'release_merge_lock', success: true, reason: entry.diagnosis });
+          } finally { close(); }
+        } catch (err) {
+          results.push({ action: 'release_merge_lock', success: false, error: String(err) });
+        }
+        break;
+      }
+
+      case 'reset_merge_phase': {
+        try {
+          const { db, close } = openDatabase(entry.projectPath);
+          try {
+            const taskId = entry.taskId;
+            if (!taskId) throw new Error('taskId required');
+            db.prepare(
+              `UPDATE tasks SET merge_phase = 'queued', rebase_attempts = 0, updated_at = datetime('now')
+               WHERE id = ? AND status = 'merge_pending'`
+            ).run(taskId);
+            results.push({ action: 'reset_merge_phase', success: true, reason: entry.diagnosis });
+          } finally { close(); }
+        } catch (err) {
+          results.push({ action: 'reset_merge_phase', success: false, error: String(err) });
+        }
+        break;
+      }
     }
   }
 
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// S4: Branch cleanup for blocked_conflict tasks
-// ---------------------------------------------------------------------------
-
-function cleanupBlockedTaskBranch(projectPath: string, taskId: string): void {
-  try {
-    const projectId = getProjectHash(projectPath);
-    const { db: globalDb, close } = openGlobalDatabase();
-    try {
-      const taskBranch = `steroids/task-${taskId}`;
-      const slots = globalDb
-        .prepare(
-          `SELECT id, slot_path, remote_url, status, task_id
-           FROM workspace_pool_slots
-           WHERE project_id = ? AND (status = 'idle' OR task_id = ?)`
-        )
-        .all(projectId, taskId) as Array<{
-        id: number; slot_path: string; remote_url: string | null;
-        status: string; task_id: string | null;
-      }>;
-
-      for (const slot of slots) {
-        if (!slot.slot_path || !existsSync(join(slot.slot_path, '.git'))) continue;
-        deleteTaskBranchFromSlot(slot.slot_path, taskBranch, {
-          deleteRemote: true,
-          remoteUrl: slot.remote_url,
-        });
-        if (slot.status !== 'idle' && slot.task_id === taskId) {
-          releaseSlot(globalDb, slot.id);
-        }
-      }
-    } finally {
-      close();
-    }
-  } catch {
-    // Branch cleanup is best-effort — the coder will create a fresh branch regardless
-  }
-}

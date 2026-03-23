@@ -160,3 +160,72 @@ export function scanBlockedTasks(
     context: { status: row.status },
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Stuck merge phase
+// ---------------------------------------------------------------------------
+
+interface StuckMergeRow {
+  id: string;
+  title: string;
+  merge_phase: string;
+  updated_at: string;
+}
+
+export function scanStuckMergePhase(
+  projectDb: Database.Database,
+  projectPath: string,
+  projectName: string,
+): Anomaly[] {
+  const rows = projectDb
+    .prepare(
+      `SELECT id, title, merge_phase, updated_at FROM tasks
+       WHERE status = 'merge_pending' AND merge_phase IS NOT NULL
+         AND (
+           (merge_phase = 'queued' AND updated_at < datetime('now', '-15 minutes'))
+           OR (merge_phase IN ('rebasing', 'rebase_review') AND updated_at < datetime('now', '-90 minutes'))
+         )`
+    )
+    .all() as StuckMergeRow[];
+
+  return rows.map((row) => ({
+    type: 'stuck_merge_phase' as const,
+    severity: 'warning' as const,
+    projectPath,
+    projectName,
+    taskId: row.id,
+    taskTitle: row.title,
+    details: `Task "${row.title}" stuck in merge phase '${row.merge_phase}'`,
+    context: { mergePhase: row.merge_phase, updatedAt: row.updated_at },
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Disputed tasks
+// ---------------------------------------------------------------------------
+
+interface DisputedTaskRow {
+  id: string;
+  title: string;
+}
+
+export function scanDisputedTasks(
+  projectDb: Database.Database,
+  projectPath: string,
+  projectName: string,
+): Anomaly[] {
+  const rows = projectDb
+    .prepare(`SELECT id, title FROM tasks WHERE status = 'disputed'`)
+    .all() as DisputedTaskRow[];
+
+  return rows.map((row) => ({
+    type: 'disputed_task' as const,
+    severity: 'warning' as const,
+    projectPath,
+    projectName,
+    taskId: row.id,
+    taskTitle: row.title,
+    details: `Task "${row.title}" is disputed — needs manual resolution`,
+    context: {},
+  }));
+}

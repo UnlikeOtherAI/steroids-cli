@@ -228,6 +228,39 @@ export function markCompleted(
   });
 }
 
+const MAX_REBASE_ATTEMPTS = 3;
+
+export function transitionToRebasing(
+  db: Database.Database,
+  taskId: string,
+  reason: string,
+): void {
+  // Increment rebase_attempts and check cap
+  const task = db.prepare('SELECT rebase_attempts FROM tasks WHERE id = ?').get(taskId) as { rebase_attempts: number } | undefined;
+  const attempts = (task?.rebase_attempts ?? 0) + 1;
+
+  if (attempts > MAX_REBASE_ATTEMPTS) {
+    db.prepare(
+      `UPDATE tasks SET status = 'disputed', merge_phase = NULL, updated_at = datetime('now')
+       WHERE id = ?`
+    ).run(taskId);
+    addAuditEntry(db, taskId, 'merge_pending', 'disputed', 'orchestrator', {
+      actorType: 'orchestrator',
+      notes: `[merge_queue] Rebase cap reached (${MAX_REBASE_ATTEMPTS} attempts): ${reason}`,
+    });
+    return;
+  }
+
+  db.prepare(
+    `UPDATE tasks SET merge_phase = 'rebasing', rebase_attempts = ?, updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(attempts, taskId);
+  addAuditEntry(db, taskId, 'merge_pending', 'merge_pending', 'orchestrator', {
+    actorType: 'orchestrator',
+    notes: `[merge_queue] Transitioning to rebase (attempt ${attempts}/${MAX_REBASE_ATTEMPTS}): ${reason}`,
+  });
+}
+
 // ─── Orchestrator ────────────────────────────────────────────────────────────
 
 export async function handleMergeAttempt(
@@ -295,9 +328,7 @@ export async function handleMergeAttempt(
     const mergeResult = attemptRebaseAndFastForward(slotPath, taskBranch, targetBranch);
 
     if (!mergeResult.merged) {
-      // Conflicts — transition to rebasing (stub: escalate to disputed in Phase 2+3)
-      updateTaskStatus(db, task.id, 'disputed', 'orchestrator',
-        '[merge_queue] Merge conflicts detected — LLM rebase not yet implemented (Phase 4)');
+      transitionToRebasing(db, task.id, 'Merge conflicts detected during fast-forward attempt');
       return;
     }
 
@@ -349,6 +380,51 @@ export async function handleMergeAttempt(
   }
 }
 
+// ─── Rebase phase wrapper ────────────────────────────────────────────────────
+
+async function handleRebasePhase(
+  db: Database.Database,
+  task: Task,
+  config: SteroidsConfig,
+  sourceProjectPath: string,
+  phase: 'rebasing' | 'rebase_review',
+  runnerId?: string,
+): Promise<void> {
+  const { handleRebaseCoder, handleRebaseReview } = await import('./merge-queue-rebase.js');
+  const targetBranch = config.git?.branch ?? 'main';
+  const remoteUrl = resolveRemoteUrl(sourceProjectPath);
+
+  if (!remoteUrl) {
+    // Local-only — no rebase needed, mark completed
+    markCompleted(db, task.id, task.approved_sha ?? undefined);
+    return;
+  }
+
+  const projectId = getProjectHash(sourceProjectPath);
+  const gdb = openGlobalDatabase();
+  let slotId: number | undefined;
+
+  try {
+    const slot = claimSlot(gdb.db, projectId, runnerId ?? `rebase:${process.pid}`, task.id);
+    const finalSlot = finalizeSlotPath(gdb.db, slot.id, sourceProjectPath, remoteUrl);
+    slotId = finalSlot.id;
+
+    const taskBranch = finalSlot.task_branch ?? `steroids/task-${task.id}`;
+    const slotPath = finalSlot.slot_path;
+
+    if (phase === 'rebasing') {
+      await handleRebaseCoder(db, task, config, slotPath, targetBranch, taskBranch, runnerId);
+    } else {
+      await handleRebaseReview(db, task, config, slotPath, targetBranch, taskBranch, runnerId);
+    }
+  } finally {
+    if (slotId !== undefined) {
+      try { releaseSlot(gdb.db, slotId); } catch { /* ignore */ }
+    }
+    try { gdb.close(); } catch { /* ignore */ }
+  }
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 export async function processMergeQueue(
@@ -365,14 +441,8 @@ export async function processMergeQueue(
       await handleMergeAttempt(db, task, config, sourceProjectPath, runnerId);
       break;
     case 'rebasing':
-      // Phase 4 stub — escalate to disputed
-      updateTaskStatus(db, task.id, 'disputed', 'orchestrator',
-        '[merge_queue] Rebase cycle not yet implemented (Phase 4)');
-      break;
     case 'rebase_review':
-      // Phase 4 stub — escalate to disputed
-      updateTaskStatus(db, task.id, 'disputed', 'orchestrator',
-        '[merge_queue] Rebase review not yet implemented (Phase 4)');
+      await handleRebasePhase(db, task, config, sourceProjectPath, mergePhase, runnerId);
       break;
     default:
       updateTaskStatus(db, task.id, 'blocked_error', 'orchestrator',

@@ -81,8 +81,8 @@ Analyze the anomalies above and respond with a JSON object matching this schema:
   Resets a stuck/failed task to pending (clears failure and rejection counts).
 
 - { "action": "update_task", "projectPath": "<path>", "taskId": "<id>", "fields": { ... }, "reason": "<why>" }
-  Update specific task fields. Allowed fields: status, failure_count, rejection_count, merge_failure_count, conflict_count, blocked_reason, description.
-  Valid statuses: pending, in_progress, review, completed, failed, skipped, disputed, blocked_conflict, blocked_error.
+  Update specific task fields. Allowed fields: status, failure_count, rejection_count, merge_failure_count, conflict_count, blocked_reason, description, merge_phase, approved_sha, rebase_attempts.
+  Valid statuses: pending, in_progress, review, merge_pending, completed, failed, skipped, disputed, blocked_conflict, blocked_error.
   Use this for surgical fixes — e.g., changing status from blocked_error to pending, clearing a blocked_reason, updating a description to be clearer.
 
 - { "action": "add_task_feedback", "projectPath": "<path>", "taskId": "<id>", "feedback": "<guidance>", "reason": "<why>" }
@@ -111,13 +111,21 @@ Analyze the anomalies above and respond with a JSON object matching this schema:
 - { "action": "trigger_wakeup", "reason": "<why>" }
   Triggers the wakeup cycle to restart runners and recover from idle states.
 
+**Merge Queue:**
+
+- { "action": "release_merge_lock", "projectPath": "<path>", "diagnosis": "<why>" }
+  Force-release a stale merge lock for a project. Use when a merge_pending task is stuck because the merge lock was not released after a crash.
+
+- { "action": "reset_merge_phase", "projectPath": "<path>", "taskId": "<id>", "diagnosis": "<why>" }
+  Reset a merge_pending task's merge_phase to 'queued' and clear rebase_attempts. Use when a task is stuck in rebasing/rebase_review phase.
+
 **Suppression:**
 
 - { "action": "suppress_anomaly", "projectPath": "<path>", "anomalyType": "<type>", "duration_hours": <number>, "reason": "<why>" }
   Suppress a known false positive anomaly for the specified project and type (max 168 hours = 1 week).
   The scanner will skip matching anomalies until the suppression expires.
   Use when you have confirmed an anomaly is a false positive (e.g., idle_project when runners are actually active via parallel sessions).
-  Valid anomaly types: orphaned_task, hanging_invocation, zombie_runner, dead_runner, db_inconsistency, credit_exhaustion, failed_task, skipped_task, idle_project, high_invocations, repeated_failures, blocked_task.
+  Valid anomaly types: orphaned_task, hanging_invocation, zombie_runner, dead_runner, db_inconsistency, credit_exhaustion, failed_task, skipped_task, idle_project, high_invocations, repeated_failures, blocked_task, stale_merge_lock, stuck_merge_phase, disputed_task.
 
 **Report:**
 

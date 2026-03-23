@@ -34,6 +34,8 @@ export type FirstResponderAction =
   | { action: 'add_dependency'; projectPath: string; sectionId: string; dependsOnSectionId: string; reason: string }
   | { action: 'add_task_feedback'; projectPath: string; taskId: string; feedback: string; reason: string }
   | { action: 'suppress_anomaly'; projectPath: string; anomalyType: string; duration_hours: number; reason: string }
+  | { action: 'release_merge_lock'; projectPath: string; diagnosis: string }
+  | { action: 'reset_merge_phase'; projectPath: string; taskId: string; diagnosis: string }
   | { action: 'report_only'; diagnosis: string };
 
 export interface FirstResponderResponse {
@@ -65,6 +67,8 @@ const ALLOWED_ACTIONS: Record<string, string[]> = {
   add_dependency: ['projectPath', 'sectionId', 'dependsOnSectionId', 'reason'],
   add_task_feedback: ['projectPath', 'taskId', 'feedback', 'reason'],
   suppress_anomaly: ['projectPath', 'anomalyType', 'duration_hours', 'reason'],
+  release_merge_lock: ['projectPath', 'diagnosis'],
+  reset_merge_phase: ['projectPath', 'taskId', 'diagnosis'],
   report_only: ['diagnosis'],
 };
 
