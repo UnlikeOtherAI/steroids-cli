@@ -18,11 +18,12 @@ import type { FirstResponderAction } from './investigator-agent.js';
 const UPDATABLE_TASK_FIELDS = new Set([
   'status', 'failure_count', 'rejection_count', 'merge_failure_count',
   'conflict_count', 'blocked_reason', 'description',
+  'merge_phase', 'approved_sha', 'rebase_attempts',
 ]);
 
 // Valid task statuses for update_task
 const VALID_TASK_STATUSES = new Set([
-  'pending', 'in_progress', 'review', 'completed', 'failed', 'skipped',
+  'pending', 'in_progress', 'review', 'merge_pending', 'completed', 'failed', 'skipped',
   'disputed', 'blocked_conflict', 'blocked_error',
 ]);
 
@@ -31,6 +32,7 @@ const VALID_ANOMALY_TYPES = new Set([
   'orphaned_task', 'hanging_invocation', 'zombie_runner', 'dead_runner',
   'db_inconsistency', 'credit_exhaustion', 'failed_task', 'skipped_task',
   'idle_project', 'high_invocations', 'repeated_failures', 'blocked_task',
+  'stale_merge_lock', 'stuck_merge_phase', 'disputed_task',
 ]);
 
 export type ActionResult = { action: string; success: boolean; reason?: string; error?: string; output?: unknown };
@@ -69,6 +71,9 @@ export async function executeActions(
                    merge_failure_count = 0,
                    conflict_count = 0,
                    last_failure_at = NULL,
+                   merge_phase = NULL,
+                   approved_sha = NULL,
+                   rebase_attempts = 0,
                    updated_at = datetime('now')
                WHERE id = ?`,
             ).run(targetStatus, targetStatus, entry.taskId);

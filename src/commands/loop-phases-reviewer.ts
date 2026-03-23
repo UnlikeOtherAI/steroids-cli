@@ -7,7 +7,6 @@ import {
   getTaskAudit,
   incrementTaskFailureCount,
   clearTaskFailureCount,
-  clearMergeFailureCount,
   addAuditEntry,
 } from '../database/queries.js';
 import type { openDatabase } from '../database/connection.js';
@@ -27,10 +26,8 @@ import { resolveEffectiveBranch } from '../git/branch-resolver.js';
 import { checkSectionCompletionAndPR } from '../git/section-pr.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { PoolSlotContext } from '../workspace/types.js';
-import { prepareForTask, postCoderGate, postReviewGate } from '../workspace/git-lifecycle.js';
-import { mergeToBase } from '../workspace/git-lifecycle-merge.js';
-import { updateSlotStatus, releaseSlot, getSlot } from '../workspace/pool.js';
-import { handleMergeFailure } from '../workspace/merge-pipeline.js';
+import { prepareForTask, postReviewGate } from '../workspace/git-lifecycle.js';
+import { updateSlotStatus, releaseSlot } from '../workspace/pool.js';
 import {
   LeaseFenceContext,
   extractOutOfScopeItems,
@@ -345,85 +342,59 @@ export async function runReviewerPhase(
   const commitSha = submissionCommitSha;
 
   switch (decision.decision) {
-    case 'approve':
+    case 'approve': {
       if (poolSlotContext) {
-        // ── Pool slot: post-review gate + merge pipeline ──
         postReviewGate(effectiveProjectPath);
+      }
 
-        // Refresh slot from DB before merge
-        const freshSlot = getSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
-        if (!freshSlot) {
-          if (!jsonMode) console.log('\n✗ Pool slot disappeared during review');
-          return;
-        }
-
-        // No-op submission: coder made no new commits; work pre-existed.
-        // isNoOp was captured before the reviewer ran (from submission notes), safe from audit shadowing.
-        const isNoOp = reviewerResult?.isNoOp ?? false;
-        if (isNoOp) {
-          approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
-          handleIntakeTaskApproval(db, task, effectiveProjectPath);
-          releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
-          if (!jsonMode) console.log('\n✓ Task APPROVED (pre-existing work confirmed by reviewer, no merge needed)');
-          await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
-          return;
-        }
-
-        const mergeResult = mergeToBase(poolSlotContext.globalDb, freshSlot, task.id);
-
-        if (!mergeResult.ok) {
-          const failureResult = handleMergeFailure(db, poolSlotContext, task.id, mergeResult);
-          if (!jsonMode) {
-            if (failureResult.taskBlocked) {
-              console.log(`\n✗ Task BLOCKED (${failureResult.blockStatus}): ${failureResult.reason}`);
-            } else {
-              console.log(`\n⟳ Merge failed, returning to pending: ${failureResult.reason}`);
-            }
-          }
-          return;
-        }
-
-        // Merge succeeded — clear merge failure counter and approve the task
-        clearMergeFailureCount(db, task.id);
-        approveTask(db, task.id, 'orchestrator', decision.notes, mergeResult.mergedSha || commitSha);
-        handleIntakeTaskApproval(db, task, effectiveProjectPath);
-        releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
-        if (!jsonMode) {
-          console.log(`\n✓ Task APPROVED and merged (sha: ${mergeResult.mergedSha})`);
-        }
-        // Check if the section is now complete and create PR if auto_pr is set
-        await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
-      } else {
-        // Legacy path: direct push
+      // No-op submission: coder made no new commits; work pre-existed.
+      const isNoOp = reviewerResult?.isNoOp ?? false;
+      if (isNoOp) {
         approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
-        if (!jsonMode) {
-          console.log(`\n✓ Task APPROVED (confidence: ${decision.confidence})`);
-          console.log('Pushing to git...');
+        handleIntakeTaskApproval(db, task, effectiveProjectPath);
+        if (poolSlotContext) {
+          releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
         }
-        if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
-          if (!jsonMode) {
-            console.log('\n↺ Lease ownership lost before review push; skipping push in this runner.');
-          }
-          return;
-        }
-        const reviewerConfig = loadConfig(projectPath);
-        const legacyApproveBranch = leaseFence?.parallelSessionId
-          ? branchName
-          : (resolveEffectiveBranch(db, task.section_id ?? null, reviewerConfig) ?? reviewerConfig.git?.branch ?? 'main');
-        const pushResult = pushToRemote(effectiveProjectPath, 'origin', legacyApproveBranch);
-        if (!jsonMode && pushResult.success) {
-          console.log(`Pushed successfully (${pushResult.commitHash})`);
-        } else if (!jsonMode) {
-          console.warn('Push failed. Will stack and retry on next completion.');
-        }
-        // Check if the section is now complete and create PR if auto_pr is set.
-        // Only fire when push succeeded — a PR against an un-pushed branch is invalid.
-        if (pushResult.success) {
-          handleIntakeTaskApproval(db, task, effectiveProjectPath);
-          await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
+        if (!jsonMode) console.log('\n✓ Task APPROVED (pre-existing work confirmed by reviewer, no merge needed)');
+        await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
+        return;
+      }
+
+      // Resolve approved_sha from the remote task branch HEAD
+      const taskBranch = poolSlotContext?.slot.task_branch;
+      let approvedSha = commitSha;
+      if (taskBranch) {
+        try {
+          const { execFileSync: efs } = await import('node:child_process');
+          const remoteSha = efs('git', ['rev-parse', `refs/remotes/origin/${taskBranch}`], {
+            cwd: effectiveProjectPath, encoding: 'utf-8',
+          }).trim();
+          if (remoteSha) approvedSha = remoteSha;
+        } catch {
+          // Fallback to local commit SHA if remote ref not available
         }
       }
+
+      // Transition to merge_pending — merge queue will handle the actual merge
+      updateTaskStatus(db, task.id, 'merge_pending', 'orchestrator',
+        `Reviewer approved (${decision.confidence}). Queued for merge.`);
+      // Set merge queue columns
+      db.prepare(
+        `UPDATE tasks SET merge_phase = 'queued', approved_sha = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      ).run(approvedSha, task.id);
+
+      addAuditEntry(db, task.id, 'review', 'merge_pending', 'orchestrator', {
+        actorType: 'orchestrator',
+        notes: `[merge_queue] Reviewer approved → merge_pending (approved_sha: ${approvedSha})`,
+        commitSha: approvedSha,
+      });
+
+      if (!jsonMode) {
+        console.log(`\n✓ Task APPROVED → merge_pending (sha: ${approvedSha}, confidence: ${decision.confidence})`);
+      }
       break;
+    }
 
     case 'reject': {
       // Deterministically extract [OUT_OF_SCOPE] items from raw reviewer stdout.

@@ -54,7 +54,7 @@ export async function projectHasPendingWork(projectPath: string): Promise<boolea
         .prepare(
           `SELECT COUNT(*) as count
            FROM tasks
-           WHERE status IN ('pending', 'in_progress', 'review')`
+           WHERE status IN ('pending', 'in_progress', 'review', 'merge_pending')`
         )
         .get() as { count: number };
 

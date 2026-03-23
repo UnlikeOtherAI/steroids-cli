@@ -11,6 +11,7 @@ import {
   isRunnerProcessDead,
   recoverOrphanedInvocation,
 } from './wakeup-sanitise-recovery.js';
+import { getProjectHash } from '../parallel/clone.js';
 
 export interface SanitiseSettings {
   enabled: boolean;
@@ -130,13 +131,15 @@ function sanitiseProjectState(
   );
   let hasActiveMergeLock = false;
   try {
-    const mergeLockRows = projectDb
-      .prepare('SELECT expires_at FROM merge_locks')
-      .all() as Array<{ expires_at: string }>;
+    const STALE_LOCK_TTL_MS = 90_000;
+    const projectId = getProjectHash(projectPath);
+    const mergeLockRows = globalDb
+      .prepare('SELECT heartbeat_at FROM workspace_merge_locks WHERE project_id = ?')
+      .all(projectId) as Array<{ heartbeat_at: string }>;
     const nowMs = Date.now();
     hasActiveMergeLock = mergeLockRows.some((row) => {
-      const expiresAtMs = Date.parse(row.expires_at);
-      return Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
+      const hbMs = Date.parse(row.heartbeat_at);
+      return Number.isFinite(hbMs) && (nowMs - hbMs) < STALE_LOCK_TTL_MS;
     });
   } catch {
     hasActiveMergeLock = false;
@@ -248,7 +251,7 @@ function sanitiseProjectState(
         const placeholders = ids.map(() => '?').join(',');
         projectDb
           .prepare(
-            `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+            `UPDATE tasks SET status = 'pending', merge_phase = NULL, approved_sha = NULL, rebase_attempts = 0, updated_at = datetime('now')
              WHERE id IN (${placeholders})`
           )
           .run(...ids);

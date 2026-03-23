@@ -145,7 +145,7 @@ function hasPendingWork(projectDb: Database.Database): boolean {
   const row = projectDb
     .prepare(
       `SELECT COUNT(*) as count FROM tasks
-       WHERE status IN ('pending', 'in_progress', 'review')`
+       WHERE status IN ('pending', 'in_progress', 'review', 'merge_pending')`
     )
     .get() as { count: number };
   return row.count > 0;

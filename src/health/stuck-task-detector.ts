@@ -213,8 +213,11 @@ function detectTaskSignalsInternal(
          MAX(i.created_at) as last_invocation_at,
          COALESCE(SUM(CASE WHEN i.status = 'running' THEN 1 ELSE 0 END), 0) as running_invocation_count
        FROM tasks t
-       LEFT JOIN task_invocations i ON i.task_id = t.id AND i.role = 'coder'
-       WHERE t.status = 'in_progress'
+       LEFT JOIN task_invocations i ON i.task_id = t.id AND (
+         (t.status = 'in_progress' AND i.role = 'coder')
+         OR (t.status = 'merge_pending' AND i.role IN ('merge', 'rebase_coder', 'rebase_reviewer'))
+       )
+       WHERE t.status IN ('in_progress', 'merge_pending')
          AND t.updated_at < ?
        GROUP BY t.id
        HAVING (
@@ -224,7 +227,7 @@ function detectTaskSignalsInternal(
     ).all(taskCutoff, invocationCutoff) as Array<{
       id: string;
       title: string;
-      status: 'in_progress';
+      status: 'in_progress' | 'merge_pending';
       updated_at: string;
       invocation_count: number;
       last_invocation_at: string | null;
@@ -259,7 +262,7 @@ function detectTaskSignalsInternal(
       `SELECT t.id, t.title, t.status, t.updated_at, i.last_activity_at_ms, i.role
        FROM tasks t
        JOIN task_invocations i ON i.task_id = t.id
-       WHERE (t.status = 'in_progress' OR t.status = 'review')
+       WHERE t.status IN ('in_progress', 'review', 'merge_pending')
          AND i.status = 'running'
          AND (
            i.started_at_ms IS NULL
@@ -269,10 +272,10 @@ function detectTaskSignalsInternal(
     ).all() as Array<{
       id: string;
       title: string;
-      status: 'in_progress' | 'review';
+      status: 'in_progress' | 'review' | 'merge_pending';
       updated_at: string;
       last_activity_at_ms: number | null;
-      role: 'coder' | 'reviewer';
+      role: 'coder' | 'reviewer' | 'merge' | 'rebase_coder' | 'rebase_reviewer';
     }>;
 
     for (const row of rows) {
@@ -288,13 +291,23 @@ function detectTaskSignalsInternal(
 
       // RULE: If we have activity heartbeats, use silence threshold (invocationStalenessSec).
       // If we DON'T have activity yet, use the wall-clock phase limit.
+      // Phase-aware thresholds for merge_pending: queued ~5 min, rebasing ~30 min.
       let isStuck = false;
       if (secondsSinceActivity !== null) {
         if (secondsSinceActivity > cfg.invocationStalenessSec) {
           isStuck = true;
         }
       } else {
-        const wallClockLimit = row.status === 'review' ? cfg.maxReviewerDurationSec : cfg.maxCoderDurationSec;
+        let wallClockLimit: number;
+        if (row.status === 'merge_pending' && row.role === 'merge') {
+          wallClockLimit = 300; // 5 min for queued merge operations
+        } else if (row.status === 'merge_pending') {
+          wallClockLimit = cfg.maxCoderDurationSec; // rebase uses standard LLM timeout
+        } else if (row.status === 'review') {
+          wallClockLimit = cfg.maxReviewerDurationSec;
+        } else {
+          wallClockLimit = cfg.maxCoderDurationSec;
+        }
         if (secondsSinceUpdate > wallClockLimit) {
           isStuck = true;
         }
@@ -303,7 +316,7 @@ function detectTaskSignalsInternal(
       if (isStuck) {
         hangingInvocations.push({
           failureMode: 'hanging_invocation',
-          phase: row.role as 'coder' | 'reviewer',
+          phase: row.role as 'coder' | 'reviewer' | 'merge' | 'rebase_coder' | 'rebase_reviewer',
           taskId: row.id,
           title: row.title,
           status: row.status,

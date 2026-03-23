@@ -11,6 +11,7 @@ export type TaskStatus =
   | 'pending'
   | 'in_progress'
   | 'review'
+  | 'merge_pending'     // Approved by reviewer, awaiting merge queue
   | 'completed'
   | 'disputed'
   | 'failed'
@@ -24,6 +25,7 @@ export const STATUS_MARKERS: Record<TaskStatus, string> = {
   pending: '[ ]',
   in_progress: '[-]',
   review: '[o]',
+  merge_pending: '[M]',   // Approved, awaiting merge queue
   completed: '[x]',
   disputed: '[!]',
   failed: '[F]',
@@ -69,6 +71,9 @@ export interface Task {
   reference_commit?: string | null;
   reference_commit_message?: string | null;
   description?: string | null;
+  merge_phase?: string | null;
+  approved_sha?: string | null;
+  rebase_attempts?: number;
   created_at: string;
   updated_at: string;
 }
@@ -1352,7 +1357,7 @@ export function findNextTask(
   sectionId?: string
 ): {
   task: Task | null;
-  action: 'review' | 'resume' | 'start' | 'idle';
+  action: 'review' | 'resume' | 'start' | 'merge' | 'idle';
 } {
   // Build WHERE clause for section filtering
   const sectionFilter = sectionId ? 'AND t.section_id = ?' : '';
@@ -1363,13 +1368,29 @@ export function findNextTask(
       OR NOT EXISTS (
         SELECT 1 FROM tasks t2
         WHERE ((t2.section_id = t.section_id) OR (t2.section_id IS NULL AND t.section_id IS NULL))
-          AND t2.status IN ('pending', 'in_progress', 'review')
+          AND t2.status IN ('pending', 'in_progress', 'review', 'merge_pending')
           AND t2.is_follow_up = 0
       )
     )`;
 
   // Exclude tasks in skipped sections unless a specific section was requested
   const skipFilter = sectionId ? '' : 'AND (s.skipped IS NULL OR s.skipped = 0)';
+
+  // Priority 0: Tasks awaiting merge (closest to completion)
+  const mergePendingTasks = db
+    .prepare(
+       `SELECT t.* FROM tasks t
+       LEFT JOIN sections s ON t.section_id = s.id
+       WHERE t.status = 'merge_pending' ${sectionFilter} ${skipFilter}
+         ${followUpEligibilityFilter}
+       ORDER BY COALESCE(s.position, 999999), t.created_at`
+    )
+    .all(...sectionParams) as Task[];
+
+  const filteredMergeTasks = filterTasksWithMetDependencies(db, mergePendingTasks);
+  if (filteredMergeTasks.length > 0) {
+    return { task: filteredMergeTasks[0], action: 'merge' };
+  }
 
   // Priority 1: Tasks ready for review
   const reviewTasks = db

@@ -50,7 +50,7 @@ export interface OrphanedTaskSignal {
   failureMode: 'orphaned_task';
   taskId: string;
   title: string;
-  status: 'in_progress' | 'review';
+  status: 'in_progress' | 'review' | 'merge_pending';
   updatedAt: Date;
   secondsSinceUpdate: number;
   invocationCount: number;
@@ -60,10 +60,10 @@ export interface OrphanedTaskSignal {
 
 export interface HangingTaskSignal {
   failureMode: 'hanging_invocation';
-  phase: 'coder' | 'reviewer';
+  phase: 'coder' | 'reviewer' | 'merge' | 'rebase_coder' | 'rebase_reviewer';
   taskId: string;
   title: string;
-  status: 'in_progress' | 'review';
+  status: 'in_progress' | 'review' | 'merge_pending';
   updatedAt: Date;
   secondsSinceUpdate: number;
   runnerId: string;

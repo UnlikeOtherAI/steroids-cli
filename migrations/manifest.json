@@ -1,6 +1,6 @@
 {
   "version": "0.2.3",
-  "latestDbVersion": 27,
+  "latestDbVersion": 28,
   "migrations": [
     {
       "id": 1,
@@ -217,6 +217,14 @@
       "description": "Add task_dependencies table for explicit task-level dependency tracking",
       "checksum": "",
       "cliVersion": "0.12.7"
+    },
+    {
+      "id": 28,
+      "name": "028_add_merge_queue_fields",
+      "file": "028_add_merge_queue_fields.sql",
+      "description": "Add merge_phase, approved_sha, rebase_attempts columns for merge queue pipeline",
+      "checksum": "",
+      "cliVersion": "0.14.3"
     }
   ]
 }

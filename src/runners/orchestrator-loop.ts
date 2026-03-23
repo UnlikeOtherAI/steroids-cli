@@ -379,9 +379,14 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             },
             poolSlotCtx
           );
+        } else if (action === 'merge') {
+          // Merge queue manages its own pool slot and lock — skip outer pool claim/cleanup
+          const { processMergeQueue } = await import('../orchestrator/merge-queue.js');
+          await processMergeQueue(db, task, config, sourceProjectPath, options.runnerId);
         }
       } finally {
-        if (poolSlotCtx) cleanupPoolSlot(poolSlotCtx);
+        // Only clean up pool slot if one was claimed by the outer dispatch (not merge action)
+        if (poolSlotCtx && action !== 'merge') cleanupPoolSlot(poolSlotCtx);
         if (poolGlobalDb) {
           try { poolGlobalDb.close(); } catch { /* ignore */ }
         }

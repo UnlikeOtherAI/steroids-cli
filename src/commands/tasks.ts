@@ -1109,7 +1109,7 @@ async function checkSectionCompletion(
   // Non-terminal (active): pending, in_progress, review, partial.
   const sectionTasks = listTasks(db, { sectionId });
   const activeCount = sectionTasks.filter(t =>
-    ['pending', 'in_progress', 'review', 'partial'].includes(t.status)
+    ['pending', 'in_progress', 'review', 'merge_pending', 'partial'].includes(t.status)
   ).length;
   const completedCount = sectionTasks.filter(t => t.status === 'completed').length;
   const sectionDone = sectionTasks.length > 0 && activeCount === 0 && completedCount > 0;

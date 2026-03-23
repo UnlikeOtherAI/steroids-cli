@@ -34,7 +34,7 @@ function getSectionCounts(db: Database.Database, sectionId: string): SectionCoun
   return db.prepare(`
     SELECT
       COUNT(*) as total,
-      SUM(CASE WHEN status IN ('pending','in_progress','review','partial') THEN 1 ELSE 0 END) as active,
+      SUM(CASE WHEN status IN ('pending','in_progress','review','merge_pending','partial') THEN 1 ELSE 0 END) as active,
       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
     FROM tasks WHERE section_id = ?
   `).get(sectionId) as SectionCounts;

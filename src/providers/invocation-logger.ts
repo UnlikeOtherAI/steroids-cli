@@ -20,7 +20,7 @@ import type { InvocationActivity, InvokeResult } from './interface.js';
  */
 export interface InvocationLogEntry {
   timestamp: string;
-  role: 'orchestrator' | 'coder' | 'reviewer';
+  role: 'orchestrator' | 'coder' | 'reviewer' | 'merge';
   provider: string;
   model: string;
   taskId?: string;
@@ -335,7 +335,7 @@ export async function logInvocation(
   prompt: string,
   invokeOrResult: ((ctx?: InvocationInvokeContext) => Promise<InvokeResult>) | InvokeResult,
   metadata: {
-    role: 'orchestrator' | 'coder' | 'reviewer';
+    role: 'orchestrator' | 'coder' | 'reviewer' | 'merge';
     provider: string;
     model: string;
     taskId?: string;
@@ -352,7 +352,7 @@ export async function logInvocation(
 
   const canDbLog =
     Boolean(metadata.taskId && metadata.projectPath) &&
-    (metadata.role === 'coder' || metadata.role === 'reviewer');
+    (metadata.role === 'coder' || metadata.role === 'reviewer' || metadata.role === 'merge');
 
   const projectPath = metadata.projectPath;
   let invocationId: number | null = null;

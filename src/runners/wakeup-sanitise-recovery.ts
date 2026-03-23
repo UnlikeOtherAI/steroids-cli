@@ -143,7 +143,7 @@ export function recoverOrphanedInvocation(
 
       projectDb
         .prepare(
-          `UPDATE tasks SET status = 'completed', updated_at = datetime('now')
+          `UPDATE tasks SET status = 'merge_pending', merge_phase = 'queued', updated_at = datetime('now')
            WHERE id = ? AND status = 'review'`
         )
         .run(row.task_id);
@@ -151,10 +151,10 @@ export function recoverOrphanedInvocation(
       projectDb
         .prepare(
           `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
-           SELECT ?, 'review', 'completed', 'orchestrator', 'orchestrator', ?, datetime('now')
-           WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND status = 'completed')`
+           SELECT ?, 'review', 'merge_pending', 'orchestrator', 'orchestrator', ?, datetime('now')
+           WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND status = 'merge_pending')`
         )
-        .run(row.task_id, `Recovered by sanitise [${source}] (DECISION: APPROVE).`, row.task_id);
+        .run(row.task_id, `Recovered by sanitise [${source}] (DECISION: APPROVE → merge_pending).`, row.task_id);
     } else if (reviewerDecision === 'reject' && row.task_status === 'review') {
       projectDb
         .prepare(
@@ -207,6 +207,16 @@ export function recoverOrphanedInvocation(
       if (resetResult.changes > 0) {
         projectDb
           .prepare('DELETE FROM task_locks WHERE task_id = ?')
+          .run(row.task_id);
+      }
+
+      // Merge role recovery: reset merge_pending tasks with orphaned merge invocations
+      if (row.role === 'merge' && row.task_status === 'merge_pending') {
+        projectDb
+          .prepare(
+            `UPDATE tasks SET merge_phase = 'queued', updated_at = datetime('now')
+             WHERE id = ? AND status = 'merge_pending'`
+          )
           .run(row.task_id);
       }
     }

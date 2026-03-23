@@ -380,6 +380,11 @@ export async function loopCommand(args: string[], flags: GlobalFlags): Promise<v
         // Task ready for review - pass coordinator guidance if available
         const cachedCoord = coordinatorCache.get(task.id);
         creditResult = await runReviewerPhase(db, task, projectPath, flags.json, cachedCoord);
+      } else if (action === 'merge') {
+        const { processMergeQueue } = await import('../orchestrator/merge-queue.js');
+        const { loadConfig } = await import('../config/loader.js');
+        const config = loadConfig(projectPath);
+        await processMergeQueue(db, task, config, projectPath);
       }
 
       if (creditResult) {

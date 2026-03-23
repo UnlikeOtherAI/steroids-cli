@@ -24,7 +24,7 @@ import { listTaskLocks } from '../locking/queries.js';
 
 export interface SelectedTask {
   task: Task;
-  action: 'review' | 'resume' | 'start';
+  action: 'review' | 'resume' | 'start' | 'merge';
   rejectionNotes?: string;
 }
 
@@ -63,7 +63,7 @@ export function hasPendingOrInProgressWork(
     .prepare(
       `SELECT COUNT(*) as count FROM tasks
        WHERE section_id = ?
-       AND status IN ('pending', 'in_progress', 'review')
+       AND status IN ('pending', 'in_progress', 'review', 'merge_pending')
        AND is_follow_up = 0`
     )
     .get(sectionId) as { count: number };
@@ -98,7 +98,7 @@ export function selectNextTask(
       if (result.task && result.action !== 'idle') {
         const selectedTask: SelectedTask = {
           task: result.task,
-          action: result.action as 'review' | 'resume' | 'start',
+          action: result.action as 'review' | 'resume' | 'start' | 'merge',
         };
 
         if (result.action === 'resume' && result.task.rejection_count > 0) {
@@ -124,7 +124,7 @@ export function selectNextTask(
 
   const selectedTask: SelectedTask = {
     task: result.task,
-    action: result.action as 'review' | 'resume' | 'start',
+    action: result.action as 'review' | 'resume' | 'start' | 'merge',
   };
 
   // If resuming after rejection, get the last rejection notes
@@ -157,7 +157,7 @@ export function selectTaskBatch(
     .prepare(
       `SELECT s.id, s.name, s.position,
               SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pending_count,
-              SUM(CASE WHEN t.status IN ('in_progress', 'review') THEN 1 ELSE 0 END) as active_count
+              SUM(CASE WHEN t.status IN ('in_progress', 'review', 'merge_pending') THEN 1 ELSE 0 END) as active_count
        FROM sections s
        LEFT JOIN tasks t ON t.section_id = s.id
        GROUP BY s.id
@@ -250,6 +250,7 @@ export function getTaskCounts(
   pending: number;
   in_progress: number;
   review: number;
+  merge_pending: number;
   completed: number;
   disputed: number;
   failed: number;
@@ -259,6 +260,7 @@ export function getTaskCounts(
     pending: 0,
     in_progress: 0,
     review: 0,
+    merge_pending: 0,
     completed: 0,
     disputed: 0,
     failed: 0,
@@ -375,10 +377,27 @@ function findNextTaskSkippingLocked(
       OR NOT EXISTS (
         SELECT 1 FROM tasks t2
         WHERE ((t2.section_id = t.section_id) OR (t2.section_id IS NULL AND t.section_id IS NULL))
-          AND t2.status IN ('pending', 'in_progress', 'review')
+          AND t2.status IN ('pending', 'in_progress', 'review', 'merge_pending')
           AND t2.is_follow_up = 0
       )
     )`;
+
+  // Priority 0: Tasks awaiting merge (closest to completion)
+  const mergePendingTasks = db
+    .prepare(
+      `SELECT t.* FROM tasks t
+       LEFT JOIN sections s ON t.section_id = s.id
+       WHERE t.status = 'merge_pending' ${sectionFilter}
+         ${followUpEligibilityFilter}
+       ORDER BY COALESCE(s.position, 999999), t.created_at`
+    )
+    .all(...sectionParams) as Task[];
+
+  for (const task of mergePendingTasks) {
+    if (canSelectTask(db, task) && (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId))) {
+      return { task, action: 'merge' };
+    }
+  }
 
   // Priority 1: Tasks in 'review' status
   const reviewTasks = db
@@ -501,7 +520,7 @@ export async function selectNextTaskWithWait(
     }
   } else {
     const counts = getTaskCounts(db);
-    if (counts.pending === 0 && counts.in_progress === 0 && counts.review === 0) {
+    if (counts.pending === 0 && counts.in_progress === 0 && counts.review === 0 && counts.merge_pending === 0) {
       return null; // All tasks completed
     }
   }
@@ -532,7 +551,8 @@ export async function selectNextTaskWithWait(
       const currentCounts = getTaskCounts(db);
       if (currentCounts.pending === 0 &&
         currentCounts.in_progress === 0 &&
-        currentCounts.review === 0) {
+        currentCounts.review === 0 &&
+        currentCounts.merge_pending === 0) {
         return null; // All tasks completed while waiting
       }
     }
