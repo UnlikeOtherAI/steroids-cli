@@ -13,6 +13,33 @@ Deterministic daemon — never makes decisions, just follows the state machine.
 - NEVER commit '.steroids/' to git — add it to .gitignore. Tracking it breaks
   runner workspace isolation and causes data loss.
 
+## DEPENDENCY PLANNING (CRITICAL)
+
+Every task and every section MUST have its dependencies explicitly considered and
+declared. Never leave dependency declarations to chance.
+
+Rules:
+- Tasks that can execute in parallel share the same dependency (or have none).
+- A common pattern: multiple tasks in a section all depend on a single setup/foundation
+  task and can then run in parallel with each other.
+- No dependency = eligible for parallel execution with other dependency-free tasks.
+- ALWAYS evaluate whether a blocking dependency exists within the section before
+  leaving tasks dependency-free. If task B reads output produced by task A, B depends
+  on A — even when both live in the same section.
+- Sections follow the same rule: if section Y needs artifacts from section X, declare
+  the dependency. Do not assume ordering from priority alone.
+
+Example — correct:
+  Task "Set up database schema"        → no dependency (runs first)
+  Task "Build user API endpoints"      → depends on "Set up database schema"
+  Task "Build admin API endpoints"     → depends on "Set up database schema"
+  (User and Admin endpoints run in parallel — same dependency)
+
+Example — wrong:
+  Task "Build user API endpoints"      → no dependency
+  Task "Add auth middleware to user API" → no dependency
+  (Second task clearly depends on the first — missing dependency causes race)
+
 ## TASK SIZING (CRITICAL)
 
 Tasks should be PR-sized chunks of work — not individual classes or functions,
@@ -90,12 +117,13 @@ If no selectable task exists → runner goes idle.
 
 ## SECTION DEPENDENCIES
 
-Sections can declare dependencies on other sections:
+Sections must declare dependencies when one section's work requires another's output:
   steroids sections depends-on <A> <B>   → Section A depends on Section B
 
 Effect: ALL tasks in section B must be completed before ANY task in section A
 can be picked by the runner. "Completed" means status=completed (not just
 skipped/partial — those count as incomplete for dependency purposes).
+Sections with no dependency on each other can execute in parallel.
 
 Dependency checks:
 - Cycle detection prevents circular dependencies
@@ -112,12 +140,13 @@ Commands:
 
 ## TASK DEPENDENCIES
 
-Tasks can declare dependencies on other tasks within or across sections:
+Tasks must declare dependencies on other tasks when ordering matters:
   steroids tasks depends-on <A> <B>     # Task A depends on Task B
 
 Effect: Task B must reach a terminal status (completed, disputed, skipped, partial)
 before the runner will pick up Task A. Unlike section dependencies which block entire
-sections, task dependencies provide fine-grained ordering within sections.
+sections, task dependencies provide fine-grained ordering within and across sections.
+Tasks sharing the same dependency (or no dependency) are eligible for parallel execution.
 
 Commands:
   steroids tasks depends-on <A> <B>          # add dependency
@@ -352,9 +381,10 @@ Use --description (-d) for context beyond the spec file:
 Max 4000 characters.
 
 ### Task Ordering
-When tasks in the same section must run in sequence:
+Always declare dependencies between tasks when one builds on another's output:
   steroids tasks depends-on <later-task> <earlier-task>
 Example: "Set up Prisma" depends on "Initialize monorepo"
+Tasks that can run in parallel should share the same dependency (or have none).
 
 ## IMPORTANT NOTES
 - Task spec is in source file (see tasks audit output)
