@@ -282,20 +282,31 @@ function sanitiseProjectState(
     // Resets to 'pending' — the task selector's S7 logic will route to 'review'
     // (skipping the coder) if the coder already succeeded for the task.
     // Clears failure_count/rejection_count and merge columns for a fresh attempt.
-    // Guard: skip tasks with >30 total invocations — they likely have a systemic
-    // issue (infrastructure block, repeated provider failures) and should not
-    // be retried automatically to avoid burning credits.
+    // Guard: count S4 recoveries since the task last made progress (reached
+    // in_progress/review/merge_pending). If the task keeps failing without
+    // advancing past its stuck phase, stop after 3 attempts. If it progresses
+    // to a new phase then fails at a different stage, the counter resets.
     try {
+      const MAX_S4_RECOVERIES = 3;
       const failedRows = projectDb
         .prepare(
           `SELECT t.id, t.status FROM tasks t
            WHERE t.status IN ('failed', 'skipped')
              AND t.updated_at < datetime('now', '-30 minutes')
              AND (
-               SELECT COUNT(*) FROM task_invocations i WHERE i.task_id = t.id
-             ) <= 30`
+               SELECT COUNT(*) FROM audit a
+               WHERE a.task_id = t.id
+                 AND a.to_status = 'pending'
+                 AND a.notes LIKE '%Recovered by periodic sanitise%failed/skipped%'
+                 AND a.created_at > COALESCE(
+                   (SELECT MAX(a2.created_at) FROM audit a2
+                    WHERE a2.task_id = t.id
+                      AND a2.to_status IN ('in_progress', 'review', 'merge_pending')),
+                   '1970-01-01'
+                 )
+             ) < ?`
         )
-        .all() as Array<{ id: string; status: string }>;
+        .all(MAX_S4_RECOVERIES) as Array<{ id: string; status: string }>;
 
       if (failedRows.length > 0) {
         const ids = failedRows.map((r) => r.id);
