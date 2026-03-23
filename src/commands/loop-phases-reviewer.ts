@@ -115,9 +115,13 @@ export async function runReviewerPhase(
     }
     reviewerResults = reviewerInvocation.result;
 
-    const failedReviewerIndex = reviewerResults.findIndex((res) => !res.success || res.timedOut);
-    if (failedReviewerIndex !== -1) {
-      const failedReviewer = reviewerResults[failedReviewerIndex];
+    const successfulResults = reviewerResults.filter((res) => res.success && !res.timedOut);
+    const failedResults = reviewerResults.filter((res) => !res.success || res.timedOut);
+
+    if (failedResults.length > 0 && successfulResults.length === 0) {
+      // All reviewers failed — handle as provider failure
+      const failedReviewer = failedResults[0];
+      const failedReviewerIndex = reviewerResults.indexOf(failedReviewer);
       const failedConfig = reviewerConfigs[failedReviewerIndex];
       const providerName =
         failedReviewer.provider ??
@@ -129,6 +133,20 @@ export async function runReviewerPhase(
         failedConfig?.model ??
         phaseConfig.ai?.reviewer?.model ??
         'unknown';
+
+      // Check for credit/rate limit before generic failure handling
+      const registry = await getProviderRegistry();
+      const prov = registry.tryGet(providerName);
+      if (prov) {
+        const classified = prov.classifyResult(failedReviewer);
+        if (classified?.type === 'credit_exhaustion') {
+          return { action: 'pause_credit_exhaustion', provider: providerName, model: modelName, role: 'reviewer', message: classified.message };
+        }
+        if (classified?.type === 'rate_limit') {
+          return { action: 'rate_limit', provider: providerName, model: modelName, role: 'reviewer', message: classified.message, retryAfterMs: classified.retryAfterMs };
+        }
+      }
+
       const output = (failedReviewer.stderr || failedReviewer.stdout || '').trim();
       const failed = await handleProviderInvocationFailure(
         db,
@@ -147,6 +165,22 @@ export async function runReviewerPhase(
         return;
       }
       return;
+    }
+
+    if (failedResults.length > 0 && successfulResults.length > 0) {
+      // Partial failure: some reviewers failed but at least one succeeded.
+      // Log the failures and degrade gracefully to using successful results only.
+      for (const failedReviewer of failedResults) {
+        const failedReviewerIndex = reviewerResults.indexOf(failedReviewer);
+        const failedConfig = reviewerConfigs[failedReviewerIndex];
+        const providerName = failedReviewer.provider ?? failedConfig?.provider ?? 'unknown';
+        const modelName = failedReviewer.model ?? failedConfig?.model ?? 'unknown';
+        if (!jsonMode) {
+          console.log(`\n⚠ Reviewer ${providerName}/${modelName} failed — degrading to ${successfulResults.length} successful reviewer(s).`);
+        }
+      }
+      // Continue with only the successful results
+      reviewerResults = successfulResults;
     }
 
     clearTaskFailureCount(db, task.id);

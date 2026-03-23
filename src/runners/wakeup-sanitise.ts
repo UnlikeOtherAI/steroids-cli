@@ -2,13 +2,15 @@
  * Periodic state sanitisation for projects in wakeup
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
 import { openDatabase } from '../database/connection.js';
 import { openGlobalDatabase } from './global-db.js';
 import { loadConfig } from '../config/loader.js';
-import { parseReviewerDecisionSignal } from '../orchestrator/reviewer-decision-parser.js';
+import {
+  type StaleInvocationRow,
+  shouldSkipInvocation,
+  isRunnerProcessDead,
+  recoverOrphanedInvocation,
+} from './wakeup-sanitise-recovery.js';
 
 export interface SanitiseSettings {
   enabled: boolean;
@@ -85,68 +87,7 @@ function markPeriodicSanitiseRun(
   ).run(getSanitiseSchemaKey(projectPath));
 }
 
-export function parseReviewerDecisionFromInvocationLogContent(
-  raw: string
-): 'approve' | 'reject' | null {
-  const stdoutMessages: string[] = [];
-
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    try {
-      const parsed = JSON.parse(trimmed) as {
-        type?: string;
-        stream?: string;
-        msg?: unknown;
-      };
-      if (
-        parsed.type === 'output'
-        && parsed.stream === 'stdout'
-        && typeof parsed.msg === 'string'
-      ) {
-        stdoutMessages.push(parsed.msg);
-      }
-    } catch {
-      // Legacy/non-JSON logs are handled by fallback raw parsing below.
-    }
-  }
-
-  const parseCandidates = stdoutMessages.length > 0
-    ? [stdoutMessages.join('\n'), raw]
-    : [raw];
-
-  for (const candidate of parseCandidates) {
-    const decision = parseReviewerDecisionSignal(candidate).decision;
-    if (decision === 'approve') {
-      return 'approve';
-    }
-    if (decision === 'reject') {
-      return 'reject';
-    }
-  }
-
-  return null;
-}
-
-function parseReviewerDecisionFromLog(
-  projectPath: string,
-  invocationId: number
-): 'approve' | 'reject' | null {
-  const logPath = join(projectPath, '.steroids', 'invocations', `${invocationId}.log`);
-  if (!existsSync(logPath)) {
-    return null;
-  }
-
-  try {
-    const raw = readFileSync(logPath, 'utf-8');
-    return parseReviewerDecisionFromInvocationLogContent(raw);
-  } catch {
-    return null;
-  }
-}
+export { parseReviewerDecisionFromInvocationLogContent } from './wakeup-sanitise-recovery.js';
 
 function sanitiseProjectState(
   globalDb: ReturnType<typeof openGlobalDatabase>['db'],
@@ -201,6 +142,7 @@ function sanitiseProjectState(
     hasActiveMergeLock = false;
   }
 
+  // ── Pass 1: Stale invocations (exceeded timeout, any runner state) ──
   const staleInvocations = projectDb
     .prepare(
       `SELECT i.id, i.task_id, i.role, i.started_at_ms, i.runner_id, t.status AS task_status
@@ -211,160 +153,66 @@ function sanitiseProjectState(
          AND i.started_at_ms <= ?
        ORDER BY i.started_at_ms ASC`
     )
-    .all(staleCutoffMs) as Array<{
-    id: number;
-    task_id: string;
-    role: string;
-    started_at_ms: number;
-    runner_id: string | null;
-    task_status: string | null;
-  }>;
+    .all(staleCutoffMs) as Array<StaleInvocationRow>;
 
   for (const row of staleInvocations) {
-    if (activeTaskIds.has(row.task_id)) {
+    if (shouldSkipInvocation(row, activeTaskIds, hasActiveMergeLock, hasActiveParallelRunner, globalDb)) {
       continue;
     }
-    // Merge locks are a hard skip — don't touch tasks during merge operations.
-    if (hasActiveMergeLock) {
+    recoverOrphanedInvocation(projectDb, projectPath, row, dryRun, summary, 'stale timeout');
+  }
+
+  // ── Pass 2: Dead-runner orphans (runner process is dead, invocation >2 min old) ──
+  // Catches invocations left 'running' by crashed/killed runners without waiting 30 min.
+  const deadRunnerCutoffMs = Date.now() - 120_000;
+  const recentRunningInvocations = projectDb
+    .prepare(
+      `SELECT i.id, i.task_id, i.role, i.started_at_ms, i.runner_id, t.status AS task_status
+       FROM task_invocations i
+       LEFT JOIN tasks t ON t.id = i.task_id
+       WHERE i.status = 'running'
+         AND i.started_at_ms IS NOT NULL
+         AND i.started_at_ms > ?
+         AND i.started_at_ms <= ?
+       ORDER BY i.started_at_ms ASC`
+    )
+    .all(staleCutoffMs, deadRunnerCutoffMs) as Array<StaleInvocationRow>;
+
+  for (const row of recentRunningInvocations) {
+    if (activeTaskIds.has(row.task_id) || hasActiveMergeLock) {
       continue;
     }
-    // If a parallel runner is active, only skip if this invocation's runner is still alive
-    if (hasActiveParallelRunner && row.runner_id) {
-      const runnerRow = globalDb
-        .prepare('SELECT pid FROM runners WHERE id = ?')
-        .get(row.runner_id) as { pid: number | null } | undefined;
-      if (runnerRow) {
-        if (runnerRow.pid !== null) {
-          try {
-            process.kill(runnerRow.pid, 0);
-            continue; // Process alive, skip this invocation
-          } catch {
-            // Process dead, fall through to cleanup
-          }
-        } else {
-          continue; // No PID to check, assume alive (defensive)
-        }
-      }
-      // Runner row missing = runner is dead, proceed with cleanup
+    // Only recover if we can confirm the runner process is dead
+    if (!isRunnerProcessDead(row.runner_id, globalDb)) {
+      continue;
     }
+    recoverOrphanedInvocation(projectDb, projectPath, row, dryRun, summary, 'dead runner');
+  }
 
-    const completedAtMs = Date.now();
-    const durationMs = Math.max(0, completedAtMs - row.started_at_ms);
-    const reviewerDecision =
-      row.role === 'reviewer'
-        ? parseReviewerDecisionFromLog(projectPath, row.id)
-        : null;
+  // ── Pass 3: Orphaned task locks (task has no running invocations and no active runner) ──
+  if (!dryRun) {
+    const orphanedLocks = projectDb
+      .prepare(
+        `SELECT tl.task_id FROM task_locks tl
+         WHERE NOT EXISTS (
+           SELECT 1 FROM task_invocations i
+           WHERE i.task_id = tl.task_id AND i.status = 'running'
+         )
+         AND tl.task_id NOT IN (${
+           activeTaskIds.size > 0
+             ? [...activeTaskIds].map(() => '?').join(',')
+             : "'__none__'"
+         })`
+      )
+      .all(...(activeTaskIds.size > 0 ? [...activeTaskIds] : [])) as Array<{ task_id: string }>;
 
-    if (!dryRun) {
-      if (reviewerDecision === 'approve' && row.task_status === 'review') {
-        projectDb
-          .prepare(
-            `UPDATE task_invocations
-             SET status = 'completed',
-                 success = 1,
-                 timed_out = 0,
-                 exit_code = 0,
-                 completed_at_ms = ?,
-                 duration_ms = ?,
-                 error = COALESCE(error, 'Recovered by periodic sanitise (review approve token found).')
-             WHERE id = ? AND status = 'running'`
-          )
-          .run(completedAtMs, durationMs, row.id);
-
-        projectDb
-          .prepare(
-            `UPDATE tasks
-             SET status = 'completed',
-                 updated_at = datetime('now')
-             WHERE id = ? AND status = 'review'`
-          )
-          .run(row.task_id);
-
-        projectDb
-          .prepare(
-            `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
-             SELECT ?, 'review', 'completed', 'orchestrator', 'orchestrator',
-                    'Recovered by periodic sanitise from reviewer decision log (DECISION: APPROVE).',
-                    datetime('now')
-             WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND status = 'completed')`
-          )
-          .run(row.task_id, row.task_id);
-      } else if (reviewerDecision === 'reject' && row.task_status === 'review') {
-        projectDb
-          .prepare(
-            `UPDATE task_invocations
-             SET status = 'completed',
-                 success = 1,
-                 timed_out = 0,
-                 exit_code = 0,
-                 completed_at_ms = ?,
-                 duration_ms = ?,
-                 error = COALESCE(error, 'Recovered by periodic sanitise (review reject token found).')
-             WHERE id = ? AND status = 'running'`
-          )
-          .run(completedAtMs, durationMs, row.id);
-
-        const rejectResult = projectDb
-          .prepare(
-            `UPDATE tasks
-             SET status = 'in_progress',
-                 rejection_count = COALESCE(rejection_count, 0) + 1,
-                 updated_at = datetime('now')
-             WHERE id = ? AND status = 'review'`
-          )
-          .run(row.task_id);
-
-        if (rejectResult.changes > 0) {
-          projectDb
-            .prepare(
-              `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
-               SELECT ?, 'review', 'in_progress', 'orchestrator', 'orchestrator',
-                      'Recovered by periodic sanitise from reviewer decision log (DECISION: REJECT).',
-                      datetime('now')
-               WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND status = 'in_progress')`
-            )
-            .run(row.task_id, row.task_id);
-          projectDb
-            .prepare('DELETE FROM task_locks WHERE task_id = ?')
-            .run(row.task_id);
-        }
-      } else {
-        projectDb
-          .prepare(
-            `UPDATE task_invocations
-             SET status = 'failed',
-                 success = 0,
-                 timed_out = 1,
-                 exit_code = 1,
-                 completed_at_ms = ?,
-                 duration_ms = ?,
-                 error = COALESCE(error, 'Periodic sanitise closed stale running invocation.')
-             WHERE id = ? AND status = 'running'`
-          )
-          .run(completedAtMs, durationMs, row.id);
-        // Reset task to pending so the section is unblocked.
-        // Defense-in-depth: covers SIGKILL and crash cases where Part 1 (global-db-sessions)
-        // cleanup did not fire.
-        const resetResult = projectDb
-          .prepare(
-            `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
-             WHERE id = ? AND status = 'in_progress'`
-          )
-          .run(row.task_id);
-        if (resetResult.changes > 0) {
-          projectDb
-            .prepare('DELETE FROM task_locks WHERE task_id = ?')
-            .run(row.task_id);
-        }
-      }
-    }
-
-    if (reviewerDecision === 'approve' && row.task_status === 'review') {
-      summary.recoveredApprovals += 1;
-    } else if (reviewerDecision === 'reject' && row.task_status === 'review') {
-      summary.recoveredRejects += 1;
-    } else {
-      summary.closedStaleInvocations += 1;
+    if (orphanedLocks.length > 0) {
+      const taskIds = orphanedLocks.map((r) => r.task_id);
+      const placeholders = taskIds.map(() => '?').join(',');
+      const released = projectDb
+        .prepare(`DELETE FROM task_locks WHERE task_id IN (${placeholders})`)
+        .run(...taskIds);
+      summary.releasedTaskLocks += released.changes;
     }
   }
 
@@ -372,7 +220,7 @@ function sanitiseProjectState(
     const releasedTaskLocks = projectDb
       .prepare(`DELETE FROM task_locks WHERE expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
       .run();
-    summary.releasedTaskLocks = releasedTaskLocks.changes;
+    summary.releasedTaskLocks += releasedTaskLocks.changes;
 
     const releasedSectionLocks = projectDb
       .prepare(`DELETE FROM section_locks WHERE expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
