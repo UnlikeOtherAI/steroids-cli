@@ -871,9 +871,23 @@ export function updateTaskStatus(
 
   const oldStatus = task.status;
 
+  // When a task reaches completed, clear all operational counters.
+  // History is preserved in the audit trail — the task record should be clean.
+  if (newStatus === 'completed') {
+    db.prepare(
+      `UPDATE tasks
+       SET status = ?,
+           failure_count = 0,
+           rejection_count = 0,
+           merge_failure_count = 0,
+           last_failure_at = NULL,
+           updated_at = datetime('now')
+       WHERE id = ?`
+    ).run(newStatus, taskId);
+  }
   // Handle failure_count updates for tasks transitioning from failed status
   // Only decrement once per failure, regardless of the recovery path
-  if (oldStatus === 'failed' && (newStatus === 'pending' || newStatus === 'completed')) {
+  else if (oldStatus === 'failed' && newStatus === 'pending') {
     db.prepare(
       `UPDATE tasks
        SET status = ?,
@@ -883,13 +897,6 @@ export function updateTaskStatus(
            END,
            updated_at = datetime('now')
        WHERE id = ?`
-    ).run(newStatus, taskId);
-  }
-  // For other transitions from failed (disputed, skipped, etc.),
-  // keep failure_count unchanged but update status
-  else if (oldStatus === 'failed') {
-    db.prepare(
-      `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`
     ).run(newStatus, taskId);
   } else {
     db.prepare(
