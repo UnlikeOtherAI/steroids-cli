@@ -62,15 +62,37 @@ coder -> push task branch -> reviewer -> approve -> MERGE QUEUE -> target branch
 
 The merge queue replaces coupled reviewer-merge logic with a sequential pipeline of named steps. Each step has a clear contract: what it checks, what it returns, and what happens on failure. The main flow reads as a high-level narrative.
 
+### Single status, internal phases
+
+The merge pipeline uses **one new task status** (`merge_pending`) visible to the rest of the system. The internal state machine is tracked via a `merge_phase` column, private to the merge queue module. Every other component — task selector, wakeup checks, section-done checks, monitor — sees a single status and treats it uniformly as "active, non-terminal work."
+
+| `merge_phase` | Meaning | What runs |
+|----------------|---------|-----------|
+| `queued` | Awaiting merge attempt | `processMergeQueue` |
+| `rebasing` | LLM rebase coder in progress | `runRebaseCoder` |
+| `rebase_review` | Rebase review in progress | `runRebaseReview` |
+
+This eliminates the need for 3 new statuses, 3 new action types, 3 new dispatch branches, and a `MERGE_PIPELINE_ACTIVE_STATUSES` constant across 17+ call sites. Instead: one status added to each status set, one new action type (`merge`), one dispatch branch.
+
 ### Pipeline overview
 
 ```typescript
 // merge-queue.ts — desired shape
-async function processMergeQueue(db: Database, config: SteroidsConfig): Promise<void> {
-  const task = selectMergePendingTask(db);
-  if (!task) return;
+async function processMergeQueue(db: Database, task: Task, config: SteroidsConfig): Promise<void> {
+  const phase = task.merge_phase ?? 'queued';
 
-  if (!acquireMergeLock(db, config)) return;  // another merge in progress
+  switch (phase) {
+    case 'queued':
+      return handleMergeAttempt(db, task, config);
+    case 'rebasing':
+      return handleRebaseCoder(db, task, config);
+    case 'rebase_review':
+      return handleRebaseReview(db, task, config);
+  }
+}
+
+async function handleMergeAttempt(db: Database, task: Task, config: SteroidsConfig): Promise<void> {
+  if (!acquireMergeLock(db, config)) return;  // another merge in progress, retry next iteration
 
   try {
     const prepared = fetchAndPrepare(db, task, config);
@@ -85,13 +107,8 @@ async function processMergeQueue(db: Database, config: SteroidsConfig): Promise<
       return;
     }
 
-    if (mergeResult.reason === 'conflicts') {
-      // Deterministic rebase failed with conflicts — needs LLM
-      transitionToRebasePending(db, task, mergeResult.reason);
-      return;
-    }
-
-    // Should not reach here — all merge outcomes handled above
+    // Deterministic rebase failed with conflicts — needs LLM
+    transitionToRebasing(db, task);
   } finally {
     releaseMergeLock(db, config);
   }
@@ -133,7 +150,7 @@ function transitionAfterReviewerApproval(
   db: Database, task: Task, slotPath: string, config: SteroidsConfig
 ): void
 // Contract:
-//   - Approve: task transitions to 'merge_pending' (NOT direct merge)
+//   - Approve: task transitions to 'merge_pending' with merge_phase = 'queued'
 //   - SOLE authority for setting approved_sha: fetches current HEAD of remote
 //     steroids/task-<taskId> and records it as task.approved_sha
 //   - Reject: task returns to 'pending' (existing behavior)
@@ -147,17 +164,7 @@ The reviewer **never merges**. `mergeToBase` is removed from the reviewer phase.
 
 ### Phase 3: Merge gate — named steps
 
-The merge gate operates on tasks in `merge_pending` status. Each step is a named function.
-
-#### `selectMergePendingTask`
-
-```typescript
-function selectMergePendingTask(db: Database): Task | null
-// Contract:
-//   - Returns the oldest task with status 'merge_pending'
-//   - Returns null if no tasks are waiting
-//   - Task selector gains a new action type: 'merge'
-```
+The merge gate operates on tasks in `merge_pending` status with `merge_phase = 'queued'`.
 
 #### `acquireMergeLock` / `releaseMergeLock`
 
@@ -165,11 +172,10 @@ function selectMergePendingTask(db: Database): Task | null
 function acquireMergeLock(db: Database, config: SteroidsConfig): boolean
 // Contract:
 //   - One merge attempt at a time per project (keyed by project path)
-//   - Lock scope: covers ONLY the rebase + ff-only + target branch push (seconds, not minutes)
+//   - Lock scope: covers ONLY the deterministic rebase + ff-only + target branch push (seconds)
 //   - Does NOT hold lock during LLM rebase cycle
 //   - Uses the existing epoch-based locking pattern (workspace_merge_locks + epoch column)
-//     to handle crash recovery — a new contender invalidates the stale holder's epoch
-//   - Returns true if acquired, false if another merge is in progress
+//   - Returns true if acquired, false if contended (handler returns immediately, task retried next iteration)
 ```
 
 #### `fetchAndPrepare`
@@ -199,9 +205,8 @@ function attemptRebaseAndFastForward(
 //   - If rebase succeeds (no conflicts): runs ff-only again, returns { merged: true }
 //   - If rebase fails (conflicts): aborts rebase, returns { merged: false, reason: 'conflicts' }
 //
-// This preserves the current mergeToBase performance characteristic: most merges
-// after concurrent work are simple rebases with no conflicts, handled in milliseconds
-// without LLM involvement. Only true conflicts escalate to the rebase coder.
+// Preserves current mergeToBase performance: most concurrent merges are simple
+// rebases with no conflicts, handled in milliseconds without LLM involvement.
 ```
 
 #### `pushTargetBranch`
@@ -214,7 +219,7 @@ function pushTargetBranch(
 //   - Pushes target branch to remote with pushWithRetries
 //   - This is the real race point — another merge could have pushed between our ff-only and our push
 //   - If push fails due to non-ff rejection: returns { ok: false, raceLoss: true }
-//     -> task returns to merge_pending for retry, does NOT count toward any cap
+//     -> task stays in merge_pending/queued for retry, does NOT count toward any cap
 //   - If push fails due to infrastructure: returns { ok: false }
 //     -> task -> blocked_error
 ```
@@ -227,8 +232,7 @@ function cleanupTaskBranch(
 ): void
 // Contract:
 //   - Deletes steroids/task-<taskId> from local and remote
-//   - Failure is non-fatal (branch cleanup is best-effort)
-//   - Orphan branches are caught by existing `steroids gc` and wakeup cleanup
+//   - Failure is non-fatal (orphan branches caught by existing `steroids gc`)
 ```
 
 #### `markCompleted`
@@ -236,7 +240,7 @@ function cleanupTaskBranch(
 ```typescript
 function markCompleted(db: Database, task: Task): void
 // Contract:
-//   - Task status -> 'completed'
+//   - Task status -> 'completed', clears merge_phase
 //   - Clears task branch reference
 ```
 
@@ -244,34 +248,23 @@ function markCompleted(db: Database, task: Task): void
 
 ### Phase 4: Rebase cycle — named steps
 
-When deterministic rebase fails with conflicts, the task needs LLM-powered conflict resolution.
+When deterministic rebase fails with conflicts, the task needs LLM-powered conflict resolution. The rebase cycle is internal to the merge queue — the task stays in `merge_pending` status throughout.
 
-#### `transitionToRebasePending`
+#### `transitionToRebasing`
 
 ```typescript
-function transitionToRebasePending(
-  db: Database, task: Task, reason: string
-): void
+function transitionToRebasing(db: Database, task: Task): void
 // Contract:
-//   - Task status -> 'rebase_pending'
-//   - Increments total_rebase_cycles counter
-//   - If total_rebase_cycles >= maxTotalRebaseCycles (default 10): task -> 'disputed'
+//   - Sets merge_phase = 'rebasing'
+//   - Increments rebase_attempts counter
+//   - If rebase_attempts >= maxRebaseAttempts (default 3): task -> 'disputed'
 //   - Records divergence reason for audit trail
 ```
 
-#### `selectRebasePendingTask`
+#### `handleRebaseCoder`
 
 ```typescript
-function selectRebasePendingTask(db: Database): Task | null
-// Contract:
-//   - Returns the oldest task with status 'rebase_pending'
-//   - Task selector gains a new action type: 'rebase'
-```
-
-#### `runRebaseCoder`
-
-```typescript
-function runRebaseCoder(
+function handleRebaseCoder(
   db: Database, task: Task, config: SteroidsConfig
 ): { ok: boolean; error?: string }
 // Contract:
@@ -281,137 +274,142 @@ function runRebaseCoder(
 //   - Resolves any conflicts
 //   - Ensures code still works after rebase (runs build/test if configured)
 //   - Force-pushes the updated task branch (--force-with-lease)
-//   - Success: task -> 'rebase_review', updates task.approved_sha to new HEAD
+//   - Success: sets merge_phase = 'rebase_review'
 //   - Failure (LLM cannot resolve conflicts): task -> 'disputed' (not blocked_error)
 //   - Failure (infrastructure — git/network): task -> 'blocked_error'
+//   - Does NOT set approved_sha — that is the rebase reviewer's responsibility
 ```
 
-#### `runRebaseReview`
+#### `handleRebaseReview`
 
 ```typescript
-function runRebaseReview(
+function handleRebaseReview(
   db: Database, task: Task, config: SteroidsConfig
 ): { decision: 'approve' | 'reject' }
 // Contract:
 //   - Runs existing reviewer on the rebased task branch
 //   - Reviewer sees: original approved code + rebase changes, reviews only the delta
-//   - Task selector gains a new action type: 'rebase_review'
-//   - Approve: re-records task.approved_sha = current remote HEAD, task -> 'merge_pending'
-//   - Reject: increment rebase_review_rejection_count
-```
-
-#### `handleRebaseReviewRejection`
-
-```typescript
-function handleRebaseReviewRejection(
-  db: Database, task: Task
-): void
-// Contract:
-//   - Only REVIEW REJECTIONS count toward the 2-cycle cap (not ff-only race losses)
-//   - If rebase_review_rejection_count < 2: task -> 'rebase_pending' (retry rebase)
-//   - If rebase_review_rejection_count >= 2: task -> 'disputed' (human intervention)
+//   - Approve: re-records task.approved_sha = current remote HEAD,
+//     sets merge_phase = 'queued' (retry merge)
+//   - Reject: sets merge_phase = 'rebasing' (retry rebase),
+//     increments rebase_attempts (may trigger disputed if cap reached)
 ```
 
 #### Rebase cycle state machine
 
 ```
-merge_pending -> [ff-only] -> [deterministic rebase] -> [ff-only] -> completed
-                                      |
-                                 [conflicts]
-                                      |
-                rebase_pending -> rebase coder -> rebase_review -> [approve] -> merge_pending (retry)
-                      ^                |                   |
-                      |           [LLM fail]         [reject, count < 2]
-                      |                |                   |
-                      |            disputed                |
-                      +------------------------------------+
-                                                           |
-                                                     [reject, count >= 2]
-                                                           |
-                                                       disputed
+merge_pending (queued) -> [ff-only] -> [deterministic rebase] -> [ff-only] -> completed
+                                              |
+                                         [conflicts]
+                                              |
+                   merge_pending (rebasing) -> rebase coder -> merge_pending (rebase_review)
+                          ^                       |                     |
+                          |                  [LLM fail]           [reject, count < 3]
+                          |                       |                     |
+                          |                   disputed                  |
+                          +---------------------------------------------+
+                                                                        |
+                                                                  [reject, count >= 3]
+                                                                        |
+                                                                    disputed
+
+                   merge_pending (rebase_review) -> [approve] -> merge_pending (queued) -> retry
 ```
 
-**Caps:** Two independent caps prevent unbounded cycles:
-- `rebase_review_rejection_count` (default 2): LLM-produced rebases that fail review. Escalates to `disputed`.
-- `total_rebase_cycles` (default 10): Total times through the rebase loop (including race losses). Prevents unbounded LLM spend in high-contention scenarios.
+**Single cap:** `rebase_attempts` (default 3) — incremented each time the task enters LLM rebase (conflicts requiring AI resolution). Deterministic rebases and push race losses do NOT increment this counter.
 
 ---
 
-### New task statuses
+### New task status
 
 | Status | Meaning | Terminal? |
 |--------|---------|-----------|
-| `merge_pending` | Reviewer approved, waiting for merge queue | No |
-| `rebase_pending` | Needs rebase before merge can succeed | No |
-| `rebase_review` | Rebase complete, waiting for verification review | No |
+| `merge_pending` | In the merge pipeline (queued, rebasing, or under rebase review) | No |
+
+New columns on tasks table:
+- `merge_phase TEXT` — `'queued'`, `'rebasing'`, `'rebase_review'` (NULL when not in merge pipeline)
+- `approved_sha TEXT` — SHA blessed by reviewer, verified before merge
+- `rebase_attempts INTEGER DEFAULT 0` — LLM rebase cycle count, cap at 3
 
 ### Status propagation table
 
-Every hardcoded status set in the codebase must be updated. The implementation should introduce a shared `MERGE_PIPELINE_ACTIVE_STATUSES` constant (`['merge_pending', 'rebase_pending', 'rebase_review']`) used by all sites below, rather than adding three items to each independent list.
+One new status (`merge_pending`) added to each hardcoded status set:
 
 | Call site | File | Current set | Required change |
 |-----------|------|-------------|-----------------|
-| `hasPendingOrInProgressWork` | `task-selector.ts:62` | `IN ('pending', 'in_progress', 'review')` | Add `merge_pending, rebase_pending, rebase_review` — without this, runner loop exits with "ALL TASKS COMPLETE" while tasks sit in merge pipeline |
-| `selectNextTaskWithWait` exit | `task-selector.ts:504` | `pending === 0 && in_progress === 0 && review === 0` | Include merge pipeline statuses in active count |
-| `selectTaskBatch` active count | `task-selector.ts:160` | `IN ('in_progress', 'review')` | Add merge pipeline statuses to prevent duplicate dispatch |
-| `findNextTask` pending work | `queries.ts` | `NOT IN (completed, failed, skipped, disputed)` | Add merge pipeline statuses as non-terminal active |
-| `hasDependenciesMet` | `queries.ts` | `completed` only | No change — only `completed` unblocks dependents |
-| `buildParallelRunPlan` | `runners-parallel.ts:125` | `NOT IN (completed, disputed, skipped, failed, partial, blocked_error, blocked_conflict)` | Uses exclusion — new statuses correctly included. Must use shared constant. |
-| `selectNextTaskWithLock` routing | `task-selector.ts` | `pending->start, in_progress->resume, review->review` | Add: `merge_pending->merge, rebase_pending->rebase, rebase_review->rebase_review` |
-| `getTaskCounts` | `task-selector.ts:246` | Counts `pending, in_progress, review, completed, disputed, failed` | Add buckets for merge pipeline statuses |
-| `wakeup-checks.ts` pending work | `wakeup-checks.ts:57` | `IN ('pending', 'in_progress', 'review')` | Add merge pipeline statuses — without this, wakeup won't spawn runners for merge/rebase work |
-| `getSectionCounts` | `section-pr.ts:37` | `IN ('pending','in_progress','review','partial')` | Add merge pipeline statuses — without this, PRs created before code reaches target |
-| Section "done" check | `tasks.ts:1111` | `['pending', 'in_progress', 'review', 'partial']` | Add merge pipeline statuses to NOT-done set |
-| `followUpEligibilityFilter` | `queries.ts:1366` | `IN ('pending', 'in_progress', 'review')` | Add merge pipeline statuses — without this, follow-ups start before primary work merges |
-| `STATUS_MARKERS` | `queries.ts:23` | Maps each status to display marker | Add entries for `merge_pending`, `rebase_pending`, `rebase_review` |
-| `SelectedTask.action` type | `task-selector.ts:25` | `'review' \| 'resume' \| 'start'` | Extend union: `\| 'merge' \| 'rebase' \| 'rebase_review'` |
-| `orchestrator-loop` dispatch | `orchestrator-loop.ts:338` | `if start / else if resume / else if review` | Add: `else if merge / else if rebase / else if rebase_review` |
-| Foreground `loop` dispatch | `loop.ts:372` | `if start / else if resume / else if review` | Filter out merge/rebase statuses — foreground loop does NOT handle merge pipeline (daemon only) |
-| `TERMINAL_STATUSES` (disputes) | `disputes/behavior.ts:247` | `['completed', 'disputed', 'failed']` | Pre-existing gap (missing `skipped`). New statuses are non-terminal — no change needed here. |
+| `hasPendingOrInProgressWork` | `task-selector.ts:62` | `IN ('pending', 'in_progress', 'review')` | Add `'merge_pending'` |
+| `selectNextTaskWithWait` exit | `task-selector.ts:504` | `pending === 0 && in_progress === 0 && review === 0` | Add `merge_pending` to active count |
+| `selectTaskBatch` active count | `task-selector.ts:160` | `IN ('in_progress', 'review')` | Add `'merge_pending'` |
+| `findNextTask` pending work | `queries.ts` | `NOT IN (completed, failed, skipped, disputed)` | Uses exclusion — `merge_pending` correctly included |
+| `hasDependenciesMet` | `queries.ts` | `completed` only | No change |
+| `buildParallelRunPlan` | `runners-parallel.ts:125` | `NOT IN (completed, disputed, ...)` | Uses exclusion — correctly included |
+| `selectNextTaskWithLock` routing | `task-selector.ts` | `pending->start, in_progress->resume, review->review` | Add: `merge_pending->merge` |
+| `getTaskCounts` | `task-selector.ts:246` | Named buckets for each status | Add `merge_pending` bucket |
+| `wakeup-checks.ts` pending work | `wakeup-checks.ts:57` | `IN ('pending', 'in_progress', 'review')` | Add `'merge_pending'` |
+| `getSectionCounts` | `section-pr.ts:37` | `IN ('pending','in_progress','review','partial')` | Add `'merge_pending'` |
+| Section "done" check | `tasks.ts:1111` | `['pending', 'in_progress', 'review', 'partial']` | Add `'merge_pending'` |
+| `followUpEligibilityFilter` | `queries.ts:1366` | `IN ('pending', 'in_progress', 'review')` | Add `'merge_pending'` |
+| `STATUS_MARKERS` | `queries.ts:23` | Maps each status to display marker | Add `merge_pending` entry |
+| `SelectedTask.action` type | `task-selector.ts:25` | `'review' \| 'resume' \| 'start'` | Add `\| 'merge'` |
+| `orchestrator-loop` dispatch | `orchestrator-loop.ts:338` | `if start / else if resume / else if review` | Add `else if merge` -> `processMergeQueue` |
+| Foreground `loop` dispatch | `loop.ts:372` | `if start / else if resume / else if review` | Add `else if merge` -> `processMergeQueue` (same handler) |
+| `VALID_TASK_STATUSES` | `investigator-actions.ts:24` | Whitelist of valid statuses | Add `'merge_pending'` |
+| `hasPendingWork` (scanner) | `scanner.ts:148` | `IN ('pending', 'in_progress', 'review')` | Add `'merge_pending'` |
+| `scanHighInvocations` | `scanner-queries.ts:67` | `NOT IN ('completed', 'skipped', ...)` | Uses exclusion — correctly included |
+| Stuck task detector | `stuck-task-detector.ts:258` | `IN ('in_progress', 'review')` | Add `'merge_pending'` for hanging invocation detection |
 
-### Task selector action types
+### Task selector
 
-The task selector returns an action type that the orchestrator uses to route dispatch:
+One new action type. The merge queue handler internally routes based on `merge_phase`:
 
 | Status | Action | Handler |
 |--------|--------|---------|
 | `pending` | `start` | `runCoderPhase` |
 | `in_progress` | `resume` | `runCoderPhase` |
 | `review` | `review` | `runReviewerPhase` |
-| `merge_pending` | `merge` | `processMergeQueue` |
-| `rebase_pending` | `rebase` | `runRebaseCoder` |
-| `rebase_review` | `rebase_review` | `runRebaseReview` |
+| `merge_pending` | `merge` | `processMergeQueue` (routes internally via `merge_phase`) |
 
-**Foreground `loop` command:** Does NOT support merge/rebase actions. The task selector in foreground mode filters out `merge_pending`, `rebase_pending`, `rebase_review` statuses. Merge pipeline runs only in daemon mode.
+Both foreground `loop` and daemon mode handle the `merge` action — the merge lock provides serialization regardless of which process drives the loop.
 
-### Runtime environment for merge/rebase handlers
+### Runtime environment for merge handler
 
-| Action | Pool slot | Merge lock | Heartbeat | Expected duration |
-|--------|-----------|------------|-----------|-------------------|
-| `merge` | Claims a pool slot for git operations | Acquires merge lock (epoch-based) | Pool slot heartbeat + task lock heartbeat | Seconds (rebase + ff-only + push) |
-| `rebase` | Claims a pool slot for LLM coder work | No merge lock (lock is per-merge-attempt only) | Pool slot heartbeat + task lock heartbeat | 5-30 minutes (LLM invocation) |
-| `rebase_review` | Claims a pool slot for reviewer work | No merge lock | Pool slot heartbeat + task lock heartbeat | 5-15 minutes (LLM invocation) |
+| `merge_phase` | Pool slot | Merge lock | Expected duration |
+|---------------|-----------|------------|-------------------|
+| `queued` | Claims pool slot | Acquires merge lock (epoch-based) | Seconds (rebase + ff-only + push) |
+| `rebasing` | Claims pool slot | No merge lock | 5-30 minutes (LLM invocation) |
+| `rebase_review` | Claims pool slot | No merge lock | 5-15 minutes (LLM invocation) |
 
-**Lock nesting order:** task lock (outer) -> merge lock (inner). The merge lock is never held while waiting for the task lock. The merge lock uses non-blocking acquisition (`acquireMergeLock` returns false immediately if contended).
+**Lock nesting order:** task lock (outer) -> merge lock (inner). Merge lock uses non-blocking acquisition — returns false immediately if contended, task retried next iteration.
 
 ### Merge lock
 
 - One merge attempt at a time per project (keyed by project path)
-- Lock acquired before rebase + ff-only attempt, released after push or on failure
-- Lock covers the deterministic rebase + ff-only + push window (seconds) — does NOT hold during LLM rebase cycles
-- Uses epoch-based locking (existing `workspace_merge_locks` + `epoch` column pattern from `012_add_merge_lock_epoch.sql`) — a new contender invalidates stale holders
-- Tasks waiting for the lock stay in `merge_pending` — the task selector picks them up when the lock is free
+- Lock scope: deterministic rebase + ff-only + push only (seconds)
+- Uses epoch-based locking (existing `workspace_merge_locks` pattern) for crash recovery
+- Contention is handled by the merge handler, not the task selector — no coupling between them
 
 ### SHA tracking
 
-`approved_sha` has a single owner: the reviewer (or rebase reviewer) at approval time.
+`approved_sha` has exactly two writers: the initial reviewer and the rebase reviewer.
 
 1. `pushTaskBranchForDurability`: pushes branch only, does NOT set `approved_sha`
-2. `transitionAfterReviewerApproval`: SOLE authority — fetches remote HEAD of `steroids/task-<taskId>`, records as `task.approved_sha`, transitions to `merge_pending`
+2. `transitionAfterReviewerApproval`: SOLE initial authority — fetches remote HEAD, records as `task.approved_sha`
 3. `fetchAndPrepare`: verifies `task branch HEAD === task.approved_sha` before merge
-4. `runRebaseCoder`: updates `task.approved_sha` to new HEAD after force-push
-5. `runRebaseReview` (approve): re-records `task.approved_sha` from remote HEAD at approval time — guards against modification between rebase coder and merge gate
-6. If SHA mismatch detected in `fetchAndPrepare`: task returns to `review` status for re-review
+4. `handleRebaseCoder`: does NOT set `approved_sha` — it is not a reviewer
+5. `handleRebaseReview` (approve): re-records `task.approved_sha` from remote HEAD at approval time
+6. If SHA mismatch in `fetchAndPrepare`: task returns to `review` for re-review
+
+### Health system integration
+
+The monitor, sanitizer, and stuck-task detector must be merge-pipeline-aware:
+
+**Wakeup sanitizer (`wakeup-sanitise-recovery.ts`):** The reviewer-approval recovery path (lines 133-157) currently marks `review` tasks as `completed` when it recovers an approve token. Under the new design, recovered reviewer approvals must transition to `merge_pending` (with `merge_phase = 'queued'` and `approved_sha` recorded), not `completed`. This prevents the sanitizer from bypassing the merge queue.
+
+**Stuck task detector (`stuck-task-detector.ts`):** The hanging invocation query (line 258) only checks `('in_progress', 'review')`. Add `'merge_pending'` so tasks stuck in the merge pipeline (e.g., LLM rebase taking too long) are detected and reported.
+
+**Monitor scanner (`scanner.ts`):** `hasPendingWork` (line 148) must include `'merge_pending'`. Without this, projects with tasks in the merge pipeline appear idle, triggering false-positive "idle project" anomalies and unnecessary wakeup actions.
+
+**First responder (`investigator-actions.ts`):** `VALID_TASK_STATUSES` (line 24) must include `'merge_pending'` so the first responder can perform manual recovery on merge-pipeline tasks.
 
 ---
 
@@ -434,7 +432,7 @@ The task selector returns an action type that the orchestrator uses to route dis
 | Pool slot lifecycle (`pool.ts`, `git-lifecycle.ts`) | Coder still works in pool slots |
 | `pushWithRetries` (`git-helpers.ts`) | Still used for task branch and target branch pushes |
 | `prepareForTask` (`git-lifecycle.ts`) | Still sets up pool slot for coder work |
-| Task selector (`task-selector.ts`) | Extended to handle new statuses and action types |
+| Task selector (`task-selector.ts`) | Extended with one new action type (`merge`) |
 | Reviewer phase (`loop-phases-reviewer.ts`) | Still reviews, just doesn't merge |
 | Workspace merge lock pattern + epoch | Reused for merge queue serialization |
 
@@ -450,21 +448,21 @@ The task selector returns an action type that the orchestrator uses to route dis
 ### Phase 2+3: Decouple review + merge gate (atomic)
 These ship together so `merge_pending` tasks always have a processor.
 
-4. Add `merge_pending`, `rebase_pending`, `rebase_review` statuses to `TaskStatus` enum
-5. Add `approved_sha`, `rebase_review_rejection_count`, `total_rebase_cycles` columns to tasks table (migration)
-6. Add `MERGE_PIPELINE_ACTIVE_STATUSES` constant, update ALL call sites in the propagation table
-7. Extend `SelectedTask.action` union type; add dispatch handlers in orchestrator-loop
-8. Filter merge/rebase statuses from foreground `loop` task selector
-9. Reviewer approval transitions to `merge_pending` (records `approved_sha`) instead of calling `mergeToBase`
-10. Remove `mergeToBase` call from reviewer phase
-11. New merge gate module: `selectMergePendingTask` -> `acquireMergeLock` (epoch-based) -> `fetchAndPrepare` (SHA verify) -> `attemptRebaseAndFastForward` (deterministic rebase + ff-only) -> `pushTargetBranch` -> `cleanupTaskBranch` -> `markCompleted`
-12. Failure path: `transitionToRebasePending` (with `total_rebase_cycles` cap)
+4. Add `merge_pending` status to `TaskStatus` enum
+5. Add `merge_phase`, `approved_sha`, `rebase_attempts` columns to tasks table (migration)
+6. Update all call sites in the propagation table (one status per site)
+7. Extend `SelectedTask.action` union with `'merge'`; add dispatch handler in orchestrator-loop and foreground loop
+8. Reviewer approval transitions to `merge_pending` (records `approved_sha`, sets `merge_phase = 'queued'`) instead of calling `mergeToBase`
+9. Remove `mergeToBase` call from reviewer phase
+10. New merge gate module: `processMergeQueue` with internal routing via `merge_phase`
+11. Merge lock per project (epoch-based)
+12. Update wakeup sanitizer reviewer-approval recovery to transition to `merge_pending` instead of `completed`
+13. Update stuck-task-detector, scanner `hasPendingWork`, and `VALID_TASK_STATUSES` for `merge_pending`
 
 ### Phase 4: Rebase cycle
-13. `runRebaseCoder` — rebase-specific prompt (rebase onto target, resolve conflicts, verify build). Failure = `disputed` (task-level), not `blocked_error` (infrastructure)
-14. `runRebaseReview` — lighter review focused on conflict resolution quality. Re-records `approved_sha` on approval.
-15. `handleRebaseReviewRejection` — cycle tracking: only review rejections count toward 2-cap, total cycles count toward 10-cap
-16. Rebase cycle state machine wired into task selector
+14. `handleRebaseCoder` — rebase-specific prompt (rebase onto target, resolve conflicts, verify build). Failure = `disputed` (task-level), not `blocked_error` (infrastructure)
+15. `handleRebaseReview` — lighter review focused on conflict resolution quality. Re-records `approved_sha` on approval.
+16. `rebase_attempts` cap (default 3) — incremented on LLM rebase entry only
 
 ### Phase 5: Cleanup
 17. Remove `autoMergeOnCompletion` from daemon
@@ -480,18 +478,18 @@ These ship together so `merge_pending` tasks always have a processor.
 |----------|----------|
 | Push succeeds but task branch already on remote (no-op coder) | `git push` returns "Everything up-to-date" — not an error, proceed to review |
 | Two tasks approved simultaneously, both try merge | Merge lock serializes — first wins ff-only, second gets deterministic rebase attempt. If no conflicts, merges without LLM. |
-| Rebase coder introduces new bugs | Rebase review catches it, rejects, rebase review rejection count increments |
+| Rebase coder introduces new bugs | Rebase review catches it, rejects, rebase_attempts increments |
 | Target branch force-pushed externally | ff-only will fail, deterministic rebase attempted first, conflicts escalate to LLM rebase coder |
 | Task branch deleted from remote while in review | Reviewer fetch fails — transition to `blocked_error`, not silent skip |
 | Task branch modified after approval (SHA mismatch) | `fetchAndPrepare` detects mismatch, task returns to `review` for re-review |
-| ff-only succeeds but target push fails (race) | Another merge pushed between ff-only and push. Task returns to `merge_pending` for retry. Does NOT count toward any cap. |
+| ff-only succeeds but target push fails (race) | Task stays in `merge_pending/queued` for retry. Does NOT increment `rebase_attempts`. |
 | Multiple tasks hit rebase cap simultaneously | Each escalates to `disputed` independently |
-| Local-only project (no remote) | No task branch push, no merge queue. Work stays local. Existing local behavior preserved — out of scope. |
-| Rebase succeeds but ff-only still fails (concurrent merge) | Normal — re-enter merge gate. Deterministic rebase handles most cases without LLM. `total_rebase_cycles` cap (10) prevents unbounded looping. |
-| Crash during merge (lock held) | Epoch-based lock — new contender invalidates stale holder's epoch, acquires lock normally |
-| High-contention project (many concurrent merges) | `total_rebase_cycles` cap (10) prevents any single task from unbounded bounce. Most concurrent merges resolve via deterministic rebase (no LLM). |
-| `blocked_error` dependency interaction | `blocked_error` is in `SECTION_DEP_TERMINAL` but NOT in `TASK_DEP_TERMINAL`. Section-level deps may treat it as done; task-level deps correctly block. This is pre-existing behavior, not introduced by merge queue. |
-| Foreground `loop` encounters merge_pending task | Filtered out — foreground loop only handles `start`, `resume`, `review`. Merge pipeline runs in daemon mode only. |
+| Local-only project (no remote) | No task branch push, no merge queue. Existing local behavior preserved — out of scope. |
+| Rebase succeeds but ff-only still fails (concurrent merge) | Normal — re-enter merge gate. Deterministic rebase handles most cases without LLM. |
+| Crash during merge (lock held) | Epoch-based lock — new contender invalidates stale holder's epoch |
+| Sanitizer recovers reviewer approval | Transitions to `merge_pending/queued` (not `completed`), preserving merge queue path |
+| Monitor detects stuck merge_pending task | Stuck-task-detector catches hanging invocations; first responder can reset via `update_task` |
+| Foreground `loop` picks up merge_pending task | Handled normally — `processMergeQueue` runs the same in both modes, merge lock serializes |
 
 ## Non-Goals
 
@@ -500,108 +498,113 @@ These ship together so `merge_pending` tasks always have a processor.
 - Multi-remote support — single remote per project (`config.git.remote`)
 - Changing the coder or reviewer prompt formats — only the merge/rebase pipeline changes
 - Local-only project merge improvements — out of scope
-- Drain mode (stop all runners for rebase) — deferred from v1; simple `disputed` escalation is sufficient
+- Drain mode (stop all runners for rebase) — deferred; simple `disputed` escalation is sufficient
 - `blocked_error` lifecycle redesign — pre-existing concern, handled by wakeup sanitizer retries
-- Branch GC mechanism — orphan branches handled by existing `steroids gc` and wakeup cleanup
+- Centralized `STATUS_SETS` refactor — valuable follow-up but broader than merge queue scope
 
 ## Cross-Provider Review — Round 1
 
 **Reviewers:** Claude (`superpowers:code-reviewer`) and Codex
 **Date:** 2026-03-23
 
-### Finding 1: Remove drain mode from v1 (Claude Critical, Codex Critical)
-**Assessment:** Both reviewers flagged drain mode as over-engineered with deadlock risk.
-**Decision:** ADOPT. Removed drain mode entirely. Tasks escalate to `disputed` after 2 failed rebase review cycles.
+### R1-1: Remove drain mode from v1 (Claude Critical, Codex Critical)
+**Decision:** ADOPT. Removed. Tasks escalate to `disputed` after failed rebase cycles.
 
-### Finding 2: Add SHA tracking for approved commits (Claude Important, Codex Important)
-**Assessment:** Without SHA tracking, a task branch could be modified between reviewer approval and merge gate processing.
-**Decision:** ADOPT. Added `approved_sha` column, recorded at approval time, verified in `fetchAndPrepare`, updated after rebase force-push.
+### R1-2: Add SHA tracking for approved commits (Claude Important, Codex Important)
+**Decision:** ADOPT. Added `approved_sha` column, verified before merge.
 
-### Finding 3: Fix merge gate race — push is the real race point (Claude Important)
-**Assessment:** `git merge --ff-only` is local. The race is between the local merge succeeding and `git push` of the target branch.
-**Decision:** ADOPT. `pushTargetBranch` handles non-ff push rejection by returning task to `merge_pending` for retry.
+### R1-3: Fix merge gate race — push is the real race point (Claude Important)
+**Decision:** ADOPT. `pushTargetBranch` handles non-ff push rejection.
 
-### Finding 4: Only count rebase REVIEW REJECTIONS toward cycle cap (Codex Important)
-**Assessment:** ff-only race losses are normal and shouldn't penalize the task.
-**Decision:** ADOPT. Renamed counter to `rebase_review_rejection_count`. Only review rejections increment it.
+### R1-4: Only count rebase REVIEW REJECTIONS toward cycle cap (Codex Important)
+**Decision:** ADOPT. Only LLM rebase entries increment the cap.
 
-### Finding 5: Add status propagation table (Claude Critical, Codex Important)
-**Assessment:** New statuses must propagate through every hardcoded status set.
-**Decision:** ADOPT. Added propagation table mapping each call site to required changes.
+### R1-5: Add status propagation table (Claude Critical, Codex Important)
+**Decision:** ADOPT. Full propagation table added.
 
-### Finding 6: Merge lock scope — seconds, not entire rebase cycle (Claude Important)
-**Assessment:** Holding the merge lock during LLM rebase would block all merges for minutes.
-**Decision:** ADOPT. Lock scope covers rebase + ff-only + push only.
+### R1-6: Merge lock scope — seconds, not entire rebase cycle (Claude Important)
+**Decision:** ADOPT. Lock covers deterministic rebase + ff-only + push only.
 
-### Finding 7: Implement Phases 2+3 atomically (Codex Important)
-**Assessment:** If `merge_pending` exists without a merge gate processor, approved tasks strand.
-**Decision:** ADOPT. Phases 2 and 3 merged into single atomic step.
+### R1-7: Implement Phases 2+3 atomically (Codex Important)
+**Decision:** ADOPT. Single atomic deployment.
 
-### Finding 8: Specify task selector action types (Claude Suggestion, Codex Suggestion)
-**Assessment:** New statuses need new action types for dispatch routing.
-**Decision:** ADOPT. Added action type table.
+### R1-8: Specify task selector action types (Claude Suggestion, Codex Suggestion)
+**Decision:** ADOPT. Action type table added.
 
-### Finding 9: Migration plan for in-flight tasks (Codex Suggestion)
-**Assessment:** Tasks in `review` need handling during migration.
-**Decision:** ADOPT. Atomic Phase 2+3 deployment handles this naturally.
+### R1-9: Migration plan for in-flight tasks (Codex Suggestion)
+**Decision:** ADOPT. Atomic Phase 2+3 handles this naturally.
 
 ## Cross-Provider Review — Round 2
 
 **Reviewers:** Claude (`superpowers:code-reviewer`) and Gemini (`gemini -p`)
 **Date:** 2026-03-23
 
-### Finding R2-1: Status propagation table incomplete — 10+ missing call sites (Claude Critical)
-**Assessment:** Valid. Claude traced through the actual codebase and found `hasPendingOrInProgressWork`, `selectNextTaskWithWait`, `selectTaskBatch`, `wakeup-checks.ts`, `getSectionCounts`, `tasks.ts` section done check, `getTaskCounts`, `followUpEligibilityFilter`, `STATUS_MARKERS`, `SelectedTask.action` type, foreground `loop` dispatch, and more. The original 6-row table was dangerously incomplete — `hasPendingOrInProgressWork` controls runner loop exit and would cause premature "ALL TASKS COMPLETE" declarations.
-**Decision:** ADOPT. Expanded propagation table from 6 to 17 rows. Added recommendation for shared `MERGE_PIPELINE_ACTIVE_STATUSES` constant.
+### R2-1: Status propagation table incomplete — 10+ missing call sites (Claude Critical)
+**Decision:** ADOPT. Expanded table to 20 rows.
 
-### Finding R2-2: `SelectedTask.action` type union breaks downstream (Claude Critical)
-**Assessment:** Valid. The type is `'review' | 'resume' | 'start'` — adding new action types cascades through multiple dispatch sites. The foreground `loop.ts` has no handler for merge/rebase.
-**Decision:** ADOPT. Specified type change, all dispatch sites, and that foreground loop filters out merge/rebase statuses.
+### R2-2: `SelectedTask.action` type union breaks downstream (Claude Critical)
+**Decision:** ADOPT. Specified type change and all dispatch sites.
 
-### Finding R2-3: Unbounded ff-only race loss loop (Claude Critical)
-**Assessment:** Valid. No cap on total rebase cycles means a task could bounce `merge_pending -> rebase_pending -> rebase_review -> merge_pending` indefinitely in a high-throughput project, consuming LLM invocations on every cycle.
-**Decision:** ADOPT. Added `total_rebase_cycles` counter (default 10) alongside `rebase_review_rejection_count` (default 2). Total cycles covers all loop iterations; review rejections covers LLM quality failures.
+### R2-3: Unbounded ff-only race loss loop (Claude Critical)
+**Decision:** ADOPT. Added `rebase_attempts` cap (simplified further in round 3).
 
-### Finding R2-4: `pushTaskBranchForDurability` insertion point unspecified (Claude Important)
-**Assessment:** Valid. The design said push moves to coder-to-review transition but didn't specify the exact code location.
-**Decision:** ADOPT. Specified: called from `submitForReviewWithDurableRef`, BEFORE status transitions to `review`.
+### R2-4: `pushTaskBranchForDurability` insertion point unspecified (Claude Important)
+**Decision:** ADOPT. Specified: called from `submitForReviewWithDurableRef`.
 
-### Finding R2-5: Current `mergeToBase` does cheap deterministic rebase — new design skips this (Claude Important)
-**Assessment:** Valid. The strongest finding. Currently `mergeToBase` does `git rebase` (no LLM) + ff-only inside the lock. The original design jumped straight to LLM-powered rebase on ff-only failure. In a project with 5+ parallel runners, every merge after the first in each batch would require an LLM rebase coder instead of a simple `git rebase`.
-**Decision:** ADOPT. Renamed `attemptFastForwardMerge` to `attemptRebaseAndFastForward`. It now tries ff-only first, then deterministic `git rebase`, then ff-only again. Only true conflicts (rebase fails) escalate to LLM rebase coder. Preserves current performance.
+### R2-5: Current `mergeToBase` does cheap deterministic rebase (Claude Important)
+**Decision:** ADOPT. Added deterministic rebase before LLM escalation.
 
-### Finding R2-6: No runtime environment spec for merge/rebase handlers (Claude Important)
-**Assessment:** Valid. Pool slot usage, lock nesting, heartbeat maintenance for new action types was unspecified.
-**Decision:** ADOPT. Added runtime environment table and lock nesting order specification.
+### R2-6: No runtime environment spec (Claude Important)
+**Decision:** ADOPT. Added runtime table and lock nesting order.
 
-### Finding R2-7: SHA tracking TOCTOU gap in rebase review (Claude Important)
-**Assessment:** Valid. `runRebaseReview` approval should re-record `approved_sha` at approval time, just as the initial reviewer does.
-**Decision:** ADOPT. Added explicit SHA re-recording to `runRebaseReview` approval path.
+### R2-7: SHA tracking TOCTOU gap in rebase review (Claude Important)
+**Decision:** ADOPT. Rebase reviewer re-records `approved_sha`.
 
-### Finding R2-8: `approved_sha` set by two functions (Gemini Critical)
-**Assessment:** Valid. Both `pushTaskBranchForDurability` and `transitionAfterReviewerApproval` claimed to set it.
-**Decision:** ADOPT. Made `transitionAfterReviewerApproval` the sole authority. Removed SHA recording from `pushTaskBranchForDurability`.
+### R2-8: `approved_sha` set by two functions (Gemini Critical)
+**Decision:** ADOPT. Made reviewer sole authority.
 
-### Finding R2-9: `runRebaseCoder` failure should go to `disputed`, not `blocked_error` (Gemini Important)
-**Assessment:** Valid. An LLM failing to resolve conflicts is task-specific, not infrastructure. `blocked_error` is for git/network failures.
-**Decision:** ADOPT. Rebase coder failure (LLM cannot resolve) -> `disputed`. Infrastructure failure (git/network) -> `blocked_error`.
+### R2-9: `runRebaseCoder` failure -> `disputed`, not `blocked_error` (Gemini Important)
+**Decision:** ADOPT. LLM conflict failure is task-specific.
 
-### Finding R2-10: Merge lock should use epoch pattern (Gemini Important)
-**Assessment:** Valid. The codebase already has the epoch-based locking pattern in `workspace_merge_locks` + `012_add_merge_lock_epoch.sql`.
-**Decision:** ADOPT. Specified epoch-based locking explicitly in `acquireMergeLock` contract.
+### R2-10: Merge lock should use epoch pattern (Gemini Important)
+**Decision:** ADOPT. Epoch-based locking specified.
 
-### Finding R2-11: `blocked_error` lifecycle undefined (Gemini Important)
-**Assessment:** Pre-existing concern. `blocked_error` handling (wakeup sanitizer retries) already exists. Not introduced by this design.
-**Decision:** DEFER. Added to Non-Goals.
+### R2-11 through R2-14: Various deferrals
+**Decision:** DEFER. Pre-existing concerns or out of scope.
 
-### Finding R2-12: `cleanupTaskBranch` best-effort leads to branch bloat (Gemini Suggestion)
-**Assessment:** Existing `steroids gc` and wakeup cleanup already handle orphan branches. Adding a dedicated GC mechanism is over-engineering for v1.
-**Decision:** DEFER. Added to Non-Goals.
+## Cross-Provider Review — Round 3 (Simplification)
 
-### Finding R2-13: Delta-only rebase review unproven (Gemini Suggestion)
-**Assessment:** Prompt engineering concern, not architectural. If delta review proves unreliable, switching to full review is a prompt change, not a design change.
-**Decision:** DEFER. Risk acknowledged but no design change needed — prompt iteration is independent of pipeline architecture.
+**Reviewers:** Claude (`superpowers:code-reviewer`) and Gemini (`gemini -p`)
+**Date:** 2026-03-23
 
-### Finding R2-14: `blocked_error` in `SECTION_DEP_TERMINAL` may unblock dependents prematurely (Claude Important)
-**Assessment:** Valid concern but pre-existing. `blocked_error` is in `SECTION_DEP_TERMINAL` but NOT in `TASK_DEP_TERMINAL`. The merge queue uses `blocked_error` the same way existing code does.
-**Decision:** DEFER. Documented in edge cases table. Pre-existing behavior, not introduced by this design.
+### R3-1: Reduce three statuses to one with internal `merge_phase` (Claude Critical, Gemini Important)
+**Assessment:** Both reviewers converge: three new statuses propagating through 17+ call sites is the primary complexity cost. Claude proposes one status (`merge_pending`) with internal `merge_phase` column. Gemini proposes centralizing all status logic with `STATUS_SETS`. Both are valid; the single-status approach provides immediate simplification while `STATUS_SETS` is a broader follow-up.
+**Decision:** ADOPT. Collapsed to single `merge_pending` status. Internal `merge_phase` column (`queued`, `rebasing`, `rebase_review`) is private to the merge queue module. This eliminates 2/3 of propagation updates, 2 of 3 action types, 2 of 3 dispatch branches. The `STATUS_SETS` centralization is noted as a valuable follow-up.
+
+### R3-2: Simplify caps to single `rebase_attempts` counter (Claude Suggestion, Gemini Important)
+**Assessment:** Both reviewers flag the two-counter system as unnecessary. Deterministic rebases are free (milliseconds, no LLM). Only LLM rebase entries are expensive. A single `rebase_attempts` counter (cap 3) tracking LLM entries provides the same protection with half the state.
+**Decision:** ADOPT. Replaced `rebase_review_rejection_count` + `total_rebase_cycles` with single `rebase_attempts` (default 3). Incremented only when task enters LLM rebase (conflicts).
+
+### R3-3: Sanitizer will bypass merge queue on recovered reviewer approvals (Claude Critical, Gemini Important)
+**Assessment:** `recoverOrphanedInvocation` in `wakeup-sanitise-recovery.ts` marks `review` tasks as `completed` on recovered approve tokens. This bypasses the merge queue — code never reaches the target branch but the task is marked done.
+**Decision:** ADOPT. Sanitizer reviewer-approval recovery must transition to `merge_pending/queued` (not `completed`). Added to implementation order and health system integration section.
+
+### R3-4: Monitor, scanner, and stuck-task-detector are blind spots (Claude Important, Gemini Important)
+**Assessment:** `hasPendingWork` in scanner, `VALID_TASK_STATUSES` in investigator-actions, and hanging invocation detection in stuck-task-detector all need `merge_pending`. Without this, the first responder triggers false wakeups, manual recovery is blocked, and stuck merge tasks go undetected.
+**Decision:** ADOPT. Added all three to propagation table and health system integration section.
+
+### R3-5: `approved_sha` has too many writers — remove rebase coder (Claude Important)
+**Assessment:** The rebase coder is not a reviewer. Only reviewers should set `approved_sha`. The rebase reviewer re-records SHA at approval time, making the rebase coder's write redundant.
+**Decision:** ADOPT. `approved_sha` writers reduced to two: initial reviewer and rebase reviewer.
+
+### R3-6: Task selector does not need merge lock awareness (Claude Suggestion)
+**Assessment:** The merge handler returns immediately if the lock is contended. Coupling the task selector to the merge lock adds complexity without benefit.
+**Decision:** ADOPT. Removed task selector lock awareness. Contention handled by the handler.
+
+### R3-7: Foreground loop should handle merge pipeline (Gemini Important)
+**Assessment:** With a single status and single action type, the "daemon-only" restriction is unnecessary complexity. The merge lock provides serialization regardless of which process drives the loop. Filtering creates inconsistent behavior.
+**Decision:** ADOPT. Foreground `loop` handles `merge` action the same as daemon mode.
+
+### R3-8: Centralized `STATUS_SETS` object (Gemini Suggestion)
+**Assessment:** Valuable broader refactor but out of scope for merge queue. With single-status approach, the blast radius is already small.
+**Decision:** DEFER. Noted in Non-Goals as follow-up.
