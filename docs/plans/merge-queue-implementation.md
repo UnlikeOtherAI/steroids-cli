@@ -5,6 +5,18 @@
 >
 > **Review history:** Plan v1 reviewed by 2 independent strict Claude reviewers. All critical/important findings addressed in v2. Final validation by 2 more reviewers (v3, this version).
 
+### Checkbox Convention
+
+The flight-ready checklist at the bottom tracks progress using checkbox states:
+
+| Marker | Meaning | When to set |
+|--------|---------|-------------|
+| `[ ]` | Not started | Default state |
+| `[-]` | In progress | Immediately when you begin working on the task |
+| `[x]` | Done and verified | Only after: code works, tests pass, reviewed against this doc + AGENTS.md, and an independent Sonnet agent has reviewed the implementation |
+
+**Rules:** Mark `[-]` before writing any code for a task. Never mark `[x]` without running verification. If a task is blocked or abandoned, revert to `[ ]` with a comment.
+
 ### Implementation Principles
 
 These rules apply to every task. Violations are review blockers.
