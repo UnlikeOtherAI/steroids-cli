@@ -65,6 +65,65 @@ const VERSION = getVersion();
 const HELP = `
 steroids - Automated task execution with coder/reviewer loop
 
+FOR LLM AGENTS — READ THIS FIRST (run 'steroids llm' for full reference)
+═══════════════════════════════════════════════════════════════════════════
+
+Steroids orchestrates tasks via a coder/reviewer loop. You write code,
+a reviewer LLM approves or rejects. The system is deterministic — it
+follows the state machine, never makes decisions.
+
+DESIGNING SECTIONS
+  Sections = features or functional areas. Each owns ONE cohesive concern.
+  Sections that need output from another section MUST declare a dependency:
+    steroids sections depends-on <section> <required-section>
+  Independent sections run in parallel.
+
+DESIGNING TASKS
+  Tasks = PR-sized units of work. Each produces a reviewable, testable
+  deliverable that can be merged independently. Not a single function,
+  not an entire feature — think "what makes a good pull request?"
+
+  Every task MUST have a specification file:
+    steroids tasks add "Title" --section <id> --source specs/spec.md
+
+  Good: "Implement user auth endpoint with tests"
+  Bad:  "Create UserService class" (too small)
+  Bad:  "Build the entire frontend" (too large)
+
+DEPENDENCIES (CRITICAL)
+  Every task MUST have its dependencies explicitly declared.
+  - If task B uses output from task A → B depends on A.
+  - Tasks sharing the same dependency (or none) run in parallel.
+  - Common pattern: setup task first, then N parallel tasks depending on it.
+
+    steroids tasks depends-on <task> <required-task>
+
+  Example:
+    "Set up DB schema"           → no dependency
+    "Build user API"             → depends on "Set up DB schema"
+    "Build admin API"            → depends on "Set up DB schema"
+    (User API and Admin API run in parallel)
+
+TASK LIFECYCLE
+  pending → in_progress → review → completed (approved)
+                            ↓ rejected → back to in_progress
+                            ↓ 15 rejections → failed (needs human)
+
+QUICK START
+  steroids init -y
+  steroids sections add "Phase 1: Feature"
+  steroids tasks add "Task title" --section <id> --source specs/spec.md
+  steroids runners start --detach
+
+KEY COMMANDS
+  steroids tasks                     # pending tasks
+  steroids tasks --status active     # in-progress + review
+  steroids tasks audit <id>          # full task details
+  steroids sections list --deps      # sections with dependencies
+  steroids runners status            # runner state
+
+═══════════════════════════════════════════════════════════════════════════
+
 USAGE:
   steroids <command> [options]
 
