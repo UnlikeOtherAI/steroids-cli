@@ -100,7 +100,9 @@ export function isRunnerProcessDead(
   runnerId: string | null,
   globalDb: ReturnType<typeof openGlobalDatabase>['db']
 ): boolean {
-  if (!runnerId) return true;
+  // No runner_id means no owner to verify — can't confirm dead (protects manual `steroids loop` runs
+  // that don't register in the runners table). Pass 1 (30-min timeout) handles these.
+  if (!runnerId) return false;
   const runnerRow = globalDb
     .prepare('SELECT pid FROM runners WHERE id = ?')
     .get(runnerId) as { pid: number | null } | undefined;
