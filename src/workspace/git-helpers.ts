@@ -100,13 +100,21 @@ export function pushWithRetries(
     pushArgs.push('--force-with-lease');
   }
 
+  let lastError = '';
   for (let attempt = 0; attempt < retries; attempt++) {
-    const result = execGit(cwd, pushArgs, {
-      tolerateFailure: true,
-      timeoutMs: 120_000,
-    });
-    if (result !== null) {
+    try {
+      execFileSync('git', pushArgs, {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 120_000,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      });
       return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const stderr = (err as { stderr?: string })?.stderr ?? '';
+      lastError = stderr.trim() || msg;
     }
 
     if (attempt < retries - 1 && attempt < backoffMs.length) {
@@ -120,7 +128,7 @@ export function pushWithRetries(
     }
   }
 
-  return { success: false, error: `Push failed after ${retries} attempts` };
+  return { success: false, error: `Push failed after ${retries} attempts: ${lastError}` };
 }
 
 /**
