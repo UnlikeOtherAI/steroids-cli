@@ -6,6 +6,7 @@ import { Badge } from '../components/atoms/Badge';
 import { UserFeedbackPanel } from '../components/molecules/UserFeedbackPanel';
 import { PageLayout } from '../components/templates/PageLayout';
 import { AuditLogRow, DisputePanel, formatDuration, formatTimestamp, InvocationsPanel } from './TaskDetailComponents';
+import { FirstResponderPanel } from './FirstResponderPanel';
 import { LiveInvocationActivityPanel, InvocationTimelineEventRow, StreamState } from './TaskLiveTimelineComponents';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
@@ -57,6 +58,7 @@ export const TaskDetailPage: React.FC = () => {
   const [restartNotes, setRestartNotes] = useState('');
   const [showLiveModal, setShowLiveModal] = useState(false);
   const [viewMode, setViewMode] = useState<'basic' | 'full'>('basic');
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const intervalRef = useRef<number | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -351,57 +353,50 @@ export const TaskDetailPage: React.FC = () => {
           {/* Agent Sessions — above timeline, both modes */}
           <InvocationsPanel invocations={task.invocations} taskId={taskId!} projectPath={projectPath!} />
 
-          {/* Live Indicator */}
+          {/* First Responder feedback — between agents and timeline */}
+          <FirstResponderPanel taskId={taskId!} projectPath={projectPath!} />
+
+          {/* Activity Timeline — collapsible */}
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-text-primary">
-              <i className="fa-solid fa-clock-rotate-left mr-2"></i>
-              Activity Timeline
-              <span className="text-sm font-normal text-text-muted ml-2">
-                ({task.audit_trail.length} status changes, {task.invocations?.length || 0} invocations)
-              </span>
-            </h2>
-            <div className="flex items-center gap-2">
-              {/* View mode toggle */}
-              {(['basic', 'full'] as const).map((mode) => (
-                <button key={mode} onClick={() => setViewMode(mode)}
-                  className={`px-2.5 py-1 text-sm rounded transition-colors ${viewMode === mode ? 'bg-accent text-white' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
-                >{mode.charAt(0).toUpperCase() + mode.slice(1)}</button>
-              ))}
-              {isLive && (
-                <span className="flex items-center gap-2 text-sm text-success">
-                  <span className="w-2 h-2 bg-success rounded-full animate-pulse"></span>
-                  Live
+            <button onClick={() => setTimelineCollapsed(!timelineCollapsed)} className="flex items-center gap-2 group">
+              <h2 className="text-xl font-semibold text-text-primary">
+                <i className="fa-solid fa-clock-rotate-left mr-2"></i>
+                Activity Timeline
+                <span className="text-sm font-normal text-text-muted ml-2">
+                  ({task.audit_trail.length} status changes, {task.invocations?.length || 0} invocations)
                 </span>
-              )}
-              <button
-                onClick={() => setShowLiveModal(true)}
-                className="px-3 py-1 text-sm bg-info/20 text-info hover:bg-info/30 rounded transition-colors"
-              >
-                <i className="fa-solid fa-bolt mr-1"></i>
-                Live Stream
-              </button>
-              <button
-                onClick={() => setIsLive(!isLive)}
-                className={`px-3 py-1 text-sm rounded transition-colors ${
-                  isLive
-                    ? 'bg-success/20 text-success'
-                    : 'bg-bg-surface text-text-muted hover:text-text-primary'
-                }`}
-              >
-                <i className={`fa-solid ${isLive ? 'fa-pause' : 'fa-play'} mr-1`}></i>
-                {isLive ? 'Pause' : 'Resume'}
-              </button>
-              <button
-                onClick={() => {
-                  fetchTask();
-                  fetchTimeline();
-                }}
-                className="px-3 py-1 text-sm bg-bg-surface text-text-muted hover:text-text-primary rounded transition-colors"
-              >
-                <i className="fa-solid fa-refresh mr-1"></i>
-                Refresh
-              </button>
-            </div>
+              </h2>
+              <i className={`fa-solid ${timelineCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-text-muted group-hover:text-text-primary transition-colors`}></i>
+            </button>
+            {!timelineCollapsed && (
+              <div className="flex items-center gap-2">
+                {(['basic', 'full'] as const).map((mode) => (
+                  <button key={mode} onClick={() => setViewMode(mode)}
+                    className={`px-2.5 py-1 text-sm rounded transition-colors ${viewMode === mode ? 'bg-accent text-white' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
+                  >{mode.charAt(0).toUpperCase() + mode.slice(1)}</button>
+                ))}
+                {isLive && (
+                  <span className="flex items-center gap-2 text-sm text-success">
+                    <span className="w-2 h-2 bg-success rounded-full animate-pulse"></span>
+                    Live
+                  </span>
+                )}
+                <button onClick={() => setShowLiveModal(true)} className="px-3 py-1 text-sm bg-info/20 text-info hover:bg-info/30 rounded transition-colors">
+                  <i className="fa-solid fa-bolt mr-1"></i>Live Stream
+                </button>
+                <button onClick={() => setIsLive(!isLive)}
+                  className={`px-3 py-1 text-sm rounded transition-colors ${isLive ? 'bg-success/20 text-success' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
+                >
+                  <i className={`fa-solid ${isLive ? 'fa-pause' : 'fa-play'} mr-1`}></i>
+                  {isLive ? 'Pause' : 'Resume'}
+                </button>
+                <button onClick={() => { fetchTask(); fetchTimeline(); }}
+                  className="px-3 py-1 text-sm bg-bg-surface text-text-muted hover:text-text-primary rounded transition-colors"
+                >
+                  <i className="fa-solid fa-refresh mr-1"></i>Refresh
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Live Stream Modal */}
@@ -412,69 +407,51 @@ export const TaskDetailPage: React.FC = () => {
                   <h3 className="text-lg font-semibold text-text-primary flex items-center gap-2">
                     <i className="fa-solid fa-bolt text-info"></i>
                     Live Invocation Stream
-                    {liveActivity.length > 0 && (
-                      <span className="text-sm font-normal text-text-muted">
-                        ({liveActivity.length} events)
-                      </span>
-                    )}
+                    {liveActivity.length > 0 && <span className="text-sm font-normal text-text-muted">({liveActivity.length} events)</span>}
                   </h3>
-                  <button
-                    onClick={() => setShowLiveModal(false)}
-                    className="text-text-muted hover:text-text-primary transition-colors"
-                  >
+                  <button onClick={() => setShowLiveModal(false)} className="text-text-muted hover:text-text-primary transition-colors">
                     <i className="fa-solid fa-times text-xl"></i>
                   </button>
                 </div>
                 <div className="overflow-y-auto max-h-[calc(80vh-64px)]">
-                  <LiveInvocationActivityPanel
-                    isLive={isLive}
-                    streamState={streamState}
-                    liveActivity={liveActivity}
-                    onClear={() => setLiveActivity([])}
-                  />
+                  <LiveInvocationActivityPanel isLive={isLive} streamState={streamState} liveActivity={liveActivity} onClear={() => setLiveActivity([])} />
                 </div>
               </div>
             </div>
           )}
 
-          {/* Merged Timeline */}
-          <div className="card overflow-hidden">
-            {(mergedTimelineItems.length === 0 && !timelineLoading) ? (
-              <div className="p-8 text-center text-text-muted">
-                <i className="fa-solid fa-list text-4xl mb-4"></i>
-                <p>No activity recorded yet</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {timelineError && (
-                  <div className="p-4 text-sm text-danger">
-                    <i className="fa-solid fa-triangle-exclamation mr-2"></i>
-                    Failed to load invocation timeline: {timelineError}
-                  </div>
-                )}
-                {timelineLoading && (
-                  <div className="p-4 text-sm text-text-muted">
-                    <i className="fa-solid fa-spinner fa-spin mr-2"></i>
-                    Loading invocation timeline...
-                  </div>
-                )}
-                {mergedTimelineItems.map((item, index) => {
-                  if (item.kind === 'audit') {
-                    return (
-                      <AuditLogRow
-                        key={item.key}
-                        entry={item.entry}
-                        isLatest={index === 0}
-                        githubUrl={task.github_url}
-                      />
-                    );
-                  }
-
-                  return <InvocationTimelineEventRow key={item.key} event={item.event} ts={item.ts} />;
-                })}
-              </div>
-            )}
-          </div>
+          {/* Merged Timeline — hidden when collapsed */}
+          {!timelineCollapsed && (
+            <div className="card overflow-hidden">
+              {(mergedTimelineItems.length === 0 && !timelineLoading) ? (
+                <div className="p-8 text-center text-text-muted">
+                  <i className="fa-solid fa-list text-4xl mb-4"></i>
+                  <p>No activity recorded yet</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {timelineError && (
+                    <div className="p-4 text-sm text-danger">
+                      <i className="fa-solid fa-triangle-exclamation mr-2"></i>
+                      Failed to load invocation timeline: {timelineError}
+                    </div>
+                  )}
+                  {timelineLoading && (
+                    <div className="p-4 text-sm text-text-muted">
+                      <i className="fa-solid fa-spinner fa-spin mr-2"></i>
+                      Loading invocation timeline...
+                    </div>
+                  )}
+                  {mergedTimelineItems.map((item, index) => {
+                    if (item.kind === 'audit') {
+                      return <AuditLogRow key={item.key} entry={item.entry} isLatest={index === 0} githubUrl={task.github_url} />;
+                    }
+                    return <InvocationTimelineEventRow key={item.key} event={item.event} ts={item.ts} />;
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Metadata */}
           <div className="mt-6 text-xs text-text-muted flex items-center gap-4">

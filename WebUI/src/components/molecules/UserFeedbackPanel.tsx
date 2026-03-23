@@ -17,7 +17,8 @@ export const UserFeedbackPanel: React.FC<UserFeedbackPanelProps> = ({ taskId, pr
   const loadFeedback = useCallback(async () => {
     setLoading(true);
     try {
-      const items = await taskFeedbackApi.list(taskId, projectPath);
+      const all = await taskFeedbackApi.list(taskId, projectPath);
+      const items = all.filter((f) => f.source === 'user');
       setFeedback(items);
       setError(null);
     } catch (err) {
