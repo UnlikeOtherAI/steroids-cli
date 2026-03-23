@@ -139,13 +139,45 @@ function hasActiveRunner(globalDb: Database.Database, projectPath: string): bool
 }
 
 function hasPendingWork(projectDb: Database.Database): boolean {
+  // S6: Align with wakeup-checks.ts — exclude 'disputed' since runners can't act on
+  // disputed tasks (S3's sanitiser auto-resolves them after 30 min).
   const row = projectDb
     .prepare(
       `SELECT COUNT(*) as count FROM tasks
-       WHERE status IN ('pending', 'in_progress', 'review', 'disputed')`
+       WHERE status IN ('pending', 'in_progress', 'review')`
     )
     .get() as { count: number };
   return row.count > 0;
+}
+
+// ---------------------------------------------------------------------------
+// S6: Provider backoff awareness
+// ---------------------------------------------------------------------------
+
+function getActiveProviderBackoff(
+  globalDb: Database.Database,
+): { provider: string; remainingMs: number; reasonType: string | null } | null {
+  try {
+    const now = Date.now();
+    const row = globalDb
+      .prepare(
+        `SELECT provider, backoff_until_ms, reason_type
+         FROM provider_backoffs
+         WHERE backoff_until_ms > ?
+         ORDER BY backoff_until_ms DESC
+         LIMIT 1`
+      )
+      .get(now) as { provider: string; backoff_until_ms: number; reason_type: string | null } | undefined;
+    if (!row) return null;
+    return {
+      provider: row.provider,
+      remainingMs: row.backoff_until_ms - now,
+      reasonType: row.reason_type ?? null,
+    };
+  } catch {
+    // Table may not exist on older schema — safe to ignore
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -320,15 +352,29 @@ export async function runScan(): Promise<ScanResult> {
       // 6. Idle project check — warning if cron is running (should have spawned a runner)
       if (hasPendingWork(projectDb) && !hasActiveRunner(globalDb, projectPath)) {
         const cronActive = cronStatus().installed;
+
+        // S6: Check if any provider is backed off — this legitimately prevents wakeup
+        // from spawning a runner. Downgrade severity so FR doesn't waste actions.
+        const providerBackoff = getActiveProviderBackoff(globalDb);
+        const isBackedOff = providerBackoff !== null;
+        const severity: Anomaly['severity'] = isBackedOff ? 'info' : (cronActive ? 'critical' : 'info');
+
+        let details: string;
+        if (isBackedOff) {
+          details = `Project "${projectName}" has pending work but no active runner (provider "${providerBackoff.provider}" backed off for ${Math.ceil(providerBackoff.remainingMs / 60000)}m)`;
+        } else if (cronActive) {
+          details = `Project "${projectName}" has pending work but no active runner (cron is running — this should be resolved)`;
+        } else {
+          details = `Project "${projectName}" has pending work but no active runner`;
+        }
+
         anomalies.push({
           type: 'idle_project',
-          severity: cronActive ? 'critical' : 'info',
+          severity,
           projectPath,
           projectName,
-          details: cronActive
-            ? `Project "${projectName}" has pending work but no active runner (cron is running — this should be resolved)`
-            : `Project "${projectName}" has pending work but no active runner`,
-          context: { cronActive },
+          details,
+          context: { cronActive, providerBackedOff: isBackedOff, providerBackoff: providerBackoff ?? undefined },
         });
       }
     } catch {

@@ -338,7 +338,7 @@ These are bugs in the scanner's data sources, the runner lifecycle, and the wake
 
 ---
 
-### [ ] S5: Persistent task failures with no learning (prompter Android init)
+### [x] S5: Persistent task failures with no learning (prompter Android init)
 
 **Severity:** Medium — 25 FR actions on a single unfixable task.
 
@@ -346,13 +346,13 @@ These are bugs in the scanner's data sources, the runner lifecycle, and the wake
 
 **Root cause (FR run 73):** Cross-device link error — project on /System/Volumes/Data, workspaces on /Users/dictator/.steroids/workspaces (different APFS volumes). Infrastructure issue, not code issue.
 
-**Fix:** Runner should detect environment-specific failures and transition to `blocked_error` with a clear message. M2 (circuit breaker) and M8 (human escalation) prevent the reset loop.
+**Fix:** Already addressed by the combination of: (a) `prepareForTask` in `git-lifecycle.ts` already catches clone errors (EXDEV/cross-device link) and transitions to `blocked_error`; (b) M2 circuit breaker stops FR after 5 remediation attempts on the same fingerprint; (c) M8 creates human escalation alerts; (d) S4 makes `reset_task` branch-aware for blocked tasks.
 
-**Files:** `src/orchestrator/coder.ts`, `src/prompts/coder.ts`
+**Files:** `src/workspace/git-lifecycle.ts` (existing), `src/monitor/loop.ts` (M2), `src/monitor/investigator-actions.ts` (S4)
 
 ---
 
-### [ ] S6: Wakeup cron runs but doesn't spawn runners for idle projects
+### [x] S6: Wakeup cron runs but doesn't spawn runners for idle projects
 
 **Severity:** High — partially real problem underneath S1's false positives.
 
@@ -360,7 +360,14 @@ These are bugs in the scanner's data sources, the runner lifecycle, and the wake
 
 **Additional finding:** A 6.3-hour blind spot exists after auth failure (runs 91-92, 01:35-07:52). The wakeup cron didn't trigger any monitor scan overnight. No retry mechanism exists after auth failure.
 
-**Files:** `src/runners/wakeup.ts`, `src/runners/system-pressure.ts`, `src/runners/global-db-backoffs.ts`
+**Root cause:** Scanner's `hasPendingWork()` included `disputed` status but wakeup's `projectHasPendingWork()` did not — creating permanent false positive `idle_project` alerts for projects with only disputed tasks. Additionally, scanner had no awareness of provider backoffs, which legitimately prevent wakeup from spawning runners. The scanner flagged projects as critical even when the provider was rate-limited or auth-failed.
+
+**Fix:**
+1. Removed `disputed` from scanner's `hasPendingWork()` to align with wakeup (runners can't act on disputed tasks; S3's sanitiser auto-resolves after 30 min)
+2. Added `getActiveProviderBackoff()` helper that checks `provider_backoffs` table for active backoffs
+3. Idle project detection now downgrades severity from `critical` to `info` when a provider is backed off, and includes backoff details in the anomaly context
+
+**Files:** `src/monitor/scanner.ts:141-149` (hasPendingWork), `src/monitor/scanner.ts:150-174` (getActiveProviderBackoff), `src/monitor/scanner.ts:349-378` (idle_project detection)
 
 ---
 
