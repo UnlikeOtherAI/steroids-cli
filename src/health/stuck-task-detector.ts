@@ -349,14 +349,14 @@ function detectTaskSignalsInternal(
          JOIN tasks t ON t.id = i.task_id
          WHERE i.status = 'running'
            AND i.runner_id IS NOT NULL
-           AND t.status IN ('in_progress', 'review')`
+           AND t.status IN ('in_progress', 'review', 'merge_pending')`
       )
       .all() as Array<{
       id: number;
       task_id: string;
       runner_id: string;
       title: string;
-      status: 'in_progress' | 'review';
+      status: 'in_progress' | 'review' | 'merge_pending';
       updated_at: string;
     }>;
 

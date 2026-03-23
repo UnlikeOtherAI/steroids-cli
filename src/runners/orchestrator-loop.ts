@@ -353,7 +353,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           }
           ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
 
-          // S7/I1: Fresh slot lacks branch metadata — prepare it so mergeToBase works.
+          // S7/I1: Fresh slot lacks branch metadata — prepare it for reviewer phase.
           if (poolSlotCtx && !poolSlotCtx.slot.task_branch) {
             const prepResult = prepareForTask(
               poolSlotCtx.globalDb, poolSlotCtx.slot, task.id, projectPath, sourceProjectPath,

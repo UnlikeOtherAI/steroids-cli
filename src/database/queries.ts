@@ -38,6 +38,9 @@ export const STATUS_MARKERS: Record<TaskStatus, string> = {
 /**
  * Terminal status sets for dependency checks — single source of truth.
  *
+ * Non-terminal active statuses: pending, in_progress, review, merge_pending, failed.
+ * These are intentionally NOT in either set — they represent ongoing work.
+ *
  * SECTION deps (coarse): blocked_error/blocked_conflict count as "met" so one
  * blocked task doesn't hold up entire downstream section chains.
  *
