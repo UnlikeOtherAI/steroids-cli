@@ -392,7 +392,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
                 task_branch: prepResult.taskBranch, base_branch: prepResult.baseBranch,
                 starting_sha: prepResult.startingSha,
               });
-            } else { console.warn(`[S7] Pool slot prep failed: ${prepResult.reason}`); }
+            } else { console.warn(`[S7] Pool slot prep failed (blocked=${prepResult.blocked}): ${prepResult.reason}`); }
           }
 
           creditResult = await runReviewerPhase(
