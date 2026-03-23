@@ -587,16 +587,16 @@ Each call site below must be updated. Checked individually:
 - [x] **0.2** Stale lock TTL reduced to 90s for merge queue use
 
 ### Phase 1: Push Restructuring
-- [ ] **1.1** `pushTaskBranchForDurability` function exists and is called from coder decision phase
-- [ ] **1.1** Called BEFORE `submitForReviewWithDurableRef` (not inside it)
-- [ ] **1.1** Push success → task status = `review`
-- [ ] **1.1** Push failure → task status = `blocked_error` (never `pending`/`skipped`)
-- [ ] **1.1** `approved_sha` is NOT set during push
-- [ ] **1.2** `cleanupPoolSlot` performs NO git push
-- [ ] **1.2** `cleanupPoolSlot` does NOT modify task status
-- [ ] **1.2** `cleanupPoolSlot` finally block safe for all action types
-- [ ] **1.3** Tests written and passing
-- [ ] **1.3** Reviewer rejection regression test passing
+- [-] **1.1** `pushTaskBranchForDurability` function exists and is called from coder decision phase
+- [-] **1.1** Called BEFORE `submitForReviewWithDurableRef` (not inside it)
+- [-] **1.1** Push success → task status = `review`
+- [-] **1.1** Push failure → task status = `blocked_error` (never `pending`/`skipped`)
+- [-] **1.1** `approved_sha` is NOT set during push
+- [-] **1.2** `cleanupPoolSlot` performs NO git push
+- [-] **1.2** `cleanupPoolSlot` does NOT modify task status
+- [-] **1.2** `cleanupPoolSlot` finally block safe for all action types
+- [-] **1.3** Tests written and passing
+- [-] **1.3** Reviewer rejection regression test passing
 
 ### Phase 2+3: Merge Gate (ATOMIC — all boxes must be ticked simultaneously)
 

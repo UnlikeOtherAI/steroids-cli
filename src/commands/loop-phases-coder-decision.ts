@@ -26,6 +26,7 @@ import {
 } from '../git/status.js';
 import { pushToRemote } from '../git/push.js';
 import { submitForReviewWithDurableRef } from './submission-transition.js';
+import { pushTaskBranchForDurability } from './push-task-branch.js';
 import {
   LeaseFenceContext,
   refreshParallelWorkstreamLease,
@@ -177,6 +178,8 @@ export interface CoderExecutionContext {
   leaseFence?: LeaseFenceContext;
   jsonMode: boolean;
   hasPoolSlot: boolean;
+  /** Task branch name from pool slot — needed for durability push. */
+  poolTaskBranch?: string;
 }
 
 export interface CoderDecision {
@@ -226,43 +229,26 @@ export async function executeCoderDecision(
           }
           break;
         }
-        // Skip push in pool mode: mergeToBase handles all pushing atomically.
-        // Only push in legacy workstream mode (no pool slot).
-        if (leaseFence?.parallelSessionId && !hasPoolSlot) {
+        // Push task branch for durability before submitting for review
+        if (ctx.poolTaskBranch) {
+          const pushOk = await pushTaskBranchForDurability(db, task!.id, effectiveProjectPath, ctx.poolTaskBranch, jsonMode);
+          if (!pushOk.ok) break;
+        } else if (leaseFence?.parallelSessionId && !hasPoolSlot) {
           const pushResult = pushToRemote(projectPath, 'origin', branchName);
           if (!pushResult.success) {
-            updateTaskStatus(
-              db,
-              task!.id,
-              'failed',
-              'orchestrator',
-              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`
-            );
-            if (!jsonMode) {
-              console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
-            }
+            updateTaskStatus(db, task!.id, 'failed', 'orchestrator',
+              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`);
+            if (!jsonMode) console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
             break;
           }
         }
         const submitted = submitForReviewWithDurableRef(
-          db,
-          task!.id,
-          'orchestrator',
-          effectiveProjectPath,
-          submissionCommitSha,
-          decision.reasoning
+          db, task!.id, 'orchestrator', effectiveProjectPath, submissionCommitSha, decision.reasoning
         );
         if (!submitted.ok) {
-          updateTaskStatus(
-            db,
-            task!.id,
-            'failed',
-            'orchestrator',
-            `Task failed: durable submission write failed (${submitted.error})`
-          );
-          if (!jsonMode) {
-            console.log('\n✗ Task failed (durable submission write failed)');
-          }
+          updateTaskStatus(db, task!.id, 'failed', 'orchestrator',
+            `Task failed: durable submission write failed (${submitted.error})`);
+          if (!jsonMode) console.log('\n✗ Task failed (durable submission write failed)');
           break;
         }
       }
@@ -299,55 +285,35 @@ export async function executeCoderDecision(
           }
           break;
         }
-        // Skip push in pool mode: mergeToBase handles all pushing atomically.
-        // Only push in legacy workstream mode (no pool slot).
-        if (leaseFence?.parallelSessionId && !hasPoolSlot) {
+        // Push task branch for durability before submitting for review
+        if (ctx.poolTaskBranch) {
+          const pushOk = await pushTaskBranchForDurability(db, task!.id, effectiveProjectPath, ctx.poolTaskBranch, jsonMode);
+          if (!pushOk.ok) break;
+        } else if (leaseFence?.parallelSessionId && !hasPoolSlot) {
           const pushResult = pushToRemote(projectPath, 'origin', branchName);
           if (!pushResult.success) {
-            updateTaskStatus(
-              db,
-              task!.id,
-              'failed',
-              'orchestrator',
-              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`
-            );
-            if (!jsonMode) {
-              console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
-            }
+            updateTaskStatus(db, task!.id, 'failed', 'orchestrator',
+              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`);
+            if (!jsonMode) console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
             break;
           }
         }
         const submitted = submitForReviewWithDurableRef(
-          db,
-          task!.id,
-          'orchestrator',
-          effectiveProjectPath,
-          submissionCommitSha,
+          db, task!.id, 'orchestrator', effectiveProjectPath, submissionCommitSha,
           'Auto-commit skipped: no uncommitted changes'
         );
         if (!submitted.ok) {
-          updateTaskStatus(
-            db,
-            task!.id,
-            'failed',
-            'orchestrator',
-            `Task failed: durable submission write failed (${submitted.error})`
-          );
-          if (!jsonMode) {
-            console.log('\n✗ Task failed (durable submission write failed)');
-          }
+          updateTaskStatus(db, task!.id, 'failed', 'orchestrator',
+            `Task failed: durable submission write failed (${submitted.error})`);
+          if (!jsonMode) console.log('\n✗ Task failed (durable submission write failed)');
           break;
         }
-        if (!jsonMode) {
-          console.log('\n✓ Auto-commit skipped (no uncommitted files) and submitted to review');
-        }
+        if (!jsonMode) console.log('\n✓ Auto-commit skipped (no uncommitted files) and submitted to review');
         break;
       }
 
       if (!refreshParallelWorkstreamLease(projectPath, leaseFence)) {
-        if (!jsonMode) {
-          console.log('\n↺ Lease ownership lost before auto-commit; skipping task in this runner.');
-        }
+        if (!jsonMode) console.log('\n↺ Lease ownership lost before auto-commit; skipping task in this runner.');
         return;
       }
       // Stage all changes
@@ -372,43 +338,27 @@ export async function executeCoderDecision(
           }
           break;
         }
-        // Skip push in pool mode: mergeToBase handles all pushing atomically.
-        // Only push in legacy workstream mode (no pool slot).
-        if (leaseFence?.parallelSessionId && !hasPoolSlot) {
+        // Push task branch for durability before submitting for review
+        if (ctx.poolTaskBranch) {
+          const pushOk = await pushTaskBranchForDurability(db, task!.id, effectiveProjectPath, ctx.poolTaskBranch, jsonMode);
+          if (!pushOk.ok) break;
+        } else if (leaseFence?.parallelSessionId && !hasPoolSlot) {
           const pushResult = pushToRemote(projectPath, 'origin', branchName);
           if (!pushResult.success) {
-            updateTaskStatus(
-              db,
-              task!.id,
-              'failed',
-              'orchestrator',
-              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`
-            );
-            if (!jsonMode) {
-              console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
-            }
+            updateTaskStatus(db, task!.id, 'failed', 'orchestrator',
+              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`);
+            if (!jsonMode) console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
             break;
           }
         }
         const submitted = submitForReviewWithDurableRef(
-          db,
-          task!.id,
-          'orchestrator',
-          effectiveProjectPath,
-          submissionCommitSha,
+          db, task!.id, 'orchestrator', effectiveProjectPath, submissionCommitSha,
           `Auto-committed and submitted (${decision.reasoning})`
         );
         if (!submitted.ok) {
-          updateTaskStatus(
-            db,
-            task!.id,
-            'failed',
-            'orchestrator',
-            `Task failed: durable submission write failed (${submitted.error})`
-          );
-          if (!jsonMode) {
-            console.log('\n✗ Task failed (durable submission write failed)');
-          }
+          updateTaskStatus(db, task!.id, 'failed', 'orchestrator',
+            `Task failed: durable submission write failed (${submitted.error})`);
+          if (!jsonMode) console.log('\n✗ Task failed (durable submission write failed)');
           break;
         }
         if (!jsonMode) {

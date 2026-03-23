@@ -5,10 +5,11 @@ import type { PoolSlotContext } from '../workspace/types.js';
 import type { LeaseFenceContext } from './loop-phases-helpers.js';
 import { refreshParallelWorkstreamLease, countCommitRecoveryAttempts } from './loop-phases-helpers.js';
 import { submitForReviewWithDurableRef } from './submission-transition.js';
+import { pushTaskBranchForDurability } from './push-task-branch.js';
 import { COMMIT_RECOVERY_MAX_ATTEMPTS } from './commit-recovery.js';
 import { updateSlotStatus } from '../workspace/pool.js';
 
-export function handleNoOpSubmissionInPool(
+export async function handleNoOpSubmissionInPool(
   db: ReturnType<typeof openDatabase>['db'],
   task: NonNullable<ReturnType<typeof getTask>>,
   projectPath: string,
@@ -17,7 +18,7 @@ export function handleNoOpSubmissionInPool(
   poolSlotContext: PoolSlotContext,
   leaseFence: LeaseFenceContext | undefined,
   jsonMode: boolean
-): { handled: boolean } {
+): Promise<{ handled: boolean }> {
   const submissionHistory = resolveSubmissionCommitHistoryWithRecovery(
     effectiveProjectPath,
     getSubmissionCommitShas(db, task.id)
@@ -60,6 +61,11 @@ export function handleNoOpSubmissionInPool(
       console.log('\n↺ Lease lost before no-op forward; skipping.');
     }
     return { handled: true };
+  }
+  // Push task branch for durability before submitting for review
+  if (poolSlotContext.slot.task_branch) {
+    const pushOk = await pushTaskBranchForDurability(db, task.id, effectiveProjectPath, poolSlotContext.slot.task_branch, jsonMode);
+    if (!pushOk.ok) return { handled: true };
   }
   updateSlotStatus(poolSlotContext.globalDb, poolSlotContext.slot.id, 'awaiting_review');
   const submitted = submitForReviewWithDurableRef(

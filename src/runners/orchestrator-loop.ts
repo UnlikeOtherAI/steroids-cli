@@ -5,7 +5,7 @@
 
 import { openDatabase, getDbPath } from '../database/connection.js';
 import { autoMigrate } from '../migrations/index.js';
-import { getTask, getSection, incrementTaskFailureCount, clearTaskFailureCount, updateTaskStatus, listTasks, getInvocationCount } from '../database/queries.js';
+import { getTask, getSection, updateTaskStatus, listTasks, getInvocationCount } from '../database/queries.js';
 import {
   selectNextTask,
   selectNextTaskWithLock,
@@ -25,7 +25,6 @@ import { runBatchIteration, type BatchResult } from './orchestrator-batch.js';
 import { ensureWorkspaceSteroidsSymlink, getProjectHash } from '../parallel/clone.js';
 import type { PoolSlotContext } from '../workspace/types.js';
 import { claimSlot, finalizeSlotPath, releaseSlot, partialReleaseSlot, resolveRemoteUrl, refreshSlotHeartbeat, getSlot } from '../workspace/pool.js';
-import { pushWithRetries } from '../workspace/git-helpers.js';
 import { prepareForTask } from '../workspace/git-lifecycle.js';
 import { resolveEffectiveBranch } from '../git/branch-resolver.js';
 import { refreshWorkspaceMergeLockHeartbeat } from '../workspace/merge-lock.js';
@@ -37,40 +36,12 @@ function sleep(ms: number): Promise<void> {
 
 function cleanupPoolSlot(
   poolSlotCtx: PoolSlotContext,
-  db: import('better-sqlite3').Database,
-  taskId: string,
-  config: ReturnType<typeof loadConfig>,
 ): void {
   if (poolSlotCtx.heartbeatTimer) clearInterval(poolSlotCtx.heartbeatTimer);
   try {
     const currentSlot = getSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
     if (currentSlot?.status === 'awaiting_review') {
-      let durabilityPushFailed = false;
-      if (currentSlot.slot_path && currentSlot.task_branch && currentSlot.remote_url) {
-        const pushResult = pushWithRetries(
-          currentSlot.slot_path, 'origin', currentSlot.task_branch, 2, [2000, 8000], true
-        );
-        if (!pushResult.success) {
-          durabilityPushFailed = true;
-          console.warn(`[pool] Failed to push ${currentSlot.task_branch} before partial release: ${pushResult.error ?? 'unknown error'}`);
-        }
-      }
-      if (durabilityPushFailed) {
-        const failCount = incrementTaskFailureCount(db, taskId);
-        const maxAttempts = config.health?.maxRecoveryAttempts ?? 3;
-        if (failCount >= maxAttempts) {
-          updateTaskStatus(db, taskId, 'skipped', 'orchestrator',
-            `Auto-skipped: task branch push failed ${failCount} times. Remote may be unreachable or misconfigured.`);
-          console.warn(`[pool] Push failure cap reached (${failCount}/${maxAttempts}); task skipped.`);
-        } else {
-          updateTaskStatus(db, taskId, 'pending', 'orchestrator',
-            `Returned to pending because task branch push failed before review handoff (${failCount}/${maxAttempts})`);
-        }
-        releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
-      } else {
-        clearTaskFailureCount(db, taskId);
-        partialReleaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
-      }
+      partialReleaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
     } else {
       releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
     }
@@ -410,7 +381,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           );
         }
       } finally {
-        if (poolSlotCtx) cleanupPoolSlot(poolSlotCtx, db, task.id, config);
+        if (poolSlotCtx) cleanupPoolSlot(poolSlotCtx);
         if (poolGlobalDb) {
           try { poolGlobalDb.close(); } catch { /* ignore */ }
         }

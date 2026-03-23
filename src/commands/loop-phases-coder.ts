@@ -191,7 +191,7 @@ export async function runCoderPhase(
     const gateResult = postCoderGate(effectiveProjectPath, poolStartingSha, task.title);
     if (!gateResult.ok) {
       if (gateResult.reasonCode === 'no_new_commits') {
-        const noOpResult = handleNoOpSubmissionInPool(
+        const noOpResult = await handleNoOpSubmissionInPool(
           db,
           task,
           projectPath,
@@ -476,5 +476,6 @@ Only use WONT_FIX if you provide exceptional technical evidence and the orchestr
     leaseFence,
     jsonMode,
     hasPoolSlot: poolSlotContext !== undefined,
+    poolTaskBranch: poolSlotContext?.slot.task_branch ?? undefined,
   });
 }
