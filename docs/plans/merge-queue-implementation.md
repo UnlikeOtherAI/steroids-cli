@@ -3,7 +3,23 @@
 > Design doc: [docs/plans/merge-queue.md](./merge-queue.md)
 > This document is the definitive task list and flight-ready checklist for implementing the merge queue pipeline. Every task maps to a specific change in the design doc. Nothing ships without every checkbox ticked.
 >
-> **Review history:** Plan v1 reviewed by 2 independent strict Claude reviewers. All critical/important findings addressed in v2 (this version).
+> **Review history:** Plan v1 reviewed by 2 independent strict Claude reviewers. All critical/important findings addressed in v2. Final validation by 2 more reviewers (v3, this version).
+
+### Implementation Principles
+
+These rules apply to every task. Violations are review blockers.
+
+1. **Every function is testable in isolation.** No function combines I/O, business logic, and state transitions in one body. Extract pure logic into separate functions that can be unit-tested without mocking git or DB. Integration tests cover the composed flow.
+
+2. **Every named step in the design doc becomes its own exported function.** The design doc defines `fetchAndPrepare`, `handlePrepFailure`, `attemptRebaseAndFastForward`, `pushTargetBranch`, `cleanupTaskBranch`, `markCompleted`, `transitionToRebasing`, etc. Each of these is a real, importable function — not inline code inside `handleMergeAttempt`. The router (`processMergeQueue`) and the orchestrator (`handleMergeAttempt`) compose these functions but contain minimal logic themselves.
+
+3. **No patches upon patches.** This design replaces the broken merge system — it does not patch it. Every removal (Phase 5) is a clean deletion, not a conditional bypass. Every new function has a single responsibility. If a task says "modify X to also do Y," check whether X should be split into X and Y instead.
+
+4. **500-line file limit** (per AGENTS.md). `src/orchestrator/merge-queue.ts` will contain many functions. If it approaches 500 lines, split into `merge-queue.ts` (router + orchestrator), `merge-queue-steps.ts` (named step functions), and `merge-queue-rebase.ts` (rebase cycle).
+
+5. **Determinism first** (per AGENTS.md). No regex parsing of git output, no fuzzy matching of error messages. Git exit codes and known error patterns determine branch logic. If git commands need structured output, use `--porcelain` or equivalent.
+
+6. **Root-cause first** (per AGENTS.md). Each change fixes a defect directly. The push restructuring fixes the root cause (push coupled with cleanup). The sanitizer fix addresses the root cause (wrong table). No workaround layers.
 
 ---
 
@@ -60,7 +76,9 @@
 - Success: transitions task to `review`
 - Failure: transitions to `blocked_error` (infrastructure error)
 - NEVER transitions to `pending` or `skipped` on push failure
-- **Insertion point:** Called in `src/commands/loop-phases-coder-decision.ts` BEFORE calling `submitForReviewWithDurableRef` (which is a pure DB function at `src/commands/submission-transition.ts:11` — do NOT put push logic inside it). Call sites: lines ~229, ~302, ~375 in `loop-phases-coder-decision.ts`.
+- **Insertion point:** Called BEFORE `submitForReviewWithDurableRef` (which is a pure DB function at `src/commands/submission-transition.ts:11` — do NOT put push logic inside it). Call sites (4 total):
+  - `src/commands/loop-phases-coder-decision.ts` lines ~229, ~302, ~375 (3 coder decision paths)
+  - `src/commands/coder-noop-submission.ts:65` (no-op submission — task branch may already be on remote, push ensures durability)
 
 **Tests:** Test successful push → `review`. Test failed push → `blocked_error`. Test that `approved_sha` is NOT set.
 
@@ -174,7 +192,7 @@ Each call site below must be updated. Checked individually:
 **Change:** Add `'merge_pending'` to `IN (...)` list
 
 #### 2.4.8 `getSectionCounts`
-**File:** `src/commands/section-pr.ts:37`
+**File:** `src/git/section-pr.ts:37`
 **Change:** Add `'merge_pending'` to `IN (...)` list
 
 #### 2.4.9 Section "done" check
@@ -218,7 +236,10 @@ Each call site below must be updated. Checked individually:
   - `src/commands/loop.ts:372` — foreground dispatch
 - Block calls `processMergeQueue(db, task, config)` (from task 2.7's new module)
 - **Note:** `src/commands/loop.ts` uses `selectNextTask` (not `selectNextTaskWithLock`). The `selectNextTask` function calls `findNextTask` which returns the new `'merge'` action. No separate routing logic needed in `selectNextTask` — it just passes through what `findNextTask` returns.
-- **Pool slot lifecycle:** The merge handler claims its own pool slot internally (same as reviewer). The `finally` block's `cleanupPoolSlot` handles the outer slot used for coder/reviewer — for `merge` action, there is no outer slot claim (the merge handler manages its own). Guard the outer `cleanupPoolSlot` call: only run if a pool slot was actually claimed by the outer dispatch.
+- **Pool slot lifecycle:** The merge handler claims its own pool slot internally (same as reviewer). For `merge` action:
+  - **Skip the outer pool slot claim** (lines 304-331 in orchestrator-loop.ts) — the merge handler manages its own slot
+  - **Guard the outer `cleanupPoolSlot`** in the `finally` block (line 413) — only run if a pool slot was actually claimed by the outer dispatch
+  - Both the claim skip AND the cleanup guard are needed — claim-only without cleanup guard leaks the slot
 
 **Tests:** Verify dispatch routing for `merge` action reaches `processMergeQueue`. Verify `cleanupPoolSlot` is NOT called for merge action's outer context.
 
@@ -230,8 +251,9 @@ Each call site below must be updated. Checked individually:
 **Changes:**
 - On approval: fetch current HEAD of remote `steroids/task-<taskId>` → record as `task.approved_sha`
 - Transition task to `merge_pending` with `merge_phase = 'queued'`
-- Remove `mergeToBase` call entirely from reviewer phase
-- Remove `mergeToBase` import from this file (imports from `src/workspace/git-lifecycle-merge.ts`)
+- Remove `mergeToBase` call entirely from reviewer phase (line ~372)
+- Remove `handleMergeFailure` call and related logic (line ~375 — becomes dead code when `mergeToBase` is removed)
+- Remove both imports: `mergeToBase` from `git-lifecycle-merge.ts` and `handleMergeFailure` from `merge-pipeline.ts`
 
 **Tests:** Test reviewer approval → status = `merge_pending`, `merge_phase = 'queued'`, `approved_sha` set. Test `mergeToBase` is not called. Test reviewer rejection → `pending` (regression — unchanged behavior).
 
@@ -240,32 +262,35 @@ Each call site below must be updated. Checked individually:
 **Files:** `src/orchestrator/merge-queue.ts` (new)
 **Design ref:** "Pipeline overview", all Phase 3 step contracts
 
+**Method architecture:** Every named step in the design doc is its own exported function, testable in isolation:
+
+| Function | Responsibility | Test strategy |
+|----------|---------------|--------------|
+| `processMergeQueue(db, task, config)` | Router — reads `merge_phase`, dispatches to handler | Unit: mock handlers, verify routing |
+| `handleMergeAttempt(db, task, config, ctx)` | Orchestrator — composes steps, manages lock/slot lifecycle | Integration: mocked git, real DB |
+| `fetchAndPrepare(db, task, config, slot)` | Fetch branches, idempotency check, SHA verify | Unit: mock git commands |
+| `handlePrepFailure(db, task, result)` | Per-error-type DB transitions | Unit: pure DB logic, no I/O |
+| `attemptRebaseAndFastForward(slot, task, config)` | ff-only, then deterministic rebase, then conflict detection | Unit: mock git commands |
+| `pushTargetBranch(slot, config)` | Push with error classification | Unit: mock git, verify classification |
+| `cleanupTaskBranch(slot, task, config)` | Delete remote task branch (non-fatal) | Unit: mock git |
+| `markCompleted(db, task)` | Status → completed, clear merge columns | Unit: pure DB |
+| `classifyPushError(error)` | Classify push error as transient/permanent/race | Unit: pure function, no mocking |
+| `classifyFetchError(error)` | Classify fetch error as transient/permanent | Unit: pure function, no mocking |
+
 **Changes:**
 - Create `src/orchestrator/merge-queue.ts`
-- Export `processMergeQueue(db, task, config)` — routes via `task.merge_phase`:
+- `processMergeQueue` routes via `task.merge_phase`:
   - `queued` → `handleMergeAttempt`
-  - `rebasing` → stub returning `disputed` (Phase 4 will implement)
-  - `rebase_review` → stub returning `disputed` (Phase 4 will implement)
-- Implement `handleMergeAttempt`:
-  - Claims a pool slot (`claimSlot` from `pool.ts`) — if none available, return (retry next iteration)
-  - `acquireMergeLock` (tryOnce, passing `runnerId` + `slotId`) — return immediately if contended
-  - `fetchAndPrepare` — fetch target + task branch, idempotency check (`git merge-base --is-ancestor`), SHA verify
-  - `handlePrepFailure` — per-error-type handling:
-    - `sha_mismatch` → return to `review`, clear `merge_phase`, `rebase_attempts`, `approved_sha`
-    - `fetch_transient` → release lock, return (retry next iteration, no status change)
-    - `fetch_permanent` → `blocked_error`
-  - `attemptRebaseAndFastForward` — ff-only first, then deterministic `git rebase`, then conflict detection
-  - `pushTargetBranch` — push with race/failure detection:
-    - Race loss (non-ff) → release lock, return (retry — bounded by `maxInvocationsPerTask`)
-    - Transient failure → release lock, return (retry next iteration)
-    - Permanent failure → `blocked_error`
-  - `cleanupTaskBranch` — delete remote task branch (non-fatal on failure)
-  - `markCompleted` — status → `completed`, clear `merge_phase`, `rebase_attempts`, `approved_sha`
+  - `rebasing` → stub returning `disputed` (Phase 4 implements)
+  - `rebase_review` → stub returning `disputed` (Phase 4 implements)
+- `handleMergeAttempt` is a thin orchestrator — it composes the step functions above but contains NO business logic in its body. Each step returns a typed result; the orchestrator branches on the result type:
+  - Claims pool slot → `acquireMergeLock` (tryOnce) → `fetchAndPrepare` → branch on result → `attemptRebaseAndFastForward` → `pushTargetBranch` → `cleanupTaskBranch` → `markCompleted`
   - **Local-only guard:** if `config.git?.remote` is not configured, skip merge queue (log warning, mark completed)
-- `try/finally` ensures `releaseMergeLock` always called
-- Release pool slot in `finally` block
+- Error classifiers (`classifyPushError`, `classifyFetchError`) are pure functions — git exit codes and known error strings drive classification. No regex parsing of arbitrary output (per AGENTS.md determinism rule).
+- `try/finally` ensures `releaseMergeLock` and pool slot release always called
+- **500-line limit:** If the file approaches 500 lines after Phase 4 adds rebase handlers, split into `merge-queue.ts` (router + orchestrator), `merge-queue-steps.ts` (step functions), `merge-queue-rebase.ts` (rebase cycle)
 
-**Tests:** See 2.12 for comprehensive test coverage.
+**Tests:** See 2.12 for comprehensive test coverage. Each exported function has dedicated unit tests.
 
 ### 2.8 Fix sanitizer merge lock table reference
 
@@ -323,7 +348,20 @@ Each call site below must be updated. Checked individually:
 **Files:** `tests/merge-queue-gate.test.ts` (new)
 **Design ref:** All Phase 2+3 contracts
 
-**Tests:**
+**Unit tests** (each step function tested independently):
+- `classifyPushError`: returns `'race_loss'` for non-ff, `'transient'` for connection errors, `'permanent'` for auth failures
+- `classifyFetchError`: returns `'transient'` for network timeout, `'permanent'` for auth/not-found
+- `fetchAndPrepare`: idempotency check returns `alreadyMerged` when SHA is ancestor of target HEAD
+- `fetchAndPrepare`: SHA mismatch returns `{ ok: false, error: 'sha_mismatch' }`
+- `handlePrepFailure`: sha_mismatch → status `review`, all merge columns cleared
+- `handlePrepFailure`: fetch_transient → no DB changes
+- `handlePrepFailure`: fetch_permanent → status `blocked_error`
+- `markCompleted`: status `completed`, merge_phase/approved_sha/rebase_attempts all NULL/0
+- `attemptRebaseAndFastForward`: ff-only success → `{ merged: true }`
+- `attemptRebaseAndFastForward`: diverged + clean rebase → `{ merged: true }`
+- `attemptRebaseAndFastForward`: conflicts → `{ merged: false, reason: 'conflicts' }`
+
+**Integration tests** (composed flow):
 - Happy path: approved task → `merge_pending` → merge → `completed`, code on target branch
 - SHA mismatch: task branch modified after approval → returns to `review` with cleared merge state
 - Crash recovery: `approved_sha` already in target → skip to `markCompleted`
@@ -367,22 +405,37 @@ Each call site below must be updated. Checked individually:
 
 ### 4.3 Implement `handleRebaseCoder`
 
-**Files:** `src/orchestrator/merge-queue.ts`, `src/prompts/rebase-coder.ts` (new)
+**Files:** `src/orchestrator/merge-queue.ts` (or `merge-queue-rebase.ts` if split), `src/prompts/rebase-coder.ts` (new)
 **Design ref:** `handleRebaseCoder` contract
+
+**Method architecture:** Extract these as separate testable functions:
+
+| Function | Responsibility | Test strategy |
+|----------|---------------|--------------|
+| `captureConflictFiles(slot, task, config)` | Start rebase, record conflicting files, abort | Unit: mock git |
+| `validateDiffFence(slot, allowedFiles)` | Compare modified files against allowed list | Unit: pure logic |
+| `resetBranchToSha(slot, sha)` | `git reset --hard <sha>` | Unit: mock git |
 
 **Changes:**
 - Claims pool slot
-- Checks out task branch, resets to `task.approved_sha` (`git reset --hard`) — ensures each attempt starts from reviewer-approved code
-- Captures conflict file list: start `git rebase`, record files from `git diff --name-only --diff-filter=U`, abort
+- `resetBranchToSha(slot, task.approved_sha)` — ensures each attempt starts from reviewer-approved code
+- `captureConflictFiles(slot, task, config)` — start `git rebase`, record files from `git diff --name-only --diff-filter=U`, abort
 - Spawns LLM rebase coder with rebase-specific prompt
-- After LLM: validates diff fence (only conflict-affected files modified)
+- `validateDiffFence(slot, conflictFiles)` — after LLM, validates only conflict-affected files were modified
 - Force-pushes updated task branch (`--force-with-lease`)
 - Success: `merge_phase = 'rebase_review'`
 - LLM failure / diff fence violation: → `disputed`
 - Infrastructure failure: → `blocked_error`
 - Does NOT set `approved_sha`
 
-**Tests:** Test successful rebase → `rebase_review`. Test diff fence violation → `disputed`. Test LLM failure → `disputed`. Test branch reset to `approved_sha` before each attempt.
+**Tests:**
+- `captureConflictFiles`: returns correct file list from conflicted rebase
+- `validateDiffFence`: passes when only allowed files modified, fails when unrelated files touched
+- `resetBranchToSha`: verifies HEAD matches target SHA after reset
+- Integration: successful rebase → `rebase_review`
+- Integration: diff fence violation → `disputed`
+- Integration: LLM failure → `disputed`
+- Integration: branch reset to `approved_sha` before each attempt
 
 ### 4.4 Implement `handleRebaseReview`
 
@@ -459,7 +512,7 @@ Each call site below must be updated. Checked individually:
 **Changes:**
 - Delete all: `merge.ts`, `merge-git.ts`, `merge-process.ts`, `merge-sealing.ts`, `merge-workspace.ts`, `merge-commit-checks.ts`, `merge-validation.ts`, `merge-progress.ts`, `merge-errors.ts`, `merge-lock.ts`, `merge-conflict*.ts` (all under `src/parallel/`)
 - **Also delete/update:** `src/commands/merge.ts` — this CLI command imports `runParallelMerge` from `../parallel/merge.js`. Either remove the command entirely or update it to use the new merge queue.
-- Remove `createIntegrationWorkspace` from `src/workspace/clone.ts` (lines 449-499)
+- Remove `createIntegrationWorkspace` from `src/parallel/clone.ts` (lines 449-499)
 - Do NOT delete `src/workspace/merge-lock.ts` (reused by merge queue)
 
 **Tests:** Build succeeds. No broken imports.
@@ -650,7 +703,7 @@ Each call site below must be updated. Checked individually:
 - [ ] **5.1** `autoMergeOnCompletion` removed from `src/runners/daemon.ts`
 - [ ] **5.2** All `src/parallel/merge-*.ts` AND `src/parallel/merge.ts` files deleted
 - [ ] **5.2** `src/commands/merge.ts` updated or removed (broken import to `../parallel/merge.js`)
-- [ ] **5.2** `createIntegrationWorkspace` removed from `src/workspace/clone.ts`
+- [ ] **5.2** `createIntegrationWorkspace` removed from `src/parallel/clone.ts`
 - [ ] **5.2** `src/workspace/merge-lock.ts` is NOT deleted (still used)
 - [ ] **5.3** Workstream branch push removed from `src/commands/loop-phases-coder-decision.ts`
 - [ ] **5.4** `src/workspace/git-lifecycle-merge.ts` deleted

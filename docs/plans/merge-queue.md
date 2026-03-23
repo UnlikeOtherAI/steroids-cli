@@ -136,7 +136,7 @@ function pushTaskBranchForDurability(
 //   - NEVER transitions to 'pending' or 'skipped' on push failure
 ```
 
-**Insertion point:** Called from within `submitForReviewWithDurableRef` (in `loop-phases-coder-decision.ts`), BEFORE the status transitions to `review`. If push fails, the task stays in its current status and transitions to `blocked_error` — it never enters `review` without a durable push.
+**Insertion point:** Called BEFORE `submitForReviewWithDurableRef` in the coder decision phase (`loop-phases-coder-decision.ts`) and no-op submission path (`coder-noop-submission.ts`). `submitForReviewWithDurableRef` is a pure DB function — push logic stays outside it. If push fails, the task stays in its current status and transitions to `blocked_error` — it never enters `review` without a durable push.
 
 This replaces the current `cleanupPoolSlot` durability push. The push is a first-class pipeline step, not a side effect of cleanup. `cleanupPoolSlot` becomes slot release only — no push, no status overrides.
 
