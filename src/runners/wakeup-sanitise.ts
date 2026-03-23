@@ -28,6 +28,7 @@ export interface SanitiseSummary {
   releasedTaskLocks: number;
   releasedSectionLocks: number;
   recoveredDisputedTasks: number;
+  recoveredFailedTasks: number;
 }
 
 const DEFAULT_SANITISE_INTERVAL_MINUTES = 5;
@@ -106,6 +107,7 @@ function sanitiseProjectState(
     releasedTaskLocks: 0,
     releasedSectionLocks: 0,
     recoveredDisputedTasks: 0,
+    recoveredFailedTasks: 0,
   };
 
   const staleCutoffMs = Date.now() - staleInvocationTimeoutSec * 1000;
@@ -275,6 +277,64 @@ function sanitiseProjectState(
     } catch {
       // task_invocations may lack role column or audit table schema mismatch — safe to skip
     }
+
+    // S4: Recover failed/skipped tasks stuck > 30 min.
+    // Resets to 'pending' — the task selector's S7 logic will route to 'review'
+    // (skipping the coder) if the coder already succeeded for the task.
+    // Clears failure_count/rejection_count and merge columns for a fresh attempt.
+    // Guard: skip tasks with >30 total invocations — they likely have a systemic
+    // issue (infrastructure block, repeated provider failures) and should not
+    // be retried automatically to avoid burning credits.
+    try {
+      const failedRows = projectDb
+        .prepare(
+          `SELECT t.id, t.status FROM tasks t
+           WHERE t.status IN ('failed', 'skipped')
+             AND t.updated_at < datetime('now', '-30 minutes')
+             AND (
+               SELECT COUNT(*) FROM task_invocations i WHERE i.task_id = t.id
+             ) <= 30`
+        )
+        .all() as Array<{ id: string; status: string }>;
+
+      if (failedRows.length > 0) {
+        const ids = failedRows.map((r) => r.id);
+        const placeholders = ids.map(() => '?').join(',');
+        projectDb
+          .prepare(
+            `UPDATE tasks
+             SET status = 'pending',
+                 failure_count = 0,
+                 rejection_count = 0,
+                 merge_phase = NULL,
+                 approved_sha = NULL,
+                 rebase_attempts = 0,
+                 merge_failure_count = 0,
+                 conflict_count = 0,
+                 blocked_reason = NULL,
+                 last_failure_at = NULL,
+                 updated_at = datetime('now')
+             WHERE id IN (${placeholders})`
+          )
+          .run(...ids);
+
+        const auditStmt = projectDb.prepare(
+          `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
+           VALUES (?, ?, 'pending', 'orchestrator', 'orchestrator',
+                   'Recovered by periodic sanitise — failed/skipped task reset for retry (S7 routes to correct phase).',
+                   datetime('now'))`
+        );
+        for (const row of failedRows) {
+          auditStmt.run(row.id, row.status);
+        }
+        projectDb
+          .prepare(`DELETE FROM task_locks WHERE task_id IN (${placeholders})`)
+          .run(...ids);
+      }
+      summary.recoveredFailedTasks = failedRows.length;
+    } catch {
+      // Safe to skip on schema mismatch
+    }
   }
 
   return summary;
@@ -297,6 +357,7 @@ export function runPeriodicSanitiseForProject(
       releasedTaskLocks: 0,
       releasedSectionLocks: 0,
       recoveredDisputedTasks: 0,
+      recoveredFailedTasks: 0,
     };
   }
 
@@ -310,6 +371,7 @@ export function runPeriodicSanitiseForProject(
       releasedTaskLocks: 0,
       releasedSectionLocks: 0,
       recoveredDisputedTasks: 0,
+      recoveredFailedTasks: 0,
     };
   }
 
@@ -335,6 +397,7 @@ export function sanitisedActionCount(summary: SanitiseSummary): number {
     summary.closedStaleInvocations +
     summary.releasedTaskLocks +
     summary.releasedSectionLocks +
-    summary.recoveredDisputedTasks
+    summary.recoveredDisputedTasks +
+    summary.recoveredFailedTasks
   );
 }
