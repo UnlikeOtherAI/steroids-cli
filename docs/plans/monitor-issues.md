@@ -284,7 +284,7 @@ These are bugs in the scanner's data sources, the runner lifecycle, and the wake
 
 ---
 
-### [ ] S1: Scanner `hasActiveRunner()` misses parallel-session runners
+### [x] S1: Scanner `hasActiveRunner()` misses parallel-session runners
 
 **Severity:** Critical — single root cause of 189 out of 301 anomaly occurrences.
 
@@ -300,7 +300,7 @@ These are bugs in the scanner's data sources, the runner lifecycle, and the wake
 
 ---
 
-### [ ] S2: Orphaned task not cleaned up by wakeup sanitiser
+### [x] S2: Orphaned task not cleaned up by wakeup sanitiser
 
 **Severity:** High — tasks can stay orphaned for hours.
 
@@ -314,7 +314,7 @@ These are bugs in the scanner's data sources, the runner lifecycle, and the wake
 
 ---
 
-### [ ] S3: Stuck "disputed" tasks block section progress
+### [x] S3: Stuck "disputed" tasks block section progress
 
 **Severity:** Medium — task blocks all siblings in its section.
 
@@ -326,7 +326,7 @@ These are bugs in the scanner's data sources, the runner lifecycle, and the wake
 
 ---
 
-### [ ] S4: Merge-conflict blocked tasks require manual intervention
+### [x] S4: Merge-conflict blocked tasks require manual intervention
 
 **Severity:** Medium — 15 occurrences across 4 projects, no auto-recovery.
 
