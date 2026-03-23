@@ -126,7 +126,7 @@ Use non-interactive modes for all scripted/automated flows. For `npx` in automat
 
 - Prefer proven patterns in this codebase over new architectural models for routine problems.
 - **After editing any file, check its line count — hard limits:**
-  - Source, tests, config: **500 lines**. Exceeding requires splitting into focused modules before continuing.
+  - Source, tests, config: **500 lines**. Exceeding requires splitting into focused modules before continuing. **Never trim comments or blank lines to fit** — refactor the architecture (extract helpers, split files) instead.
   - Documentation (`.md`): **1,000 lines**. Exceeding requires a dedicated folder with `overview.md` linking to sub-files.
 - Include targeted tests for bug fixes and new logic when validation is in scope.
 - Keep work in small isolated commits and push promptly.

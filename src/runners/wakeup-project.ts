@@ -185,7 +185,12 @@ async function probeAuthErrorProviders(projectPath: string, log: WakeupLogger): 
   const projectConfig = loadConfig(projectPath);
   const coderProvider = projectConfig.ai?.coder?.provider;
   const reviewerProvider = projectConfig.ai?.reviewer?.provider;
-  const providersToCheck = [...new Set([coderProvider, reviewerProvider].filter(Boolean) as string[])];
+  const multiReviewerProviders = (projectConfig.ai?.reviewers ?? [])
+    .map(r => r.provider)
+    .filter(Boolean) as string[];
+  const providersToCheck = [...new Set(
+    [coderProvider, reviewerProvider, ...multiReviewerProviders].filter(Boolean) as string[]
+  )];
 
   for (const providerName of providersToCheck) {
     const info = getProviderBackoffInfo(providerName);

@@ -26,11 +26,57 @@ import { ensureWorkspaceSteroidsSymlink, getProjectHash } from '../parallel/clon
 import type { PoolSlotContext } from '../workspace/types.js';
 import { claimSlot, finalizeSlotPath, releaseSlot, partialReleaseSlot, resolveRemoteUrl, refreshSlotHeartbeat, getSlot } from '../workspace/pool.js';
 import { pushWithRetries } from '../workspace/git-helpers.js';
+import { prepareForTask } from '../workspace/git-lifecycle.js';
+import { resolveEffectiveBranch } from '../git/branch-resolver.js';
 import { refreshWorkspaceMergeLockHeartbeat } from '../workspace/merge-lock.js';
 import { waitForPressureRelief } from './system-pressure.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cleanupPoolSlot(
+  poolSlotCtx: PoolSlotContext,
+  db: import('better-sqlite3').Database,
+  taskId: string,
+  config: ReturnType<typeof loadConfig>,
+): void {
+  if (poolSlotCtx.heartbeatTimer) clearInterval(poolSlotCtx.heartbeatTimer);
+  try {
+    const currentSlot = getSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+    if (currentSlot?.status === 'awaiting_review') {
+      let durabilityPushFailed = false;
+      if (currentSlot.slot_path && currentSlot.task_branch && currentSlot.remote_url) {
+        const pushResult = pushWithRetries(
+          currentSlot.slot_path, 'origin', currentSlot.task_branch, 2, [2000, 8000], true
+        );
+        if (!pushResult.success) {
+          durabilityPushFailed = true;
+          console.warn(`[pool] Failed to push ${currentSlot.task_branch} before partial release: ${pushResult.error ?? 'unknown error'}`);
+        }
+      }
+      if (durabilityPushFailed) {
+        const failCount = incrementTaskFailureCount(db, taskId);
+        const maxAttempts = config.health?.maxRecoveryAttempts ?? 3;
+        if (failCount >= maxAttempts) {
+          updateTaskStatus(db, taskId, 'skipped', 'orchestrator',
+            `Auto-skipped: task branch push failed ${failCount} times. Remote may be unreachable or misconfigured.`);
+          console.warn(`[pool] Push failure cap reached (${failCount}/${maxAttempts}); task skipped.`);
+        } else {
+          updateTaskStatus(db, taskId, 'pending', 'orchestrator',
+            `Returned to pending because task branch push failed before review handoff (${failCount}/${maxAttempts})`);
+        }
+        releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+      } else {
+        clearTaskFailureCount(db, taskId);
+        partialReleaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+      }
+    } else {
+      releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
+    }
+  } catch {
+    // Tolerate release failures — reconciliation handles cleanup
+  }
 }
 
 function resolveSectionIds(sectionId?: string, sectionIds?: string[]): string[] | undefined {
@@ -245,14 +291,12 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
         }
       }
 
-      // ── System pressure gate: wait for memory/disk headroom ──
       const pressureOk = await waitForPressureRelief();
       if (!pressureOk) {
         console.error('[pressure] System under sustained pressure — stopping runner to prevent crash');
         break;
       }
 
-      // ── Workspace pool: claim slot, start heartbeat ──
       let poolSlotCtx: PoolSlotContext | undefined;
       let poolGlobalDb: ReturnType<typeof openGlobalDatabase> | undefined;
       const sourceProjectPath = parallelSourceProjectPath ?? projectPath;
@@ -264,8 +308,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           const projectId = getProjectHash(sourceProjectPath);
           const remoteUrl = resolveRemoteUrl(sourceProjectPath);
           if (!remoteUrl) {
-            console.warn(`[pool] Skipping pool mode for ${projectPath}: no remote URL detected. Pool mode requires a pushable remote.`);
-            // poolSlotCtx remains undefined — falls through to non-pool (legacy) path
+            console.warn(`[pool] Skipping pool mode for ${projectPath}: no remote URL. Pool requires a pushable remote.`);
           } else {
             const slot = claimSlot(gdb.db, projectId, options.runnerId, task.id);
             const finalSlot = finalizeSlotPath(gdb.db, slot.id, sourceProjectPath, remoteUrl);
@@ -284,7 +327,6 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           }
         } catch (error) {
           console.warn('Pool slot claim failed, running without pool:', (error as Error).message);
-          // Fall back to non-pool mode
         }
       }
 
@@ -339,6 +381,24 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             (task as any).status = 'review';
           }
           ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
+
+          // S7/I1: In pool mode, a fresh slot lacks task_branch/starting_sha metadata
+          // (set by prepareForTask during the coder phase). When S7 skips the coder,
+          // we must prepare the slot so mergeToBase doesn't crash on null assertions.
+          if (poolSlotCtx && !poolSlotCtx.slot.task_branch) {
+            const config = loadConfig(projectPath);
+            const sectionBranch = resolveEffectiveBranch(db, task.section_id ?? null, config);
+            const configBranch = config.git?.branch ?? null;
+            const prepResult = prepareForTask(
+              poolSlotCtx.globalDb, poolSlotCtx.slot, task.id,
+              projectPath, sourceProjectPath, sectionBranch, configBranch
+            );
+            if (!prepResult.ok) {
+              console.warn(`[S7] Pool slot prep failed for review: ${prepResult.reason}`);
+              // Fall through — reviewer preflight will catch the missing branch
+            }
+          }
+
           creditResult = await runReviewerPhase(
             db,
             task,
@@ -354,61 +414,7 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
           );
         }
       } finally {
-        // ── Pool cleanup: stop heartbeat, release slot ──
-        if (poolSlotCtx) {
-          if (poolSlotCtx.heartbeatTimer) {
-            clearInterval(poolSlotCtx.heartbeatTimer);
-          }
-          try {
-            // After the coder phase the slot may be in 'awaiting_review' status.
-            // Use partialReleaseSlot so task_branch/base_branch/starting_sha
-            // survive into the reviewer's claimSlot call next iteration.
-            // For all other statuses (including after reviewer merge) do a full release.
-            const currentSlot = getSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
-            if (currentSlot?.status === 'awaiting_review') {
-              let durabilityPushFailed = false;
-              if (currentSlot.slot_path && currentSlot.task_branch && currentSlot.remote_url) {
-                const pushResult = pushWithRetries(
-                  currentSlot.slot_path,
-                  'origin',
-                  currentSlot.task_branch,
-                  2,
-                  [2000, 8000],
-                  true
-                );
-                if (!pushResult.success) {
-                  durabilityPushFailed = true;
-                  console.warn(
-                    `[pool] Failed to push ${currentSlot.task_branch} before partial release: ${pushResult.error ?? 'unknown error'}`
-                  );
-                }
-              }
-
-              if (durabilityPushFailed) {
-                // failure_count is shared across provider failures and push failures.
-                // Both accumulate toward maxRecoveryAttempts; cleared only on push success.
-                const failCount = incrementTaskFailureCount(db, task.id);
-                const maxAttempts = config.health?.maxRecoveryAttempts ?? 3;
-                if (failCount >= maxAttempts) {
-                  updateTaskStatus(db, task.id, 'skipped', 'orchestrator',
-                    `Auto-skipped: task branch push failed ${failCount} times. Remote may be unreachable or misconfigured.`);
-                  console.warn(`[pool] Push failure cap reached (${failCount}/${maxAttempts}); task skipped.`);
-                } else {
-                  updateTaskStatus(db, task.id, 'pending', 'orchestrator',
-                    `Returned to pending because task branch push failed before review handoff (${failCount}/${maxAttempts})`);
-                }
-                releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
-              } else {
-                clearTaskFailureCount(db, task.id);
-                partialReleaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
-              }
-            } else {
-              releaseSlot(poolSlotCtx.globalDb, poolSlotCtx.slot.id);
-            }
-          } catch {
-            // Tolerate release failures — reconciliation handles cleanup
-          }
-        }
+        if (poolSlotCtx) cleanupPoolSlot(poolSlotCtx, db, task.id, config);
         if (poolGlobalDb) {
           try { poolGlobalDb.close(); } catch { /* ignore */ }
         }
