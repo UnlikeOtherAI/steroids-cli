@@ -15,7 +15,16 @@ These rules apply to every task. Violations are review blockers.
 
 3. **No patches upon patches.** This design replaces the broken merge system — it does not patch it. Every removal (Phase 5) is a clean deletion, not a conditional bypass. Every new function has a single responsibility. If a task says "modify X to also do Y," check whether X should be split into X and Y instead.
 
-4. **500-line file limit** (per AGENTS.md). `src/orchestrator/merge-queue.ts` will contain many functions. If it approaches 500 lines, split into `merge-queue.ts` (router + orchestrator), `merge-queue-steps.ts` (named step functions), and `merge-queue-rebase.ts` (rebase cycle).
+4. **500-line file limit means architectural refactor, not mechanical extraction** (per AGENTS.md). When a file approaches 500 lines, it is a signal that the file has accumulated too many responsibilities. The fix is never "move the bottom 3 functions to a new file." The fix is to identify the cohesive responsibility groups within the file and split along those seams — each resulting file owns a complete concern, not a random slice. For the merge queue module, the natural responsibility boundaries are:
+
+   | File | Responsibility | What belongs here |
+   |------|---------------|-------------------|
+   | `merge-queue.ts` | Pipeline routing and orchestration | `processMergeQueue` (router), `handleMergeAttempt` (orchestrator), pool slot and lock lifecycle management |
+   | `merge-queue-steps.ts` | Deterministic merge operations | `fetchAndPrepare`, `attemptRebaseAndFastForward`, `pushTargetBranch`, `cleanupTaskBranch`, `classifyPushError`, `classifyFetchError` — all git I/O for the happy-path merge |
+   | `merge-queue-rebase.ts` | LLM-powered rebase cycle | `handleRebaseCoder`, `handleRebaseReview`, `captureConflictFiles`, `validateDiffFence`, `resetBranchToSha`, rebase prompt construction |
+   | `merge-queue-transitions.ts` | State machine transitions | `markCompleted`, `handlePrepFailure`, `transitionToRebasing` — pure DB operations that move tasks between states |
+
+   The test is: can you describe what a file does in one sentence? If you need "and" or a comma, the file has multiple responsibilities and should be split further. Start with one file; split only when the line count forces it. But when you split, split by responsibility, not by alphabet or line count.
 
 5. **Determinism first** (per AGENTS.md). No regex parsing of git output, no fuzzy matching of error messages. Git exit codes and known error patterns determine branch logic. If git commands need structured output, use `--porcelain` or equivalent.
 
@@ -288,7 +297,7 @@ Each call site below must be updated. Checked individually:
   - **Local-only guard:** if `config.git?.remote` is not configured, skip merge queue (log warning, mark completed)
 - Error classifiers (`classifyPushError`, `classifyFetchError`) are pure functions — git exit codes and known error strings drive classification. No regex parsing of arbitrary output (per AGENTS.md determinism rule).
 - `try/finally` ensures `releaseMergeLock` and pool slot release always called
-- **500-line limit:** If the file approaches 500 lines after Phase 4 adds rebase handlers, split into `merge-queue.ts` (router + orchestrator), `merge-queue-steps.ts` (step functions), `merge-queue-rebase.ts` (rebase cycle)
+- **500-line limit:** If the file approaches 500 lines after Phase 4 adds rebase handlers, split by responsibility per the table in Implementation Principle #4 — routing/orchestration, deterministic merge steps, LLM rebase cycle, and state transitions. Each file owns a complete concern.
 
 **Tests:** See 2.12 for comprehensive test coverage. Each exported function has dedicated unit tests.
 
