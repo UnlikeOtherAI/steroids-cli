@@ -177,6 +177,9 @@ function acquireMergeLock(db: Database, config: SteroidsConfig): boolean
 //   - Does NOT hold lock during LLM rebase cycle
 //   - Uses the existing heartbeat-based locking pattern (workspace_merge_locks table with
 //     heartbeat_at column and TTL-based stale detection — NOT epoch-based despite prior doc references)
+//   - tryOnce semantics: single acquisition attempt, returns true/false immediately
+//     (no busy-wait polling — the task is retried next iteration by the orchestrator loop)
+//   - Stale lock TTL reduced to 90 seconds for merge queue use (merge gate takes seconds, not minutes)
 //   - Returns true if acquired, false if contended (handler returns immediately, task retried next iteration)
 ```
 
@@ -194,7 +197,11 @@ function fetchAndPrepare(
 //     -> caller skips to markCompleted. This handles crash-after-push recovery
 //     (push succeeded but DB update failed on previous attempt).
 //   - Verifies task branch HEAD matches task.approved_sha (SHA tracking guard)
-//   - If SHA mismatch: returns { ok: false, error: 'sha_mismatch' }
+//   - If SHA mismatch: returns { ok: false, error: 'sha_mismatch' } (permanent — needs re-review)
+//   - If fetch fails (network timeout, transient): returns { ok: false, error: 'fetch_transient' }
+//     -> handler releases lock, returns. Task retried next iteration (idempotent).
+//   - If fetch fails (auth, permanent): returns { ok: false, error: 'fetch_permanent' }
+//     -> handler transitions to blocked_error
 //   - Prepares pool slot for merge: checks out target branch, task branch fetched
 //     into local tracking ref. Slot is in a state where `git merge --ff-only task_branch`
 //     or `git rebase` can run immediately.
@@ -206,8 +213,9 @@ function fetchAndPrepare(
 function handlePrepFailure(db: Database, task: Task, result: { error?: string }): void
 // Contract:
 //   - 'sha_mismatch': task returns to 'review' for re-review, clears merge_phase,
-//     rebase_attempts, approved_sha, push_race_losses (full merge state reset)
-//   - 'fetch_failed' / infrastructure: task -> 'blocked_error'
+//     rebase_attempts, approved_sha (full merge state reset)
+//   - 'fetch_transient': release lock, return (no status change — retry next iteration)
+//   - 'fetch_permanent' / auth failure: task -> 'blocked_error'
 //   - All other errors: task -> 'blocked_error' with error detail
 ```
 
@@ -239,9 +247,10 @@ function pushTargetBranch(
 //   - This is the real race point — another merge could have pushed between our ff-only and our push
 //   - If push fails due to non-ff rejection: returns { ok: false, raceLoss: true }
 //     -> task stays in merge_pending/queued for retry, does NOT count toward rebase cap
-//     -> push_race_losses counter incremented; if >= soft cap (default 20), task -> disputed
-//        (prevents infinite loop under extreme contention)
-//   - If push fails due to infrastructure: returns { ok: false }
+//     -> bounded by maxInvocationsPerTask (default 50) — each retry is an invocation
+//   - If push fails due to transient network error: returns { ok: false }
+//     -> release lock, return (retry next iteration — idempotent)
+//   - If push fails due to permanent error (auth, etc.): returns { ok: false }
 //     -> task -> blocked_error
 ```
 
@@ -261,10 +270,10 @@ function cleanupTaskBranch(
 ```typescript
 function markCompleted(db: Database, task: Task): void
 // Contract:
-//   - Task status -> 'completed', clears merge_phase, rebase_attempts, approved_sha, push_race_losses
+//   - Task status -> 'completed', clears merge_phase, rebase_attempts, approved_sha
 //   - Clears task branch reference
-//   - Any external reset of a merge_pending task (FR, sanitizer) must also clear
-//     merge_phase, rebase_attempts, approved_sha, and push_race_losses
+//   - Any external reset of a merge_pending task (FR, sanitizer, disputed recovery) must also clear
+//     merge_phase, rebase_attempts, and approved_sha
 ```
 
 ---
@@ -293,6 +302,8 @@ function handleRebaseCoder(
 // Contract:
 //   - Spawns a rebase coder instance (LLM invocation with rebase-specific prompt)
 //   - Checks out the task branch
+//   - RESETS task branch HEAD to task.approved_sha (git reset --hard) before rebasing
+//     — ensures each rebase attempt starts from reviewer-approved code, not rejected rebase
 //   - Runs: git rebase <remote>/<target_branch>
 //   - Resolves any conflicts
 //   - Ensures code still works after rebase (runs build/test if configured)
@@ -359,7 +370,7 @@ New columns on tasks table:
 - `merge_phase TEXT` — `'queued'`, `'rebasing'`, `'rebase_review'` (NULL when not in merge pipeline)
 - `approved_sha TEXT` — SHA blessed by reviewer, verified before merge
 - `rebase_attempts INTEGER DEFAULT 0` — LLM rebase cycle count, cap at 3
-- `push_race_losses INTEGER DEFAULT 0` — push race loss counter, soft cap at 20
+_(`push_race_losses` removed — existing `maxInvocationsPerTask` cap serves as circuit breaker for push race loops)_
 
 ### Status propagation table
 
@@ -434,28 +445,44 @@ Both foreground `loop` and daemon mode handle the `merge` action — the merge l
 
 ### Health system integration
 
-The monitor, sanitizer, and stuck-task detector must be merge-pipeline-aware:
+The monitor, sanitizer, stuck-task detector, and invocation logger must be merge-pipeline-aware:
 
-**Wakeup sanitizer (`wakeup-sanitise-recovery.ts`):** Two changes required:
+**Invocation logger (`invocation-logger.ts`):** PREREQUISITE — must ship before any merge invocations can run.
+- Line 353-355: `canDbLog` whitelist only allows `role === 'coder' || role === 'reviewer'`. New roles (`merge`, `rebase_coder`, `rebase_reviewer`) will silently skip DB logging. Without DB records, the health system (stuck-task-detector, scanner, sanitizer) is completely blind to merge invocations.
+- Phase 2+3: extend whitelist to include `'merge'`. Phase 4: add `'rebase_coder'`, `'rebase_reviewer'`.
 
-1. **Reviewer-approval recovery** (lines 133-157): Currently marks `review` tasks as `completed` on recovered approve token. Must transition to `merge_pending` (with `merge_phase = 'queued'` and `approved_sha` recorded), not `completed`. Prevents bypassing the merge queue.
+**Wakeup sanitizer (`wakeup-sanitise.ts` + `wakeup-sanitise-recovery.ts`):** CRITICAL merge lock table fix + role-aware recovery:
 
-2. **Merge-role-aware recovery**: When recovering orphaned invocations for tasks in `merge_pending` status, the sanitizer must check the invocation role (`merge`, `rebase_coder`, `rebase_reviewer`) and handle each correctly:
+1. **Wrong merge lock table** (wakeup-sanitise.ts lines 131-143): Currently queries `merge_locks` in the **project** DB. The merge queue uses `workspace_merge_locks` in the **global** DB. After the old parallel merge module is removed, `merge_locks` won't exist. Fix: query `workspace_merge_locks` from the global DB, using `heartbeat_at` + TTL stale detection (matching the actual lock schema) instead of `expires_at`.
+
+2. **Disputed task recovery** (wakeup-sanitise.ts lines 230-268): Resets disputed tasks to `pending` but doesn't clear merge columns. A disputed task from the merge pipeline retains stale `merge_phase`, `approved_sha`, `rebase_attempts` — causing incorrect routing on re-entry. Fix: clear all merge columns in the disputed recovery UPDATE.
+
+Recovery changes (`wakeup-sanitise-recovery.ts`): Three changes required:
+
+3. **Reviewer-approval recovery** (lines 133-157): Currently marks `review` tasks as `completed` on recovered approve token. Must transition to `merge_pending` (with `merge_phase = 'queued'` and `approved_sha` recorded), not `completed`. Prevents bypassing the merge queue.
+
+4. **Generic recovery status filter** (lines 201-206): `WHERE status = 'in_progress'` won't match `merge_pending` tasks. Orphaned merge invocations strand permanently. Fix: extend to include `merge_pending`.
+
+5. **Merge-role-aware recovery**: When recovering orphaned invocations for tasks in `merge_pending` status, the sanitizer must check the invocation role (`merge`, `rebase_coder`, `rebase_reviewer`) and handle each correctly:
    - Orphaned `rebase_coder` invocation: reset `merge_phase` to `queued` for retry (do NOT reset to `pending` — that loses the review approval)
    - Orphaned `rebase_reviewer` with approve token: re-record `approved_sha`, set `merge_phase = 'queued'`
    - Orphaned `rebase_reviewer` with reject token: set `merge_phase = 'rebasing'`, increment `rebase_attempts`
    - Orphaned `merge` invocation: release merge lock if held, reset `merge_phase = 'queued'`
    - The `shouldSkipInvocation` guard (line 79) must NOT block recovery of `rebase_coder`/`rebase_reviewer` invocations — these don't hold the merge lock
 
-**Stuck task detector (`stuck-task-detector.ts`):** The hanging invocation query (line 258) only checks `('in_progress', 'review')`. Add `'merge_pending'` so tasks stuck in the merge pipeline (e.g., LLM rebase taking too long) are detected and reported.
+**Stuck task detector (`stuck-task-detector.ts`):** Three changes:
+1. Orphan detection queries (lines 180, 216) hardcode `i.role = 'coder'` — merge invocations are invisible. Fix: extend to `(t.status = 'in_progress' AND i.role = 'coder') OR (t.status = 'merge_pending' AND i.role IN ('merge', 'rebase_coder', 'rebase_reviewer'))`.
+2. Hanging invocation query (line 339) only checks `('in_progress', 'review')`. Add `'merge_pending'`.
+3. Phase-aware thresholds: `merge_pending/queued` should flag at ~5 min (merge gate takes seconds), while `rebasing`/`rebase_review` use standard LLM timeout (~30 min).
 
 **Monitor scanner (`scanner.ts`):** `hasPendingWork` (line 148) must include `'merge_pending'`. Without this, projects with tasks in the merge pipeline appear idle, triggering false-positive "idle project" anomalies.
 
-**First responder (`investigator-actions.ts`):** Three changes:
+**First responder (`investigator-actions.ts`):** Four changes:
 
 1. `VALID_TASK_STATUSES` (line 24): Add `'merge_pending'`
 2. `UPDATABLE_TASK_FIELDS` (line 18): Add `'merge_phase'`, `'approved_sha'`, `'rebase_attempts'`
-3. New actions the FR agent can take:
+3. `reset_task` (lines 64-74): Must clear merge columns (`merge_phase = NULL, approved_sha = NULL, rebase_attempts = 0`) when resetting any task — prevents stale merge state persisting after reset.
+4. New actions the FR agent can take:
    - `release_merge_lock`: Forcibly release a stale merge lock for a project. Used when `stale_merge_lock` anomaly is detected.
    - `reset_merge_phase`: Reset a task's `merge_phase` to `'queued'` and clear failure state, allowing merge retry without losing review approval. Used for most `stuck_merge_*` anomalies.
 
@@ -510,27 +537,35 @@ The monitor, sanitizer, and stuck-task detector must be merge-pipeline-aware:
 These ship together so `merge_pending` tasks always have a processor.
 
 5. Add `merge_pending` status to `TaskStatus` enum
-6. Add `merge_phase`, `approved_sha`, `rebase_attempts`, `push_race_losses` columns to tasks table (migration)
-7. Update all call sites in the propagation table (one status per site)
-8. Extend `SelectedTask.action` union with `'merge'`; add dispatch handler in orchestrator-loop and foreground loop
-9. Reviewer approval transitions to `merge_pending` (records `approved_sha`, sets `merge_phase = 'queued'`) instead of calling `mergeToBase`
-10. Remove `mergeToBase` call from reviewer phase
-11. New merge gate module: `processMergeQueue` with internal routing via `merge_phase`
-12. Merge lock per project (heartbeat-based, reusing `src/workspace/merge-lock.ts`)
-13. Update wakeup sanitizer reviewer-approval recovery to transition to `merge_pending` instead of `completed`
-14. Update stuck-task-detector, scanner `hasPendingWork`, and `VALID_TASK_STATUSES` for `merge_pending`
+6. Add `merge_phase`, `approved_sha`, `rebase_attempts` columns to tasks table (migration)
+7. Extend invocation logger `canDbLog` whitelist to include `'merge'` role (prerequisite for health system visibility)
+8. Update all call sites in the propagation table (one status per site)
+9. Extend `SelectedTask.action` union with `'merge'`; add dispatch handler in orchestrator-loop and foreground loop
+10. Reviewer approval transitions to `merge_pending` (records `approved_sha`, sets `merge_phase = 'queued'`) instead of calling `mergeToBase`
+11. Remove `mergeToBase` call from reviewer phase
+12. New merge gate module: `processMergeQueue` with internal routing via `merge_phase`
+13. Merge lock per project (heartbeat-based tryOnce, reusing `src/workspace/merge-lock.ts`, TTL reduced to 90s)
+14. Fix sanitizer merge lock table: query `workspace_merge_locks` in global DB (not `merge_locks` in project DB)
+15. Update wakeup sanitizer reviewer-approval recovery to transition to `merge_pending` instead of `completed`
+16. Add basic merge-role recovery to sanitizer (for `merge` invocation role) — orphaned merge invocations must not strand
+17. Fix sanitizer generic recovery status filter to include `merge_pending`
+18. Fix disputed task recovery to clear merge columns (`merge_phase`, `approved_sha`, `rebase_attempts`)
+19. Fix FR `reset_task` to clear merge columns
+20. Update stuck-task-detector: orphan query role extension, hanging invocation status, phase-aware thresholds
+21. Update scanner `hasPendingWork` and `VALID_TASK_STATUSES` for `merge_pending`
 
 ### Phase 4: Rebase cycle
-15. `handleRebaseCoder` — rebase-specific prompt (rebase onto target, resolve conflicts, verify build). Failure = `disputed` (task-level), not `blocked_error` (infrastructure). Includes diff fence validation.
-16. `handleRebaseReview` — lighter review focused on conflict resolution quality. Re-records `approved_sha` on approval.
-17. `rebase_attempts` cap (default 3) — incremented on LLM rebase entry only (single increment point: `transitionToRebasing`)
-18. Add merge-role-aware recovery to wakeup sanitizer (`rebase_coder`, `rebase_reviewer`, `merge` invocation roles). New invocation roles must be registered in the invocation logging system.
+22. Extend invocation logger `canDbLog` whitelist to include `'rebase_coder'`, `'rebase_reviewer'` roles
+23. `handleRebaseCoder` — rebase-specific prompt (reset to `approved_sha`, rebase onto target, resolve conflicts, verify build). Failure = `disputed` (task-level), not `blocked_error` (infrastructure). Includes diff fence validation.
+24. `handleRebaseReview` — lighter review focused on conflict resolution quality. Re-records `approved_sha` on approval.
+25. `rebase_attempts` cap (default 3) — incremented on LLM rebase entry only (single increment point: `transitionToRebasing`)
+26. Add `rebase_coder` and `rebase_reviewer` recovery paths to wakeup sanitizer
 
 ### Phase 5: Cleanup
-19. Remove `autoMergeOnCompletion` from daemon
-20. Remove `runParallelMerge`, integration workspace, cherry-pick pipeline (all `src/parallel/merge-*.ts` and `merge-conflict*.ts`)
-21. Remove workstream branch push from coder decision phase
-22. Remove dead code: `src/workspace/git-lifecycle-merge.ts`, remaining unused parallel modules
+27. Remove `autoMergeOnCompletion` from daemon
+28. Remove `runParallelMerge`, integration workspace, cherry-pick pipeline (all `src/parallel/merge-*.ts` and `merge-conflict*.ts`)
+29. Remove workstream branch push from coder decision phase
+30. Remove dead code: `src/workspace/git-lifecycle-merge.ts`, remaining unused parallel modules
 
 ---
 
@@ -554,11 +589,15 @@ These ship together so `merge_pending` tasks always have a processor.
 | Foreground `loop` picks up merge_pending task | Handled normally — `processMergeQueue` runs the same in both modes, merge lock serializes |
 | Push succeeds but DB update fails (crash/SIGTERM after push) | Idempotency check in `fetchAndPrepare`: `git merge-base --is-ancestor approved_sha target_HEAD` → skip to `markCompleted` |
 | Rebase coder modifies unrelated files (prompt injection/bug) | Diff fence validates only conflict-affected files were changed; violation → `disputed` with audit log |
-| Push race loss loops indefinitely under extreme contention | `push_race_losses` soft cap (default 20) → `disputed` after sustained contention |
+| Push race loss loops indefinitely under extreme contention | Bounded by `maxInvocationsPerTask` (default 50) — each retry is an invocation. No dedicated counter needed. |
 | Sanitizer recovers orphaned rebase_coder invocation | Merge-role-aware recovery: resets `merge_phase` to `queued`, does NOT reset task to `pending` |
 | Stale merge lock blocks entire project | Monitor detects `stale_merge_lock` anomaly (> 5 min), FR releases via `release_merge_lock` action |
 | `pushWithRetries` busy-wait blocks heartbeats | Async backoff replaces synchronous busy-wait — heartbeat timers can fire during retry delays |
 | Task reset from merge_pending (FR or sanitizer) | Must clear `merge_phase`, `rebase_attempts`, `approved_sha` to prevent stale phase state |
+| Rebase retry after rejection operates on already-rebased code | `handleRebaseCoder` resets task branch to `approved_sha` before each rebase attempt — each attempt starts from reviewer-approved code |
+| Sanitizer checks wrong merge lock table | Fixed: queries `workspace_merge_locks` in global DB (not `merge_locks` in project DB) |
+| Merge invocations invisible to health system | Fixed: invocation logger whitelist extended for `merge`, `rebase_coder`, `rebase_reviewer` roles |
+| Transient network failure during merge gate → stuck in blocked_error | Fixed: transient failures release lock and retry next iteration (idempotent); only permanent failures → blocked_error |
 
 ## Non-Goals
 
@@ -635,8 +674,8 @@ These ship together so `merge_pending` tasks always have a processor.
 ### R2-9: `runRebaseCoder` failure -> `disputed`, not `blocked_error` (Gemini Important)
 **Decision:** ADOPT. LLM conflict failure is task-specific.
 
-### R2-10: Merge lock should use epoch pattern (Gemini Important)
-**Decision:** ADOPT. Epoch-based locking specified.
+### R2-10: Merge lock should use heartbeat-based pattern (Gemini Important)
+**Decision:** ADOPT. Heartbeat-based locking specified (corrected from "epoch" in R5-1).
 
 ### R2-11 through R2-14: Various deferrals
 **Decision:** DEFER. Pre-existing concerns or out of scope.
@@ -780,3 +819,75 @@ These ship together so `merge_pending` tasks always have a processor.
 | `handleRebaseCoder` build/test config location | Implementation detail — follows existing config patterns |
 | `partial` status inconsistency in wakeup-checks | Pre-existing issue, out of scope |
 | `config.git.branch` not in `schema.ts` | Fixed reference, but full config shape is implementation detail |
+
+## Cross-Provider Review — Round 6 (Focused Review Passes)
+
+**Reviewers:** 3 Claude agents — simplification/fragility reviewer, edge case reviewer, monitoring/recovery reviewer
+**Date:** 2026-03-23
+**Goal:** Three focused deep-dives before implementation: (1) simplification opportunities and fragility, (2) edge cases and race conditions, (3) monitoring, recovery, and system stability.
+
+### R6-1: Drop `push_race_losses` column — generic caps sufficient (Simplification, Important)
+**Assessment:** The `push_race_losses` counter with soft cap 20 adds a column, migration field, clearing logic, and a separate escalation path — all for a scenario (sustained ff-push contention) that is already bounded by `maxInvocationsPerTask` (default 50) in the orchestrator loop. Every push race retry is an invocation, so the existing cap catches this.
+**Decision:** ADOPT. Remove `push_race_losses` from migration, `markCompleted` clearing, `handlePrepFailure` clearing, `pushTargetBranch` contract, and edge cases. The existing `maxInvocationsPerTask` cap (checked before each dispatch in `orchestrator-loop.ts`) serves as the circuit breaker.
+
+### R6-2: Non-blocking merge lock — tryOnce, not busy-wait polling (Simplification, Important)
+**Assessment:** `acquireWorkspaceMergeLock` in `src/workspace/merge-lock.ts` (lines 80-84) has a busy-wait polling loop. The merge handler already returns immediately on contention (task retried next iteration). A polling loop inside the lock function is redundant and blocks the event loop.
+**Decision:** ADOPT. The merge handler calls `acquireMergeLock` with tryOnce semantics: single attempt, return true/false immediately. No polling loop needed. The existing busy-wait in `merge-lock.ts` must be replaced or bypassed.
+
+### R6-3: Transient fetch/push failures retry next iteration, not `blocked_error` (Simplification, Important)
+**Assessment:** Transitioning to `blocked_error` on a transient network failure (fetch timeout, push timeout) is too aggressive. `blocked_error` requires wakeup sanitizer recovery, adding latency. For the merge gate's deterministic operations (fetch, rebase, push), a transient failure should simply release the lock and retry on the next iteration — the operation is idempotent.
+**Decision:** ADOPT. `fetchAndPrepare` and `pushTargetBranch` distinguish between transient failures (network timeout, temporary remote unavailable) and permanent failures (SHA mismatch, auth failure). Transient failures → release lock, return, retry next iteration. Permanent failures → `blocked_error`. Updated contracts accordingly.
+
+### R6-4: Reduce stale lock TTL from 10 min to 60-90 seconds (Simplification, Medium)
+**Assessment:** The merge lock covers only seconds of work (deterministic rebase + ff-only + push). A 10-minute TTL means a crashed merge holder blocks the entire project for 10 minutes before stale detection fires. 60-90 seconds provides ample margin while drastically reducing recovery time.
+**Decision:** ADOPT. Implementation note: reduce `STALE_LOCK_TTL_MS` in `src/workspace/merge-lock.ts` from 10 minutes to 90 seconds when used for merge queue locking. Original value may still apply to other use cases if any.
+
+### R6-5: Batch mode dispatch gap — `selectTaskBatch` ignores `merge_pending` (Edge Cases, Critical)
+**Assessment:** `selectTaskBatch` (task-selector.ts:159-165) only selects sections with `status = 'pending'` tasks. If all pending tasks in a section complete but one is in `merge_pending`, the batch returns no tasks for that section. The `merge_pending` task is invisible to batch selection.
+**Decision:** ADOPT. `selectTaskBatch` active count (`IN ('in_progress', 'review')` at line 160) already needs `merge_pending` per the propagation table. This is sufficient — the batch picker doesn't need to SELECT merge_pending tasks (they're not pending work), but the active count must include them so sections with merge_pending tasks are correctly identified as having active work. Already covered by propagation table row 3 (`selectTaskBatch` active count). Verified: no additional change needed beyond what's already specified.
+
+### R6-6: Rebase retry must reset task branch to `approved_sha` before re-rebasing (Edge Cases, Important)
+**Assessment:** If `handleRebaseReview` rejects and `transitionToRebasing` sends the task back to `handleRebaseCoder`, the task branch still has the rejected rebase. The next `git rebase` attempt operates on already-rebased (and rejected) code, not the original approved code. The rebase coder must reset the task branch to `approved_sha` before starting a new rebase attempt.
+**Decision:** ADOPT. Added to `handleRebaseCoder` contract: "Before starting rebase, resets task branch HEAD to `task.approved_sha` via `git reset --hard`. This ensures each rebase attempt starts from the reviewer-approved code, not from a previously rejected rebase."
+
+### R6-7: Sanitizer merge-role recovery MUST ship with Phase 2+3, not Phase 4 (Edge Cases, Critical)
+**Assessment:** If Phase 2+3 ships without merge-role-aware recovery in the sanitizer, any crash during `processMergeQueue` (phase `queued`) creates an orphaned invocation. The generic sanitizer recovery (line 201-206) has `WHERE status = 'in_progress'` — it won't match `merge_pending` tasks. The orphaned task strands permanently until Phase 4 ships. Basic merge-role recovery (at minimum for role `merge`) must ship atomically with Phase 2+3.
+**Decision:** ADOPT. Move basic merge-role recovery (`merge` invocation role) from Phase 4 to Phase 2+3. Phase 4 adds `rebase_coder` and `rebase_reviewer` recovery. Updated implementation order.
+
+### R6-8: Sanitizer queries wrong merge lock table (Monitoring/Recovery, CRITICAL)
+**Assessment:** `wakeup-sanitise.ts` lines 131-143 queries `merge_locks` in the **project** DB. The merge queue uses `workspace_merge_locks` in the **global** DB (`src/workspace/merge-lock.ts`). After the old parallel merge module is removed (Phase 5), the `merge_locks` table won't exist — the sanitizer will always see `hasActiveMergeLock = false`, disabling its lock-awareness guard entirely. Even before removal, the sanitizer is checking the wrong lock.
+**Decision:** ADOPT. The sanitizer's `hasActiveMergeLock` check must query `workspace_merge_locks` from the global DB (same DB used by `acquireWorkspaceMergeLock`). This fix ships in Phase 2+3. The check also needs to use `heartbeat_at` + TTL stale detection (matching the actual lock schema) instead of `expires_at`.
+
+### R6-9: Invocation logger role whitelist blocks merge invocation DB logging (Monitoring/Recovery, CRITICAL)
+**Assessment:** `invocation-logger.ts` line 353-355: `canDbLog` only allows `role === 'coder' || role === 'reviewer'`. New roles (`merge`, `rebase_coder`, `rebase_reviewer`) will not be logged to the project DB. Consequence: the health system (stuck-task-detector, scanner, sanitizer) is completely blind to merge invocations — orphan detection, hanging detection, and invocation counting all fail silently.
+**Decision:** ADOPT. Extend the `canDbLog` whitelist to include `'merge'`, `'rebase_coder'`, `'rebase_reviewer'`. Ships in Phase 2+3 (for `merge` role), Phase 4 adds rebase roles.
+
+### R6-10: Stuck-task-detector orphan queries hardcode `role = 'coder'` (Monitoring/Recovery, Important)
+**Assessment:** `stuck-task-detector.ts` lines 180 and 216: orphan task detection queries join `task_invocations` with `i.role = 'coder'`. Tasks in `merge_pending` status have `merge` role invocations, not `coder`. These tasks are invisible to orphan detection — the stuck-task-detector will never report them.
+**Decision:** ADOPT. Extend orphan queries to include `merge_pending` status with appropriate role join: `(t.status = 'in_progress' AND i.role = 'coder') OR (t.status = 'merge_pending' AND i.role IN ('merge', 'rebase_coder', 'rebase_reviewer'))`. The hanging invocation query (line 339) already needs `merge_pending` per the propagation table.
+
+### R6-11: Disputed task recovery doesn't clear merge columns (Monitoring/Recovery, Important)
+**Assessment:** `wakeup-sanitise.ts` lines 230-268: disputed task recovery resets status to `pending` but doesn't clear `merge_phase`, `approved_sha`, or `rebase_attempts`. A disputed task that entered the merge pipeline will retain stale merge state after recovery — on re-processing, it could be routed back into the merge queue with corrupted state.
+**Decision:** ADOPT. Disputed task recovery must clear all merge columns: `merge_phase = NULL, approved_sha = NULL, rebase_attempts = 0`. Same clearing pattern as `markCompleted` and `handlePrepFailure` SHA mismatch.
+
+### R6-12: FR `reset_task` doesn't clear merge columns (Monitoring/Recovery, Important)
+**Assessment:** `investigator-actions.ts` lines 64-74: `reset_task` clears `failure_count`, `rejection_count`, `merge_failure_count`, `conflict_count`, `last_failure_at` — but not `merge_phase`, `approved_sha`, or `rebase_attempts`. If FR resets a `merge_pending` task, stale merge phase persists, causing incorrect routing on re-entry.
+**Decision:** ADOPT. `reset_task` must clear all merge columns when resetting a task. `UPDATABLE_TASK_FIELDS` already needs `merge_phase`, `approved_sha`, `rebase_attempts` (per R4-3).
+
+### R6-13: Stuck-task-detector thresholds wrong for merge phases (Monitoring/Recovery, Medium)
+**Assessment:** The hanging invocation query (line 339) uses the same timeout threshold for all statuses. A `merge_pending/queued` task should be flagged much sooner (~5 min — the merge gate takes seconds) than a `merge_pending/rebasing` task (~30 min — LLM rebase). Using 30-min threshold for queued tasks means a stuck merge gate goes undetected for 30 minutes.
+**Decision:** ADOPT as implementation note. The stuck-task-detector should use phase-aware thresholds when checking `merge_pending` tasks: `queued` → ~5 min, `rebasing`/`rebase_review` → standard LLM timeout. Exact values are implementation details.
+
+### R6-14: `followUpEligibilityFilter` over-blocks `merge_pending` follow-ups (Edge Cases, Low)
+**Assessment:** Adding `merge_pending` to the active status list in `followUpEligibilityFilter` means a task in the merge pipeline blocks its section's follow-up tasks from being selected. This is intentional and correct — the task is near completion, and starting follow-ups before the merge lands could create dependency issues.
+**Decision:** REJECT. Current behavior (blocking follow-ups for merge_pending sections) is correct. No change needed.
+
+### Deferred from Round 6
+
+| Finding | Reason |
+|---------|--------|
+| `acquireMergeLock` should accept `maxWaitMs` parameter | Implementation detail — tryOnce semantics are sufficient |
+| Separate `blocked_transient` status for auto-retryable errors | Broader status design concern, out of scope |
+| `merge_phase` index for query performance | Implementation optimization — add if queries are slow |
+| Batch mode should dispatch `merge_pending` tasks directly | Batch mode dispatches `pending` tasks; merge_pending dispatch handled by normal loop |
+| Config validation for `maxRebaseAttempts` bounds | Implementation detail — follows existing config validation patterns |
