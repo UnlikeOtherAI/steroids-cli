@@ -27,7 +27,8 @@ import { resolveEffectiveBranch } from '../git/branch-resolver.js';
 import { checkSectionCompletionAndPR } from '../git/section-pr.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { PoolSlotContext } from '../workspace/types.js';
-import { prepareForTask, postCoderGate, postReviewGate, mergeToBase } from '../workspace/git-lifecycle.js';
+import { prepareForTask, postCoderGate, postReviewGate } from '../workspace/git-lifecycle.js';
+import { mergeToBase } from '../workspace/git-lifecycle-merge.js';
 import { updateSlotStatus, releaseSlot, getSlot } from '../workspace/pool.js';
 import { handleMergeFailure } from '../workspace/merge-pipeline.js';
 import {

@@ -14,7 +14,8 @@ import Database from 'better-sqlite3';
 
 import { resolveRemoteUrl, ensureSlotClone } from '../src/workspace/pool.js';
 import { createWorkspaceClone } from '../src/parallel/clone.js';
-import { prepareForTask, mergeToBase } from '../src/workspace/git-lifecycle.js';
+import { prepareForTask } from '../src/workspace/git-lifecycle.js';
+import { mergeToBase } from '../src/workspace/git-lifecycle-merge.js';
 import { GLOBAL_SCHEMA_V19_SQL } from '../src/runners/global-db-schema.js';
 import type { PoolSlot } from '../src/workspace/types.js';
 

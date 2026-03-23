@@ -6,7 +6,7 @@
 
 import type Database from 'better-sqlite3';
 import type { PoolSlotContext } from './types.js';
-import type { MergeResult } from './git-lifecycle.js';
+import type { MergeResult } from './git-lifecycle-merge.js';
 import { deleteTaskBranchFromSlot } from './git-lifecycle.js';
 import {
   incrementTaskConflictCount,

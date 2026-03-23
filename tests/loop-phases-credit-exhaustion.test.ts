@@ -130,6 +130,9 @@ jest.unstable_mockModule('../src/workspace/git-lifecycle.js', () => ({
   prepareForTask: jest.fn().mockResolvedValue({ taskBranch: 'steroids/task-1', baseBranch: 'main' }),
   postCoderGate: jest.fn().mockResolvedValue({ ok: true }),
   postReviewGate: jest.fn().mockResolvedValue({ ok: true }),
+}));
+
+jest.unstable_mockModule('../src/workspace/git-lifecycle-merge.js', () => ({
   mergeToBase: jest.fn().mockResolvedValue({ ok: true }),
 }));
 

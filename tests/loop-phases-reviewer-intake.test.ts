@@ -73,6 +73,9 @@ jest.unstable_mockModule('../src/workspace/git-lifecycle.js', () => ({
   prepareForTask: jest.fn(),
   postCoderGate: jest.fn(),
   postReviewGate: jest.fn(),
+}));
+
+jest.unstable_mockModule('../src/workspace/git-lifecycle-merge.js', () => ({
   mergeToBase: mockMergeToBase,
 }));
 
