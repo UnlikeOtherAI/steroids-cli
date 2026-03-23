@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { openDatabase } from '../database/connection.js';
+import { hasSuccessfulCoderWork } from '../database/queries.js';
 import { openGlobalDatabase } from '../runners/global-db-connection.js';
 import { resolveCliEntrypoint } from '../cli/entrypoint.js';
 import { deleteTaskBranchFromSlot } from '../workspace/git-lifecycle.js';
@@ -53,26 +54,35 @@ export async function executeActions(
               cleanupBlockedTaskBranch(entry.projectPath, entry.taskId);
             }
 
+            // S7: If coder already succeeded, reset to 'review' instead of 'pending'
+            // to skip the coder phase and go straight to review.
+            // Exception: blocked_conflict tasks had their branch deleted (S4), so they need a full restart.
+            const coderSucceeded = !isBlockedConflict && hasSuccessfulCoderWork(db, entry.taskId);
+            const targetStatus = coderSucceeded ? 'review' : 'pending';
+
             const fromStatus = taskRow?.status ?? 'unknown';
             db.prepare(
               `UPDATE tasks
-               SET status = 'pending',
+               SET status = ?,
                    failure_count = 0,
-                   rejection_count = 0,
+                   rejection_count = CASE WHEN ? = 'review' THEN rejection_count ELSE 0 END,
                    merge_failure_count = 0,
                    conflict_count = 0,
                    last_failure_at = NULL,
                    updated_at = datetime('now')
                WHERE id = ?`,
-            ).run(entry.taskId);
+            ).run(targetStatus, targetStatus, entry.taskId);
 
             db.prepare('DELETE FROM task_locks WHERE task_id = ?').run(entry.taskId);
+            const notes = coderSucceeded
+              ? `S7: ${entry.reason ?? 'FR reset_task'} (coder succeeded previously — routing to review)`
+              : (entry.reason ?? 'FR reset_task');
             db.prepare(
               `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
-               VALUES (?, ?, 'pending', 'first_responder', 'orchestrator', ?, datetime('now'))`,
-            ).run(entry.taskId, fromStatus, entry.reason ?? 'FR reset_task');
+               VALUES (?, ?, ?, 'first_responder', 'orchestrator', ?, datetime('now'))`,
+            ).run(entry.taskId, fromStatus, targetStatus, notes);
 
-            results.push({ action: 'reset_task', success: true, reason: entry.reason });
+            results.push({ action: 'reset_task', success: true, reason: entry.reason, output: { targetStatus } });
           } finally {
             close();
           }

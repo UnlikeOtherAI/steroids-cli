@@ -1416,10 +1416,32 @@ export function findNextTask(
 
   const filteredPendingTasks = filterTasksWithMetDependencies(db, pendingTasks);
   if (filteredPendingTasks.length > 0) {
-    return { task: filteredPendingTasks[0], action: 'start' };
+    const pendingTask = filteredPendingTasks[0];
+    // S7: If coder already succeeded for this task (e.g. after FR/sanitiser reset),
+    // route to review to avoid wasting a coder invocation.
+    const action = hasSuccessfulCoderWork(db, pendingTask.id) ? 'review' : 'start';
+    return { task: pendingTask, action };
   }
 
   return { task: null, action: 'idle' };
+}
+
+/**
+ * S7: Check if a task has prior successful coder invocations.
+ * Used to avoid re-running the coder when a task is reset after coder already succeeded.
+ */
+export function hasSuccessfulCoderWork(
+  db: Database.Database,
+  taskId: string
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM task_invocations
+       WHERE task_id = ? AND role = 'coder' AND success = 1
+       LIMIT 1`
+    )
+    .get(taskId) as { 1: number } | undefined;
+  return row !== undefined;
 }
 
 /**

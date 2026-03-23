@@ -331,6 +331,11 @@ export async function runOrchestratorLoop(options: LoopOptions): Promise<void> {
             sourceProjectPath
           );
         } else if (action === 'review') {
+          // S7: Task selector may route pending tasks with prior coder work to review.
+          // Transition status so the reviewer phase sees the task in 'review' status.
+          if (task.status === 'pending') {
+            updateTaskStatus(db, task.id, 'review', 'orchestrator');
+          }
           ensureParallelWorkspaceSteroids(projectPath, parallelSourceProjectPath);
           creditResult = await runReviewerPhase(
             db,

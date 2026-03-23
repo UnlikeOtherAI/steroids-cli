@@ -4,7 +4,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { findNextTask, getTask, updateTaskStatus, getLastRejectionNotes, hasDependenciesMet, hasTaskDependenciesMet } from '../database/queries.js';
+import { findNextTask, getTask, updateTaskStatus, getLastRejectionNotes, hasDependenciesMet, hasTaskDependenciesMet, hasSuccessfulCoderWork } from '../database/queries.js';
 import type { Task } from '../database/queries.js';
 import {
   acquireTaskLock,
@@ -430,7 +430,9 @@ function findNextTaskSkippingLocked(
 
   for (const task of pendingTasks) {
     if (canSelectTask(db, task) && (!lockedTaskIds.has(task.id) || isLockedByUs(db, task.id, runnerId))) {
-      return { task, action: 'start' };
+      // S7: If coder already succeeded, route to review instead of fresh start
+      const action = hasSuccessfulCoderWork(db, task.id) ? 'review' : 'start';
+      return { task, action };
     }
   }
 
