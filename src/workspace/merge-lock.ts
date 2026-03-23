@@ -7,10 +7,14 @@
 
 import type Database from 'better-sqlite3';
 
+const STALE_LOCK_TTL_MS = 90_000; // 90s — merge queue uses heartbeats, so stale = missed ~3 heartbeat cycles
+
 /**
  * Attempt to acquire the merge lock for a project.
- * Polls every `pollMs` until `timeoutMs` elapses.
- * Reclaims stale locks older than 3 minutes.
+ *
+ * When `tryOnce` is true, makes a single attempt and returns immediately.
+ * Otherwise polls every `pollMs` until `timeoutMs` elapses.
+ * Reclaims stale locks older than 90 seconds.
  *
  * Returns true if the lock was acquired.
  */
@@ -20,14 +24,11 @@ export function acquireWorkspaceMergeLock(
   runnerId: string,
   slotId: number,
   timeoutMs: number = 300_000,
-  pollMs: number = 5_000
+  pollMs: number = 5_000,
+  tryOnce: boolean = false
 ): boolean {
-  const deadline = Date.now() + timeoutMs;
-  const STALE_LOCK_TTL_MS = 10 * 60 * 1000; // 10 minutes — must exceed worst-case push retry (3×120s = 360s)
-
-  while (Date.now() < deadline) {
-    const acquired = globalDb.transaction(() => {
-      // Check for existing lock
+  const attemptAcquire = (): boolean => {
+    return globalDb.transaction(() => {
       const existing = globalDb
         .prepare('SELECT * FROM workspace_merge_locks WHERE project_id = ?')
         .get(projectId) as {
@@ -37,20 +38,16 @@ export function acquireWorkspaceMergeLock(
       } | undefined;
 
       if (existing) {
-        // Check if stale
         const age = Date.now() - existing.heartbeat_at;
         if (age > STALE_LOCK_TTL_MS) {
-          // Reclaim stale lock
           globalDb
             .prepare('DELETE FROM workspace_merge_locks WHERE id = ?')
             .run(existing.id);
         } else {
-          // Lock is held by another runner
           return false;
         }
       }
 
-      // Insert new lock
       const now = Date.now();
       try {
         globalDb
@@ -63,17 +60,23 @@ export function acquireWorkspaceMergeLock(
         return true;
       } catch (error: any) {
         if (error.message?.includes('UNIQUE constraint')) {
-          return false; // Another runner acquired it
+          return false;
         }
         throw error;
       }
     }).immediate();
+  };
 
-    if (acquired) {
+  if (tryOnce) {
+    return attemptAcquire();
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (attemptAcquire()) {
       return true;
     }
 
-    // Wait before retrying
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
 

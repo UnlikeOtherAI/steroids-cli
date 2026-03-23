@@ -3,9 +3,12 @@
  * All operations are synchronous and host-controlled — no LLM involvement.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFile as execFileCb, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFileCb);
 
 export interface ExecGitOptions {
   /** Timeout in milliseconds (default 120_000). */
@@ -125,6 +128,47 @@ export function pushWithRetries(
       while (Date.now() < end) {
         // busy-wait
       }
+    }
+  }
+
+  return { success: false, error: `Push failed after ${retries} attempts: ${lastError}` };
+}
+
+/**
+ * Async version of pushWithRetries — uses setTimeout instead of busy-wait
+ * so heartbeat timers can fire during backoff delays.
+ */
+export async function pushWithRetriesAsync(
+  cwd: string,
+  remote: string,
+  refspec: string,
+  retries: number = 3,
+  backoffMs: number[] = [1000, 4000, 16000],
+  forceWithLease: boolean = false
+): Promise<{ success: boolean; error?: string }> {
+  const pushArgs = ['push', remote, refspec];
+  if (forceWithLease) {
+    pushArgs.push('--force-with-lease');
+  }
+
+  let lastError = '';
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      await execFileAsync('git', pushArgs, {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 120_000,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      });
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const stderr = (err as { stderr?: string })?.stderr ?? '';
+      lastError = stderr.trim() || msg;
+    }
+
+    if (attempt < retries - 1 && attempt < backoffMs.length) {
+      await new Promise<void>(r => setTimeout(r, backoffMs[attempt]));
     }
   }
 
