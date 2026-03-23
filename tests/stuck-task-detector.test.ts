@@ -38,7 +38,13 @@ function setupGlobalDb(): Database.Database {
       pid INTEGER,
       project_path TEXT,
       current_task_id TEXT,
-      heartbeat_at TEXT NOT NULL
+      heartbeat_at TEXT NOT NULL,
+      parallel_session_id TEXT
+    );
+    CREATE TABLE parallel_sessions (
+      id TEXT PRIMARY KEY,
+      project_path TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running'
     );
   `);
   return db;

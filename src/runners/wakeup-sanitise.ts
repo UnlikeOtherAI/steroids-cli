@@ -24,6 +24,7 @@ export interface SanitiseSummary {
   closedStaleInvocations: number;
   releasedTaskLocks: number;
   releasedSectionLocks: number;
+  recoveredDisputedTasks: number;
 }
 
 const DEFAULT_SANITISE_INTERVAL_MINUTES = 5;
@@ -162,19 +163,22 @@ function sanitiseProjectState(
     closedStaleInvocations: 0,
     releasedTaskLocks: 0,
     releasedSectionLocks: 0,
+    recoveredDisputedTasks: 0,
   };
 
   const staleCutoffMs = Date.now() - staleInvocationTimeoutSec * 1000;
+  // S1/S2: Include parallel session runners (workspace-prefixed paths don't match project_path directly)
   const activeRunnerTaskRows = globalDb
     .prepare(
-      `SELECT current_task_id, parallel_session_id
-       FROM runners
-       WHERE project_path = ?
-         AND status = 'running'
-         AND heartbeat_at > datetime('now', '-5 minutes')
-         AND (current_task_id IS NOT NULL OR parallel_session_id IS NOT NULL)`
+      `SELECT r.current_task_id, r.parallel_session_id
+       FROM runners r
+       LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
+       WHERE (r.project_path = ? OR ps.project_path = ?)
+         AND r.status = 'running'
+         AND r.heartbeat_at > datetime('now', '-5 minutes')
+         AND (r.current_task_id IS NOT NULL OR r.parallel_session_id IS NOT NULL)`
     )
-    .all(projectPath) as Array<{ current_task_id: string | null; parallel_session_id: string | null }>;
+    .all(projectPath, projectPath) as Array<{ current_task_id: string | null; parallel_session_id: string | null }>;
   const activeTaskIds = new Set(
     activeRunnerTaskRows
       .map((row) => row.current_task_id)
@@ -374,6 +378,51 @@ function sanitiseProjectState(
       .prepare(`DELETE FROM section_locks WHERE expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
       .run();
     summary.releasedSectionLocks = releasedSectionLocks.changes;
+
+    // S3: Recover disputed tasks stuck > 30 min with no active arbitration invocation.
+    // Note: no code currently inserts role='arbitrator' invocations — the subquery is a
+    // forward-looking guard. The 30-minute timeout is the effective sole guard today.
+    try {
+      const disputedRows = projectDb
+        .prepare(
+          `SELECT id FROM tasks
+           WHERE status = 'disputed'
+             AND updated_at < datetime('now', '-30 minutes')
+             AND id NOT IN (
+               SELECT task_id FROM task_invocations
+               WHERE role = 'arbitrator' AND status = 'running'
+             )`
+        )
+        .all() as Array<{ id: string }>;
+
+      if (disputedRows.length > 0) {
+        const ids = disputedRows.map((r) => r.id);
+        const placeholders = ids.map(() => '?').join(',');
+        projectDb
+          .prepare(
+            `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+             WHERE id IN (${placeholders})`
+          )
+          .run(...ids);
+
+        const auditStmt = projectDb.prepare(
+          `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
+           VALUES (?, 'disputed', 'pending', 'orchestrator', 'orchestrator',
+                   'Recovered by periodic sanitise — disputed task stuck >30 min with no active arbitration.',
+                   datetime('now'))`
+        );
+        for (const id of ids) {
+          auditStmt.run(id);
+        }
+        // Release any locks held by disputed tasks
+        projectDb
+          .prepare(`DELETE FROM task_locks WHERE task_id IN (${placeholders})`)
+          .run(...ids);
+      }
+      summary.recoveredDisputedTasks = disputedRows.length;
+    } catch {
+      // task_invocations may lack role column or audit table schema mismatch — safe to skip
+    }
   }
 
   return summary;
@@ -395,6 +444,7 @@ export function runPeriodicSanitiseForProject(
       closedStaleInvocations: 0,
       releasedTaskLocks: 0,
       releasedSectionLocks: 0,
+      recoveredDisputedTasks: 0,
     };
   }
 
@@ -407,6 +457,7 @@ export function runPeriodicSanitiseForProject(
       closedStaleInvocations: 0,
       releasedTaskLocks: 0,
       releasedSectionLocks: 0,
+      recoveredDisputedTasks: 0,
     };
   }
 
@@ -431,6 +482,7 @@ export function sanitisedActionCount(summary: SanitiseSummary): number {
     summary.recoveredRejects +
     summary.closedStaleInvocations +
     summary.releasedTaskLocks +
-    summary.releasedSectionLocks
+    summary.releasedSectionLocks +
+    summary.recoveredDisputedTasks
   );
 }

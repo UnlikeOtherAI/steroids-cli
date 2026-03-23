@@ -24,6 +24,12 @@ import {
   type GlobalDatabaseConnection,
 } from '../runners/global-db-connection.js';
 import { cronStatus } from '../runners/cron.js';
+import {
+  scanFailedAndSkippedTasks,
+  scanHighInvocations,
+  scanRepeatedFailures,
+  scanBlockedTasks,
+} from './scanner-queries.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,7 +97,8 @@ function openProjectDbReadOnly(projectPath: string): Database.Database | null {
 }
 
 function hasActiveRunner(globalDb: Database.Database, projectPath: string): boolean {
-  const row = globalDb
+  // Check direct (non-parallel) runners
+  const directRunner = globalDb
     .prepare(
       `SELECT 1 FROM runners
        WHERE project_path = ?
@@ -99,7 +106,36 @@ function hasActiveRunner(globalDb: Database.Database, projectPath: string): bool
          AND heartbeat_at > datetime('now', '-5 minutes')`
     )
     .get(projectPath) as { 1: number } | undefined;
-  return row !== undefined;
+  if (directRunner) return true;
+
+  // S1: Check parallel session runners (workspace-prefixed paths don't match project_path)
+  const parallelRunner = globalDb
+    .prepare(
+      `SELECT 1 FROM runners r
+       JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
+       WHERE ps.project_path = ?
+         AND r.status != 'stopped'
+         AND r.heartbeat_at > datetime('now', '-5 minutes')
+       LIMIT 1`
+    )
+    .get(projectPath) as { 1: number } | undefined;
+  if (parallelRunner) return true;
+
+  // S1: Check active parallel sessions with running workstreams (even if no runner row yet)
+  const activeSession = globalDb
+    .prepare(
+      `SELECT 1 FROM parallel_sessions ps
+       WHERE ps.project_path = ?
+         AND ps.status NOT IN ('completed', 'failed', 'aborted', 'blocked_validation', 'blocked_recovery')
+         AND EXISTS (
+           SELECT 1 FROM workstreams ws
+           WHERE ws.session_id = ps.id
+             AND ws.status NOT IN ('completed', 'failed', 'aborted')
+         )
+       LIMIT 1`
+    )
+    .get(projectPath) as { 1: number } | undefined;
+  return activeSession !== undefined;
 }
 
 function hasPendingWork(projectDb: Database.Database): boolean {
@@ -212,148 +248,6 @@ function mapStuckReport(
 }
 
 // ---------------------------------------------------------------------------
-// Project-level scans (task health queries)
-// ---------------------------------------------------------------------------
-
-interface FailedSkippedRow {
-  id: string;
-  title: string;
-  status: string;
-}
-
-function scanFailedAndSkippedTasks(
-  projectDb: Database.Database,
-  projectPath: string,
-  projectName: string,
-): Anomaly[] {
-  const rows = projectDb
-    .prepare(
-      `SELECT id, title, status FROM tasks WHERE status IN ('failed', 'skipped')`
-    )
-    .all() as FailedSkippedRow[];
-
-  return rows.map((row) => ({
-    type: (row.status === 'failed' ? 'failed_task' : 'skipped_task') as Anomaly['type'],
-    severity: 'info' as const,
-    projectPath,
-    projectName,
-    taskId: row.id,
-    taskTitle: row.title,
-    details: `Task "${row.title}" is ${row.status}`,
-    context: { status: row.status },
-  }));
-}
-
-interface HighInvocationRow {
-  id: string;
-  title: string;
-  invocation_count: number;
-}
-
-function scanHighInvocations(
-  projectDb: Database.Database,
-  projectPath: string,
-  projectName: string,
-  maxInvocations: number,
-): Anomaly[] {
-  const threshold = Math.floor(maxInvocations * HIGH_INVOCATION_THRESHOLD);
-  if (threshold <= 0) return [];
-
-  const rows = projectDb
-    .prepare(
-      `SELECT t.id, t.title, COUNT(i.id) as invocation_count
-       FROM tasks t
-       JOIN task_invocations i ON i.task_id = t.id
-       WHERE t.status NOT IN ('completed', 'skipped', 'failed', 'blocked_conflict', 'blocked_error')
-       GROUP BY t.id
-       HAVING invocation_count >= ?`
-    )
-    .all(threshold) as HighInvocationRow[];
-
-  return rows.map((row) => ({
-    type: 'high_invocations' as const,
-    severity: 'warning' as const,
-    projectPath,
-    projectName,
-    taskId: row.id,
-    taskTitle: row.title,
-    details: `Task "${row.title}" has ${row.invocation_count}/${maxInvocations} invocations`,
-    context: {
-      invocationCount: row.invocation_count,
-      maxInvocations,
-      threshold,
-    },
-  }));
-}
-
-interface RepeatedFailureRow {
-  id: string;
-  title: string;
-  failure_count: number;
-  rejection_count: number;
-}
-
-function scanRepeatedFailures(
-  projectDb: Database.Database,
-  projectPath: string,
-  projectName: string,
-): Anomaly[] {
-  const rows = projectDb
-    .prepare(
-      `SELECT id, title, failure_count, rejection_count
-       FROM tasks
-       WHERE status NOT IN ('completed', 'skipped', 'failed', 'blocked_conflict', 'blocked_error')
-         AND (failure_count >= 2 OR rejection_count >= 5)`
-    )
-    .all() as RepeatedFailureRow[];
-
-  return rows.map((row) => ({
-    type: 'repeated_failures' as const,
-    severity: 'warning' as const,
-    projectPath,
-    projectName,
-    taskId: row.id,
-    taskTitle: row.title,
-    details: `Task "${row.title}" has ${row.failure_count} failures, ${row.rejection_count} rejections`,
-    context: {
-      failureCount: row.failure_count,
-      rejectionCount: row.rejection_count,
-    },
-  }));
-}
-
-interface BlockedTaskRow {
-  id: string;
-  title: string;
-  status: string;
-}
-
-function scanBlockedTasks(
-  projectDb: Database.Database,
-  projectPath: string,
-  projectName: string,
-): Anomaly[] {
-  const rows = projectDb
-    .prepare(
-      `SELECT id, title, status FROM tasks WHERE status IN ('blocked_conflict', 'blocked_error')`
-    )
-    .all() as BlockedTaskRow[];
-
-  return rows.map((row) => ({
-    type: 'blocked_task' as const,
-    severity: 'critical' as const,
-    projectPath,
-    projectName,
-    taskId: row.id,
-    taskTitle: row.title,
-    details: row.status === 'blocked_conflict'
-      ? `Task "${row.title}" blocked by merge conflict — needs reset or manual resolution`
-      : `Task "${row.title}" blocked by error — needs reset`,
-    context: { status: row.status },
-  }));
-}
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -414,7 +308,7 @@ export async function runScan(): Promise<ScanResult> {
 
       // 3. High invocation tasks
       anomalies.push(
-        ...scanHighInvocations(projectDb, projectPath, projectName, DEFAULT_MAX_INVOCATIONS)
+        ...scanHighInvocations(projectDb, projectPath, projectName, DEFAULT_MAX_INVOCATIONS, HIGH_INVOCATION_THRESHOLD)
       );
 
       // 4. Repeated failures

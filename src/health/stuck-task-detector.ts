@@ -1,191 +1,47 @@
 /**
  * Core stuck-task detection logic (detection only, no recovery).
  *
- * This implementation intentionally uses the project's current schemas:
- * - Project DB: tasks, audit, task_invocations
- * - Global DB: runners
- *
- * The design doc (docs/stuck-task-detection.md) describes additional fields/tables
- * (incidents, invocation started/completed timestamps, last_tool_execution, etc.).
- * Those are not present in the current repo schema, so we derive signals from
- * existing timestamps (tasks.updated_at, task_invocations.created_at, runners.heartbeat_at).
+ * Types, config defaults, and datetime utilities live in stuck-task-detector-types.ts.
  */
 
 import type Database from 'better-sqlite3';
+import {
+  type StuckTaskDetectionConfig,
+  type OrphanedTaskSignal,
+  type HangingTaskSignal,
+  type ZombieRunnerSignal,
+  type DeadRunnerSignal,
+  type DbInconsistencySignal,
+  type StuckTaskDetectionReport,
+  type DetectStuckTasksOptions,
+  DEFAULTS,
+  parseSqliteDateTimeUtc,
+  formatSqliteDateTimeUtc,
+  secondsBetween,
+  mergeConfig,
+} from './stuck-task-detector-types.js';
 
-export type FailureMode =
-  | 'orphaned_task'
-  | 'hanging_invocation'
-  | 'zombie_runner'
-  | 'dead_runner'
-  | 'db_inconsistency'
-  | 'credit_exhaustion';
-
-export interface StuckTaskDetectionConfig {
-  /**
-   * How long a task may remain `in_progress` without a recent invocation and without
-   * an active runner assigned before being considered orphaned.
-   */
-  orphanedTaskTimeoutSec?: number; // default 600 (10m)
-
-  /**
-   * Maximum allowed time a task may remain `in_progress` while an active runner is
-   * actively working on it (approximates "hanging coder invocation" without
-   * started/completed timestamps).
-   */
-  maxCoderDurationSec?: number; // default 1800 (30m)
-
-  /**
-   * Maximum allowed time a task may remain `review` while an active runner is
-   * actively working on it (approximates "hanging reviewer invocation").
-   */
-  maxReviewerDurationSec?: number; // default 900 (15m)
-
-  /** Runner heartbeat staleness threshold. */
-  runnerHeartbeatTimeoutSec?: number; // default 300 (5m)
-
-  /**
-   * How long since last task invocation to consider a task "inactive" for orphan checks.
-   * This is compared against task_invocations.created_at.
-   */
-  invocationStalenessSec?: number; // default 600 (10m)
-
-  /** Recent-update window used for "DB inconsistency" transient detection. */
-  dbInconsistencyRecentUpdateSec?: number; // default 60 (1m)
-}
-
-export interface OrphanedTaskSignal {
-  failureMode: 'orphaned_task';
-  taskId: string;
-  title: string;
-  status: 'in_progress' | 'review';
-  updatedAt: Date;
-  secondsSinceUpdate: number;
-  invocationCount: number;
-  lastInvocationAt: Date | null;
-  hasActiveRunner: boolean;
-}
-
-export interface HangingTaskSignal {
-  failureMode: 'hanging_invocation';
-  phase: 'coder' | 'reviewer';
-  taskId: string;
-  title: string;
-  status: 'in_progress' | 'review';
-  updatedAt: Date;
-  secondsSinceUpdate: number;
-  runnerId: string;
-  runnerPid: number | null;
-  runnerHeartbeatAt: Date;
-  lastActivityAt: Date | null;
-  secondsSinceActivity: number | null;
-}
-
-export interface ZombieRunnerSignal {
-  failureMode: 'zombie_runner';
-  runnerId: string;
-  pid: number | null;
-  status: string;
-  projectPath: string | null;
-  currentTaskId: string | null;
-  heartbeatAt: Date;
-  secondsSinceHeartbeat: number;
-}
-
-export interface DeadRunnerSignal {
-  failureMode: 'dead_runner';
-  runnerId: string;
-  pid: number | null;
-  status: string;
-  projectPath: string | null;
-  currentTaskId: string | null;
-  heartbeatAt: Date;
-  secondsSinceHeartbeat: number;
-}
-
-export interface DbInconsistencySignal {
-  failureMode: 'db_inconsistency';
-  taskId: string;
-  title: string;
-  status: 'in_progress';
-  updatedAt: Date;
-  secondsSinceUpdate: number;
-  invocationCount: 0;
-}
-
-export interface StuckTaskDetectionReport {
-  timestamp: Date;
-  orphanedTasks: OrphanedTaskSignal[];
-  hangingInvocations: HangingTaskSignal[];
-  zombieRunners: ZombieRunnerSignal[];
-  deadRunners: DeadRunnerSignal[];
-  dbInconsistencies: DbInconsistencySignal[];
-}
-
-export interface DetectStuckTasksOptions {
-  /** Absolute project path as stored in global runners DB. */
-  projectPath: string;
-  /** Project-local database connection (tasks, task_invocations). */
-  projectDb: Database.Database;
-  /** Global database connection (runners). */
-  globalDb: Database.Database;
-  /** Optional config overrides. */
-  config?: StuckTaskDetectionConfig;
-  /**
-   * PID liveness check override for testing.
-   * If omitted, a best-effort `process.kill(pid, 0)` check is used.
-   */
-  isPidAlive?: (pid: number) => boolean;
-  /** Override current time for deterministic tests. */
-  now?: Date;
-}
-
-const DEFAULTS: Required<StuckTaskDetectionConfig> = {
-  orphanedTaskTimeoutSec: 600,
-  maxCoderDurationSec: 1800,
-  maxReviewerDurationSec: 900,
-  runnerHeartbeatTimeoutSec: 300,
-  invocationStalenessSec: 600,
-  dbInconsistencyRecentUpdateSec: 60,
-};
+// Re-export all public types and utilities so existing importers don't break.
+export type {
+  FailureMode,
+  StuckTaskDetectionConfig,
+  OrphanedTaskSignal,
+  HangingTaskSignal,
+  ZombieRunnerSignal,
+  DeadRunnerSignal,
+  DbInconsistencySignal,
+  StuckTaskDetectionReport,
+  DetectStuckTasksOptions,
+} from './stuck-task-detector-types.js';
+export { parseSqliteDateTimeUtc, formatSqliteDateTimeUtc } from './stuck-task-detector-types.js';
 
 function isProcessAliveBestEffort(pid: number): boolean {
   try {
-    // Signal 0: existence check only.
     process.kill(pid, 0);
     return true;
   } catch {
     return false;
   }
-}
-
-/**
- * Parse SQLite datetime('now') strings (YYYY-MM-DD HH:MM:SS) as UTC.
- * Node's Date parser can treat "YYYY-MM-DD HH:MM:SS" as local time depending on runtime,
- * so we normalize to ISO 8601 Zulu.
- */
-export function parseSqliteDateTimeUtc(value: string): Date {
-  // Already ISO? (e.g., 2026-02-10T13:45:00.000Z)
-  if (value.includes('T')) return new Date(value);
-  // SQLite "YYYY-MM-DD HH:MM:SS" (UTC) => "YYYY-MM-DDTHH:MM:SSZ"
-  return new Date(value.replace(' ', 'T') + 'Z');
-}
-
-/**
- * Format a Date as SQLite datetime('now')-compatible UTC string: YYYY-MM-DD HH:MM:SS
- * This keeps comparisons lexicographically safe against stored SQLite timestamps.
- */
-export function formatSqliteDateTimeUtc(date: Date): string {
-  // Date#toISOString is always UTC; trim milliseconds and replace T with space.
-  return date.toISOString().slice(0, 19).replace('T', ' ');
-}
-
-function secondsBetween(a: Date, b: Date): number {
-  return Math.max(0, Math.floor((a.getTime() - b.getTime()) / 1000));
-}
-
-function mergeConfig(config?: StuckTaskDetectionConfig): Required<StuckTaskDetectionConfig> {
-  return { ...DEFAULTS, ...(config ?? {}) };
 }
 
 export function detectStuckTasks(options: DetectStuckTasksOptions): StuckTaskDetectionReport {
@@ -223,12 +79,13 @@ function detectZombieRunnersInternal(
 ): ZombieRunnerSignal[] {
   const cutoff = formatSqliteDateTimeUtc(new Date(now.getTime() - cfg.runnerHeartbeatTimeoutSec * 1000));
   const rows = globalDb.prepare(
-    `SELECT id, status, pid, project_path, current_task_id, heartbeat_at
-     FROM runners
-     WHERE status = 'running'
-       AND project_path = ?
-       AND heartbeat_at < ?`
-  ).all(projectPath, cutoff) as Array<{
+    `SELECT r.id, r.status, r.pid, r.project_path, r.current_task_id, r.heartbeat_at
+     FROM runners r
+     LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
+     WHERE r.status = 'running'
+       AND (r.project_path = ? OR ps.project_path = ?)
+       AND r.heartbeat_at < ?`
+  ).all(projectPath, projectPath, cutoff) as Array<{
     id: string;
     status: string;
     pid: number | null;
@@ -264,11 +121,12 @@ function detectDeadRunnersInternal(
   isPidAlive: (pid: number) => boolean
 ): DeadRunnerSignal[] {
   const rows = globalDb.prepare(
-    `SELECT id, status, pid, project_path, current_task_id, heartbeat_at
-     FROM runners
-     WHERE status = 'running'
-       AND project_path = ?`
-  ).all(projectPath) as Array<{
+    `SELECT r.id, r.status, r.pid, r.project_path, r.current_task_id, r.heartbeat_at
+     FROM runners r
+     LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
+     WHERE r.status = 'running'
+       AND (r.project_path = ? OR ps.project_path = ?)`
+  ).all(projectPath, projectPath) as Array<{
     id: string;
     status: string;
     pid: number | null;
@@ -540,16 +398,18 @@ function getActiveRunnerForTask(
 ): { id: string; pid: number | null; heartbeat_at: string } | null {
   const cutoff = formatSqliteDateTimeUtc(new Date(now.getTime() - cfg.runnerHeartbeatTimeoutSec * 1000));
 
+  // Check direct runners and parallel session runners (workspace-prefixed paths)
   const row = globalDb.prepare(
-    `SELECT id, pid, heartbeat_at
-     FROM runners
-     WHERE project_path = ?
-       AND current_task_id = ?
-       AND status = 'running'
-       AND heartbeat_at >= ?
-     ORDER BY heartbeat_at DESC
+    `SELECT r.id, r.pid, r.heartbeat_at
+     FROM runners r
+     LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
+     WHERE (r.project_path = ? OR ps.project_path = ?)
+       AND r.current_task_id = ?
+       AND r.status = 'running'
+       AND r.heartbeat_at >= ?
+     ORDER BY r.heartbeat_at DESC
      LIMIT 1`
-  ).get(projectPath, taskId, cutoff) as { id: string; pid: number | null; heartbeat_at: string } | undefined;
+  ).get(projectPath, projectPath, taskId, cutoff) as { id: string; pid: number | null; heartbeat_at: string } | undefined;
 
   if (!row) return null;
   if (row.pid !== null && !isPidAlive(row.pid)) return null;
