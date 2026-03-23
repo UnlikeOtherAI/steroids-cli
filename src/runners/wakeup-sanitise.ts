@@ -341,8 +341,87 @@ function sanitiseProjectState(
         projectDb
           .prepare(`DELETE FROM task_locks WHERE task_id IN (${placeholders})`)
           .run(...ids);
+
+        // S4b: Pull back active downstream tasks.
+        // When a foundational task is un-skipped, any in_progress/review/merge_pending
+        // tasks in transitively dependent sections must be reset to pending so they
+        // don't run before their foundation is rebuilt.
+        const recoveredSectionIds = new Set(
+          projectDb
+            .prepare(
+              `SELECT DISTINCT section_id FROM tasks WHERE id IN (${placeholders})`
+            )
+            .all(...ids)
+            .map((r: any) => r.section_id as string)
+            .filter(Boolean)
+        );
+
+        if (recoveredSectionIds.size > 0) {
+          // Walk section_dependencies transitively to find all downstream sections
+          const downstream = new Set<string>();
+          const queue = [...recoveredSectionIds];
+          while (queue.length > 0) {
+            const sectionId = queue.pop()!;
+            const dependents = projectDb
+              .prepare(
+                'SELECT section_id FROM section_dependencies WHERE depends_on_section_id = ?'
+              )
+              .all(sectionId) as Array<{ section_id: string }>;
+            for (const d of dependents) {
+              if (!downstream.has(d.section_id)) {
+                downstream.add(d.section_id);
+                queue.push(d.section_id);
+              }
+            }
+          }
+
+          if (downstream.size > 0) {
+            const dsArray = [...downstream];
+            const dsPlaceholders = dsArray.map(() => '?').join(',');
+            const pulled = projectDb
+              .prepare(
+                `SELECT id, status FROM tasks
+                 WHERE section_id IN (${dsPlaceholders})
+                   AND status IN ('in_progress', 'review', 'merge_pending')`
+              )
+              .all(...dsArray) as Array<{ id: string; status: string }>;
+
+            if (pulled.length > 0) {
+              const pullIds = pulled.map((r) => r.id);
+              const pullPlaceholders = pullIds.map(() => '?').join(',');
+              projectDb
+                .prepare(
+                  `UPDATE tasks
+                   SET status = 'pending',
+                       merge_phase = NULL,
+                       approved_sha = NULL,
+                       rebase_attempts = 0,
+                       updated_at = datetime('now')
+                   WHERE id IN (${pullPlaceholders})`
+                )
+                .run(...pullIds);
+
+              const pullAudit = projectDb.prepare(
+                `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
+                 VALUES (?, ?, 'pending', 'orchestrator', 'orchestrator',
+                         'Pulled back by S4b — upstream foundational task recovered, must complete first.',
+                         datetime('now'))`
+              );
+              for (const p of pulled) {
+                pullAudit.run(p.id, p.status);
+              }
+              projectDb
+                .prepare(`DELETE FROM task_locks WHERE task_id IN (${pullPlaceholders})`)
+                .run(...pullIds);
+
+              summary.recoveredFailedTasks += pulled.length;
+            }
+          }
+        }
+      } else {
+        // No failed rows found — still init the count
       }
-      summary.recoveredFailedTasks = failedRows.length;
+      summary.recoveredFailedTasks += failedRows.length;
     } catch {
       // Safe to skip on schema mismatch
     }
