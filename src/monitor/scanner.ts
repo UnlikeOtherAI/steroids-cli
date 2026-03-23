@@ -24,8 +24,7 @@ import {
   type GlobalDatabaseConnection,
 } from '../runners/global-db-connection.js';
 import { cronStatus } from '../runners/cron.js';
-import { getProviderBackoffRemainingMs } from '../runners/global-db-backoffs.js';
-import { loadConfig } from '../config/loader.js';
+import { getProjectProviderBackoff } from '../runners/global-db-backoffs.js';
 import {
   scanFailedAndSkippedTasks,
   scanHighInvocations,
@@ -160,25 +159,9 @@ function getActiveProviderBackoff(
   projectPath: string,
 ): { provider: string; remainingMs: number } | null {
   try {
-    // S6 fix: Only check providers this project actually uses (mirrors wakeup-project.ts).
-    // Previous implementation checked ALL providers globally, which could silence idle_project
-    // alerts for project B because an unrelated provider for project A was backed off.
-    const projectConfig = loadConfig(projectPath);
-    const coderProvider = projectConfig.ai?.coder?.provider;
-    const reviewerProvider = projectConfig.ai?.reviewer?.provider;
-    const providersToCheck = [...new Set([coderProvider, reviewerProvider].filter(Boolean) as string[])];
-
-    for (const provider of providersToCheck) {
-      const remainingMs = getProviderBackoffRemainingMs(provider);
-      if (remainingMs > 0) {
-        return { provider, remainingMs };
-      }
-    }
-    return null;
+    return getProjectProviderBackoff(projectPath);
   } catch (err) {
-    // If config fails to load, log it but return null. This prevents a single
-    // broken project from crashing the entire monitor scan.
-    console.warn(`[scanner] Failed to load config for ${basename(projectPath)}, assuming no backoff`, err);
+    console.warn(`[scanner] Failed to check provider backoff for ${basename(projectPath)}`, err);
     return null;
   }
 }

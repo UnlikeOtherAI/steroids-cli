@@ -4,6 +4,7 @@
 
 import Database from 'better-sqlite3';
 import { withGlobalDatabase } from './global-db-connection';
+import { loadConfig } from '../config/loader.js';
 
 function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
   const columns = db
@@ -80,4 +81,27 @@ export function clearProviderBackoff(provider: string): void {
   withGlobalDatabase((db) => {
     db.prepare('DELETE FROM provider_backoffs WHERE provider = ?').run(provider);
   });
+}
+
+/**
+ * Check if any provider used by a specific project is currently backed off.
+ * Loads the project config to determine coder/reviewer providers, then checks
+ * only those providers — prevents cross-project backoff contamination.
+ */
+export function getProjectProviderBackoff(
+  projectPath: string,
+): { provider: string; remainingMs: number } | null {
+  const projectConfig = loadConfig(projectPath);
+  const coderProvider = projectConfig.ai?.coder?.provider;
+  const reviewerProvider = projectConfig.ai?.reviewer?.provider;
+  const providersToCheck = [...new Set([coderProvider, reviewerProvider].filter(Boolean) as string[])];
+
+  for (const provider of providersToCheck) {
+    const remainingMs = getProviderBackoffRemainingMs(provider);
+    if (remainingMs > 0) {
+      return { provider, remainingMs };
+    }
+  }
+
+  return null;
 }

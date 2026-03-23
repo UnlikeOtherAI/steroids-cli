@@ -5,8 +5,8 @@ import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
 import { cleanupInvocationLogs } from '../cleanup/invocation-logs.js';
 import { pollIntakeProject } from '../intake/poller.js';
 import { syncGitHubIntakeGate } from '../intake/github-gate.js';
-import { getProviderBackoffRemainingMs, clearProviderBackoff } from './global-db.js';
-import { getProviderBackoffInfo } from './global-db-backoffs.js';
+import { clearProviderBackoff } from './global-db.js';
+import { getProviderBackoffInfo, getProjectProviderBackoff } from './global-db-backoffs.js';
 import {
   SanitiseSummary,
   runPeriodicSanitiseForProject,
@@ -174,21 +174,7 @@ function createProjectResult(
   };
 }
 
-function getProviderBackoff(projectPath: string): { provider: string; remainingMs: number } | null {
-  const projectConfig = loadConfig(projectPath);
-  const coderProvider = projectConfig.ai?.coder?.provider;
-  const reviewerProvider = projectConfig.ai?.reviewer?.provider;
-  const providersToCheck = [coderProvider, reviewerProvider].filter(Boolean) as string[];
-
-  for (const provider of providersToCheck) {
-    const remainingMs = getProviderBackoffRemainingMs(provider);
-    if (remainingMs > 0) {
-      return { provider, remainingMs };
-    }
-  }
-
-  return null;
-}
+// Uses shared getProjectProviderBackoff from global-db-backoffs.ts
 
 /**
  * For auth-error backoffs, probe the provider with a quick "say hi" invocation.
@@ -238,7 +224,7 @@ async function probeAuthErrorProviders(projectPath: string, log: WakeupLogger): 
   }
 
   // Re-check if any provider is still backed off
-  return getProviderBackoff(projectPath) === null;
+  return getProjectProviderBackoff(projectPath) === null;
 }
 
 export async function processWakeupProject(
@@ -264,7 +250,7 @@ export async function processWakeupProject(
     return createProjectResult('none', noWorkReason, projectPath, state);
   }
 
-  const providerBackoff = getProviderBackoff(projectPath);
+  const providerBackoff = getProjectProviderBackoff(projectPath);
   if (providerBackoff) {
     // If this is an auth-error backoff, probe the provider to check recovery
     const info = getProviderBackoffInfo(providerBackoff.provider);
