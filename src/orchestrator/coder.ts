@@ -5,6 +5,7 @@
 
 import type { Task } from '../database/queries.js';
 import { getSection, getTaskRejections, findResumableSession, invalidateSession, listTasks } from '../database/queries.js';
+import { listTaskFeedback } from '../database/feedback-queries.js';
 import { withDatabase } from '../database/connection.js';
 import {
   generateCoderPrompt,
@@ -76,6 +77,7 @@ class CoderRunner extends BaseRunner {
     let rejectionHistory: ReturnType<typeof getTaskRejections> = [];
     let resumeSessionId: string | null = null;
     let sectionTasks: { id: string; title: string; status: string }[] | undefined;
+    let userFeedbackItems: string[] = [];
 
     try {
       withDatabase(projectPath, (db) => {
@@ -87,6 +89,12 @@ class CoderRunner extends BaseRunner {
         }
         if (rejectionHistory.length > 0) {
           console.log(`Found ${rejectionHistory.length} previous rejection(s) - coder will see full history`);
+        }
+
+        const feedbackRows = listTaskFeedback(db, task.id);
+        if (feedbackRows.length > 0) {
+          userFeedbackItems = feedbackRows.map(f => f.feedback);
+          console.log(`Found ${feedbackRows.length} user feedback item(s) for coder`);
         }
 
         if (coderConfig?.provider && coderConfig.provider !== 'claude' && coderConfig?.model) {
@@ -113,6 +121,7 @@ class CoderRunner extends BaseRunner {
       rejectionHistory,
       coordinatorGuidance,
       sectionTasks,
+      userFeedbackItems: userFeedbackItems.length > 0 ? userFeedbackItems : undefined,
     };
 
     let prompt: string;

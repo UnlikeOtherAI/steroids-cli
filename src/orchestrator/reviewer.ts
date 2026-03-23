@@ -12,6 +12,7 @@ import {
   findResumableSession,
   invalidateSession,
 } from '../database/queries.js';
+import { listTaskFeedback } from '../database/feedback-queries.js';
 import { withDatabase } from '../database/connection.js';
 import {
   generateReviewerPrompt,
@@ -172,6 +173,7 @@ class ReviewerRunner extends BaseRunner {
     let submissionCommitHash: string | null = null;
     let submissionCommitHashes: string[] = [];
     let unresolvedSubmissionCommits: string[] = [];
+    let userFeedbackItems: string[] = [];
 
     try {
       withDatabase(projectPath, (db) => {
@@ -187,6 +189,12 @@ class ReviewerRunner extends BaseRunner {
         rejectionHistory = getTaskRejections(db, task.id);
         if (rejectionHistory.length > 0) {
           console.log(`Found ${rejectionHistory.length} previous rejection(s) for this task`);
+        }
+
+        const feedbackRows = listTaskFeedback(db, task.id);
+        if (feedbackRows.length > 0) {
+          userFeedbackItems = feedbackRows.map(f => f.feedback);
+          console.log(`Found ${feedbackRows.length} user feedback item(s) for reviewer`);
         }
 
         submissionNotes = getLatestSubmissionNotes(db, task.id);
@@ -246,6 +254,7 @@ class ReviewerRunner extends BaseRunner {
       coordinatorGuidance,
       coordinatorDecision,
       reviewerCustomInstructions: effectiveReviewerConfig?.customInstructions,
+      userFeedbackItems: userFeedbackItems.length > 0 ? userFeedbackItems : undefined,
     };
 
     let prompt: string;
