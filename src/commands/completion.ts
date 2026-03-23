@@ -63,6 +63,7 @@ const COMMANDS = {
   git: ['status', 'push', 'retry', 'log'],
   projects: ['list', 'add', 'remove', 'enable', 'disable', 'prune'],
   locks: ['list', 'show', 'release', 'cleanup'],
+  ai: ['providers', 'models', 'test', 'run', 'setup'],
   completion: ['bash', 'zsh', 'fish', 'install'],
   workspaces: ['list', 'clean'],
 };
@@ -323,6 +324,7 @@ function getCommandDescription(cmd: string): string {
     git: 'Git integration commands',
     projects: 'Manage global project registry',
     locks: 'Manage task and section locks',
+    ai: 'Manage AI providers and run agents',
     completion: 'Generate shell completions',
   };
   return descriptions[cmd] || cmd;
@@ -415,6 +417,13 @@ function getSubcommandDescription(cmd: string, sub: string): string {
       show: 'Show lock details',
       release: 'Release a lock',
       cleanup: 'Clean stale locks',
+    },
+    ai: {
+      providers: 'List detected AI providers',
+      models: 'List models for a provider',
+      test: 'Test provider configuration',
+      run: 'Run a single agent invocation',
+      setup: 'Interactive setup wizard',
     },
     completion: {
       bash: 'Generate bash completion',

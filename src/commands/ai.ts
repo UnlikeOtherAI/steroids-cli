@@ -17,16 +17,18 @@ import {
   checkProviderCLI,
 } from '../providers/api-models.js';
 import { loadConfig, type ProviderName } from '../config/loader.js';
+import { runSubcommand as runRunSubcommand } from './ai-run.js';
 
 const HELP = generateHelp({
   command: 'ai',
   description: 'AI provider management and testing',
-  details: `Manage AI providers, detect installed CLIs, list available models, and test configurations.`,
+  details: `Manage AI providers, detect installed CLIs, list available models, test configurations, and run agent invocations.`,
   usage: ['steroids ai <subcommand> [options]'],
   subcommands: [
     { name: 'providers', description: 'List all detected AI providers' },
     { name: 'models', args: '<provider>', description: 'List available models for a provider' },
     { name: 'test', args: '<role>', description: 'Test provider configuration for a role' },
+    { name: 'run', args: '<role>', description: 'Run a single agent invocation for debugging' },
     { name: 'setup', args: '[role]', description: 'Run interactive setup wizard' },
   ],
   options: [
@@ -38,6 +40,7 @@ const HELP = generateHelp({
     { command: 'steroids ai models claude', description: 'List Claude models from CLI' },
     { command: 'steroids ai models mistral --api', description: 'Fetch Mistral models from API' },
     { command: 'steroids ai test coder', description: 'Test coder provider configuration' },
+    { command: 'steroids ai run coder -p "Add health check"', description: 'Run coder agent' },
     { command: 'steroids ai setup', description: 'Interactive setup wizard' },
     { command: 'steroids ai setup reviewer', description: 'Configure reviewer role' },
   ],
@@ -67,6 +70,9 @@ export async function aiCommand(args: string[], flags: GlobalFlags): Promise<voi
       break;
     case 'test':
       await testSubcommand(subArgs, flags);
+      break;
+    case 'run':
+      await runRunSubcommand(subArgs, flags);
       break;
     case 'setup':
       await setupSubcommand(subArgs, flags);
