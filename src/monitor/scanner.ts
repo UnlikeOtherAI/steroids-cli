@@ -175,7 +175,10 @@ function getActiveProviderBackoff(
       }
     }
     return null;
-  } catch {
+  } catch (err) {
+    // If config fails to load, log it but return null. This prevents a single
+    // broken project from crashing the entire monitor scan.
+    console.warn(`[scanner] Failed to load config for ${basename(projectPath)}, assuming no backoff`, err);
     return null;
   }
 }
