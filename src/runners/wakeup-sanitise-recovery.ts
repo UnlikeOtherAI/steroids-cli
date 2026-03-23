@@ -141,6 +141,10 @@ export function recoverOrphanedInvocation(
         )
         .run(completedAtMs, durationMs, `Recovered by sanitise [${source}] (review approve token found).`, row.id);
 
+      // Note: approved_sha is not set here because we don't have the commit SHA
+      // from the stale invocation data and resolving from remote requires network.
+      // The merge queue's handleMergeAttempt checks for missing approved_sha and
+      // transitions to blocked_error, which is the safe fallback.
       projectDb
         .prepare(
           `UPDATE tasks SET status = 'merge_pending', merge_phase = 'queued', updated_at = datetime('now')

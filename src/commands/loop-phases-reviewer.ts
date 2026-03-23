@@ -371,7 +371,10 @@ export async function runReviewerPhase(
           }).trim();
           if (remoteSha) approvedSha = remoteSha;
         } catch {
-          // Fallback to local commit SHA if remote ref not available
+          // Remote ref not in local reflog — use local commit SHA.
+          // The merge queue's fetchAndPrepare will independently verify the SHA
+          // matches the remote branch HEAD; mismatches return the task to review.
+          if (!jsonMode) console.log(`  ⚠ Could not resolve remote ref for ${taskBranch}, using local SHA`);
         }
       }
 
