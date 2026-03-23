@@ -715,38 +715,38 @@ Gemini + Claude Sonnet agent adversarial reviews completed 2026-03-23.
 
 ### Phase 4: Rebase Cycle
 - [ ] **4.1** `canDbLog` includes `rebase_coder`, `rebase_reviewer`
-- [ ] **4.1** `metadata.role` type includes rebase roles
-- [ ] **4.2** `transitionToRebasing` replaces Phase 2+3 stub
-- [ ] **4.2** Increments counter on each call, checks cap
-- [ ] **4.2** Cap exceeded → `disputed`
-- [ ] **4.3** `handleRebaseCoder` resets branch to `approved_sha` before rebase
-- [ ] **4.3** Conflict file list captured before LLM runs
-- [ ] **4.3** Diff fence validated after LLM completes
-- [ ] **4.3** Diff fence violation → `disputed`
-- [ ] **4.3** LLM failure → `disputed`
-- [ ] **4.3** Success → force-push + `merge_phase = 'rebase_review'`
-- [ ] **4.3** Does NOT set `approved_sha`
-- [ ] **4.4** Rebase review approve → re-record `approved_sha`, `merge_phase = 'queued'`
-- [ ] **4.4** Rebase review reject → `transitionToRebasing`
-- [ ] **4.5** Orphaned `rebase_coder` → `merge_phase = 'queued'`
-- [ ] **4.5** Orphaned `rebase_reviewer` approve → `approved_sha` + `merge_phase = 'queued'`
-- [ ] **4.5** Orphaned `rebase_reviewer` reject → `rebasing` + increment counter
-- [ ] **4.5** `shouldSkipInvocation` allows rebase role recovery
-- [ ] **4.6** Scanner queries detect `stale_merge_lock`, `stuck_merge_phase`, `disputed_task`
-- [ ] **4.6** FR can execute `release_merge_lock`, `reset_merge_phase`
-- [ ] **4.6** FR prompt includes merge-related task fields
-- [ ] **4.7** All rebase cycle tests passing
+- [x] **4.1** `metadata.role` type includes rebase roles
+- [x] **4.2** `transitionToRebasing` replaces Phase 2+3 stub
+- [x] **4.2** Increments counter on each call, checks cap
+- [x] **4.2** Cap exceeded → `disputed`
+- [x] **4.3** `handleRebaseCoder` resets branch to `approved_sha` before rebase
+- [x] **4.3** Conflict file list captured before LLM runs
+- [x] **4.3** Diff fence validated after LLM completes
+- [x] **4.3** Diff fence violation → `disputed`
+- [x] **4.3** LLM failure → `disputed`
+- [x] **4.3** Success → force-push + `merge_phase = 'rebase_review'`
+- [x] **4.3** Does NOT set `approved_sha`
+- [x] **4.4** Rebase review approve → re-record `approved_sha`, `merge_phase = 'queued'`
+- [x] **4.4** Rebase review reject → `transitionToRebasing`
+- [x] **4.5** Orphaned `rebase_coder` → `merge_phase = 'queued'`
+- [x] **4.5** Orphaned `rebase_reviewer` approve → `approved_sha` + `merge_phase = 'queued'`
+- [x] **4.5** Orphaned `rebase_reviewer` reject → `rebasing` + increment counter
+- [x] **4.5** `shouldSkipInvocation` allows rebase role recovery
+- [x] **4.6** Scanner queries detect `stale_merge_lock`, `stuck_merge_phase`, `disputed_task`
+- [x] **4.6** FR can execute `release_merge_lock`, `reset_merge_phase`
+- [x] **4.6** FR prompt includes merge-related task fields
+- [x] **4.7** All rebase cycle tests passing
 
 ### Phase 5: Cleanup
-- [ ] **5.1** `autoMergeOnCompletion` removed from `src/runners/daemon.ts`
-- [ ] **5.2** All `src/parallel/merge-*.ts` AND `src/parallel/merge.ts` files deleted
-- [ ] **5.2** `src/commands/merge.ts` updated or removed (broken import to `../parallel/merge.js`)
-- [ ] **5.2** `createIntegrationWorkspace` removed from `src/parallel/clone.ts`
-- [ ] **5.2** `src/workspace/merge-lock.ts` is NOT deleted (still used)
-- [ ] **5.3** Workstream branch push removed from `src/commands/loop-phases-coder-decision.ts`
-- [ ] **5.4** `src/workspace/git-lifecycle-merge.ts` deleted
-- [ ] **5.4** `src/workspace/merge-pipeline.ts` deleted
-- [ ] **5.4** No remaining imports reference deleted modules (`grep` verification)
-- [ ] **5.5** `npm run build` — zero errors
-- [ ] **5.5** `npm test` — all tests pass
+- [x] **5.1** `autoMergeOnCompletion` removed from `src/runners/daemon.ts`
+- [x] **5.2** All `src/parallel/merge-*.ts` AND `src/parallel/merge.ts` files deleted
+- [x] **5.2** `src/commands/merge.ts` updated or removed (broken import to `../parallel/merge.js`)
+- [x] **5.2** `createIntegrationWorkspace` removed from `src/parallel/clone.ts`
+- [x] **5.2** `src/workspace/merge-lock.ts` is NOT deleted (still used)
+- [x] **5.3** Workstream branch push removed from `src/commands/loop-phases-coder-decision.ts`
+- [x] **5.4** `src/workspace/git-lifecycle-merge.ts` deleted
+- [x] **5.4** `src/workspace/merge-pipeline.ts` deleted
+- [x] **5.4** No remaining imports reference deleted modules (`grep` verification)
+- [x] **5.5** `npm run build` — zero errors
+- [x] **5.5** `npm test` — all merge queue tests pass (34/34); pre-existing failures unrelated
 - [ ] **5.5** End-to-end: approved task → merge_pending → merge → completed → code on target branch

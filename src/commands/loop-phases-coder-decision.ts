@@ -24,7 +24,7 @@ import {
   getModifiedFiles,
   isCommitReachable,
 } from '../git/status.js';
-import { pushToRemote } from '../git/push.js';
+
 import { submitForReviewWithDurableRef } from './submission-transition.js';
 import { pushTaskBranchForDurability } from './push-task-branch.js';
 import {
@@ -233,14 +233,6 @@ export async function executeCoderDecision(
         if (ctx.poolTaskBranch) {
           const pushOk = await pushTaskBranchForDurability(db, task!.id, effectiveProjectPath, ctx.poolTaskBranch, jsonMode);
           if (!pushOk.ok) break;
-        } else if (leaseFence?.parallelSessionId && !hasPoolSlot) {
-          const pushResult = pushToRemote(projectPath, 'origin', branchName);
-          if (!pushResult.success) {
-            updateTaskStatus(db, task!.id, 'failed', 'orchestrator',
-              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`);
-            if (!jsonMode) console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
-            break;
-          }
         }
         const submitted = submitForReviewWithDurableRef(
           db, task!.id, 'orchestrator', effectiveProjectPath, submissionCommitSha, decision.reasoning
@@ -289,14 +281,6 @@ export async function executeCoderDecision(
         if (ctx.poolTaskBranch) {
           const pushOk = await pushTaskBranchForDurability(db, task!.id, effectiveProjectPath, ctx.poolTaskBranch, jsonMode);
           if (!pushOk.ok) break;
-        } else if (leaseFence?.parallelSessionId && !hasPoolSlot) {
-          const pushResult = pushToRemote(projectPath, 'origin', branchName);
-          if (!pushResult.success) {
-            updateTaskStatus(db, task!.id, 'failed', 'orchestrator',
-              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`);
-            if (!jsonMode) console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
-            break;
-          }
         }
         const submitted = submitForReviewWithDurableRef(
           db, task!.id, 'orchestrator', effectiveProjectPath, submissionCommitSha,
@@ -342,14 +326,6 @@ export async function executeCoderDecision(
         if (ctx.poolTaskBranch) {
           const pushOk = await pushTaskBranchForDurability(db, task!.id, effectiveProjectPath, ctx.poolTaskBranch, jsonMode);
           if (!pushOk.ok) break;
-        } else if (leaseFence?.parallelSessionId && !hasPoolSlot) {
-          const pushResult = pushToRemote(projectPath, 'origin', branchName);
-          if (!pushResult.success) {
-            updateTaskStatus(db, task!.id, 'failed', 'orchestrator',
-              `Task failed: cannot publish submission commit ${submissionCommitSha} to ${branchName} before review`);
-            if (!jsonMode) console.log('\n✗ Task failed (unable to push submission commit to branch for review)');
-            break;
-          }
         }
         const submitted = submitForReviewWithDurableRef(
           db, task!.id, 'orchestrator', effectiveProjectPath, submissionCommitSha,

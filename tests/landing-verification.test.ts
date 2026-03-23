@@ -15,7 +15,7 @@ import Database from 'better-sqlite3';
 import { resolveRemoteUrl, ensureSlotClone } from '../src/workspace/pool.js';
 import { createWorkspaceClone } from '../src/parallel/clone.js';
 import { prepareForTask } from '../src/workspace/git-lifecycle.js';
-import { mergeToBase } from '../src/workspace/git-lifecycle-merge.js';
+
 import { GLOBAL_SCHEMA_V19_SQL } from '../src/runners/global-db-schema.js';
 import type { PoolSlot } from '../src/workspace/types.js';
 
@@ -212,8 +212,8 @@ describe('Fix 2: ensureSlotClone origin management', () => {
 
 // ─── Fix 3 + merge-to-remote integration ─────────────────────────────────────
 
-describe('Fix 3 + merge-to-remote integration', () => {
-  it('self-heals poisoned slot (remote_url=NULL) and pushes commit to bare remote', () => {
+describe('Fix 3: self-heal poisoned slot', () => {
+  it('self-heals poisoned slot (remote_url=NULL) and repairs origin', () => {
     const bareRemote = makeTempDir('bare-integration');
     execFileSync('git', ['init', '--bare', '-b', 'main', bareRemote], { stdio: 'pipe' });
     // Use file:// so the origin URL is treated as "real" (not a plain filesystem path)
@@ -256,23 +256,5 @@ describe('Fix 3 + merge-to-remote integration', () => {
     // DB must be updated too
     const healed = globalDb.prepare('SELECT remote_url FROM workspace_pool_slots WHERE id = 1').get() as { remote_url: string | null };
     expect(healed.remote_url).toBe(bareRemoteUrl);
-
-    // Make a feature commit on the task branch
-    writeFileSync(join(slotPath, 'feature.md'), 'new feature');
-    gitRun(slotPath, ['add', '-A']);
-    gitRun(slotPath, ['commit', '-m', 'feat: new feature from task']);
-
-    // mergeToBase should push to the bare remote
-    const updatedSlot = globalDb.prepare('SELECT * FROM workspace_pool_slots WHERE id = 1').get() as PoolSlot;
-    const mergeResult = mergeToBase(globalDb, updatedSlot, 'task-1');
-    expect(mergeResult.ok).toBe(true);
-
-    // Verify the feature commit landed in the bare remote
-    const remoteLog = execFileSync(
-      'git',
-      ['--git-dir', bareRemote, 'log', 'main', '--oneline'],
-      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-    expect(remoteLog).toContain('feat: new feature from task');
   });
 });

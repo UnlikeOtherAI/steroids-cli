@@ -10,11 +10,7 @@ import { createHeartbeatManager } from './heartbeat.js';
 import { hasActiveRunnerForProject } from './wakeup.js';
 import { runOrchestratorLoop } from './orchestrator-loop.js';
 import { getRegisteredProject } from './projects.js';
-import { openDatabase } from '../database/connection.js';
-import { getTaskCountsByStatus } from '../database/queries.js';
-import { runParallelMerge, type MergeWorkstreamSpec } from '../parallel/merge.js';
-import { updateParallelSessionStatus } from './global-db.js';
-import { loadConfig } from '../config/loader.js';
+
 
 export type RunnerStatus = 'idle' | 'running' | 'stopping';
 
@@ -273,111 +269,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
     console.error('Loop error:', error);
   }
 
-  // Auto-merge if this is a parallel runner and loop completed normally
-  if (loopCompletedNormally && options.parallelSessionId) {
-    try {
-      await autoMergeOnCompletion(
-        options.parallelSessionId,
-        effectiveProjectPath,
-        runnerId
-      );
-    } catch (error) {
-      console.error('[AUTO-MERGE] Error:', error instanceof Error ? error.message : error);
-    }
-  }
-
   // Cleanup and exit
   shutdown('completed');
-}
-
-/**
- * Auto-merge THIS runner's workstream branch immediately on completion.
- * Does not wait for other workstreams — each runner merges its own work
- * so commits reach main even if other runners crash or stall.
- */
-async function autoMergeOnCompletion(
-  parallelSessionId: string,
-  workspacePath: string,
-  runnerId: string
-): Promise<void> {
-  return withGlobalDatabase(async (db) => {
-    // Find our workstream
-    const ours = db.prepare(
-      `SELECT id, branch_name FROM workstreams
-       WHERE session_id = ? AND clone_path = ? AND status = 'running'`
-    ).get(parallelSessionId, workspacePath) as { id: string; branch_name: string } | undefined;
-
-    if (!ours) {
-      console.log('[AUTO-MERGE] No running workstream found for this runner, skipping');
-      return;
-    }
-
-    // Mark our workstream as completed
-    db.prepare(
-      `UPDATE workstreams SET status = 'completed', completed_at = COALESCE(completed_at, datetime('now'))
-       WHERE id = ? AND session_id = ?`
-    ).run(ours.id, parallelSessionId);
-
-    // Get original project path from session
-    const session = db.prepare(
-      `SELECT project_path FROM parallel_sessions WHERE id = ?`
-    ).get(parallelSessionId) as { project_path: string } | undefined;
-
-    if (!session) {
-      console.log('[AUTO-MERGE] Session not found, skipping');
-      return;
-    }
-
-    console.log(`\n[AUTO-MERGE] Merging workstream ${ours.id} (${ours.branch_name})...`);
-
-    const config = loadConfig(session.project_path);
-    const validationCommand = typeof config.runners?.parallel?.validationCommand === 'string'
-      ? config.runners.parallel.validationCommand : undefined;
-    const mainBranch = config.git?.branch ?? 'main';
-    const remote = config.git?.remote ?? 'origin';
-
-    const result = await runParallelMerge({
-      projectPath: session.project_path,
-      sessionId: parallelSessionId,
-      runnerId,
-      workstreams: [{ id: ours.id, branchName: ours.branch_name }],
-      remote,
-      mainBranch,
-      cleanupOnSuccess: config.runners?.parallel?.cleanupOnSuccess ?? true,
-      validationCommand,
-      // Don't mark session complete yet — only do so when ALL workstreams are done.
-      // This prevents a fast workstream (e.g. a blocked section with no tasks) from
-      // prematurely completing the session while other workstreams still run, which
-      // caused wakeup to spawn duplicate parallel sessions.
-      skipSessionComplete: true,
-    });
-
-    if (result.success) {
-      if (result.completedCommits === 0 && result.skipped > 0 && result.conflicts === 0) {
-        console.warn(
-          `[AUTO-MERGE] WARNING: All workstreams skipped, 0 commits applied ` +
-          `(${result.skipped} skipped). Workstream branches may be unreachable ` +
-          `from the integration workspace. Check remote URL configuration.`
-        );
-      }
-      console.log(`[AUTO-MERGE] Success: ${result.completedCommits} commits applied, ${result.conflicts} conflicts, ${result.skipped} skipped`);
-
-      // Mark session complete only if ALL workstreams in this session are now done.
-      const remaining = db.prepare(
-        `SELECT COUNT(*) as count FROM workstreams
-         WHERE session_id = ? AND status NOT IN ('completed', 'failed', 'aborted')`
-      ).get(parallelSessionId) as { count: number };
-
-      if (remaining.count === 0) {
-        console.log('[AUTO-MERGE] All workstreams complete — marking session as completed');
-        updateParallelSessionStatus(parallelSessionId, 'completed', true);
-      } else {
-        console.log(`[AUTO-MERGE] ${remaining.count} workstream(s) still running — session stays active`);
-      }
-    } else {
-      console.error(`[AUTO-MERGE] Failed: ${result.errors.join('; ')}`);
-    }
-  });
 }
 
 /**

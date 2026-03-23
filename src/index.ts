@@ -33,7 +33,7 @@ import { statsCommand } from './commands/stats.js';
 import { hooksCommand } from './commands/hooks.js';
 import { aiCommand } from './commands/ai.js';
 import { webCommand } from './commands/web.js';
-import { mergeCommand } from './commands/merge.js';
+
 import { workspacesCommand } from './commands/workspaces.js';
 import { skillsCommand } from './commands/skills.js';
 import { hfCommand } from './commands/hf.js';
@@ -251,9 +251,7 @@ async function main(): Promise<void> {
       case 'web':
         await webCommand(commandArgs, flags);
         break;
-      case 'merge':
-        await mergeCommand(commandArgs, flags);
-        break;
+
       case 'workspaces':
         await workspacesCommand(commandArgs, flags);
         break;
