@@ -581,10 +581,10 @@ Each call site below must be updated. Checked individually:
 > Every box must be ticked before the merge queue is considered complete. Review this checklist against the implementation at each phase boundary.
 
 ### Phase 0: Prerequisites
-- [-] **0.1** `pushWithRetries` uses async backoff (no synchronous busy-wait)
-- [-] **0.1** All callers of `pushWithRetries` updated for async or using new async wrapper
-- [-] **0.2** `acquireWorkspaceMergeLock` supports tryOnce mode
-- [-] **0.2** Stale lock TTL reduced to 90s for merge queue use
+- [x] **0.1** `pushWithRetries` uses async backoff (no synchronous busy-wait)
+- [x] **0.1** All callers of `pushWithRetries` updated for async or using new async wrapper
+- [x] **0.2** `acquireWorkspaceMergeLock` supports tryOnce mode
+- [x] **0.2** Stale lock TTL reduced to 90s for merge queue use
 
 ### Phase 1: Push Restructuring
 - [ ] **1.1** `pushTaskBranchForDurability` function exists and is called from coder decision phase
