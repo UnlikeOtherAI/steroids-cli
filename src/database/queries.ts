@@ -1429,6 +1429,10 @@ export function findNextTask(
 /**
  * S7: Check if a task has prior successful coder invocations.
  * Used to avoid re-running the coder when a task is reset after coder already succeeded.
+ *
+ * Known limitation: does not detect spec changes since the coder ran. If the task
+ * description was updated after the coder succeeded, the reviewer will catch the
+ * mismatch and reject, sending the task back to the coder via the normal cycle.
  */
 export function hasSuccessfulCoderWork(
   db: Database.Database,
