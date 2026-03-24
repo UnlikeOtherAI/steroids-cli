@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, existsSync, rmSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -232,12 +232,10 @@ export class ClaudeProvider extends BaseAIProvider {
       }
     }
 
-    // Set up isolated HOME
-    // ~/.claude.json lives at HOME root (not inside ~/.claude/) and holds onboarding/machine state.
-    // Without it, Claude Code shows a toolchain/onboarding prompt on every invocation, which hangs
-    // since stdin is closed.
-    const isolatedHome = this.setupIsolatedHome('.claude', ['config.json', '.credentials.json', 'settings.json'], undefined, ['.claude.json']);
-
+    // Claude runs with the real HOME — no isolated home needed.
+    // In -p (print) mode it does not write interactive history, and auth/config
+    // files are naturally present in the real home. Each session has a server-side
+    // UUID so parallel sessions don't conflict on local state.
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
       let stdout = '';
@@ -257,10 +255,7 @@ export class ClaudeProvider extends BaseAIProvider {
       const child = spawn(command, {
         shell: true,
         cwd,
-        env: this.getSanitizedCliEnv({
-          HOME: isolatedHome,
-          ...proxyOverrides,
-        }),
+        env: this.getSanitizedCliEnv({ ...proxyOverrides }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -348,13 +343,6 @@ export class ClaudeProvider extends BaseAIProvider {
         clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
 
-        // Cleanup isolated home
-        try {
-          rmSync(isolatedHome, { recursive: true, force: true });
-        } catch {
-          // Ignore cleanup errors
-        }
-
         const outputStr = (stdout + '\n' + stderr).toLowerCase();
         if (code !== 0 && resumeSessionId && (
           !outputStr.trim() || // No output = session file missing (e.g. isolated home was cleaned up)
@@ -381,13 +369,6 @@ export class ClaudeProvider extends BaseAIProvider {
       child.on('error', (error) => {
         clearTimeout(activityTimer);
         const duration = Date.now() - startTime;
-
-        // Cleanup isolated home
-        try {
-          rmSync(isolatedHome, { recursive: true, force: true });
-        } catch {
-          // Ignore cleanup errors
-        }
 
         resolve({
           success: false,

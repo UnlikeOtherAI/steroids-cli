@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -363,24 +363,21 @@ export abstract class BaseAIProvider implements IAIProvider {
   }
 
   /**
-   * Set up an isolated home directory for a provider CLI.
+   * Set up a minimal isolated home directory for a provider CLI.
    *
-   * For temp homes (baseDir not provided): mirrors the entire real home top-level
-   * into the isolated dir via symlinks, then replaces only `providerDir` with a real
-   * isolated directory containing auth-file symlinks. This gives the spawned process
-   * access to all user dotfiles, tools, configs, and credentials without needing an
-   * explicit allowlist, while keeping provider session state isolated between parallel
-   * invocations.
+   * Only used by providers that store session state locally and need isolation
+   * between parallel invocations (Gemini, Codex). Providers that don't write
+   * local session state (Claude with -p flag, Mistral via VIBE_HOME) should
+   * NOT use this — they should run with the real HOME or a targeted env var.
    *
-   * For persistent homes (baseDir provided, e.g. Gemini's per-project home): only
-   * creates the provider dir + auth symlinks, plus a small set of essential files.
-   * We don't full-mirror into persistent homes because they live inside project dirs
-   * and should not be filled with real-home symlinks.
+   * Creates a minimal dir with:
+   *  - an isolated providerDir containing only auth-file symlinks
+   *  - symlinks for .gitconfig, .ssh, and any extra rootFiles
    *
-   * @param providerDir Provider-specific config/state dir (e.g. '.claude', '.config/gcloud')
+   * @param providerDir Provider-specific config/state dir (e.g. '.gemini', '.config/gcloud')
    * @param authFiles Auth/config filenames to symlink into the isolated providerDir
-   * @param baseDir Optional pre-existing dir to use instead of creating a temp one
-   * @param rootFiles Extra HOME-root files to symlink for persistent homes (ignored for temp homes)
+   * @param baseDir Optional pre-existing dir to use (e.g. per-project persistent home)
+   * @param rootFiles Extra HOME-root files to symlink (e.g. ['.npmrc'])
    */
   protected setupIsolatedHome(providerDir: string, authFiles: string[], baseDir?: string, rootFiles?: string[]): string {
     const uuid = randomUUID();
@@ -392,54 +389,13 @@ export abstract class BaseAIProvider implements IAIProvider {
         mkdirSync(isolatedHome, { recursive: true });
       }
 
-      // ── Temp home: mirror the real home ──────────────────────────────────────
-      // Symlink every top-level real-home entry except the provider dir (which we
-      // create as a real isolated dir below). For nested provider dirs like
-      // '.config/gcloud', the parent ('.config') is excluded from the mirror and
-      // rebuilt with its own contents minus the specific subdir.
-      if (!baseDir) {
-        const topProviderDir = providerDir.split('/')[0];
-
-        try {
-          for (const entry of readdirSync(realHome)) {
-            if (entry === topProviderDir) continue; // handled separately below
-            const src = join(realHome, entry);
-            const dest = join(isolatedHome, entry);
-            if (!existsSync(dest)) {
-              try { symlinkSync(src, dest); } catch { /* best effort */ }
-            }
-          }
-        } catch { /* best effort — don't abort if real home listing fails */ }
-
-        // For nested paths (e.g. '.config/gcloud'): create the parent dir as a real
-        // dir and symlink everything from the real parent except the specific subdir.
-        const isNested = providerDir.includes('/');
-        if (isNested) {
-          const subDir = providerDir.slice(topProviderDir.length + 1);
-          const realParentPath = join(realHome, topProviderDir);
-          const isolatedParentPath = join(isolatedHome, topProviderDir);
-          mkdirSync(isolatedParentPath, { recursive: true });
-          if (existsSync(realParentPath)) {
-            try {
-              for (const entry of readdirSync(realParentPath)) {
-                if (entry === subDir) continue;
-                const src = join(realParentPath, entry);
-                const dest = join(isolatedParentPath, entry);
-                if (!existsSync(dest)) {
-                  try { symlinkSync(src, dest); } catch { /* best effort */ }
-                }
-              }
-            } catch { /* best effort */ }
-          }
-        }
-      }
-
-      // ── Create isolated provider dir with auth-file symlinks ─────────────────
+      // Create isolated provider dir with auth-file symlinks
       const realProviderPath = join(realHome, providerDir);
       const isolatedProviderPath = join(isolatedHome, providerDir);
-      mkdirSync(isolatedProviderPath, { recursive: true });
 
       if (existsSync(realProviderPath)) {
+        mkdirSync(isolatedProviderPath, { recursive: true });
+
         for (const file of authFiles) {
           const src = join(realProviderPath, file);
           const dest = join(isolatedProviderPath, file);
@@ -458,18 +414,14 @@ export abstract class BaseAIProvider implements IAIProvider {
         }
       }
 
-      // ── Persistent home: explicit essential symlinks ──────────────────────────
-      // The full-mirror doesn't apply to persistent homes, so add the minimum
-      // required files explicitly.
-      if (baseDir) {
-        [...(rootFiles ?? []), '.gitconfig', '.ssh'].forEach(file => {
-          const src = join(realHome, file);
-          const dest = join(isolatedHome, file);
-          if (existsSync(src) && !existsSync(dest)) {
-            try { symlinkSync(src, dest); } catch { /* best effort */ }
-          }
-        });
-      }
+      // Essential HOME-root symlinks so git and SSH work from the isolated home
+      [...(rootFiles ?? []), '.gitconfig', '.ssh'].forEach(file => {
+        const src = join(realHome, file);
+        const dest = join(isolatedHome, file);
+        if (existsSync(src) && !existsSync(dest)) {
+          try { symlinkSync(src, dest); } catch { /* best effort */ }
+        }
+      });
 
     } catch (e) {
       console.warn(`Failed to set up isolated ${this.name} home: ${e}`);
