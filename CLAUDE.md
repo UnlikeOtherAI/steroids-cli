@@ -7,10 +7,11 @@
 
 ## Debugging Protocol
 - **Always check logs first** before using browser automation or code analysis. Look at server logs (`~/.steroids/logs/api.log`, `~/.steroids/logs/webui.log`), runner logs (`~/.steroids/runners/logs/`), and browser console errors before diving into source code.
+- **Never manually trigger recovery.** Do not run `steroids monitor run`, `steroids runners wakeup`, reset tasks, or invoke any other recovery command to work around a bug. Fix the code so the system self-heals, then let the user restart and verify.
 
-## How to Run Parallel Adversarial Reviews (Claude + Codex)
+## How to Run Parallel Adversarial Reviews
 
-When a design requires cross-provider review (see AGENTS.md for when), dispatch Claude and Codex **simultaneously** by sending a single message with two `Task` tool calls:
+When a design requires cross-provider review (see AGENTS.md for when), dispatch two reviewers **simultaneously** by sending a single message with two `Task` tool calls. Use whichever providers are available: Claude, Codex, Gemini, Mistral, or top reasoning models from Hugging Face.
 
 **Call 1 — Claude reviewer:**
 ```
@@ -21,11 +22,14 @@ Task tool:
            Do not suggest over-engineering. [paste full design doc content here]"
 ```
 
-**Call 2 — Codex reviewer:**
+**Call 2 — alternate provider (pick whichever is available):**
 ```
 Task tool:
   subagent_type: Bash
-  prompt: "Run: timeout 1800 codex exec \"[adversarial review prompt with full design text]\""
+  prompt: "Run one of:
+    timeout 1800 codex exec \"[adversarial review prompt]\"
+    timeout 1800 gemini -p \"[adversarial review prompt]\"
+    timeout 1800 mistral \"[adversarial review prompt]\""
 ```
 
 Both calls go in a **single message** so they execute in parallel. When both return, assess each finding independently per AGENTS.md §"How to Conduct a Review" and append a Cross-Provider Review section to the design doc with adopt/defer/reject decisions for each finding.

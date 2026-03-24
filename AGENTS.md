@@ -6,7 +6,7 @@
 
 ### Core Engine Functions — Mandatory Double Review
 
-Any change to the dispatch pipeline requires two independent adversarial reviews — Claude (`superpowers:code-reviewer`) and Codex — at both the **planning phase** (before writing code) and the **verification phase** (after tests pass).
+Any change to the dispatch pipeline requires two independent adversarial reviews from different providers at both the **planning phase** (before writing code) and the **verification phase** (after tests pass). Use whichever providers are available: Claude (`superpowers:code-reviewer`), Codex, Gemini, Mistral, or top reasoning models from Hugging Face.
 
 **Functions that trigger this rule:**
 
@@ -47,7 +47,7 @@ Get a second opinion from a different provider **before implementation** for: ne
 ### How to Conduct a Review
 
 1. Write the design/spec first — complete thinking before seeking review.
-2. Send to a different provider (Claude wrote it → Codex; Codex wrote it → Claude). Instruct the reviewer to be **adversarial**: look for technical debt, architectural regression, type safety gaps, and logic holes.
+2. Send to a different provider (use whichever is available: Claude, Codex, Gemini, Mistral, or a top HuggingFace reasoning model). Instruct the reviewer to be **adversarial**: look for technical debt, architectural regression, type safety gaps, and logic holes.
 3. Run in non-interactive mode so output is captured and the workflow isn't blocked.
 4. The review is advisory. Assess each finding independently: is it valid, relevant, actionable now? Push back with reasoning if the reviewer is wrong. Do not let reviewers push toward over-engineering.
 5. Append a "Cross-Provider Review" section to the design doc (finding → assessment → decision: adopt/defer/reject). Commit the combined document.
@@ -80,6 +80,10 @@ When all tasks in the plan are complete, move the design doc and plan file from 
 ---
 
 ## Agent Behavior Rules
+
+### No Manual Recovery (CRITICAL)
+
+Never manually trigger recovery to work around a bug. Do not run `steroids monitor run`, `steroids runners wakeup`, reset tasks, or invoke any other recovery command. Fix the code so the system self-heals, then let the user restart and verify.
 
 ### Root-Cause First (CRITICAL)
 

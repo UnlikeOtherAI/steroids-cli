@@ -121,9 +121,15 @@ function isDuplicateOfLastRun(scanResult: ScanResult): boolean {
   const { db, close } = openGlobalDatabase();
   try {
     const row = db.prepare(
-      'SELECT scan_results FROM monitor_runs ORDER BY started_at DESC LIMIT 1'
-    ).get() as { scan_results: string | null } | undefined;
+      'SELECT scan_results, outcome FROM monitor_runs ORDER BY started_at DESC LIMIT 1'
+    ).get() as { scan_results: string | null; outcome: string } | undefined;
     if (!row?.scan_results) return false;
+
+    // If the last run found anomalies but didn't dispatch a first responder, don't
+    // suppress — the cooldown may have blocked dispatch and we need to retry once it
+    // expires. Duplicate suppression only makes sense when a FR was already sent or
+    // the system was clean (no action needed).
+    if (row.outcome === 'anomalies_found' || row.outcome === 'error') return false;
 
     const prev = safeJsonParse<ScanResult | null>(row.scan_results, null);
     if (!prev) return false;
