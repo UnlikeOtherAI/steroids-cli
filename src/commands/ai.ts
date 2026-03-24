@@ -375,8 +375,10 @@ EXAMPLES:
   }
   out.log('');
 
-  // Validate model
-  if (!status.models.includes(model)) {
+  // Validate model — HF models (org/name format) are routed through the local proxy
+  // and don't appear in the provider's native model list.
+  const isHF = model.includes('/') && !model.startsWith('models/');
+  if (!status.models.includes(model) && !isHF) {
     if (flags.json) {
       out.error('CONFIGURATION_ERROR', 'Model not found in provider', { ...results, error: 'Model not found in provider' });
     } else {
@@ -385,8 +387,11 @@ EXAMPLES:
     }
     process.exit(1);
   }
-
-  out.log(markers.success(`Model valid: ${model}`));
+  if (isHF) {
+    out.log(markers.success(`Model valid: ${model} (HF proxy)`));
+  } else {
+    out.log(markers.success(`Model valid: ${model}`));
+  }
   out.log('');
 
   results.success = true;
