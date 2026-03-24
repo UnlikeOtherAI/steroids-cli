@@ -545,6 +545,21 @@ export abstract class BaseAIProvider implements IAIProvider {
       }
     }
 
+    // Prevent git from invoking the macOS Keychain credential helper inside isolated
+    // home dirs. The real .gitconfig is symlinked in (so git finds it), but its
+    // credential.helper = osxkeychain setting causes macOS to show "Keychain Not
+    // Found" dialogs when the spawned process has no keychain session (e.g. when
+    // launched from launchd as a detached child). Override via git env vars so the
+    // helper is disabled for all child processes without touching the real gitconfig.
+    if (overrides?.HOME && overrides.HOME !== homedir()) {
+      env.GIT_TERMINAL_PROMPT = '0';
+      // GIT_CONFIG_COUNT/KEY/VALUE overrides take precedence over all gitconfig files
+      const existingCount = parseInt(env.GIT_CONFIG_COUNT ?? '0', 10);
+      env.GIT_CONFIG_COUNT = String(existingCount + 1);
+      env[`GIT_CONFIG_KEY_${existingCount}`] = 'credential.helper';
+      env[`GIT_CONFIG_VALUE_${existingCount}`] = '';
+    }
+
     // Cap Node.js heap for child processes to prevent runaway memory consumption.
     // Provider CLIs (Codex, Claude) spawn sub-processes (pnpm, tsc, etc.) that
     // can each balloon to GBs and trigger massive macOS swap on constrained systems.
