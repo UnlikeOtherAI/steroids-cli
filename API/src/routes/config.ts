@@ -512,12 +512,15 @@ async function fetchMistralModels(): Promise<{ models: APIModel[]; source: strin
     }
 
     const data = await response.json() as
-      | { data?: Array<{ id: string; name?: string; description?: string; max_context_length?: number }> }
-      | Array<{ id: string; name?: string; description?: string; max_context_length?: number }>;
+      | { data?: Array<{ id: string; name?: string; description?: string; max_context_length?: number; capabilities?: { completion_chat?: boolean; function_calling?: boolean } }> }
+      | Array<{ id: string; name?: string; description?: string; max_context_length?: number; capabilities?: { completion_chat?: boolean; function_calling?: boolean } }>;
 
     const rawModels = Array.isArray(data) ? data : (data.data ?? []);
     const modelById = new Map<string, APIModel>();
     for (const m of rawModels) {
+      // Skip non-chat models (embeddings, OCR, moderation, audio-only)
+      if (!m.capabilities?.completion_chat) continue;
+
       const mapped: APIModel = {
         id: m.id,
         name: m.name || formatMistralModelName(m.id),
@@ -553,18 +556,24 @@ function formatMistralModelName(id: string): string {
 }
 
 function getMistralModelScore(id: string): number {
-  if (id.includes('codestral')) return 0;
-  if (id.includes('mistral-large')) return 1;
-  if (id.includes('mistral-medium')) return 2;
-  if (id.includes('mistral-small')) return 3;
-  if (id.includes('ministral')) return 4;
-  return 5;
+  if (id.includes('vibe-cli')) return 0;
+  if (id.includes('devstral') || id.includes('codestral')) return 1;
+  if (id.includes('mistral-large')) return 2;
+  if (id.includes('mistral-medium')) return 3;
+  if (id.includes('mistral-small')) return 4;
+  if (id.includes('ministral')) return 5;
+  return 6;
 }
 
 function dedupeMistralModels(models: APIModel[]): APIModel[] {
   const byName = new Map<string, APIModel>();
 
   for (const model of models) {
+    // vibe-cli aliases are explicit routing targets — always keep them separate
+    if (model.id.includes('vibe-cli')) {
+      byName.set(model.id, model);
+      continue;
+    }
     const key = (model.name || model.id).trim().toLowerCase();
     const existing = byName.get(key);
 
