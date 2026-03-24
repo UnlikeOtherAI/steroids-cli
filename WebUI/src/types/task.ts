@@ -25,10 +25,11 @@ export interface TaskInvocation {
   role: 'coder' | 'reviewer';
   provider: string;
   model: string;
-  exit_code: number;
+  status: string;
+  exit_code: number | null;
   duration_ms: number;
-  success: number;
-  timed_out: number;
+  success: number | null;
+  timed_out: number | null;
   rejection_number: number | null;
   created_at: string;
 }

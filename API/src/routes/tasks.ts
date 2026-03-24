@@ -50,10 +50,11 @@ interface InvocationEntry {
   role: string;
   provider: string;
   model: string;
-  exit_code: number;
+  status: string;
+  exit_code: number | null;
   duration_ms: number;
-  success: number;
-  timed_out: number;
+  success: number | null;
+  timed_out: number | null;
   rejection_number: number | null;
   created_at: string;
 }
@@ -390,7 +391,7 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
       // Get LLM invocations (exclude prompt/response to keep payload light)
       const invocations = db
         .prepare(
-          `SELECT id, task_id, role, provider, model, exit_code, duration_ms, success, timed_out, rejection_number, created_at
+          `SELECT id, task_id, role, provider, model, status, exit_code, duration_ms, success, timed_out, rejection_number, created_at
           FROM task_invocations
           WHERE task_id = ?
           ORDER BY created_at ASC`

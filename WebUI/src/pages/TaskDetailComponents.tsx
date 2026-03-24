@@ -163,13 +163,15 @@ export const InvocationCard: React.FC<InvocationCardProps> = ({ invocation, task
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [responseExpanded, setResponseExpanded] = useState(false);
 
+  const isOngoing = invocation.status === 'running';
   const isSuccess = invocation.success === 1;
   const isTimedOut = invocation.timed_out === 1;
   const isCoder = invocation.role === 'coder';
   const roleLabel = isCoder ? 'Coder Agent' : 'Reviewer Agent';
 
   let accentColor = 'border-success';
-  if (isTimedOut) accentColor = 'border-warning';
+  if (isOngoing) accentColor = 'border-info';
+  else if (isTimedOut) accentColor = 'border-warning';
   else if (!isSuccess) accentColor = 'border-danger';
 
   const handleToggle = async () => {
@@ -211,7 +213,12 @@ export const InvocationCard: React.FC<InvocationCardProps> = ({ invocation, task
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-text-primary text-sm">{roleLabel}</span>
             <span className="text-text-muted text-xs">{invocation.model}</span>
-            {isSuccess ? (
+            {isOngoing ? (
+              <Badge variant="info">
+                <i className="fa-solid fa-spinner fa-spin mr-1 text-[10px]"></i>
+                Running
+              </Badge>
+            ) : isSuccess ? (
               <Badge variant="success">OK</Badge>
             ) : isTimedOut ? (
               <Badge variant="warning">Timed Out</Badge>

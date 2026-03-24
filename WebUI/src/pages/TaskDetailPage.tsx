@@ -357,19 +357,24 @@ export const TaskDetailPage: React.FC = () => {
           <FirstResponderPanel taskId={taskId!} projectPath={projectPath!} />
 
           {/* Activity Timeline — collapsible */}
-          <div className="flex items-center justify-between mb-4">
-            <button onClick={() => setTimelineCollapsed(!timelineCollapsed)} className="flex items-center gap-2 group">
-              <h2 className="text-xl font-semibold text-text-primary">
+          <div className="mb-4">
+            {/* Row 1: title + chevron toggle */}
+            <button
+              onClick={() => setTimelineCollapsed(!timelineCollapsed)}
+              className="w-full flex items-center justify-between gap-2 group mb-2"
+            >
+              <h2 className="text-xl font-semibold text-text-primary text-left">
                 <i className="fa-solid fa-clock-rotate-left mr-2"></i>
                 Activity Timeline
                 <span className="text-sm font-normal text-text-muted ml-2">
                   ({task.audit_trail.length} status changes, {task.invocations?.length || 0} invocations)
                 </span>
               </h2>
-              <i className={`fa-solid ${timelineCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-text-muted group-hover:text-text-primary transition-colors`}></i>
+              <i className={`fa-solid ${timelineCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-text-muted group-hover:text-text-primary transition-colors flex-shrink-0`}></i>
             </button>
+            {/* Row 2: control buttons — only when expanded */}
             {!timelineCollapsed && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {(['basic', 'full'] as const).map((mode) => (
                   <button key={mode} onClick={() => setViewMode(mode)}
                     className={`px-2.5 py-1 text-sm rounded transition-colors ${viewMode === mode ? 'bg-accent text-white' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
