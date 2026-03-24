@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { XMarkIcon, PlusIcon, PencilIcon, TrashIcon, CheckIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, PencilIcon, TrashIcon, CheckIcon, ExclamationTriangleIcon, BoltIcon } from '@heroicons/react/24/outline';
 import { configApi } from '../services/api';
 
 export type CustomModelCli = 'claude' | 'opencode' | 'codex';
@@ -27,75 +27,174 @@ const CLI_LABELS: Record<CustomModelCli, string> = {
   codex: 'Codex CLI',
 };
 
-interface EditRowProps {
-  entry: CustomModelEntry;
-  onSave: (updated: CustomModelEntry) => void;
-  onCancel: () => void;
+function isValidUrl(value: string): boolean {
+  if (!value.trim()) return false;
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
-function EditRow({ entry, onSave, onCancel }: EditRowProps) {
-  const [form, setForm] = useState<FormState>({
-    name: entry.name,
-    cli: entry.cli,
-    baseUrl: entry.baseUrl,
-    token: entry.token,
-  });
+interface CliWarningProps {
+  cli: CustomModelCli;
+}
 
-  const save = () => {
-    if (!form.name.trim() || !form.baseUrl.trim() || !form.token.trim()) return;
-    onSave({ ...entry, name: form.name.trim(), cli: form.cli, baseUrl: form.baseUrl.trim(), token: form.token.trim() });
+function CliWarning({ cli }: CliWarningProps) {
+  if (cli !== 'codex') return null;
+  return (
+    <div className="mt-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2.5 text-xs text-yellow-200 flex gap-2 items-start">
+      <ExclamationTriangleIcon className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-yellow-400" />
+      <span>
+        Your inference provider must support the <code className="text-yellow-100">/v1/responses</code> WebSocket protocol. MiniMax does not — use OpenCode or Claude CLI instead for MiniMax.
+      </span>
+    </div>
+  );
+}
+
+interface EndpointFormProps {
+  initial?: FormState;
+  onSave: (data: FormState) => void;
+  onCancel: () => void;
+  saving?: boolean;
+}
+
+function EndpointForm({ initial = BLANK, onSave, onCancel, saving }: EndpointFormProps) {
+  const [form, setForm] = useState<FormState>(initial);
+  const [baseUrlError, setBaseUrlError] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const valid = form.name.trim() && form.baseUrl.trim() && form.token.trim() && !baseUrlError;
+
+  const handleBaseUrlChange = (value: string) => {
+    setForm((f) => ({ ...f, baseUrl: value }));
+    setBaseUrlError(value.trim() !== '' && !isValidUrl(value));
+    setTestResult(null);
+  };
+
+  const handleSave = () => {
+    if (!isValidUrl(form.baseUrl)) { setBaseUrlError(true); return; }
+    onSave({ ...form, name: form.name.trim(), baseUrl: form.baseUrl.trim(), token: form.token.trim() });
+  };
+
+  const handleTest = async () => {
+    if (!isValidUrl(form.baseUrl) || !form.token.trim()) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(form.baseUrl.trim() + '/v1/models', {
+        headers: {
+          Authorization: `Bearer ${form.token.trim()}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (res.ok) {
+        setTestResult({ ok: true, message: `${res.status} — endpoint reachable` });
+      } else {
+        setTestResult({ ok: false, message: `${res.status} ${res.statusText}` });
+      }
+    } catch (e) {
+      setTestResult({ ok: false, message: e instanceof Error ? e.message : 'Connection failed' });
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
-    <tr className="border-t border-border">
-      <td className="px-4 py-3">
+    <div className="space-y-3">
+      {/* Name */}
+      <div>
+        <label className="block text-xs font-medium text-text-muted mb-1">Name</label>
         <input
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
+          className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
           placeholder="My MiniMax Endpoint"
           autoFocus
         />
-      </td>
-      <td className="px-4 py-3">
+      </div>
+
+      {/* CLI */}
+      <div>
+        <label className="block text-xs font-medium text-text-muted mb-1">CLI</label>
         <select
           value={form.cli}
-          onChange={(e) => setForm((f) => ({ ...f, cli: e.target.value as CustomModelCli }))}
-          className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary focus:outline-none"
+          onChange={(e) => { setForm((f) => ({ ...f, cli: e.target.value as CustomModelCli })); setTestResult(null); }}
+          className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
         >
           {(Object.keys(CLI_LABELS) as CustomModelCli[]).map((k) => (
             <option key={k} value={k}>{CLI_LABELS[k]}</option>
           ))}
         </select>
-      </td>
-      <td className="px-4 py-3">
+        <CliWarning cli={form.cli} />
+      </div>
+
+      {/* Base URL */}
+      <div>
+        <label className="block text-xs font-medium text-text-muted mb-1">Base URL</label>
         <input
           value={form.baseUrl}
-          onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
-          className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
+          onChange={(e) => handleBaseUrlChange(e.target.value)}
+          className={`w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 ${
+            baseUrlError ? 'ring-1 ring-red-500 focus:ring-red-500' : 'focus:ring-accent'
+          }`}
           placeholder="https://api.example.com/v1"
         />
-      </td>
-      <td className="px-4 py-3">
+        {baseUrlError && (
+          <p className="mt-1 text-xs text-red-400">Must be a valid http:// or https:// URL</p>
+        )}
+      </div>
+
+      {/* Token */}
+      <div>
+        <label className="block text-xs font-medium text-text-muted mb-1">Token</label>
         <input
           value={form.token}
-          onChange={(e) => setForm((f) => ({ ...f, token: e.target.value }))}
+          onChange={(e) => { setForm((f) => ({ ...f, token: e.target.value })); setTestResult(null); }}
           type="password"
-          className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
+          className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
           placeholder="sk-..."
         />
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2 justify-end">
-          <button type="button" onClick={save} className="p-1.5 rounded-full bg-success/20 text-success hover:bg-success/30">
-            <CheckIcon className="w-4 h-4" />
-          </button>
-          <button type="button" onClick={onCancel} className="p-1.5 rounded-full bg-text-muted/20 text-text-muted hover:bg-text-muted/30">
-            <XMarkIcon className="w-4 h-4" />
-          </button>
+      </div>
+
+      {/* Test result */}
+      {testResult && (
+        <div className={`rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
+          testResult.ok ? 'bg-success/10 text-success border border-success/30' : 'bg-danger/10 text-danger border border-danger/30'
+        }`}>
+          {testResult.ok
+            ? <CheckIcon className="w-3.5 h-3.5 flex-shrink-0" />
+            : <ExclamationTriangleIcon className="w-3.5 h-3.5 flex-shrink-0" />}
+          {testResult.message}
         </div>
-      </td>
-    </tr>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!valid || saving}
+          className="btn-accent text-sm disabled:opacity-40"
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={!isValidUrl(form.baseUrl) || !form.token.trim() || testing}
+          className="btn-pill text-sm flex items-center gap-1.5 disabled:opacity-40"
+        >
+          {testing ? <span className="fa-solid fa-spinner fa-spin w-3.5 h-3.5 inline-block" /> : <BoltIcon className="w-3.5 h-3.5" />}
+          Test
+        </button>
+        <button type="button" onClick={onCancel} className="btn-pill text-sm">
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -107,7 +206,6 @@ export default function CustomModelsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState<FormState>(BLANK);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,22 +239,26 @@ export default function CustomModelsPage() {
     }
   };
 
-  const handleAdd = async () => {
-    if (!addForm.name.trim() || !addForm.baseUrl.trim() || !addForm.token.trim()) return;
-    const name = addForm.name.trim();
+  const handleAdd = async (form: FormState) => {
     const entry: CustomModelEntry = {
-      id: name,
-      name,
-      cli: addForm.cli,
-      baseUrl: addForm.baseUrl.trim(),
-      token: addForm.token.trim(),
+      id: form.name.trim(),
+      name: form.name.trim(),
+      cli: form.cli,
+      baseUrl: form.baseUrl.trim(),
+      token: form.token.trim(),
     };
     await persist([...models, entry]);
     setShowAdd(false);
-    setAddForm(BLANK);
   };
 
-  const handleSaveEdit = async (original: CustomModelEntry, updated: CustomModelEntry) => {
+  const handleSaveEdit = async (original: CustomModelEntry, form: FormState) => {
+    const updated: CustomModelEntry = {
+      ...original,
+      name: form.name.trim(),
+      cli: form.cli,
+      baseUrl: form.baseUrl.trim(),
+      token: form.token.trim(),
+    };
     await persist(models.map((m) => (m.name === original.name ? updated : m)));
     setEditingName(null);
   };
@@ -175,14 +277,6 @@ export default function CustomModelsPage() {
         </p>
       </div>
 
-      {/* Codex warning */}
-      <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-5 py-4 text-sm text-yellow-200 flex gap-3 items-start">
-        <ExclamationTriangleIcon className="w-5 h-5 mt-0.5 flex-shrink-0 text-yellow-400" />
-        <span>
-          <strong>Codex:</strong> Your inference provider must support the <code>/v1/responses</code> WebSocket protocol. MiniMax does not — use OpenCode or Claude CLI instead for MiniMax.
-        </span>
-      </div>
-
       {loading && (
         <div className="text-center py-8 text-text-muted">
           <i className="fa-solid fa-spinner fa-spin mr-2" />
@@ -191,140 +285,116 @@ export default function CustomModelsPage() {
       )}
 
       {!loading && (
-        <div className="card overflow-hidden">
-          <div className="px-6 py-4 border-b border-border flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-text-primary">Configured Endpoints ({models.length})</h2>
-            <button
-              type="button"
-              onClick={() => { setShowAdd(true); setEditingName(null); }}
-              className="btn-accent flex items-center gap-2 text-sm"
-            >
-              <PlusIcon className="w-4 h-4" />
-              Add Endpoint
-            </button>
+        <>
+          <div className="card overflow-hidden">
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-text-primary">Configured Endpoints ({models.length})</h2>
+              {!showAdd && (
+                <button
+                  type="button"
+                  onClick={() => { setShowAdd(true); setEditingName(null); }}
+                  className="btn-accent flex items-center gap-2 text-sm"
+                >
+                  <PlusIcon className="w-4 h-4" />
+                  Add Endpoint
+                </button>
+              )}
+            </div>
+
+            {/* Empty state */}
+            {models.length === 0 && !showAdd && (
+              <div className="px-6 py-12 text-center text-text-muted text-sm">
+                No custom endpoints configured. Click "Add Endpoint" to get started.
+              </div>
+            )}
+
+            {/* Add form (shown below header when adding) */}
+            {showAdd && (
+              <div className="px-6 py-5 border-t border-border bg-bg-elevated/30">
+                <EndpointForm
+                  initial={BLANK}
+                  onSave={handleAdd}
+                  onCancel={() => setShowAdd(false)}
+                  saving={saving}
+                />
+              </div>
+            )}
+
+            {/* Table */}
+            {(models.length > 0 || showAdd) && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-text-muted text-xs uppercase tracking-wide">
+                      <th className="px-4 py-3 font-medium">Name</th>
+                      <th className="px-4 py-3 font-medium">CLI</th>
+                      <th className="px-4 py-3 font-medium">Base URL</th>
+                      <th className="px-4 py-3 font-medium">Token</th>
+                      <th className="px-4 py-3 font-medium w-24" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {models.map((m) =>
+                      editingName === m.name ? (
+                        <tr key={m.name} className="border-t border-border">
+                          <td colSpan={5} className="px-4 py-4 bg-bg-elevated/30">
+                            <EndpointForm
+                              initial={{ name: m.name, cli: m.cli, baseUrl: m.baseUrl, token: m.token }}
+                              onSave={(form) => handleSaveEdit(m, form)}
+                              onCancel={() => setEditingName(null)}
+                              saving={saving}
+                            />
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={m.name} className="border-t border-border hover:bg-white/5">
+                          <td className="px-4 py-3 font-medium text-text-primary">{m.name}</td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-bg-elevated text-text-secondary">
+                              {CLI_LABELS[m.cli]}
+                            </span>
+                            {m.cli === 'codex' && (
+                              <div className="mt-1.5 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-2 py-1.5 text-xs text-yellow-200 flex gap-1.5 items-start">
+                                <ExclamationTriangleIcon className="w-3 h-3 mt-0.5 flex-shrink-0 text-yellow-400" />
+                                <span>MiniMax does not support <code className="text-yellow-100">/v1/responses</code> — use OpenCode or Claude CLI instead.</span>
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-text-muted font-mono text-xs">{m.baseUrl}</td>
+                          <td className="px-4 py-3 text-text-muted font-mono text-xs">{'•'.repeat(Math.min(m.token.length, 8))}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2 justify-end">
+                              <button
+                                type="button"
+                                onClick={() => { setEditingName(m.name); setShowAdd(false); }}
+                                className="p-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-bg-elevated"
+                                title="Edit"
+                              >
+                                <PencilIcon className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(m.name)}
+                                className="p-1.5 rounded-full text-text-muted hover:text-danger hover:bg-danger/10"
+                                title="Delete"
+                              >
+                                <TrashIcon className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
-          {models.length === 0 && !showAdd && (
-            <div className="px-6 py-12 text-center text-text-muted text-sm">
-              No custom endpoints configured. Click "Add Endpoint" to get started.
-            </div>
-          )}
-
-          {(models.length > 0 || showAdd) && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-text-muted text-xs uppercase tracking-wide">
-                    <th className="px-4 py-3 font-medium">Name</th>
-                    <th className="px-4 py-3 font-medium">CLI</th>
-                    <th className="px-4 py-3 font-medium">Base URL</th>
-                    <th className="px-4 py-3 font-medium">Token</th>
-                    <th className="px-4 py-3 font-medium w-24" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {models.map((m) =>
-                    editingName === m.name ? (
-                      <EditRow
-                        key={m.name}
-                        entry={m}
-                        onSave={(updated) => handleSaveEdit(m, updated)}
-                        onCancel={() => setEditingName(null)}
-                      />
-                    ) : (
-                      <tr key={m.name} className="border-t border-border hover:bg-white/5">
-                        <td className="px-4 py-3 font-medium text-text-primary">{m.name}</td>
-                        <td className="px-4 py-3 text-text-muted">
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-bg-elevated text-text-secondary">
-                            {CLI_LABELS[m.cli]}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-text-muted font-mono text-xs">{m.baseUrl}</td>
-                        <td className="px-4 py-3 text-text-muted font-mono text-xs">{'•'.repeat(Math.min(m.token.length, 8))}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2 justify-end">
-                            <button
-                              type="button"
-                              onClick={() => { setEditingName(m.name); setShowAdd(false); }}
-                              className="p-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-bg-elevated"
-                              title="Edit"
-                            >
-                              <PencilIcon className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(m.name)}
-                              className="p-1.5 rounded-full text-text-muted hover:text-danger hover:bg-danger/10"
-                              title="Delete"
-                            >
-                              <TrashIcon className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  )}
-
-                  {showAdd && (
-                    <EditRow
-                      key="__add__"
-                      entry={{ id: addForm.name, name: addForm.name, cli: addForm.cli, baseUrl: addForm.baseUrl, token: addForm.token }}
-                      onSave={() => handleAdd()}
-                      onCancel={() => { setShowAdd(false); setAddForm(BLANK); }}
-                    />
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Add form inline row when showAdd but table is empty */}
-          {showAdd && models.length === 0 && (
-            <div className="px-6 py-4 border-t border-border space-y-3">
-              <input
-                value={addForm.name}
-                onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
-                className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
-                placeholder="Name (e.g. MiniMax via OpenCode)"
-                autoFocus
-              />
-              <select
-                value={addForm.cli}
-                onChange={(e) => setAddForm((f) => ({ ...f, cli: e.target.value as CustomModelCli }))}
-                className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary focus:outline-none"
-              >
-                {(Object.keys(CLI_LABELS) as CustomModelCli[]).map((k) => (
-                  <option key={k} value={k}>{CLI_LABELS[k]}</option>
-                ))}
-              </select>
-              <input
-                value={addForm.baseUrl}
-                onChange={(e) => setAddForm((f) => ({ ...f, baseUrl: e.target.value }))}
-                className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
-                placeholder="Base URL (e.g. https://api.example.com/v1)"
-              />
-              <input
-                value={addForm.token}
-                onChange={(e) => setAddForm((f) => ({ ...f, token: e.target.value }))}
-                type="password"
-                className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
-                placeholder="API Token"
-              />
-              <div className="flex gap-2">
-                <button type="button" onClick={handleAdd} disabled={saving} className="btn-accent text-sm">
-                  {saving ? 'Saving...' : 'Save'}
-                </button>
-                <button type="button" onClick={() => { setShowAdd(false); setAddForm(BLANK); }} className="btn-pill text-sm">
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+          {message && <p className="text-sm text-success px-2">{message}</p>}
+          {error && <p className="text-sm text-danger px-2">{error}</p>}
+        </>
       )}
-
-      {message && <p className="text-sm text-success px-2">{message}</p>}
-      {error && <p className="text-sm text-danger px-2">{error}</p>}
     </div>
   );
 }
