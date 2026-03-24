@@ -84,16 +84,16 @@ function EndpointForm({ initial = BLANK, onSave, onCancel, saving }: EndpointFor
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(form.baseUrl.trim() + '/v1/models', {
-        headers: {
-          Authorization: `Bearer ${form.token.trim()}`,
-          'Content-Type': 'application/json',
-        },
+      const res = await fetch('http://localhost:3501/api/custom/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl: form.baseUrl.trim(), token: form.token.trim() }),
       });
-      if (res.ok) {
-        setTestResult({ ok: true, message: `${res.status} — endpoint reachable` });
+      const data = await res.json();
+      if (data.success) {
+        setTestResult({ ok: true, message: data.message || `${data.status} — endpoint reachable` });
       } else {
-        setTestResult({ ok: false, message: `${res.status} ${res.statusText}` });
+        setTestResult({ ok: false, message: data.message || `Error ${data.status}` });
       }
     } catch (e) {
       setTestResult({ ok: false, message: e instanceof Error ? e.message : 'Connection failed' });
