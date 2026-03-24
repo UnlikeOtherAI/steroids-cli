@@ -176,7 +176,8 @@ export async function runReviewerPhase(
         const providerName = failedReviewer.provider ?? failedConfig?.provider ?? 'unknown';
         const modelName = failedReviewer.model ?? failedConfig?.model ?? 'unknown';
         if (!jsonMode) {
-          console.log(`\n⚠ Reviewer ${providerName}/${modelName} failed — degrading to ${successfulResults.length} successful reviewer(s).`);
+          const reason = failedReviewer.stderr || failedReviewer.stdout || 'no output';
+          console.log(`\n⚠ Reviewer ${providerName}/${modelName} failed — degrading to ${successfulResults.length} successful reviewer(s). Error: ${reason.slice(0, 300)}`);
         }
       }
       // Continue with only the successful results
