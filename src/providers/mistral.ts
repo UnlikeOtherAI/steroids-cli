@@ -96,6 +96,20 @@ export class MistralProvider extends BaseAIProvider {
   }
 
   /**
+   * Restore MISTRAL_API_KEY for Vibe CLI — base class strips it, but Vibe
+   * requires it in the environment to authenticate with the Mistral API.
+   * Falls back to STEROIDS_MISTRAL if MISTRAL_API_KEY is not set.
+   */
+  protected getSanitizedCliEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    const env = super.getSanitizedCliEnv(overrides);
+    const apiKey = process.env.MISTRAL_API_KEY || process.env.STEROIDS_MISTRAL;
+    if (apiKey) {
+      env.MISTRAL_API_KEY = apiKey;
+    }
+    return env;
+  }
+
+  /**
    * Invoke Mistral Vibe with a prompt
    */
   async invoke(prompt: string, options: InvokeOptions): Promise<InvokeResult> {
