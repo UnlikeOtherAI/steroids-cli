@@ -103,6 +103,11 @@ export async function runCoderPhase(
 
     poolStartingSha = prepResult.startingSha;
     effectiveProjectPath = poolSlotContext.slot.slot_path;
+    // Sync in-memory slot with DB — prepareForTask writes task_branch to the DB
+    // but does not mutate the slot object. Callers that read slot.task_branch
+    // (push-for-durability, noop-submission) would silently skip the push on
+    // fresh slots without this sync.
+    poolSlotContext.slot.task_branch = prepResult.taskBranch;
 
     if (!jsonMode) {
       console.log(`\n✓ Workspace prepared (branch: ${prepResult.taskBranch}, base: ${prepResult.baseBranch})`);
