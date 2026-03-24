@@ -103,17 +103,31 @@ export async function fetchMistralModelList(): Promise<ModelInfo[] | null> {
       (m) => m.capabilities?.completion_chat && m.capabilities?.function_calling
     );
 
-    // Prefer -latest aliases — group by underlying model name, keep best ID
+    // Deduplicate: group by underlying model name, keep the best alias.
+    // Always keep ALL -latest aliases — they're user-facing and may represent
+    // different resolution paths (e.g. devstral-latest vs devstral-medium-latest).
     const byUnderlying = new Map<string, MistralAPIModel>();
+    const latestAliases: MistralAPIModel[] = [];
     for (const m of chatModels) {
-      const key = m.name; // underlying model name (e.g. "devstral-2512")
-      const existing = byUnderlying.get(key);
-      if (!existing || preferLatest(m, existing)) {
-        byUnderlying.set(key, m);
+      if (m.id.endsWith('-latest') || m.id.includes('vibe-cli')) {
+        latestAliases.push(m);
+      } else {
+        const key = m.name;
+        const existing = byUnderlying.get(key);
+        if (!existing || preferLatest(m, existing)) {
+          byUnderlying.set(key, m);
+        }
       }
     }
 
-    const models: ModelInfo[] = [...byUnderlying.values()].map((m) => ({
+    // Merge: latest aliases + deduplicated dated models (avoiding duplicate IDs)
+    const seenIds = new Set(latestAliases.map((m) => m.id));
+    const merged = [...latestAliases];
+    for (const m of byUnderlying.values()) {
+      if (!seenIds.has(m.id)) merged.push(m);
+    }
+
+    const models: ModelInfo[] = merged.map((m) => ({
       id: m.id,
       name: m.description || formatModelName(m.id),
       recommendedFor: inferRecommendation(m),

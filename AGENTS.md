@@ -79,6 +79,19 @@ When all tasks in the plan are complete, move the design doc and plan file from 
 
 ---
 
+## Testing AI Provider Configuration
+
+Before debugging task failures, verify provider config with `steroids ai`:
+
+- `steroids ai providers` — list all detected providers and their CLI paths
+- `steroids ai models <provider>` — list available models (add `--api` for live API models)
+- `steroids ai test <role>` — validate provider + model for a role (coder, reviewer, orchestrator)
+- `steroids ai proxy status` — check HF proxy health
+
+When a task fails with "provider exited with non-zero status", run `steroids ai test <role>` first — it catches invalid model names and missing CLIs before you dig into logs.
+
+---
+
 ## Agent Behavior Rules
 
 ### No Manual Recovery (CRITICAL)
