@@ -101,16 +101,18 @@ export const ProjectTasksPage: React.FC = () => {
         limit: 100,
       });
 
-      // Status priority for display order (review before in_progress)
+      // Status priority: [review + in_progress] → [failed + disputed + blocked_error + blocked_conflict] → skipped → pending → partial → completed
       const statusPriority: Record<string, number> = {
         'review': 1,
-        'in_progress': 2,
-        'pending': 3,
-        'disputed': 4,
-        'failed': 5,
-        'partial': 6,
-        'skipped': 7,
-        'completed': 8,
+        'in_progress': 1,
+        'failed': 2,
+        'disputed': 2,
+        'blocked_error': 2,
+        'blocked_conflict': 2,
+        'skipped': 3,
+        'pending': 4,
+        'partial': 5,
+        'completed': 6,
       };
 
       let sortedTasks = [...response.tasks];
