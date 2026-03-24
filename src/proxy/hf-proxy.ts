@@ -158,14 +158,66 @@ function blocksToString(content: string | AnthropicContentBlock[]): string {
 }
 
 function anthropicToOpenAI(body: AnthropicRequest): Record<string, unknown> {
-  const messages: Array<{ role: string; content: string }> = [];
+  const messages: Array<Record<string, unknown>> = [];
 
   if (body.system) {
     messages.push({ role: 'system', content: blocksToString(body.system) });
   }
 
   for (const msg of body.messages) {
-    messages.push({ role: msg.role, content: blocksToString(msg.content) });
+    const blocks = typeof msg.content === 'string'
+      ? [{ type: 'text', text: msg.content }] as AnthropicContentBlock[]
+      : msg.content;
+
+    if (msg.role === 'assistant') {
+      const textParts = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n');
+      const toolUses = blocks.filter((b) => b.type === 'tool_use');
+
+      if (toolUses.length > 0) {
+        // Assistant message with tool calls
+        messages.push({
+          role: 'assistant',
+          content: textParts || null,
+          tool_calls: toolUses.map((tu) => ({
+            id: tu.id as string,
+            type: 'function',
+            function: { name: tu.name as string, arguments: JSON.stringify(tu.input ?? {}) },
+          })),
+        });
+      } else {
+        messages.push({ role: 'assistant', content: textParts });
+      }
+    } else if (msg.role === 'user') {
+      // User messages may contain text and/or tool_result blocks
+      const textParts = blocks.filter((b) => b.type === 'text');
+      const toolResults = blocks.filter((b) => b.type === 'tool_result');
+
+      // Emit any text content as a user message
+      if (textParts.length > 0) {
+        messages.push({ role: 'user', content: textParts.map((b) => b.text ?? '').join('\n') });
+      }
+
+      // Emit each tool_result as a separate "tool" role message (OpenAI format)
+      for (const tr of toolResults) {
+        const resultContent = typeof tr.content === 'string'
+          ? tr.content
+          : Array.isArray(tr.content)
+            ? (tr.content as AnthropicContentBlock[]).filter((b: any) => b.type === 'text').map((b: any) => b.text ?? '').join('\n')
+            : JSON.stringify(tr.content ?? '');
+        messages.push({
+          role: 'tool',
+          tool_call_id: tr.tool_use_id as string,
+          content: resultContent,
+        });
+      }
+
+      // If message had only tool_results and no text, we still need to have emitted something
+      if (textParts.length === 0 && toolResults.length === 0) {
+        messages.push({ role: 'user', content: blocksToString(msg.content) });
+      }
+    } else {
+      messages.push({ role: msg.role, content: blocksToString(msg.content) });
+    }
   }
 
   return {
