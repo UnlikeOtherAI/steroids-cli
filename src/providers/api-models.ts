@@ -248,143 +248,21 @@ function getGeminiModelScore(id: string): number {
 
 /**
  * Fetch models from Mistral API
- * Uses STEROIDS_MISTRAL environment variable
+ *
+ * Uses the provider's already-fetched model list (populated by initialize()
+ * from the Mistral API using STEROIDS_MISTRAL or MISTRAL_API_KEY).
+ * This ensures the setup wizard shows the same filtered, deduplicated list
+ * as `steroids ai providers`.
  */
 export async function fetchMistralModels(): Promise<FetchModelsResult> {
-  const apiKey = process.env.STEROIDS_MISTRAL;
+  const models = (await getModelsForProvider('mistral')).map((m) => ({
+    id: m.id,
+    name: m.name,
+  }));
 
-  if (!apiKey) {
-    const fallbackModels = (await getModelsForProvider('mistral')).map((m) => ({
-      id: m.id,
-      name: m.name,
-    }));
-
-    return {
-      success: true,
-      models: fallbackModels,
-    };
-  }
-
-  try {
-    const response = await fetch('https://api.mistral.ai/v1/models', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      return {
-        success: false,
-        models: [],
-        error: `API error: ${response.status} - ${text}`,
-      };
-    }
-
-    const data = (await response.json()) as
-      | Array<{
-        id: string;
-        name?: string;
-        description?: string;
-        created?: number;
-        max_context_length?: number;
-      }>
-      | {
-        data?: Array<{
-          id: string;
-          name?: string;
-          description?: string;
-          created?: number;
-          max_context_length?: number;
-        }>;
-      };
-
-    const rawModels = Array.isArray(data) ? data : (data.data ?? []);
-
-    const modelById = new Map<string, APIModel>();
-    for (const m of rawModels) {
-      const mapped: APIModel = {
-        id: m.id,
-        name: m.name ?? formatMistralModelName(m.id),
-        description: m.description,
-        created: m.created ? new Date(m.created * 1000) : undefined,
-        contextWindow: m.max_context_length,
-      };
-
-      if (!modelById.has(mapped.id)) {
-        modelById.set(mapped.id, mapped);
-      }
-    }
-
-    const models = dedupeMistralModels([...modelById.values()]);
-
-    models.sort((a, b) => {
-      const aScore = getMistralModelScore(a.id);
-      const bScore = getMistralModelScore(b.id);
-      if (aScore !== bScore) return aScore - bScore;
-      return a.id.localeCompare(b.id);
-    });
-
-    return { success: true, models };
-  } catch (error) {
-    return {
-      success: false,
-      models: [],
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
+  return { success: true, models };
 }
 
-function formatMistralModelName(id: string): string {
-  return id
-    .split('-')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function getMistralModelScore(id: string): number {
-  if (id.includes('codestral')) return 0;
-  if (id.includes('mistral-large')) return 1;
-  if (id.includes('mistral-medium')) return 2;
-  if (id.includes('mistral-small')) return 3;
-  if (id.includes('ministral')) return 4;
-  return 5;
-}
-
-function dedupeMistralModels(models: APIModel[]): APIModel[] {
-  const byName = new Map<string, APIModel>();
-
-  for (const model of models) {
-    const key = (model.name || model.id).trim().toLowerCase();
-    const existing = byName.get(key);
-
-    if (!existing || preferMistralModel(model, existing)) {
-      byName.set(key, model);
-    }
-  }
-
-  return [...byName.values()];
-}
-
-function preferMistralModel(candidate: APIModel, existing: APIModel): boolean {
-  const score = (model: APIModel): number => {
-    let value = 0;
-    if (model.id.includes('latest')) value += 10;
-    if (model.id.endsWith('-latest')) value += 5;
-    if (model.name?.toLowerCase().includes('latest')) value += 1;
-    return value;
-  };
-
-  const candidateScore = score(candidate);
-  const existingScore = score(existing);
-
-  if (candidateScore !== existingScore) {
-    return candidateScore > existingScore;
-  }
-
-  return candidate.id.localeCompare(existing.id) < 0;
-}
 
 /**
  * Fetch models for a specific provider
