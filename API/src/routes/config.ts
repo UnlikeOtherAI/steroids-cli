@@ -118,7 +118,10 @@ function mergeConfigs(base: Record<string, unknown>, override: Record<string, un
 }
 
 /**
- * Set a nested value in config object
+ * Set a nested value in config object.
+ * When the existing value and new value are both plain objects, they are
+ * deep-merged so that sibling keys are preserved (e.g. saving ai.custom
+ * does not wipe ai.orchestrator).
  */
 function setConfigValue(config: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> {
   const result = JSON.parse(JSON.stringify(config));
@@ -132,8 +135,25 @@ function setConfigValue(config: Record<string, unknown>, path: string, value: un
     current = current[parts[i]] as Record<string, unknown>;
   }
 
-  current[parts[parts.length - 1]] = value;
+  const key = parts[parts.length - 1];
+  const existing = key in current ? current[key] : undefined;
+  current[key] = deepMergeObjects(existing, value);
   return result;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function deepMergeObjects(base: unknown, override: unknown): unknown {
+  if (isPlainObject(base) && isPlainObject(override)) {
+    const result: Record<string, unknown> = { ...base };
+    for (const key of Object.keys(override)) {
+      result[key] = deepMergeObjects(base[key], override[key]);
+    }
+    return result;
+  }
+  return override;
 }
 
 // GET /api/config/schema - Get full configuration schema
@@ -767,7 +787,7 @@ router.post('/custom/test', async (req: Request, res: Response) => {
     const r = await fetch(`${base}/v1/messages`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ model: 'test', max_tokens: 1, messages: [] }),
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
       signal: AbortSignal.timeout(10_000),
     });
     const body = await r.text().catch(() => '');
