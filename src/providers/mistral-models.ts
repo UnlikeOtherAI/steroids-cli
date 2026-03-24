@@ -5,6 +5,9 @@
  * Used by MistralProvider.initialize() to populate the model catalog at startup.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import type { ModelInfo } from './interface.js';
 
 /**
@@ -127,7 +130,15 @@ export async function fetchMistralModelList(): Promise<ModelInfo[] | null> {
       if (!seenIds.has(m.id)) merged.push(m);
     }
 
-    const models: ModelInfo[] = merged.map((m) => ({
+    // Scope filter: Vibe API keys only allow models listed in ~/.vibe/config.toml.
+    // When vibe config exists, restrict to its model list. This prevents the dropdown
+    // from showing models the key can't actually access (APIKeyScope.vibe restriction).
+    const vibeModels = readVibeConfigModels();
+    const scopeFiltered = vibeModels
+      ? merged.filter((m) => vibeModels.has(m.id))
+      : merged;
+
+    const models: ModelInfo[] = (scopeFiltered.length > 0 ? scopeFiltered : merged).map((m) => ({
       id: m.id,
       name: m.description || formatModelName(m.id),
       recommendedFor: inferRecommendation(m),
@@ -151,6 +162,33 @@ function preferLatest(candidate: MistralAPIModel, existing: MistralAPIModel): bo
     return 0;
   };
   return score(candidate) > score(existing);
+}
+
+/**
+ * Read model IDs from the Vibe CLI's config.toml.
+ * Vibe-scope API keys only allow models listed in this config, so it's the
+ * authoritative source for which models the user can actually invoke.
+ * Returns null if the config isn't found or can't be parsed.
+ */
+function readVibeConfigModels(): Set<string> | null {
+  const configPath = join(homedir(), '.vibe', 'config.toml');
+  try {
+    if (!existsSync(configPath)) return null;
+    const content = readFileSync(configPath, 'utf-8');
+    const ids = new Set<string>();
+    // Parse [[models]] blocks — extract name where provider = "mistral"
+    const modelBlocks = content.split(/\[\[models\]\]/);
+    for (const block of modelBlocks.slice(1)) {
+      const nameMatch = block.match(/^name\s*=\s*"([^"]+)"/m);
+      const providerMatch = block.match(/^provider\s*=\s*"([^"]+)"/m);
+      if (nameMatch && (!providerMatch || providerMatch[1] === 'mistral')) {
+        ids.add(nameMatch[1]);
+      }
+    }
+    return ids.size > 0 ? ids : null;
+  } catch {
+    return null;
+  }
 }
 
 function formatModelName(id: string): string {
