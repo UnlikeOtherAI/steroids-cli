@@ -311,6 +311,8 @@ export function getApiKeyEnvVar(provider: ProviderName): string {
       return 'STEROIDS_OPENAI';
     case 'opencode':
       return ''; // No API key needed
+    case 'custom':
+      return ''; // Token configured via custom model config, not env var
   }
 }
 

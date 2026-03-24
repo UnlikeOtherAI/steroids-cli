@@ -178,6 +178,15 @@ export const CONFIG_SCHEMA: SchemaObject = {
       _type: 'array',
       _default: [],
     },
+    custom: {
+      _description: 'Custom model endpoints (OpenRouter, MiniMax, vLLM, etc.)',
+      _type: 'object',
+      models: {
+        _description: 'Custom model configurations',
+        _type: 'array',
+        _default: [],
+      },
+    },
   },
   git: {
     _description: 'Git workflow settings',

@@ -23,6 +23,16 @@ export interface ReviewerConfig {
   customInstructions?: string;
 }
 
+export type CustomModelCli = 'claude' | 'opencode' | 'codex';
+
+export interface CustomModelConfig {
+  id: string;
+  name: string;       // display name — appears in model dropdown
+  cli: CustomModelCli;
+  baseUrl: string;
+  token: string;
+}
+
 export interface SteroidsConfig {
   skills?: string[];
   intake?: IntakeConfig;
@@ -39,6 +49,9 @@ export interface SteroidsConfig {
     };
     reviewer?: ReviewerConfig;         // Existing single reviewer
     reviewers?: ReviewerConfig[];      // NEW: multi-reviewer array
+    custom?: {
+      models?: CustomModelConfig[];
+    };
   };
   git?: {
     remote?: string;
