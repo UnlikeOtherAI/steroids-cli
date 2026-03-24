@@ -220,14 +220,21 @@ export class ClaudeProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
-    // HF proxy: if model is a HuggingFace model, ensure proxy is running
+    // HF proxy: if model is a HuggingFace model, ensure proxy is running.
+    // The Claude CLI validates model names locally and rejects org/name format,
+    // so we pass a valid placeholder model to the CLI and encode the real HF model
+    // in the proxy URL path: /model/{encodedModel}/v1/messages.
     let proxyOverrides: Record<string, string> = {};
+    let effectiveModel = model;
     if (isHFModel(model)) {
       const hfToken = resolveHFToken();
       if (hfToken) {
         try {
           const proxyPort = await ensureProxy({ hfToken });
-          proxyOverrides = { STEROIDS_HF_PROXY_URL: `http://127.0.0.1:${proxyPort}` };
+          proxyOverrides = {
+            STEROIDS_HF_PROXY_URL: `http://127.0.0.1:${proxyPort}/model/${encodeURIComponent(model)}`,
+          };
+          effectiveModel = 'claude-sonnet-4-6'; // valid placeholder; proxy overrides with real model
         } catch { /* proxy unavailable — continue without it */ }
       }
     }
@@ -249,7 +256,7 @@ export class ClaudeProvider extends BaseAIProvider {
       // Build command from invocation template
       // Convert resumeSessionId to flag if present
       const sessionIdFlag = resumeSessionId ? `--resume ${resumeSessionId}` : '';
-      const command = this.buildCommand(promptFile, model, sessionIdFlag);
+      const command = this.buildCommand(promptFile, effectiveModel, sessionIdFlag);
 
       // Spawn using shell to handle the command template
       const child = spawn(command, {

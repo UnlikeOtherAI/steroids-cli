@@ -20,13 +20,33 @@ export function createHFProxy(options: HFProxyOptions): http.Server {
 
   return http.createServer(async (req, res) => {
     try {
-      if (req.method === 'GET' && req.url === '/v1/models') {
+      const rawUrl = req.url ?? '/';
+      // Strip query string for path matching — the Claude CLI appends ?beta=true
+      const urlPath = rawUrl.split('?')[0];
+
+      // Model-override route: /model/{encodedModel}/v1/{endpoint}
+      // Used by Claude provider to pass the real HF model name without hitting
+      // the Claude CLI's local model-name validation (which rejects org/name format).
+      const modelOverrideBase = urlPath.match(/^\/model\/([^/]+)\//);
+      const modelOverride = modelOverrideBase ? decodeURIComponent(modelOverrideBase[1]) : null;
+
+      if (req.method === 'POST' && modelOverride && urlPath.endsWith('/v1/messages')) {
+        await handleAnthropicMessages(req, hfBaseUrl, hfToken, res, modelOverride);
+      } else if (req.method === 'GET' && modelOverride && urlPath.endsWith('/v1/models')) {
+        // Return a fake models list containing only the Claude placeholder so the CLI
+        // passes its model-existence check before making the actual messages request.
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          object: 'list',
+          data: [{ id: 'claude-sonnet-4-6', object: 'model', created: Math.floor(Date.now() / 1000), owned_by: 'anthropic' }],
+        }));
+      } else if (req.method === 'GET' && urlPath === '/v1/models') {
         await handleModels(hfBaseUrl, hfToken, res);
-      } else if (req.method === 'POST' && req.url === '/v1/chat/completions') {
+      } else if (req.method === 'POST' && urlPath === '/v1/chat/completions') {
         await handleChatCompletions(req, hfBaseUrl, hfToken, res);
-      } else if (req.method === 'POST' && req.url === '/v1/messages') {
+      } else if (req.method === 'POST' && urlPath === '/v1/messages') {
         await handleAnthropicMessages(req, hfBaseUrl, hfToken, res);
-      } else if (req.method === 'GET' && req.url === '/health') {
+      } else if (req.method === 'GET' && urlPath === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok' }));
       } else {
@@ -118,33 +138,34 @@ async function handleChatCompletions(
 // POST /v1/messages — Anthropic Messages API → OpenAI → HF → Anthropic
 // ---------------------------------------------------------------------------
 
+type AnthropicContentBlock = { type: string; text?: string; cache_control?: unknown; [key: string]: unknown };
+
 interface AnthropicRequest {
   model: string;
   max_tokens: number;
-  system?: string;
-  messages: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>;
+  // system can be a plain string or an array of content blocks (Anthropic cache-control format)
+  system?: string | AnthropicContentBlock[];
+  messages: Array<{ role: string; content: string | AnthropicContentBlock[] }>;
   stream?: boolean;
   tools?: any[];
   temperature?: number;
   top_p?: number;
 }
 
+function blocksToString(content: string | AnthropicContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  return content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n');
+}
+
 function anthropicToOpenAI(body: AnthropicRequest): Record<string, unknown> {
   const messages: Array<{ role: string; content: string }> = [];
 
   if (body.system) {
-    messages.push({ role: 'system', content: body.system });
+    messages.push({ role: 'system', content: blocksToString(body.system) });
   }
 
   for (const msg of body.messages) {
-    const content =
-      typeof msg.content === 'string'
-        ? msg.content
-        : msg.content
-            .filter((b) => b.type === 'text')
-            .map((b) => b.text)
-            .join('\n');
-    messages.push({ role: msg.role, content });
+    messages.push({ role: msg.role, content: blocksToString(msg.content) });
   }
 
   return {
@@ -211,11 +232,20 @@ async function handleAnthropicMessages(
   req: http.IncomingMessage,
   hfBaseUrl: string,
   hfToken: string,
-  res: http.ServerResponse
+  res: http.ServerResponse,
+  modelOverride?: string
 ): Promise<void> {
   const rawBody = await readBody(req);
   const anthropicReq = JSON.parse(rawBody) as AnthropicRequest;
-  const openaiReq = anthropicToOpenAI(anthropicReq);
+  // Model override from URL path takes precedence over the body's model field.
+  // This lets Claude CLI pass a valid placeholder model name while the real
+  // HF model is encoded in the proxy URL (e.g. /model/MiniMaxAI%2FMiniMax-M2.5/v1/messages).
+  if (modelOverride) anthropicReq.model = modelOverride;
+  const wantsStream = !!anthropicReq.stream;
+
+  // Always call HF non-streaming — streaming SSE from HF can't be parsed by
+  // upstream.json(). We fake SSE back to the Claude CLI when stream=true.
+  const openaiReq = anthropicToOpenAI({ ...anthropicReq, stream: false });
 
   const upstream = await fetch(`${hfBaseUrl}/chat/completions`, {
     method: 'POST',
@@ -232,10 +262,96 @@ async function handleAnthropicMessages(
     return;
   }
 
-  const oaiResponse = await upstream.json();
-  const anthropicResponse = openAIResponseToAnthropic(oaiResponse, anthropicReq.model);
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(anthropicResponse));
+  const oaiResponse = await upstream.json() as any;
+
+  if (!wantsStream) {
+    const anthropicResponse = openAIResponseToAnthropic(oaiResponse, anthropicReq.model);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(anthropicResponse));
+    return;
+  }
+
+  // Emit Anthropic SSE format from the non-streaming HF response.
+  const choice = oaiResponse.choices?.[0];
+  const msgId = oaiResponse.id ?? `msg_${Date.now()}`;
+  const inputTokens: number = oaiResponse.usage?.prompt_tokens ?? 0;
+  const outputTokens: number = oaiResponse.usage?.completion_tokens ?? 0;
+  const stopReasonMap: Record<string, string> = {
+    stop: 'end_turn',
+    length: 'max_tokens',
+    tool_calls: 'tool_use',
+  };
+  const stopReason = stopReasonMap[choice?.finish_reason] ?? 'end_turn';
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+
+  const sse = (event: string, data: unknown): void => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  sse('message_start', {
+    type: 'message_start',
+    message: {
+      id: msgId,
+      type: 'message',
+      role: 'assistant',
+      content: [],
+      model: anthropicReq.model,
+      stop_reason: null,
+      stop_sequence: null,
+      usage: { input_tokens: inputTokens, output_tokens: 0 },
+    },
+  });
+
+  let blockIndex = 0;
+
+  // Text block
+  if (choice?.message?.content) {
+    sse('content_block_start', {
+      type: 'content_block_start',
+      index: blockIndex,
+      content_block: { type: 'text', text: '' },
+    });
+    sse('ping', { type: 'ping' });
+    sse('content_block_delta', {
+      type: 'content_block_delta',
+      index: blockIndex,
+      delta: { type: 'text_delta', text: choice.message.content },
+    });
+    sse('content_block_stop', { type: 'content_block_stop', index: blockIndex });
+    blockIndex++;
+  }
+
+  // Tool use blocks
+  if (choice?.message?.tool_calls) {
+    for (const tc of choice.message.tool_calls) {
+      sse('content_block_start', {
+        type: 'content_block_start',
+        index: blockIndex,
+        content_block: { type: 'tool_use', id: tc.id, name: tc.function.name, input: {} },
+      });
+      sse('content_block_delta', {
+        type: 'content_block_delta',
+        index: blockIndex,
+        delta: { type: 'input_json_delta', partial_json: tc.function.arguments ?? '{}' },
+      });
+      sse('content_block_stop', { type: 'content_block_stop', index: blockIndex });
+      blockIndex++;
+    }
+  }
+
+  sse('message_delta', {
+    type: 'message_delta',
+    delta: { stop_reason: stopReason, stop_sequence: null },
+    usage: { output_tokens: outputTokens },
+  });
+  sse('message_stop', { type: 'message_stop' });
+
+  res.end();
 }
 
 // ---------------------------------------------------------------------------
