@@ -101,10 +101,10 @@ export const ProjectTasksPage: React.FC = () => {
         limit: 100,
       });
 
-      // Sort by status priority (in_progress first, completed/skipped last)
+      // Status priority for display order (review before in_progress)
       const statusPriority: Record<string, number> = {
-        'in_progress': 1,
-        'review': 2,
+        'review': 1,
+        'in_progress': 2,
         'pending': 3,
         'disputed': 4,
         'failed': 5,
@@ -115,13 +115,19 @@ export const ProjectTasksPage: React.FC = () => {
 
       let sortedTasks = [...response.tasks];
       sortedTasks.sort((a, b) => {
-        // Sort by status priority first
+        // 1. Primary: sort by task name (alphabetical)
+        const nameA = stripGuidPrefix(a.title).toLowerCase();
+        const nameB = stripGuidPrefix(b.title).toLowerCase();
+        if (nameA !== nameB) return nameA.localeCompare(nameB);
+        // 2. Secondary: sort by section name
+        const sectionA = (a.section_name || '').toLowerCase();
+        const sectionB = (b.section_name || '').toLowerCase();
+        if (sectionA !== sectionB) return sectionA.localeCompare(sectionB);
+        // 3. Status: review before in_progress
         const priorityA = statusPriority[a.status] || 9;
         const priorityB = statusPriority[b.status] || 9;
-        if (priorityA !== priorityB) {
-          return priorityA - priorityB;
-        }
-        // Within same status, sort by creation time
+        if (priorityA !== priorityB) return priorityA - priorityB;
+        // 4. Fallback: creation time
         return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       });
 
