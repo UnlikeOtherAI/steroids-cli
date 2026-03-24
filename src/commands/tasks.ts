@@ -51,7 +51,7 @@ import {
   triggerProjectCompleted,
   triggerHooksSafely,
 } from '../hooks/integration.js';
-import { resetTaskCmd } from './tasks-reset.js';
+import { resetTaskCmd, deleteTaskCmd } from './tasks-reset.js';
 import { addTaskDependencyCmd, removeTaskDependencyCmd, displayTaskDependencies } from './tasks-deps.js';
 import {
   isFileTracked,
@@ -85,6 +85,7 @@ Use this command to add, update, approve, reject, or skip tasks.`,
     { name: 'audit', args: '<id|title>', description: 'View task audit trail' },
     { name: 'promote', args: '<id>', description: 'Enable auto-implementation for a deferred follow-up' },
     { name: 'reset', args: '[<id|title>]', description: 'Reset failed/disputed tasks to pending' },
+    { name: 'delete', args: '<id|title>', description: 'Permanently delete a task' },
     { name: 'depends-on', args: '<id> <dep-id>', description: 'Add task dependency (id depends on dep-id)' },
     { name: 'no-depends-on', args: '<id> <dep-id>', description: 'Remove task dependency' },
   ],
@@ -208,6 +209,9 @@ export async function tasksCommand(args: string[], flags: GlobalFlags): Promise<
       break;
     case 'reset':
       await resetTaskCmd(subArgs, flags);
+      break;
+    case 'delete':
+      await deleteTaskCmd(subArgs, flags);
       break;
     case 'depends-on':
       await addTaskDependencyCmd(subArgs, flags);

@@ -2063,3 +2063,50 @@ export function returnTaskToPending(
 
   addAuditEntry(db, taskId, task.status, 'pending', actor, notes ?? 'Returned to pending for retry');
 }
+
+// ── Delete operations ──────────────────────────────────────────────────────
+
+/**
+ * Permanently delete a task and all its dependent records.
+ * Callers should check task status and warn about in-progress tasks beforehand.
+ */
+export function deleteTask(db: Database.Database, taskId: string): void {
+  db.transaction(() => {
+    // Nullify self-referential FKs before deleting (foreign_keys = ON)
+    db.prepare('UPDATE tasks SET reference_task_id = NULL WHERE reference_task_id = ?').run(taskId);
+    db.prepare('UPDATE incidents SET task_id = NULL WHERE task_id = ?').run(taskId);
+    // Remove all dependent rows
+    db.prepare('DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?').run(taskId, taskId);
+    db.prepare('DELETE FROM task_locks WHERE task_id = ?').run(taskId);
+    db.prepare('DELETE FROM task_invocations WHERE task_id = ?').run(taskId);
+    db.prepare('DELETE FROM disputes WHERE task_id = ?').run(taskId);
+    db.prepare('DELETE FROM audit WHERE task_id = ?').run(taskId);
+    db.prepare('DELETE FROM task_feedback WHERE task_id = ?').run(taskId);
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+  })();
+}
+
+/**
+ * Permanently delete a section and (with force=true) all its tasks.
+ * Throws if the section has tasks and force is false.
+ * Returns the number of tasks deleted.
+ */
+export function deleteSection(
+  db: Database.Database,
+  sectionId: string,
+  { force = false }: { force?: boolean } = {},
+): number {
+  const tasks = db.prepare('SELECT id FROM tasks WHERE section_id = ?').all(sectionId) as { id: string }[];
+  if (tasks.length > 0 && !force) {
+    throw new Error(`Section has ${tasks.length} task(s). Use --force to delete them along with the section.`);
+  }
+  db.transaction(() => {
+    for (const { id } of tasks) {
+      deleteTask(db, id);
+    }
+    db.prepare('DELETE FROM section_locks WHERE section_id = ?').run(sectionId);
+    db.prepare('DELETE FROM section_dependencies WHERE section_id = ? OR depends_on_section_id = ?').run(sectionId, sectionId);
+    db.prepare('DELETE FROM sections WHERE id = ?').run(sectionId);
+  })();
+  return tasks.length;
+}

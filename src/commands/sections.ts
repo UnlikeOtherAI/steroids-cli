@@ -24,6 +24,7 @@ import {
   updateSection,
   resetSectionPr,
 } from './sections-commands.js';
+import { deleteSectionCmd } from './sections-delete.js';
 import { generateHelp } from '../cli/help.js';
 import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
@@ -43,6 +44,7 @@ Sections help structure large projects and track high-level progress.`,
     { name: 'priority', args: '<id> <value>', description: 'Set section priority (0-100 or high/medium/low)' },
     { name: 'depends-on', args: '<id> <depends-on-id>', description: 'Add section dependency' },
     { name: 'no-depends-on', args: '<id> <dep-id>', description: 'Remove section dependency' },
+    { name: 'delete', args: '<id>', description: 'Permanently delete a section' },
     { name: 'graph', args: '[options]', description: 'Show dependency graph (ASCII, Mermaid, image)' },
   ],
   options: [
@@ -67,6 +69,8 @@ Sections help structure large projects and track high-level progress.`,
     { command: 'steroids sections priority abc123 25', description: 'Set numeric priority (0-100)' },
     { command: 'steroids sections depends-on abc123 def456', description: 'Add dependency' },
     { command: 'steroids sections no-depends-on abc123 def456', description: 'Remove dependency' },
+    { command: 'steroids sections delete abc123', description: 'Delete empty section' },
+    { command: 'steroids sections delete abc123 --force', description: 'Delete section and all its tasks' },
     { command: 'steroids sections graph', description: 'ASCII tree view (default)' },
     { command: 'steroids sections graph --json', description: 'JSON output' },
     { command: 'steroids sections graph --mermaid', description: 'Mermaid flowchart syntax' },
@@ -127,6 +131,9 @@ export async function sectionsCommand(args: string[], flags: GlobalFlags): Promi
       break;
     case 'no-depends-on':
       await removeDependency(subArgs, flags);
+      break;
+    case 'delete':
+      await deleteSectionCmd(subArgs, flags);
       break;
     case 'graph':
       await showGraph(subArgs, flags);

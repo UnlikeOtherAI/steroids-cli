@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { openDatabase, withDatabase } from '../database/connection.js';
-import { getTask, getTaskByTitle, listTasks, getSectionDependencies, type Task } from '../database/queries.js';
+import { getTask, getTaskByTitle, listTasks, getSectionDependencies, deleteTask, type Task } from '../database/queries.js';
 import { createOutput } from '../cli/output.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
 import type { GlobalFlags } from '../cli/flags.js';
@@ -288,4 +288,77 @@ function killRunnerAndRevokeLease(taskId: string, projDb: any, out: any) {
   } finally {
     closeGlobal();
   }
+}
+
+export async function deleteTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
+  const out = createOutput({ command: 'tasks', subcommand: 'delete', flags });
+
+  const { values, positionals } = parseArgs({
+    args,
+    options: {
+      force: { type: 'boolean', short: 'f', default: false },
+    },
+    allowPositionals: true,
+  });
+
+  if (flags.help) {
+    out.log(`
+steroids tasks delete <id|title> - Permanently delete a task
+
+USAGE:
+  steroids tasks delete <id|title> [options]
+
+ARGUMENTS:
+  id|title    Task ID (or prefix) or title
+
+OPTIONS:
+  -f, --force   Delete even if the task is currently in progress
+  --dry-run     Show what would be deleted without making changes
+
+GLOBAL OPTIONS:
+  -j, --json    Output as JSON
+  -h, --help    Show help
+
+EXAMPLES:
+  steroids tasks delete abc123
+  steroids tasks delete "Build login page"
+  steroids tasks delete abc123 --force
+`);
+    return;
+  }
+
+  if (positionals.length === 0) {
+    out.error(ErrorCode.INVALID_ARGUMENTS, 'Task ID or title required');
+    process.exit(getExitCode(ErrorCode.INVALID_ARGUMENTS));
+  }
+
+  const identifier = positionals.join(' ');
+  const projectPath = process.cwd();
+
+  withDatabase(projectPath, (db: any) => {
+    const task = getTask(db, identifier) || getTaskByTitle(db, identifier);
+    if (!task) {
+      out.error(ErrorCode.TASK_NOT_FOUND, `Task not found: ${identifier}`);
+      process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
+    }
+
+    if (task.status === 'in_progress' && !values.force) {
+      out.error(ErrorCode.GENERAL_ERROR, `Task is currently in progress. Use --force to delete it anyway.`);
+      process.exit(1);
+    }
+
+    if (flags.dryRun) {
+      out.log(`Would delete task: ${task.title} (${task.id})`);
+      out.log(`  Status: ${task.status}`);
+      return;
+    }
+
+    deleteTask(db, task.id);
+
+    if (flags.json) {
+      out.success({ deleted: { id: task.id, title: task.title } });
+    } else {
+      out.log(`Deleted task: ${task.title} (${task.id})`);
+    }
+  });
 }
