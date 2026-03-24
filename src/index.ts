@@ -41,6 +41,7 @@ import { statusCommand } from './commands/status.js';
 import { monitorCommand } from './commands/monitor.js';
 import { resetProject } from './commands/project-reset.js';
 import { checkForNewVersion } from './cli/version-check.js';
+import { featuresCommand } from './commands/features.js';
 
 // Read version from package.json - search up from dist folder
 function getVersion(): string {
@@ -109,8 +110,8 @@ TASK LIFECYCLE
                             ↓ rejected → back to in_progress
                             ↓ 15 rejections → failed (needs human)
 
-QUICK START
-  steroids init -y
+QUICK START (new project)
+  steroids init -y           # -y skips interactive prompts; LLMs MUST use -y
   steroids sections add "Phase 1: Feature"
   steroids tasks add "Task title" --section <id> --source specs/spec.md
   steroids runners start --detach
@@ -185,7 +186,7 @@ ENVIRONMENT VARIABLES:
   CI                     CI environment detected
 
 EXAMPLES:
-  steroids init
+  steroids init -y           # initialize new project (non-interactive)
   steroids sections add "Phase 1"
   steroids tasks add "Implement feature" --section "Phase 1"
   steroids config show intake
@@ -325,6 +326,9 @@ async function main(): Promise<void> {
         break;
       case 'reset-project':
         await resetProject(commandArgs, flags);
+        break;
+      case 'features':
+        await featuresCommand(commandArgs, flags);
         break;
       default:
         if (flags.json) {

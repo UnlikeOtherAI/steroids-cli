@@ -94,6 +94,7 @@ export async function llmCommand(args: string[], flags: GlobalFlags): Promise<vo
         specifications: 'Markdown files in specs/ with purpose, requirements, examples, acceptance criteria',
       },
       commands: [
+        { command: 'steroids init -y', description: 'Initialize new project (non-interactive; -y required for LLM agents)' },
         { command: 'steroids tasks list', description: 'List pending tasks' },
         { command: 'steroids tasks list --status all', description: 'Show all tasks' },
         { command: 'steroids sections list', description: 'Show task sections' },

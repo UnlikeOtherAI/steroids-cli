@@ -320,8 +320,8 @@ SPECIFICATIONS = Markdown files describing what to build
   - Reference existing code patterns the implementation should follow
   - Create a specs/ directory with markdown files
 
-INITIALIZING A PROJECT:
-  1. steroids init -y                     # non-interactive, accept defaults
+INITIALIZING A PROJECT (LLM agents MUST use -y — never run steroids init without it):
+  1. steroids init -y                     # -y required: skips interactive AI setup prompts
   2. Create specs/ with your specifications
   3. steroids sections add "Phase 1: Feature Name"
   4. steroids tasks add "Task title" --section <id> --source specs/spec.md
