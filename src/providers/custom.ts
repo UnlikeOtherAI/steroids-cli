@@ -23,18 +23,8 @@ import {
 import { ClaudeProvider } from './claude.js';
 import { CodexProvider } from './codex.js';
 import { OpenCodeProvider } from './opencode.js';
+import { loadConfig } from '../config/loader.js';
 import type { CustomModelCli, CustomModelConfig } from '../config/loader.js';
-
-// Lazy import to avoid circular dependency at module load time
-let _loadConfig: (() => { ai?: { custom?: { models?: CustomModelConfig[] } } }) | null = null;
-function loadConfig() {
-  if (!_loadConfig) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require('../config/loader.js');
-    _loadConfig = () => mod.loadConfig();
-  }
-  return _loadConfig();
-}
 
 export class CustomModelsProvider extends BaseAIProvider {
   readonly name = 'custom';
