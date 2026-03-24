@@ -5,6 +5,7 @@ import { configApi } from '../services/api';
 export type CustomModelCli = 'claude' | 'opencode' | 'codex';
 
 export interface CustomModelEntry {
+  id: string;
   name: string;
   cli: CustomModelCli;
   baseUrl: string;
@@ -42,7 +43,7 @@ function EditRow({ entry, onSave, onCancel }: EditRowProps) {
 
   const save = () => {
     if (!form.name.trim() || !form.baseUrl.trim() || !form.token.trim()) return;
-    onSave({ name: form.name.trim(), cli: form.cli, baseUrl: form.baseUrl.trim(), token: form.token.trim() });
+    onSave({ ...entry, name: form.name.trim(), cli: form.cli, baseUrl: form.baseUrl.trim(), token: form.token.trim() });
   };
 
   return (
@@ -142,8 +143,10 @@ export default function CustomModelsPage() {
 
   const handleAdd = async () => {
     if (!addForm.name.trim() || !addForm.baseUrl.trim() || !addForm.token.trim()) return;
+    const name = addForm.name.trim();
     const entry: CustomModelEntry = {
-      name: addForm.name.trim(),
+      id: name,
+      name,
       cli: addForm.cli,
       baseUrl: addForm.baseUrl.trim(),
       token: addForm.token.trim(),
@@ -265,7 +268,7 @@ export default function CustomModelsPage() {
                   {showAdd && (
                     <EditRow
                       key="__add__"
-                      entry={{ name: addForm.name, cli: addForm.cli, baseUrl: addForm.baseUrl, token: addForm.token }}
+                      entry={{ id: addForm.name, name: addForm.name, cli: addForm.cli, baseUrl: addForm.baseUrl, token: addForm.token }}
                       onSave={() => handleAdd()}
                       onCancel={() => { setShowAdd(false); setAddForm(BLANK); }}
                     />

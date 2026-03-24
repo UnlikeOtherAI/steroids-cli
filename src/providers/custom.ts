@@ -11,9 +11,10 @@
  *   codex    → CODEX_HOME (isolated config.toml) + OPENAI_API_KEY
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   BaseAIProvider,
   type InvokeOptions,
@@ -71,6 +72,7 @@ export class CustomModelsProvider extends BaseAIProvider {
       CODEX_HOME: process.env.CODEX_HOME,
     };
 
+    let codexHome = '';
     try {
       if (config.cli === 'claude') {
         process.env.ANTHROPIC_BASE_URL = config.baseUrl;
@@ -80,7 +82,7 @@ export class CustomModelsProvider extends BaseAIProvider {
         process.env.OPENAI_API_KEY = config.token;
       } else if (config.cli === 'codex') {
         // Write an isolated config.toml so the user's real ~/.codex/config.toml is untouched
-        const codexHome = await this.setupIsolatedCodexHome(config.baseUrl, config.token);
+        codexHome = await this.setupIsolatedCodexHome(config.baseUrl, config.token);
         process.env.CODEX_HOME = codexHome;
         process.env.OPENAI_API_KEY = config.token;
       }
@@ -113,6 +115,14 @@ export class CustomModelsProvider extends BaseAIProvider {
         process.env.CODEX_HOME = snap.CODEX_HOME;
       } else {
         delete process.env.CODEX_HOME;
+      }
+      // Clean up isolated Codex home directory to prevent tmpdir bloat
+      if (codexHome && existsSync(codexHome)) {
+        try {
+          rmSync(codexHome, { recursive: true, force: true });
+        } catch {
+          // Best-effort cleanup — don't fail the invocation if cleanup fails
+        }
       }
     }
   }
@@ -160,7 +170,7 @@ export class CustomModelsProvider extends BaseAIProvider {
    * The user's real ~/.codex/config.toml is never touched.
    */
   private async setupIsolatedCodexHome(baseUrl: string, token: string): Promise<string> {
-    const uuid = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const uuid = randomUUID();
     const codexHome = join(tmpdir(), `steroids-codex-custom-${uuid}`);
     mkdirSync(codexHome, { recursive: true });
 
