@@ -58,13 +58,15 @@ interface EndpointFormProps {
   onSave: (data: FormState) => void;
   onCancel: () => void;
   saving?: boolean;
+  hideLabels?: boolean; // true when embedded in the table (column headers already label the fields)
 }
 
-function EndpointForm({ initial = BLANK, onSave, onCancel, saving }: EndpointFormProps) {
+function EndpointForm({ initial = BLANK, onSave, onCancel, saving, hideLabels }: EndpointFormProps) {
   const [form, setForm] = useState<FormState>(initial);
   const [baseUrlError, setBaseUrlError] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; summary: string; body: unknown } | null>(null);
+  const [showBody, setShowBody] = useState(false);
 
   const valid = form.name.trim() && form.baseUrl.trim() && form.token.trim() && !baseUrlError;
 
@@ -83,6 +85,7 @@ function EndpointForm({ initial = BLANK, onSave, onCancel, saving }: EndpointFor
     if (!isValidUrl(form.baseUrl) || !form.token.trim()) return;
     setTesting(true);
     setTestResult(null);
+    setShowBody(false);
     try {
       const res = await fetch('http://localhost:3501/api/custom/test', {
         method: 'POST',
@@ -90,13 +93,13 @@ function EndpointForm({ initial = BLANK, onSave, onCancel, saving }: EndpointFor
         body: JSON.stringify({ baseUrl: form.baseUrl.trim(), token: form.token.trim() }),
       });
       const data = await res.json();
-      if (data.success) {
-        setTestResult({ ok: true, message: data.message || `${data.status} — endpoint reachable` });
-      } else {
-        setTestResult({ ok: false, message: data.message || `Error ${data.status}` });
-      }
+      setTestResult({
+        ok: data.reachable === true,
+        summary: data.summary || (data.reachable ? `${data.status} — endpoint reachable` : `${data.status} — ${data.path} responded`),
+        body: data.body ?? null,
+      });
     } catch (e) {
-      setTestResult({ ok: false, message: e instanceof Error ? e.message : 'Connection failed' });
+      setTestResult({ ok: false, summary: e instanceof Error ? e.message : 'Connection failed', body: null });
     } finally {
       setTesting(false);
     }
@@ -106,19 +109,19 @@ function EndpointForm({ initial = BLANK, onSave, onCancel, saving }: EndpointFor
     <div className="space-y-3">
       {/* Name */}
       <div>
-        <label className="block text-xs font-medium text-text-muted mb-1">Name</label>
+        {!hideLabels && <label className="block text-xs font-medium text-text-muted mb-1">Name</label>}
         <input
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
-          placeholder="My MiniMax Endpoint"
+          placeholder={hideLabels ? 'Name' : 'My MiniMax Endpoint'}
           autoFocus
         />
       </div>
 
       {/* CLI */}
       <div>
-        <label className="block text-xs font-medium text-text-muted mb-1">CLI</label>
+        {!hideLabels && <label className="block text-xs font-medium text-text-muted mb-1">CLI</label>}
         <select
           value={form.cli}
           onChange={(e) => { setForm((f) => ({ ...f, cli: e.target.value as CustomModelCli })); setTestResult(null); }}
@@ -133,14 +136,14 @@ function EndpointForm({ initial = BLANK, onSave, onCancel, saving }: EndpointFor
 
       {/* Base URL */}
       <div>
-        <label className="block text-xs font-medium text-text-muted mb-1">Base URL</label>
+        {!hideLabels && <label className="block text-xs font-medium text-text-muted mb-1">Base URL</label>}
         <input
           value={form.baseUrl}
           onChange={(e) => handleBaseUrlChange(e.target.value)}
           className={`w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 ${
             baseUrlError ? 'ring-1 ring-red-500 focus:ring-red-500' : 'focus:ring-accent'
           }`}
-          placeholder="https://api.example.com/v1"
+          placeholder={hideLabels ? 'Base URL' : 'https://api.example.com/v1'}
         />
         {baseUrlError && (
           <p className="mt-1 text-xs text-red-400">Must be a valid http:// or https:// URL</p>
@@ -149,25 +152,43 @@ function EndpointForm({ initial = BLANK, onSave, onCancel, saving }: EndpointFor
 
       {/* Token */}
       <div>
-        <label className="block text-xs font-medium text-text-muted mb-1">Token</label>
+        {!hideLabels && <label className="block text-xs font-medium text-text-muted mb-1">Token</label>}
         <input
           value={form.token}
           onChange={(e) => { setForm((f) => ({ ...f, token: e.target.value })); setTestResult(null); }}
           type="password"
           className="w-full bg-bg-elevated rounded-full px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
-          placeholder="sk-..."
+          placeholder={hideLabels ? 'Token' : 'sk-...'}
         />
       </div>
 
       {/* Test result */}
       {testResult && (
-        <div className={`rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
-          testResult.ok ? 'bg-success/10 text-success border border-success/30' : 'bg-danger/10 text-danger border border-danger/30'
-        }`}>
-          {testResult.ok
-            ? <CheckIcon className="w-3.5 h-3.5 flex-shrink-0" />
-            : <ExclamationTriangleIcon className="w-3.5 h-3.5 flex-shrink-0" />}
-          {testResult.message}
+        <div>
+          <div
+            className={`rounded-lg px-3 py-2 text-xs flex items-center gap-2 cursor-pointer ${
+              testResult.ok ? 'bg-success/10 text-success border border-success/30' : 'bg-danger/10 text-danger border border-danger/30'
+            }`}
+            onClick={() => testResult.body !== null && setShowBody(b => !b)}
+            role={testResult.body !== null ? 'button' : undefined}
+          >
+            {testResult.ok
+              ? <CheckIcon className="w-3.5 h-3.5 flex-shrink-0" />
+              : <ExclamationTriangleIcon className="w-3.5 h-3.5 flex-shrink-0" />}
+            <span className="flex-1">{testResult.summary}</span>
+            {testResult.body !== null && (
+              <span className={`transition-transform ${showBody ? 'rotate-90' : ''}`}>
+                <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                </svg>
+              </span>
+            )}
+          </div>
+          {showBody && testResult.body !== null && (
+            <pre className="mt-1 rounded-lg bg-black/40 border border-border px-3 py-2 text-xs text-text-muted font-mono overflow-x-auto max-h-40">
+              {JSON.stringify(testResult.body, null, 2)}
+            </pre>
+          )}
         </div>
       )}
 
@@ -343,6 +364,7 @@ export default function CustomModelsPage() {
                               onSave={(form) => handleSaveEdit(m, form)}
                               onCancel={() => setEditingName(null)}
                               saving={saving}
+                              hideLabels
                             />
                           </td>
                         </tr>

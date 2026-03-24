@@ -744,18 +744,25 @@ router.post('/custom/test', async (req: Request, res: Response) => {
     'Content-Type': 'application/json',
   };
 
-  // OpenAI-style: GET /v1/models
+  // OpenAI-style: GET /v1/models — 200 means models endpoint; 404 means path doesn't exist, fall through
   try {
     const r = await fetch(`${base}/v1/models`, {
       headers,
       signal: AbortSignal.timeout(10_000),
     });
+    const body = await r.text().catch(() => '');
+    const parsed = body ? (() => { try { return JSON.parse(body); } catch { return null; } })() : null;
     if (r.ok) {
-      return res.json({ success: true, status: r.status, path: '/v1/models', message: `${r.status} — OpenAI /v1/models reachable` });
+      return res.json({ reachable: true, status: r.status, path: '/v1/models', summary: `${r.status} — OpenAI /v1/models reachable`, body: parsed });
     }
+    if (r.status !== 404) {
+      // Non-404 non-OK (e.g. 401, 403) — endpoint exists but something rejected the call
+      return res.json({ reachable: false, status: r.status, path: '/v1/models', summary: `${r.status} — OpenAI /v1/models responded`, body: parsed });
+    }
+    // 404 — try next endpoint
   } catch { /* try next */ }
 
-  // Anthropic-style: POST /v1/messages
+  // Anthropic-style: POST /v1/messages — any non-5xx response means the endpoint exists
   try {
     const r = await fetch(`${base}/v1/messages`, {
       method: 'POST',
@@ -763,15 +770,19 @@ router.post('/custom/test', async (req: Request, res: Response) => {
       body: JSON.stringify({ model: 'test', max_tokens: 1, messages: [] }),
       signal: AbortSignal.timeout(10_000),
     });
-    // 401 = unauthorized (token valid but model wrong), 400 = bad request — both mean endpoint exists
+    const body = await r.text().catch(() => '');
+    const parsed = body ? (() => { try { return JSON.parse(body); } catch { return null; } })() : null;
+    if (r.ok) {
+      return res.json({ reachable: true, status: r.status, path: '/v1/messages', summary: `${r.status} — Anthropic /v1/messages reachable`, body: parsed });
+    }
     if (r.status < 500) {
-      return res.json({ success: true, status: r.status, path: '/v1/messages', message: `${r.status} — Anthropic /v1/messages reachable` });
+      return res.json({ reachable: false, status: r.status, path: '/v1/messages', summary: `${r.status} — Anthropic /v1/messages responded`, body: parsed });
     }
   } catch { /* try next */ }
 
   // All attempts failed
   return res.json({
-    success: false,
+    reachable: false,
     message: 'Endpoint unreachable — check base URL and token',
   });
 });
