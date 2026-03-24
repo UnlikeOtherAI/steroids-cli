@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { execSync } from 'node:child_process';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
+import { loadConfig } from '../../../dist/config/loader.js';
 
 const router = Router();
 
@@ -99,6 +100,11 @@ router.get('/ai/providers', (_req: Request, res: Response) => {
       name: 'Ollama',
       installed: true,
     },
+    {
+      id: 'custom',
+      name: 'Custom Endpoints',
+      installed: true,
+    },
   ];
 
   res.json({
@@ -174,6 +180,31 @@ router.get('/ai/models/ollama', (_req: Request, res: Response) => {
     });
   } finally {
     close();
+  }
+});
+
+router.get('/ai/models/custom', (_req: Request, res: Response) => {
+  try {
+    const config = loadConfig();
+    const models = (config.ai?.custom?.models ?? []).map((m) => ({
+      id: m.name,
+      name: m.name,
+      runtime: m.cli === 'opencode' ? 'opencode' : 'claude-code',
+      groupLabel: `${m.cli} — custom`,
+      mappedProvider: 'custom',
+    }));
+    res.json({
+      success: true,
+      provider: 'custom',
+      source: 'config',
+      models,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load custom models',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 });
 
