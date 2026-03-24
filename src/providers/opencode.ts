@@ -270,8 +270,13 @@ export class OpenCodeProvider extends BaseAIProvider {
           return;
         }
 
+        // OpenCode exits 0 even when the backend is unreachable.
+        // Detect this: exit 0 + no useful stdout + error content in stderr.
+        const nominalSuccess = code === 0 && !timedOut;
+        const falseSuccess = nominalSuccess && !stdout.trim() && stderr.trim().length > 0;
+
         resolve({
-          success: code === 0 && !timedOut,
+          success: nominalSuccess && !falseSuccess,
           exitCode: code ?? 1,
           stdout,
           stderr,

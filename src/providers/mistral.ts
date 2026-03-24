@@ -19,62 +19,15 @@ import {
   type TokenUsage,
   SessionNotFoundError,
 } from './interface.js';
+import { FALLBACK_MODELS, fetchMistralModelList } from './mistral-models.js';
 
 /**
- * Available Mistral models
- */
-const MISTRAL_MODELS: ModelInfo[] = [
-  {
-    id: 'pixtral-large-latest',
-    name: 'Pixtral Large (latest)',
-    recommendedFor: ['orchestrator', 'coder', 'reviewer'],
-    supportsStreaming: true,
-    contextWindow: 128000,
-  },
-  {
-    id: 'devstral-2',
-    name: 'Devstral (Le Chat)',
-    recommendedFor: ['orchestrator', 'coder', 'reviewer'],
-    supportsStreaming: true,
-    contextWindow: 128000,
-  },
-  {
-    id: 'devstral-small',
-    name: 'Devstral Small (Le Chat)',
-    recommendedFor: [],
-    supportsStreaming: true,
-    contextWindow: 32000,
-  },
-  {
-    id: 'mistral-large-latest',
-    name: 'Mistral Large (latest)',
-    recommendedFor: [],
-    supportsStreaming: true,
-    contextWindow: 128000,
-  },
-  {
-    id: 'mistral-medium-latest',
-    name: 'Mistral Medium (latest)',
-    recommendedFor: [],
-    supportsStreaming: true,
-    contextWindow: 32000,
-  },
-  {
-    id: 'mistral-small-latest',
-    name: 'Mistral Small (latest)',
-    recommendedFor: [],
-    supportsStreaming: true,
-    contextWindow: 32000,
-  },
-];
-
-/**
- * Default models per role
+ * Default models per role — real API model names.
  */
 const DEFAULT_MODELS: Record<'orchestrator' | 'coder' | 'reviewer', string> = {
-  orchestrator: 'devstral-2',
-  coder: 'devstral-2',
-  reviewer: 'devstral-2',
+  orchestrator: 'mistral-vibe-cli-latest',
+  coder: 'mistral-vibe-cli-latest',
+  reviewer: 'mistral-vibe-cli-latest',
 };
 
 /**
@@ -95,10 +48,20 @@ export class MistralProvider extends BaseAIProvider {
   readonly name = 'mistral';
   readonly displayName = 'Mistral Vibe';
 
+  /** Models discovered from the Mistral API (populated by initialize()). */
+  private discoveredModels: ModelInfo[] | null = null;
+
   constructor() {
     super();
     // Provider ID is "mistral", but executable is "vibe".
     this.cliPath = 'vibe';
+  }
+
+  /**
+   * Fetch available models from the Mistral API at startup.
+   */
+  async initialize(): Promise<void> {
+    this.discoveredModels = await fetchMistralModelList();
   }
 
   /**
@@ -435,14 +398,14 @@ export class MistralProvider extends BaseAIProvider {
    * List available model IDs
    */
   listModels(): string[] {
-    return MISTRAL_MODELS.map((m) => m.id);
+    return (this.discoveredModels ?? FALLBACK_MODELS).map((m) => m.id);
   }
 
   /**
    * Get detailed model information
    */
   getModelInfo(): ModelInfo[] {
-    return [...MISTRAL_MODELS];
+    return [...(this.discoveredModels ?? FALLBACK_MODELS)];
   }
 
   /**
@@ -459,3 +422,4 @@ export class MistralProvider extends BaseAIProvider {
 export function createMistralProvider(): MistralProvider {
   return new MistralProvider();
 }
+

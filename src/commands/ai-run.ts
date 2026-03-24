@@ -12,11 +12,12 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GlobalFlags } from '../cli/flags.js';
+import { parseDuration } from '../cli/flags.js';
 import { createOutput } from '../cli/output.js';
 import { colors, markers } from '../cli/colors.js';
 import { generateHelp } from '../cli/help.js';
 import { getProviderRegistry } from '../providers/registry.js';
-import { loadConfig, type ProviderName } from '../config/loader.js';
+import { loadConfig } from '../config/loader.js';
 
 const VALID_ROLES = ['coder', 'reviewer', 'orchestrator', 'first-responder'] as const;
 type RunRole = (typeof VALID_ROLES)[number];
@@ -43,7 +44,7 @@ No loop, no DB writes, no task management — pure agent invocation.`,
     { long: 'provider', description: 'Provider name (claude, gemini, codex, mistral, opencode)', values: '<name>' },
     { long: 'model', description: 'Model identifier', values: '<id>' },
     { long: 'cwd', description: 'Working directory for the agent (default: current dir)', values: '<path>' },
-    { long: 'timeout', description: 'Invocation timeout (default: 15m)', values: '<duration>' },
+    { short: 't', long: 'invoke-timeout', description: 'Invocation timeout (default: 15m)', values: '<duration>' },
     { long: 'no-stream', description: 'Suppress streaming output; print result at end' },
     { long: 'template', description: 'Custom invocation template override', values: '<template>' },
   ],
@@ -52,7 +53,7 @@ No loop, no DB writes, no task management — pure agent invocation.`,
     { command: 'steroids ai run reviewer --prompt-file review.txt --cwd /path/to/project', description: 'Run reviewer from file' },
     { command: 'steroids ai run coder -p "Fix the bug" --provider gemini --model gemini-2.5-pro', description: 'Use specific provider/model' },
     { command: 'steroids ai run first-responder -p "Diagnose stuck tasks" --provider claude', description: 'Run first-responder' },
-    { command: 'steroids ai run orchestrator --prompt-file analysis.txt --no-stream', description: 'Run orchestrator, print only final output' },
+    { command: 'steroids ai run coder -p "Fix it" -t 5m', description: 'Run with 5-minute timeout' },
   ],
   sections: [
     {
@@ -84,7 +85,7 @@ export async function runSubcommand(args: string[], flags: GlobalFlags): Promise
       provider: { type: 'string' },
       model: { type: 'string' },
       cwd: { type: 'string' },
-      timeout: { type: 'string' },
+      'invoke-timeout': { type: 'string', short: 't' },
       'no-stream': { type: 'boolean', default: false },
       template: { type: 'string' },
     },
@@ -144,11 +145,12 @@ export async function runSubcommand(args: string[], flags: GlobalFlags): Promise
     process.exit(4);
   }
 
-  // --- Resolve timeout ---
+  // --- Resolve timeout: --invoke-timeout flag, then global --timeout, then default ---
   let timeoutMs = 15 * 60 * 1000; // 15 minutes default
-  if (values.timeout) {
-    const { parseDuration } = await import('../cli/flags.js');
-    timeoutMs = parseDuration(values.timeout);
+  if (values['invoke-timeout']) {
+    timeoutMs = parseDuration(values['invoke-timeout']);
+  } else if (flags.timeout) {
+    timeoutMs = flags.timeout;
   }
 
   const streamOutput = !values['no-stream'];
