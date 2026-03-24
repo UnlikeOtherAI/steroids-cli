@@ -248,21 +248,30 @@ export const LiveInvocationActivityPanel: React.FC<{
   );
 };
 
+const VARIANT_BORDER: Record<string, string> = {
+  info: 'border-info',
+  success: 'border-success',
+  warning: 'border-warning',
+  danger: 'border-danger',
+  default: 'border-border',
+};
+
 export const InvocationTimelineEventRow: React.FC<{ event: TaskTimelineEvent; ts: number }> = ({ event, ts }) => {
   const info = summarizeTimelineEvent(event);
+  const borderColor = VARIANT_BORDER[info.variant ?? 'default'] ?? 'border-border';
   return (
-    <div className="p-4 border-l-4 border-border bg-bg-base">
+    <div className={`p-4 border-l-4 ${borderColor} bg-bg-base`}>
       <div className="flex items-start gap-4">
         <div className="flex-shrink-0 w-8 h-8 rounded-full bg-bg-surface flex items-center justify-center">
           <i className={`fa-solid ${getTimelineIcon(String(event.type), String(event.cmd ?? ''))} text-text-muted text-sm`}></i>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-text-primary">{info.title}</span>
+            <span className="font-medium text-sm text-text-primary">{info.title}</span>
             {typeof event.invocationId === 'number' && (
               <Badge variant="default">Invocation #{event.invocationId}</Badge>
             )}
-            {info.variant && (
+            {info.variant && info.variant !== 'default' && (
               <Badge variant={info.variant}>{String(event.type)}</Badge>
             )}
           </div>

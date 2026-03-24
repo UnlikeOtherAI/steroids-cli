@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
+import { usePersistentToggle } from '../hooks/usePersistentToggle';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { AuditEntry, TaskDetails, TaskStatus, TaskTimelineEvent } from '../types';
 import { API_BASE_URL, tasksApi, projectsApi } from '../services/api';
@@ -58,7 +59,7 @@ export const TaskDetailPage: React.FC = () => {
   const [restartNotes, setRestartNotes] = useState('');
   const [showLiveModal, setShowLiveModal] = useState(false);
   const [viewMode, setViewMode] = useState<'basic' | 'full'>('basic');
-  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [timelineCollapsed, toggleTimelineCollapsed] = usePersistentToggle('steroids:timeline-collapsed', false);
   const intervalRef = useRef<number | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -356,12 +357,12 @@ export const TaskDetailPage: React.FC = () => {
           {/* First Responder feedback — between agents and timeline */}
           <FirstResponderPanel taskId={taskId!} projectPath={projectPath!} />
 
-          {/* Activity Timeline — collapsible */}
-          <div className="mb-4">
-            {/* Row 1: title + chevron toggle */}
+          {/* Activity Timeline — collapsible card */}
+          <div className="card mb-6 overflow-hidden">
+            {/* Header row: title + chevron toggle */}
             <button
-              onClick={() => setTimelineCollapsed(!timelineCollapsed)}
-              className="w-full flex items-center justify-between gap-2 group mb-2"
+              onClick={toggleTimelineCollapsed}
+              className="w-full flex items-center justify-between gap-2 p-4 group hover:bg-bg-surface transition-colors"
             >
               <h2 className="text-xl font-semibold text-text-primary text-left">
                 <i className="fa-solid fa-clock-rotate-left mr-2"></i>
@@ -372,35 +373,69 @@ export const TaskDetailPage: React.FC = () => {
               </h2>
               <i className={`fa-solid ${timelineCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-text-muted group-hover:text-text-primary transition-colors flex-shrink-0`}></i>
             </button>
-            {/* Row 2: control buttons — only when expanded */}
+
             {!timelineCollapsed && (
-              <div className="flex items-center gap-2 flex-wrap">
-                {(['basic', 'full'] as const).map((mode) => (
-                  <button key={mode} onClick={() => setViewMode(mode)}
-                    className={`px-2.5 py-1 text-sm rounded transition-colors ${viewMode === mode ? 'bg-accent text-white' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
-                  >{mode.charAt(0).toUpperCase() + mode.slice(1)}</button>
-                ))}
-                {isLive && (
-                  <span className="flex items-center gap-2 text-sm text-success">
-                    <span className="w-2 h-2 bg-success rounded-full animate-pulse"></span>
-                    Live
-                  </span>
-                )}
-                <button onClick={() => setShowLiveModal(true)} className="px-3 py-1 text-sm bg-info/20 text-info hover:bg-info/30 rounded transition-colors">
-                  <i className="fa-solid fa-bolt mr-1"></i>Live Stream
-                </button>
-                <button onClick={() => setIsLive(!isLive)}
-                  className={`px-3 py-1 text-sm rounded transition-colors ${isLive ? 'bg-success/20 text-success' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
-                >
-                  <i className={`fa-solid ${isLive ? 'fa-pause' : 'fa-play'} mr-1`}></i>
-                  {isLive ? 'Pause' : 'Resume'}
-                </button>
-                <button onClick={() => { fetchTask(); fetchTimeline(); }}
-                  className="px-3 py-1 text-sm bg-bg-surface text-text-muted hover:text-text-primary rounded transition-colors"
-                >
-                  <i className="fa-solid fa-refresh mr-1"></i>Refresh
-                </button>
-              </div>
+              <>
+                {/* Control buttons row */}
+                <div className="px-4 pb-3 flex items-center gap-2 flex-wrap">
+                  {(['basic', 'full'] as const).map((mode) => (
+                    <button key={mode} onClick={() => setViewMode(mode)}
+                      className={`px-2.5 py-1 text-sm rounded transition-colors ${viewMode === mode ? 'bg-accent text-white' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
+                    >{mode.charAt(0).toUpperCase() + mode.slice(1)}</button>
+                  ))}
+                  {isLive && (
+                    <span className="flex items-center gap-2 text-sm text-success">
+                      <span className="w-2 h-2 bg-success rounded-full animate-pulse"></span>
+                      Live
+                    </span>
+                  )}
+                  <button onClick={() => setShowLiveModal(true)} className="px-3 py-1 text-sm bg-info/20 text-info hover:bg-info/30 rounded transition-colors">
+                    <i className="fa-solid fa-bolt mr-1"></i>Live Stream
+                  </button>
+                  <button onClick={() => setIsLive(!isLive)}
+                    className={`px-3 py-1 text-sm rounded transition-colors ${isLive ? 'bg-success/20 text-success' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
+                  >
+                    <i className={`fa-solid ${isLive ? 'fa-pause' : 'fa-play'} mr-1`}></i>
+                    {isLive ? 'Pause' : 'Resume'}
+                  </button>
+                  <button onClick={() => { fetchTask(); fetchTimeline(); }}
+                    className="px-3 py-1 text-sm bg-bg-surface text-text-muted hover:text-text-primary rounded transition-colors"
+                  >
+                    <i className="fa-solid fa-refresh mr-1"></i>Refresh
+                  </button>
+                </div>
+
+                {/* Timeline entries */}
+                <div className="border-t border-border">
+                  {(mergedTimelineItems.length === 0 && !timelineLoading) ? (
+                    <div className="p-8 text-center text-text-muted">
+                      <i className="fa-solid fa-list text-4xl mb-4"></i>
+                      <p>No activity recorded yet</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {timelineError && (
+                        <div className="p-4 text-sm text-danger">
+                          <i className="fa-solid fa-triangle-exclamation mr-2"></i>
+                          Failed to load invocation timeline: {timelineError}
+                        </div>
+                      )}
+                      {timelineLoading && (
+                        <div className="p-4 text-sm text-text-muted">
+                          <i className="fa-solid fa-spinner fa-spin mr-2"></i>
+                          Loading invocation timeline...
+                        </div>
+                      )}
+                      {mergedTimelineItems.map((item, index) => {
+                        if (item.kind === 'audit') {
+                          return <AuditLogRow key={item.key} entry={item.entry} isLatest={index === 0} githubUrl={task.github_url} />;
+                        }
+                        return <InvocationTimelineEventRow key={item.key} event={item.event} ts={item.ts} />;
+                      })}
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
 
@@ -422,39 +457,6 @@ export const TaskDetailPage: React.FC = () => {
                   <LiveInvocationActivityPanel isLive={isLive} streamState={streamState} liveActivity={liveActivity} onClear={() => setLiveActivity([])} />
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* Merged Timeline — hidden when collapsed */}
-          {!timelineCollapsed && (
-            <div className="card overflow-hidden">
-              {(mergedTimelineItems.length === 0 && !timelineLoading) ? (
-                <div className="p-8 text-center text-text-muted">
-                  <i className="fa-solid fa-list text-4xl mb-4"></i>
-                  <p>No activity recorded yet</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-border">
-                  {timelineError && (
-                    <div className="p-4 text-sm text-danger">
-                      <i className="fa-solid fa-triangle-exclamation mr-2"></i>
-                      Failed to load invocation timeline: {timelineError}
-                    </div>
-                  )}
-                  {timelineLoading && (
-                    <div className="p-4 text-sm text-text-muted">
-                      <i className="fa-solid fa-spinner fa-spin mr-2"></i>
-                      Loading invocation timeline...
-                    </div>
-                  )}
-                  {mergedTimelineItems.map((item, index) => {
-                    if (item.kind === 'audit') {
-                      return <AuditLogRow key={item.key} entry={item.entry} isLatest={index === 0} githubUrl={task.github_url} />;
-                    }
-                    return <InvocationTimelineEventRow key={item.key} event={item.event} ts={item.ts} />;
-                  })}
-                </div>
-              )}
             </div>
           )}
 

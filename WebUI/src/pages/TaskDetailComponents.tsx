@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { AuditEntry, TaskInvocation, TaskDispute } from '../types';
 import { Badge } from '../components/atoms/Badge';
+import { usePersistentToggle } from '../hooks/usePersistentToggle';
 
 // ============ Shared Utilities ============
 
@@ -340,15 +341,15 @@ interface InvocationsPanelProps {
 
 export const InvocationsPanel: React.FC<InvocationsPanelProps> = ({ invocations, taskId, projectPath }) => {
   const count = invocations?.length || 0;
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, toggleCollapsed] = usePersistentToggle('steroids:invocations-collapsed', false);
 
   if (!invocations || invocations.length === 0) return null;
 
   return (
-    <div className="mb-6">
+    <div className="card mb-6 overflow-hidden">
       <button
-        onClick={() => setCollapsed(!collapsed)}
-        className="w-full flex items-center justify-between mb-3 group"
+        onClick={toggleCollapsed}
+        className="w-full flex items-center justify-between p-4 group hover:bg-bg-surface transition-colors"
       >
         <h2 className="text-lg font-semibold text-text-primary">
           <i className="fa-solid fa-robot mr-2"></i>
@@ -358,7 +359,7 @@ export const InvocationsPanel: React.FC<InvocationsPanelProps> = ({ invocations,
         <i className={`fa-solid ${collapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-text-muted group-hover:text-text-primary transition-colors`}></i>
       </button>
       {!collapsed && (
-        <div className="space-y-2">
+        <div className="border-t border-border p-4 space-y-2">
           {invocations
             .slice()
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
