@@ -729,4 +729,51 @@ router.get('/ai/providers', (req: Request, res: Response) => {
   });
 });
 
+// POST /api/custom/test - Test a custom endpoint server-side (bypasses CORS)
+// Supports OpenAI-style (/v1/models) and Anthropic-style (/v1/messages) APIs
+router.post('/custom/test', async (req: Request, res: Response) => {
+  const { baseUrl, token } = req.body as { baseUrl?: string; token?: string };
+
+  if (!baseUrl || !token) {
+    return res.status(400).json({ success: false, error: 'baseUrl and token are required' });
+  }
+
+  const base = baseUrl.trim().replace(/\/$/, '');
+  const headers = {
+    Authorization: `Bearer ${token.trim()}`,
+    'Content-Type': 'application/json',
+  };
+
+  // OpenAI-style: GET /v1/models
+  try {
+    const r = await fetch(`${base}/v1/models`, {
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (r.ok) {
+      return res.json({ success: true, status: r.status, path: '/v1/models', message: `${r.status} — OpenAI /v1/models reachable` });
+    }
+  } catch { /* try next */ }
+
+  // Anthropic-style: POST /v1/messages
+  try {
+    const r = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: 'test', max_tokens: 1, messages: [] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    // 401 = unauthorized (token valid but model wrong), 400 = bad request — both mean endpoint exists
+    if (r.status < 500) {
+      return res.json({ success: true, status: r.status, path: '/v1/messages', message: `${r.status} — Anthropic /v1/messages reachable` });
+    }
+  } catch { /* try next */ }
+
+  // All attempts failed
+  return res.json({
+    success: false,
+    message: 'Endpoint unreachable — check base URL and token',
+  });
+});
+
 export default router;
