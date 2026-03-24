@@ -18,6 +18,7 @@ import {
 } from '../providers/api-models.js';
 import { loadConfig, type ProviderName } from '../config/loader.js';
 import { runSubcommand as runRunSubcommand } from './ai-run.js';
+import { proxySubcommand } from './ai-proxy.js';
 
 const HELP = generateHelp({
   command: 'ai',
@@ -30,6 +31,7 @@ const HELP = generateHelp({
     { name: 'test', args: '<role>', description: 'Test provider configuration for a role' },
     { name: 'run', args: '<role>', description: 'Run a single agent invocation for debugging' },
     { name: 'setup', args: '[role]', description: 'Run interactive setup wizard' },
+    { name: 'proxy', args: '<start|stop|status>', description: 'Manage HuggingFace model proxy' },
   ],
   options: [
     { long: 'api', description: 'Fetch models from API (requires API key) (models)' },
@@ -76,6 +78,9 @@ export async function aiCommand(args: string[], flags: GlobalFlags): Promise<voi
       break;
     case 'setup':
       await setupSubcommand(subArgs, flags);
+      break;
+    case 'proxy':
+      await proxySubcommand(subArgs, flags);
       break;
     default:
       out.error('INVALID_ARGUMENTS', `Unknown subcommand: ${subcommand}`);

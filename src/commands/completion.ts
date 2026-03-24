@@ -63,7 +63,7 @@ const COMMANDS = {
   git: ['status', 'push', 'retry', 'log'],
   projects: ['list', 'add', 'remove', 'enable', 'disable', 'prune'],
   locks: ['list', 'show', 'release', 'cleanup'],
-  ai: ['providers', 'models', 'test', 'run', 'setup'],
+  ai: ['providers', 'models', 'test', 'run', 'setup', 'proxy'],
   completion: ['bash', 'zsh', 'fish', 'install'],
   workspaces: ['list', 'clean'],
 };
@@ -424,6 +424,7 @@ function getSubcommandDescription(cmd: string, sub: string): string {
       test: 'Test provider configuration',
       run: 'Run a single agent invocation',
       setup: 'Interactive setup wizard',
+      proxy: 'Manage HuggingFace model proxy',
     },
     completion: {
       bash: 'Generate bash completion',
