@@ -59,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   const [wakeupResults, setWakeupResults] = useState<WakeupResult[] | null>(null);
   const [hfExpanded, setHfExpanded] = useState(false);
   const [ollamaExpanded, setOllamaExpanded] = useState(false);
+  const [customExpanded, setCustomExpanded] = useState(false);
 
   const navItems = [
     { to: '/', icon: HomeIcon, label: 'Dashboard' },
@@ -84,6 +85,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     { to: '/ollama/library', label: 'Model Library' },
     { to: '/ollama/ready', label: 'Ready to Use' },
     { to: '/ollama/account', label: 'Account' },
+  ];
+
+  const customItems = [
+    { to: '/custom', label: 'Custom Endpoints' },
   ];
 
   const fetchCronStatus = useCallback(async () => {
@@ -203,6 +208,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           {ollamaExpanded ? <ChevronDownIcon className="w-3 h-3" /> : <ChevronRightIcon className="w-3 h-3" />}
         </button>
         {ollamaExpanded && ollamaItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            onClick={onClose}
+            className={({ isActive }) => (
+              isActive ? 'sidebar-item-active ml-4' : 'sidebar-item ml-4'
+            )}
+          >
+            <span>{item.label}</span>
+          </NavLink>
+        ))}
+        <button
+          type="button"
+          onClick={() => setCustomExpanded((v) => !v)}
+          className="w-full px-6 pt-4 pb-2 text-xs uppercase tracking-wide text-text-inverse/60 flex items-center gap-2 hover:text-text-inverse/80 transition-colors"
+        >
+          <CpuChipIcon className="w-4 h-4" />
+          <span className="flex-1 text-left">Custom</span>
+          {customExpanded ? <ChevronDownIcon className="w-3 h-3" /> : <ChevronRightIcon className="w-3 h-3" />}
+        </button>
+        {customExpanded && customItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

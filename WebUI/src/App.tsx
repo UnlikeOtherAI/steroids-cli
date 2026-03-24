@@ -31,6 +31,7 @@ const OllamaInstalledModelsPage = lazy(() => import('./pages/OllamaInstalledMode
 const OllamaModelLibraryPage = lazy(() => import('./pages/OllamaModelLibraryPage').then(({ OllamaModelLibraryPage }) => ({ default: OllamaModelLibraryPage })));
 const OllamaReadyToUsePage = lazy(() => import('./pages/OllamaReadyToUsePage').then(({ OllamaReadyToUsePage }) => ({ default: OllamaReadyToUsePage })));
 const OllamaAccountPage = lazy(() => import('./pages/OllamaAccountPage').then(({ OllamaAccountPage }) => ({ default: OllamaAccountPage })));
+const CustomModelsPage = lazy(() => import('./pages/CustomModelsPage'));
 
 function App() {
   const { selectedProject } = useProject();
@@ -98,6 +99,7 @@ function App() {
     if (location.pathname === '/ollama/library') return 'Ollama Model Library';
     if (location.pathname === '/ollama/ready') return 'Ollama Ready to Use';
     if (location.pathname === '/ollama/account') return 'Ollama Account';
+    if (location.pathname === '/custom') return 'Custom Endpoints';
     switch (location.pathname) {
       case '/': return 'Dashboard';
       case '/projects': return 'Projects';
@@ -178,6 +180,7 @@ function App() {
               <Route path="/ollama/library" element={<OllamaModelLibraryPage />} />
               <Route path="/ollama/ready" element={<OllamaReadyToUsePage />} />
               <Route path="/ollama/account" element={<OllamaAccountPage />} />
+              <Route path="/custom" element={<CustomModelsPage />} />
             </Routes>
           </Suspense>
         </AppShell>
