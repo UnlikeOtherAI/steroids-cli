@@ -9,6 +9,7 @@ import { CodexProvider } from './codex.js';
 import { GeminiProvider } from './gemini.js';
 import { MistralProvider } from './mistral.js';
 import { OpenCodeProvider } from './opencode.js';
+import { CustomModelsProvider } from './custom.js';
 
 /**
  * Provider availability status
@@ -185,6 +186,7 @@ export async function createDefaultRegistry(): Promise<ProviderRegistry> {
     new GeminiProvider(),
     new MistralProvider(),
     new OpenCodeProvider(),
+    new CustomModelsProvider(),
   ];
 
   for (const provider of providers) {
