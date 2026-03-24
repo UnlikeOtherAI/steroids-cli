@@ -1,252 +1,32 @@
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-/**
- * AI Provider Interface
- * Defines the contract for AI providers (Claude, Gemini, OpenAI, etc.)
- */
+// Types and interfaces live in provider-types.ts; re-exported here for backward compat.
+export type {
+  InvokeOptions,
+  InvocationActivity,
+  TokenUsage,
+  InvokeResult,
+  ProviderErrorType,
+  ProviderError,
+  ModelInfo,
+  IAIProvider,
+} from './provider-types.js';
+export { SessionNotFoundError } from './provider-types.js';
 
-/**
- * Options for invoking an AI provider
- */
-export interface InvokeOptions {
-  /** Model identifier (e.g., 'claude-sonnet-4', 'gpt-4') */
-  model: string;
-  /** Timeout in milliseconds (default: 900000 = 15 minutes) */
-  timeout?: number;
-  /** Working directory for the invocation */
-  cwd?: string;
-  /** Path to prompt file (alternative to inline prompt) */
-  promptFile?: string;
-  /** Role for this invocation (orchestrator, coder, reviewer) */
-  role?: 'orchestrator' | 'coder' | 'reviewer';
-  /** Custom invocation template (e.g., "claude -p {prompt_file} --model {model}") */
-  invocationTemplate?: string;
-  /** Whether to stream output to stdout/stderr */
-  streamOutput?: boolean;
-  /**
-   * Optional activity callback for live monitoring.
-   * Providers should emit lightweight JSON-serializable events as work progresses.
-   */
-  onActivity?: (activity: InvocationActivity) => void;
-  /** Resume a previous session instead of starting fresh */
-  resumeSessionId?: string;
-}
+import type {
+  InvokeOptions,
+  InvocationActivity,
+  InvokeResult,
+  ProviderError,
+  ModelInfo,
+  IAIProvider,
+} from './provider-types.js';
+import { SessionNotFoundError } from './provider-types.js';
 
-/**
- * Activity entry emitted during a provider invocation.
- * Kept intentionally flexible (JSONL logger appends arbitrary fields).
- */
-export type InvocationActivity = Record<string, unknown> & { type: string };
-
-/**
- * Token usage information
- */
-export interface TokenUsage {
-  /** Total input tokens */
-  inputTokens: number;
-  /** Total output tokens */
-  outputTokens: number;
-  /** Subset served from server-side cache (Codex, Gemini) */
-  cachedInputTokens?: number;
-  /** Tokens served from cache (Claude) */
-  cacheReadTokens?: number;
-  /** Tokens written to cache (Claude) */
-  cacheCreationTokens?: number;
-  /** Total cost for the invocation (Claude, Vibe) */
-  totalCostUsd?: number;
-}
-
-/**
- * Error thrown when a provider fails to resume a session (e.g., session not found on disk/server)
- */
-export class SessionNotFoundError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SessionNotFoundError';
-  }
-}
-
-/**
- * Result of an AI provider invocation
- */
-export interface InvokeResult {
-  /** Whether the invocation succeeded (exit code 0) */
-  success: boolean;
-  /** Exit code from the CLI process */
-  exitCode: number;
-  /** Standard output from the process */
-  stdout: string;
-  /** Standard error from the process */
-  stderr: string;
-  /** Duration in milliseconds */
-  duration: number;
-  /** Whether the process was killed due to timeout */
-  timedOut: boolean;
-  /** Session ID from the provider CLI (if available) */
-  sessionId?: string;
-  /** Token usage statistics (if available) */
-  tokenUsage?: TokenUsage;
-}
-
-/**
- * Error types that can be classified from provider output
- */
-export type ProviderErrorType =
-  | 'rate_limit'
-  | 'auth_error'
-  | 'network_error'
-  | 'model_not_found'
-  | 'context_exceeded'
-  | 'credit_exhaustion'
-  | 'model_capability_error'
-  | 'subprocess_hung'
-  | 'safety_violation'
-  | 'policy_violation'
-  | 'invalid_prompt'
-  | 'unknown';
-
-/**
- * Classified error from provider invocation
- */
-export interface ProviderError {
-  /** Type of error */
-  type: ProviderErrorType;
-  /** Human-readable error message */
-  message: string;
-  /** Whether this error is retryable */
-  retryable: boolean;
-  /** Suggested retry delay in milliseconds */
-  retryAfterMs?: number;
-}
-
-/**
- * Model information
- */
-export interface ModelInfo {
-  /** Model identifier used for invocation */
-  id: string;
-  /** Human-readable name */
-  name: string;
-  /** Recommended role for this model */
-  recommendedFor?: ('orchestrator' | 'coder' | 'reviewer')[];
-  /** Whether this model supports streaming */
-  supportsStreaming?: boolean;
-  /** Maximum context window size in tokens */
-  contextWindow?: number;
-}
-
-/**
- * AI Provider interface
- * All providers must implement this interface
- */
-export interface IAIProvider {
-  /** Provider name (e.g., 'claude', 'gemini', 'codex') */
-  readonly name: string;
-
-  /** Human-readable display name */
-  readonly displayName: string;
-
-  /**
-   * Invoke the provider with a prompt
-   * @param prompt The prompt text to send
-   * @param options Invocation options
-   * @returns Promise resolving to the invocation result
-   */
-  invoke(prompt: string, options: InvokeOptions): Promise<InvokeResult>;
-
-  /**
-   * Resume a previous session with a new prompt
-   * @param sessionId The ID of the session to resume
-   * @param prompt The prompt text to send
-   * @param options Invocation options
-   * @returns Promise resolving to the invocation result
-   */
-  resume(sessionId: string, prompt: string, options: InvokeOptions): Promise<InvokeResult>;
-
-  /**
-   * Initialize the provider (e.g., fetch dynamic models)
-   * @returns Promise resolving when initialization is complete
-   */
-  initialize?(): Promise<void>;
-
-  /**
-   * Check if this provider is available (CLI installed and accessible)
-   * @returns Promise resolving to true if available
-   */
-  isAvailable(): Promise<boolean>;
-
-  /**
-   * List available models for this provider
-   * @returns Array of model identifiers
-   */
-  listModels(): string[];
-
-  /**
-   * Get detailed model information
-   * @returns Array of model info objects
-   */
-  getModelInfo(): ModelInfo[];
-
-  /**
-   * Get the default model for a role
-   * @param role The role to get default model for
-   * @returns Default model ID or undefined
-   */
-  getDefaultModel(role: 'orchestrator' | 'coder' | 'reviewer'): string | undefined;
-
-  /**
-   * Classify an error from stderr output
-   * @param exitCode The process exit code
-   * @param stderr The stderr output
-   * @returns Classified error or null if not an error
-   */
-  classifyError(exitCode: number, stderr: string): ProviderError | null;
-
-  /**
-   * Classify a full invocation result, checking both stderr and stdout
-   * @param result The full invocation result
-   * @returns Classified error or null if successful
-   */
-  classifyResult(result: InvokeResult): ProviderError | null;
-
-  /**
-   * Get the CLI path for this provider
-   * @returns Path to CLI executable or undefined if using default
-   */
-  getCliPath(): string | undefined;
-
-  /**
-   * Set a custom CLI path
-   * @param path Path to CLI executable
-   */
-  setCliPath(path: string): void;
-
-  /**
-   * Get the default invocation template
-   * @returns Default template with {prompt_file} and {model} placeholders
-   */
-  getDefaultInvocationTemplate(): string;
-
-  /**
-   * Set a custom invocation template
-   * @param template Custom template with {prompt_file} and {model} placeholders
-   */
-  setInvocationTemplate(template: string): void;
-
-  /**
-   * Get the current invocation template
-   * @returns Current template (custom or default)
-   */
-  getInvocationTemplate(): string;
-}
-
-/**
- * Base abstract class for AI providers
- * Provides common functionality
- */
+// Re-export SessionNotFoundError is handled above via named export.
 export abstract class BaseAIProvider implements IAIProvider {
   abstract readonly name: string;
   abstract readonly displayName: string;
@@ -583,60 +363,113 @@ export abstract class BaseAIProvider implements IAIProvider {
   }
 
   /**
-   * Set up an isolated temporary home directory for a provider CLI.
-   * Copies/symlinks essential auth files from the real home to the isolated one.
+   * Set up an isolated home directory for a provider CLI.
    *
-   * @param providerDir The provider-specific config directory (e.g. '.claude', '.gemini')
-   * @param authFiles Array of critical auth/config filenames to preserve (e.g. ['config.json', 'state.json'])
-   * @param baseDir Optional pre-existing isolated home directory to use
-   * @param rootFiles Additional HOME-root files to symlink (e.g. ['.claude.json'])
-   * @returns Path to the isolated home directory
+   * For temp homes (baseDir not provided): mirrors the entire real home top-level
+   * into the isolated dir via symlinks, then replaces only `providerDir` with a real
+   * isolated directory containing auth-file symlinks. This gives the spawned process
+   * access to all user dotfiles, tools, configs, and credentials without needing an
+   * explicit allowlist, while keeping provider session state isolated between parallel
+   * invocations.
+   *
+   * For persistent homes (baseDir provided, e.g. Gemini's per-project home): only
+   * creates the provider dir + auth symlinks, plus a small set of essential files.
+   * We don't full-mirror into persistent homes because they live inside project dirs
+   * and should not be filled with real-home symlinks.
+   *
+   * @param providerDir Provider-specific config/state dir (e.g. '.claude', '.config/gcloud')
+   * @param authFiles Auth/config filenames to symlink into the isolated providerDir
+   * @param baseDir Optional pre-existing dir to use instead of creating a temp one
+   * @param rootFiles Extra HOME-root files to symlink for persistent homes (ignored for temp homes)
    */
   protected setupIsolatedHome(providerDir: string, authFiles: string[], baseDir?: string, rootFiles?: string[]): string {
     const uuid = randomUUID();
     const isolatedHome = baseDir ?? join(tmpdir(), `steroids-${this.name}-${uuid}`);
+    const realHome = homedir();
 
     try {
       if (!baseDir) {
         mkdirSync(isolatedHome, { recursive: true });
       }
 
-      const realProviderPath = join(homedir(), providerDir);
+      // ── Temp home: mirror the real home ──────────────────────────────────────
+      // Symlink every top-level real-home entry except the provider dir (which we
+      // create as a real isolated dir below). For nested provider dirs like
+      // '.config/gcloud', the parent ('.config') is excluded from the mirror and
+      // rebuilt with its own contents minus the specific subdir.
+      if (!baseDir) {
+        const topProviderDir = providerDir.split('/')[0];
+
+        try {
+          for (const entry of readdirSync(realHome)) {
+            if (entry === topProviderDir) continue; // handled separately below
+            const src = join(realHome, entry);
+            const dest = join(isolatedHome, entry);
+            if (!existsSync(dest)) {
+              try { symlinkSync(src, dest); } catch { /* best effort */ }
+            }
+          }
+        } catch { /* best effort — don't abort if real home listing fails */ }
+
+        // For nested paths (e.g. '.config/gcloud'): create the parent dir as a real
+        // dir and symlink everything from the real parent except the specific subdir.
+        const isNested = providerDir.includes('/');
+        if (isNested) {
+          const subDir = providerDir.slice(topProviderDir.length + 1);
+          const realParentPath = join(realHome, topProviderDir);
+          const isolatedParentPath = join(isolatedHome, topProviderDir);
+          mkdirSync(isolatedParentPath, { recursive: true });
+          if (existsSync(realParentPath)) {
+            try {
+              for (const entry of readdirSync(realParentPath)) {
+                if (entry === subDir) continue;
+                const src = join(realParentPath, entry);
+                const dest = join(isolatedParentPath, entry);
+                if (!existsSync(dest)) {
+                  try { symlinkSync(src, dest); } catch { /* best effort */ }
+                }
+              }
+            } catch { /* best effort */ }
+          }
+        }
+      }
+
+      // ── Create isolated provider dir with auth-file symlinks ─────────────────
+      const realProviderPath = join(realHome, providerDir);
       const isolatedProviderPath = join(isolatedHome, providerDir);
+      mkdirSync(isolatedProviderPath, { recursive: true });
 
       if (existsSync(realProviderPath)) {
-        mkdirSync(isolatedProviderPath, { recursive: true });
-
         for (const file of authFiles) {
           const src = join(realProviderPath, file);
           const dest = join(isolatedProviderPath, file);
-
           if (existsSync(src)) {
             try {
-              // Ensure parent directories exist for nested auth files (e.g. configurations/config_default)
               mkdirSync(dirname(dest), { recursive: true });
               symlinkSync(src, dest);
             } catch {
-              // Fallback to copy if symlink fails
-              mkdirSync(dirname(dest), { recursive: true });
-              writeFileSync(dest, readFileSync(src));
+              // Fallback to copy if symlink fails (e.g. cross-device)
+              try {
+                mkdirSync(dirname(dest), { recursive: true });
+                writeFileSync(dest, readFileSync(src));
+              } catch { /* best effort */ }
             }
           }
         }
       }
 
-      // Also symlink global git config, ssh keys, and any provider-specific root files
-      [...(rootFiles ?? []), '.gitconfig', '.ssh'].forEach(file => {
-        const src = join(homedir(), file);
-        const dest = join(isolatedHome, file);
-        if (existsSync(src)) {
-          try {
-            symlinkSync(src, dest);
-          } catch {
-            // Ignore failure for optional system files
+      // ── Persistent home: explicit essential symlinks ──────────────────────────
+      // The full-mirror doesn't apply to persistent homes, so add the minimum
+      // required files explicitly.
+      if (baseDir) {
+        [...(rootFiles ?? []), '.gitconfig', '.ssh'].forEach(file => {
+          const src = join(realHome, file);
+          const dest = join(isolatedHome, file);
+          if (existsSync(src) && !existsSync(dest)) {
+            try { symlinkSync(src, dest); } catch { /* best effort */ }
           }
-        }
-      });
+        });
+      }
 
     } catch (e) {
       console.warn(`Failed to set up isolated ${this.name} home: ${e}`);
