@@ -28,6 +28,18 @@ function hasProviderAndModel(value: unknown): value is Required<InheritedRoleCon
   return Boolean(role.provider && role.model);
 }
 
+/**
+ * Reverse-maps a saved provider back to its UI source provider.
+ * HF/Ollama models are saved with their runtime provider (e.g. 'claude') but
+ * must be displayed as 'hf' so the correct model dropdown is shown on re-open.
+ * Detection matches the CLI's isHFModel heuristic: contains '/' and not 'models/'.
+ */
+function resolveDisplayProvider(savedProvider: string, model: string): string {
+  const isHFModel = model.includes('/') && !model.startsWith('models/');
+  if (isHFModel && (savedProvider === 'claude' || savedProvider === 'opencode')) return 'hf';
+  return savedProvider;
+}
+
 export const AISetupModal: React.FC<AISetupModalProps> = ({
   onComplete,
   onClose,
@@ -88,15 +100,15 @@ export const AISetupModal: React.FC<AISetupModalProps> = ({
         }
       } else if (ai) {
         // Use project config or global config directly
-        if (ai.orchestrator?.provider) setOrchestrator({ provider: ai.orchestrator.provider, model: ai.orchestrator.model || '' });
-        if (ai.coder?.provider) setCoder({ provider: ai.coder.provider, model: ai.coder.model || '' });
+        if (ai.orchestrator?.provider) setOrchestrator({ provider: resolveDisplayProvider(ai.orchestrator.provider, ai.orchestrator.model || ''), model: ai.orchestrator.model || '' });
+        if (ai.coder?.provider) setCoder({ provider: resolveDisplayProvider(ai.coder.provider, ai.coder.model || ''), model: ai.coder.model || '' });
 
         if (ai.reviewers && Array.isArray(ai.reviewers) && ai.reviewers.length > 0) {
           setUseMultiReview(true);
-          setReviewers(ai.reviewers.map((r: any) => ({ provider: r.provider || '', model: r.model || '' })));
-          setReviewer({ provider: ai.reviewers[0].provider || '', model: ai.reviewers[0].model || '' });
+          setReviewers(ai.reviewers.map((r: any) => ({ provider: resolveDisplayProvider(r.provider || '', r.model || ''), model: r.model || '' })));
+          setReviewer({ provider: resolveDisplayProvider(ai.reviewers[0].provider || '', ai.reviewers[0].model || ''), model: ai.reviewers[0].model || '' });
         } else if (ai.reviewer?.provider) {
-          setReviewer({ provider: ai.reviewer.provider, model: ai.reviewer.model || '' });
+          setReviewer({ provider: resolveDisplayProvider(ai.reviewer.provider, ai.reviewer.model || ''), model: ai.reviewer.model || '' });
         }
       }
 
