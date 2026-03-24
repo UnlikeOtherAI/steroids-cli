@@ -90,7 +90,7 @@ async function invokeOrchestrator(
       (ctx) =>
         provider.invoke(prompt, {
           model: modelName,
-          timeout: 30_000,
+          timeout: 180_000,
           cwd: projectPath,
           promptFile,
           role,
