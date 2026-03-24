@@ -17,6 +17,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { spawnProxyDaemon, isProxyRunning, getProxyPort } from '../proxy/lifecycle.js';
+import { resolveHFToken } from '../proxy/hf-token.js';
 
 // Get CLI version from package.json (relative to dist/commands/)
 function getCLIVersion(): string {
@@ -35,6 +37,7 @@ const WEB_BUILD_STATE_PATH = join(homedir(), '.steroids', 'web-build-state.json'
 const REPO_URL = 'https://github.com/UnlikeOtherAI/steroids-cli.git';
 const API_PORT = 3501;
 const WEBUI_PORT = 3500;
+const PROXY_PORT = 3580;
 
 interface WebBuildState {
   webDir: string;
@@ -259,7 +262,7 @@ function installAndBuild(out: ReturnType<typeof createOutput>): void {
 /**
  * Launch API and WebUI as background processes
  */
-function launchProcesses(out: ReturnType<typeof createOutput>): void {
+async function launchProcesses(out: ReturnType<typeof createOutput>): Promise<void> {
   if (!existsSync(LOGS_DIR)) {
     mkdirSync(LOGS_DIR, { recursive: true });
   }
@@ -292,9 +295,20 @@ function launchProcesses(out: ReturnType<typeof createOutput>): void {
   });
   webUiProcess.unref();
 
+  // Start HF proxy if a token is available
+  let proxyLine = '';
+  const hfToken = resolveHFToken();
+  if (hfToken) {
+    const proxyPort = await spawnProxyDaemon({ hfToken });
+    if (proxyPort) {
+      proxyLine = `HF Proxy: http://127.0.0.1:${proxyPort}`;
+    }
+  }
+
   out.log('');
   out.log(`Web UI:  http://localhost:${WEBUI_PORT}`);
   out.log(`API:     http://localhost:${API_PORT}`);
+  if (proxyLine) out.log(proxyLine);
   out.log('');
   out.log(`Logs:    ${apiLogPath}`);
   out.log(`         ${webUiLogPath}`);
@@ -374,7 +388,7 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
           out.log('Could not verify or sync version. Launching with current code.');
         }
       }
-      launchProcesses(out);
+      await launchProcesses(out);
       break;
     }
 
@@ -409,14 +423,16 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
     case 'stop': {
       const apiRunning = isPortInUse(API_PORT);
       const webUiRunning = isPortInUse(WEBUI_PORT);
+      const proxyRunning = isPortInUse(PROXY_PORT);
 
-      if (!apiRunning && !webUiRunning) {
+      if (!apiRunning && !webUiRunning && !proxyRunning) {
         out.log('Web dashboard is not running.');
         return;
       }
 
       if (apiRunning) killPort(API_PORT);
       if (webUiRunning) killPort(WEBUI_PORT);
+      if (proxyRunning) killPort(PROXY_PORT);
       out.log('Web dashboard stopped.');
       break;
     }
@@ -424,11 +440,13 @@ export async function webCommand(args: string[], flags: GlobalFlags): Promise<vo
     case 'status': {
       const apiUp = isPortInUse(API_PORT);
       const webUiUp = isPortInUse(WEBUI_PORT);
+      const proxyUp = isProxyRunning();
       const installed = existsSync(join(WEB_DIR, '.git'));
 
       out.log(`Installed:  ${installed ? WEB_DIR : 'No (run "steroids web" to install)'}`);
       out.log(`API:        ${apiUp ? `Running on port ${API_PORT}` : 'Stopped'}`);
       out.log(`WebUI:      ${webUiUp ? `Running on port ${WEBUI_PORT}` : 'Stopped'}`);
+      out.log(`HF Proxy:   ${proxyUp ? `Running on port ${getProxyPort() ?? PROXY_PORT}` : 'Stopped'}`);
       break;
     }
 

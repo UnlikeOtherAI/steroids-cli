@@ -5,9 +5,10 @@
  * PID file at ~/.steroids/proxy.pid tracks the running instance.
  */
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, openSync, constants as fsConstants } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { createHFProxy } from './hf-proxy.js';
 import type http from 'node:http';
 
@@ -89,4 +90,46 @@ export async function ensureProxy(options: ProxyStartOptions): Promise<number> {
   }
   const { port } = await startProxy(options);
   return port;
+}
+
+/**
+ * Spawn the proxy as a detached background process that survives the parent exiting.
+ * Used by `steroids web` so the proxy stays alive alongside the dashboard.
+ * Returns the port the proxy is listening on, or null if it couldn't start.
+ */
+export async function spawnProxyDaemon(options: ProxyStartOptions): Promise<number | null> {
+  if (isProxyRunning()) {
+    return getProxyPort();
+  }
+
+  const port = options.port ?? DEFAULT_PORT;
+  const hfBaseUrl = options.hfBaseUrl ?? 'https://router.huggingface.co/v1';
+
+  // Resolve the daemon entry script path (sibling to this file in dist/)
+  const entryScript = join(__dirname, 'daemon-entry.js');
+  if (!existsSync(entryScript)) return null;
+
+  const logsDir = join(homedir(), '.steroids', 'logs');
+  if (!existsSync(logsDir)) mkdirSync(logsDir, { recursive: true });
+  const logFd = openSync(join(logsDir, 'proxy.log'), fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC);
+
+  const child = spawn('node', [entryScript], {
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
+    env: {
+      ...process.env,
+      HF_TOKEN: options.hfToken,
+      HF_BASE_URL: hfBaseUrl,
+      PROXY_PORT: String(port),
+    },
+  });
+  child.unref();
+
+  // Wait briefly for the PID file to appear (daemon writes it on listen)
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (isProxyRunning()) return getProxyPort();
+  }
+
+  return null;
 }
