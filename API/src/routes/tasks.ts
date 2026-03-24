@@ -662,13 +662,15 @@ router.get('/tasks/:taskId/timeline', async (req: Request, res: Response) => {
     started_at_ms: number;
     completed_at_ms: number | null;
     status: string;
+    exit_code: number | null;
+    error: string | null;
   };
 
   let invocations: InvocationTimelineRow[] = [];
   try {
     invocations = db
       .prepare(
-        `SELECT id, role, provider, model, started_at_ms, completed_at_ms, status
+        `SELECT id, role, provider, model, started_at_ms, completed_at_ms, status, exit_code, error
          FROM task_invocations
          WHERE task_id = ?
          ORDER BY started_at_ms ASC`
@@ -719,8 +721,13 @@ router.get('/tasks/:taskId/timeline', async (req: Request, res: Response) => {
         ts: inv.completed_at_ms,
         type: 'invocation.completed',
         invocationId: inv.id,
+        role: inv.role,
+        provider: inv.provider,
+        model: inv.model,
         success: inv.status === 'completed',
         duration: inv.completed_at_ms - inv.started_at_ms,
+        exitCode: inv.exit_code,
+        error: inv.error || undefined,
       });
     }
   }

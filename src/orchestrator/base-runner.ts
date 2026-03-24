@@ -36,9 +36,14 @@ export abstract class BaseRunner {
     const provider = registry.get(providerName);
 
     if (!(await provider.isAvailable())) {
-      throw new Error(
-        `Provider '${providerName}' is not available. Ensure the CLI is installed and in PATH.`
+      // Log a failed invocation so the error is visible in the task UI
+      const errorMsg = `Provider '${providerName}' is not available. Ensure the CLI is installed and in PATH.`;
+      await logInvocation(
+        '',
+        async () => ({ success: false, exitCode: 1, stdout: '', stderr: errorMsg, duration: 0, timedOut: false }),
+        { role, provider: providerName, model: modelName, taskId, projectPath, runnerId }
       );
+      throw new Error(errorMsg);
     }
 
     const promptContent = readFileSync(promptFile, 'utf-8');
