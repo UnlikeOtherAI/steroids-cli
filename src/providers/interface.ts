@@ -553,7 +553,18 @@ export abstract class BaseAIProvider implements IAIProvider {
       env.NODE_OPTIONS = `${existing} --max-old-space-size=1536`.trim();
     }
 
-    return { ...env, ...overrides };
+    // HF proxy: if caller signals an HF model, inject proxy URL into env
+    // so the CLI connects to the local proxy instead of its native API.
+    if (overrides?.STEROIDS_HF_PROXY_URL) {
+      env.OPENAI_BASE_URL = overrides.STEROIDS_HF_PROXY_URL;
+      env.OPENAI_API_KEY = 'hf-proxy';
+      env.ANTHROPIC_BASE_URL = overrides.STEROIDS_HF_PROXY_URL;
+      env.ANTHROPIC_API_KEY = 'hf-proxy';
+    }
+
+    // Apply caller overrides (excluding internal signal vars)
+    const { STEROIDS_HF_PROXY_URL: _hfSignal, ...cleanOverrides } = overrides ?? {};
+    return { ...env, ...cleanOverrides };
   }
 
   /**

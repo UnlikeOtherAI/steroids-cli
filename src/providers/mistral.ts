@@ -19,6 +19,8 @@ import {
   type TokenUsage,
   SessionNotFoundError,
 } from './interface.js';
+import { isHFModel, resolveHFToken } from '../proxy/hf-token.js';
+import { ensureProxy } from '../proxy/lifecycle.js';
 import { FALLBACK_MODELS, fetchMistralModelList } from './mistral-models.js';
 
 /**
@@ -175,7 +177,7 @@ export class MistralProvider extends BaseAIProvider {
   /**
    * Invoke Vibe CLI with a prompt file using the invocation template
    */
-  private invokeWithFile(
+  private async invokeWithFile(
     promptFile: string,
     model: string,
     timeout: number,
@@ -184,6 +186,18 @@ export class MistralProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
+    // HF proxy: if model is a HuggingFace model, ensure proxy is running
+    let proxyOverrides: Record<string, string> = {};
+    if (isHFModel(model)) {
+      const hfToken = resolveHFToken();
+      if (hfToken) {
+        try {
+          const proxyPort = await ensureProxy({ hfToken });
+          proxyOverrides = { STEROIDS_HF_PROXY_URL: `http://127.0.0.1:${proxyPort}` };
+        } catch { /* proxy unavailable — continue without it */ }
+      }
+    }
+
     // Set up isolated VIBE_HOME.
     // setupIsolatedHome('.vibe', ...) puts auth files at isolatedHome/.vibe/
     // VIBE_HOME must point at that .vibe subdirectory so Vibe finds config.toml there.
@@ -203,6 +217,7 @@ export class MistralProvider extends BaseAIProvider {
       const env = this.getSanitizedCliEnv({
         VIBE_HOME: vibeHome,
         VIBE_ACTIVE_MODEL: model,
+        ...proxyOverrides,
         VIBE_MODELS: JSON.stringify([
           {
             name: model,

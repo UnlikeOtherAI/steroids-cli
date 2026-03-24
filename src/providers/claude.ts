@@ -15,6 +15,8 @@ import {
   type TokenUsage,
   SessionNotFoundError,
 } from './interface.js';
+import { isHFModel, resolveHFToken } from '../proxy/hf-token.js';
+import { ensureProxy } from '../proxy/lifecycle.js';
 
 /**
  * Available Claude models with pinned version identifiers.
@@ -209,7 +211,7 @@ export class ClaudeProvider extends BaseAIProvider {
   /**
    * Invoke Claude CLI with a prompt file using the invocation template
    */
-  private invokeWithFile(
+  private async invokeWithFile(
     promptFile: string,
     model: string,
     timeout: number,
@@ -218,6 +220,18 @@ export class ClaudeProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
+    // HF proxy: if model is a HuggingFace model, ensure proxy is running
+    let proxyOverrides: Record<string, string> = {};
+    if (isHFModel(model)) {
+      const hfToken = resolveHFToken();
+      if (hfToken) {
+        try {
+          const proxyPort = await ensureProxy({ hfToken });
+          proxyOverrides = { STEROIDS_HF_PROXY_URL: `http://127.0.0.1:${proxyPort}` };
+        } catch { /* proxy unavailable — continue without it */ }
+      }
+    }
+
     // Set up isolated HOME
     // ~/.claude.json lives at HOME root (not inside ~/.claude/) and holds onboarding/machine state.
     // Without it, Claude Code shows a toolchain/onboarding prompt on every invocation, which hangs
@@ -245,6 +259,7 @@ export class ClaudeProvider extends BaseAIProvider {
         cwd,
         env: this.getSanitizedCliEnv({
           HOME: isolatedHome,
+          ...proxyOverrides,
         }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });

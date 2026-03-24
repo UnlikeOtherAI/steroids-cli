@@ -15,6 +15,8 @@ import {
   type TokenUsage,
   SessionNotFoundError,
 } from './interface.js';
+import { isHFModel, resolveHFToken } from '../proxy/hf-token.js';
+import { ensureProxy } from '../proxy/lifecycle.js';
 
 /**
  * Fallback Codex models when ~/.codex/models_cache.json is unavailable
@@ -251,7 +253,7 @@ export class CodexProvider extends BaseAIProvider {
   /**
    * Invoke Codex CLI with a prompt file using the invocation template
    */
-  private invokeWithFile(
+  private async invokeWithFile(
     promptFile: string,
     model: string,
     timeout: number,
@@ -260,6 +262,18 @@ export class CodexProvider extends BaseAIProvider {
     onActivity?: InvokeOptions['onActivity'],
     resumeSessionId?: string
   ): Promise<InvokeResult> {
+    // HF proxy: if model is a HuggingFace model, ensure proxy is running
+    let proxyOverrides: Record<string, string> = {};
+    if (isHFModel(model)) {
+      const hfToken = resolveHFToken();
+      if (hfToken) {
+        try {
+          const proxyPort = await ensureProxy({ hfToken });
+          proxyOverrides = { STEROIDS_HF_PROXY_URL: `http://127.0.0.1:${proxyPort}` };
+        } catch { /* proxy unavailable — continue without it */ }
+      }
+    }
+
     // Use persistent home to preserve session/thread state across invocations
     const { home: isolatedHome, isPersistent } = this.getPersistentHome(cwd);
 
@@ -285,6 +299,7 @@ export class CodexProvider extends BaseAIProvider {
         cwd,
         env: this.getSanitizedCliEnv({
           HOME: isolatedHome,
+          ...proxyOverrides,
         }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
