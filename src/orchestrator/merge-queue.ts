@@ -392,7 +392,20 @@ async function handleRebasePhase(
 ): Promise<void> {
   const { handleRebaseCoder, handleRebaseReview } = await import('./merge-queue-rebase.js');
   const targetBranch = config.git?.branch ?? 'main';
-  const remoteUrl = resolveRemoteUrl(sourceProjectPath);
+
+  // Look up the existing slot's remote_url that was stored by handleMergeAttempt.
+  // This is critical when the runner's CWD is a worktree from a different repo —
+  // calling resolveRemoteUrl(sourceProjectPath) would return the wrong git remote.
+  const gdb = openGlobalDatabase();
+  const existingSlot = gdb.db
+    .prepare(
+      `SELECT remote_url, slot_path FROM workspace_pool_slots
+       WHERE task_id = ? AND remote_url IS NOT NULL AND remote_url != ''
+       ORDER BY id DESC LIMIT 1`
+    )
+    .get(task.id) as { remote_url: string; slot_path: string } | undefined;
+
+  const remoteUrl = existingSlot?.remote_url ?? resolveRemoteUrl(sourceProjectPath);
 
   if (!remoteUrl) {
     // Local-only — no rebase needed, mark completed
@@ -401,7 +414,6 @@ async function handleRebasePhase(
   }
 
   const projectId = getProjectHash(sourceProjectPath);
-  const gdb = openGlobalDatabase();
   let slotId: number | undefined;
 
   try {
