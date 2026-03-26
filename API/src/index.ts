@@ -52,6 +52,7 @@ import modelUsageRouter from './routes/model-usage.js';
 import huggingFaceRouter from './routes/huggingface.js';
 import ollamaRouter from './routes/ollama.js';
 import monitorRouter from './routes/monitor.js';
+import selfHealRouter from './routes/self-heal.js';
 
 const PORT = process.env.PORT || 3501;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -114,6 +115,7 @@ export function createApp(): express.Express {
   app.use('/api', huggingFaceRouter);
   app.use('/api', ollamaRouter);
   app.use('/api', monitorRouter);
+  app.use('/api', selfHealRouter);
   app.use('/api/credit-alerts', creditAlertRoutes);
 
   // Health check
@@ -186,6 +188,7 @@ export function createApp(): express.Express {
         'POST /api/monitor/runs/clear',
         'POST /api/monitor/scan',
         'POST /api/monitor/run',
+        'POST /api/self-heal/reload',
         'GET /api/credit-alerts?project=<path>',
         'POST /api/credit-alerts/<id>/dismiss',
         'POST /api/credit-alerts/<id>/retry',

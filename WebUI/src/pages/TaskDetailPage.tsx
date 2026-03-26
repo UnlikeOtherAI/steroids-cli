@@ -9,6 +9,7 @@ import { PageLayout } from '../components/templates/PageLayout';
 import { AuditLogRow, DisputePanel, formatDuration, formatTimestamp, InvocationsPanel } from './TaskDetailComponents';
 import { FirstResponderPanel } from './FirstResponderPanel';
 import { LiveInvocationActivityPanel, InvocationTimelineEventRow, StreamState } from './TaskLiveTimelineComponents';
+import { useReloadSelfHeal } from '../hooks/useReloadSelfHeal';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   pending: 'Pending',
@@ -45,6 +46,7 @@ export const TaskDetailPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const projectPath = searchParams.get('project');
+  useReloadSelfHeal({ source: 'task_page', projectPath });
 
   const [task, setTask] = useState<TaskDetails | null>(null);
   const [loading, setLoading] = useState(true);

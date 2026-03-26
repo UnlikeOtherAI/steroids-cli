@@ -218,6 +218,7 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 
 Steroids ships with a full web dashboard for monitoring tasks, runners, and project health.
 The monitor supports four response modes: `monitor_only`, `triage_only`, `fix_and_monitor`, and `custom`.
+Dashboard reloads now trigger an explicit background self-heal sweep for stale runners and orphaned tasks, so obvious abandoned state is rechecked without waiting for a manual recovery command.
 
 On first run, `steroids web` clones the dashboard repository to `~/.steroids/webui/` and installs everything automatically. On subsequent runs, it pulls the latest version before launching — so you're always up to date.
 

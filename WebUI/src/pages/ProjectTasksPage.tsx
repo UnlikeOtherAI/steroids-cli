@@ -4,6 +4,7 @@ import { TaskListItem, TaskStatus, Section } from '../types';
 import { tasksApi, sectionsApi } from '../services/api';
 import { Badge } from '../components/atoms/Badge';
 import { PageLayout } from '../components/templates/PageLayout';
+import { useReloadSelfHeal } from '../hooks/useReloadSelfHeal';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   pending: 'Pending',
@@ -61,6 +62,7 @@ export const ProjectTasksPage: React.FC = () => {
   const hoursFilter = hoursParam ? parseInt(hoursParam, 10) : null;
   const validHoursFilter = hoursFilter && Number.isFinite(hoursFilter) && hoursFilter > 0 ? hoursFilter : null;
   const decodedPath = projectPath ? decodeURIComponent(projectPath) : '';
+  useReloadSelfHeal({ source: 'project_tasks_page', projectPath: decodedPath || null });
 
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});

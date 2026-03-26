@@ -23,6 +23,7 @@ import {
   openGlobalDatabase,
   type GlobalDatabaseConnection,
 } from '../runners/global-db-connection.js';
+import { findAbandonedRunners } from '../runners/abandoned-runners.js';
 import { cronStatus } from '../runners/cron.js';
 import { getProjectHash } from '../parallel/clone.js';
 import { getProjectProviderBackoff } from '../runners/global-db-backoffs.js';
@@ -389,6 +390,43 @@ export async function runScan(): Promise<ScanResult> {
         // ignore close errors
       }
     }
+  }
+
+  const knownRunnerIds = new Set(anomalies.flatMap((anomaly) => (
+    anomaly.runnerId ? [anomaly.runnerId] : []
+  )));
+  for (const runner of findAbandonedRunners(globalDb)) {
+    if (knownRunnerIds.has(runner.id)) {
+      continue;
+    }
+
+    const projectPath = runner.project_path ?? runner.raw_project_path ?? '[unresolved-runner]';
+    const projectName = runner.project_resolved
+      ? basename(projectPath)
+      : 'Unresolved Runner';
+    const anomalyType: Anomaly['type'] =
+      runner.reason === 'stale_heartbeat' && runner.process_alive
+        ? 'zombie_runner'
+        : 'dead_runner';
+
+    anomalies.push({
+      type: anomalyType,
+      severity: 'critical',
+      projectPath,
+      projectName,
+      runnerId: runner.id,
+      taskId: runner.current_task_id ?? undefined,
+      details: runner.project_resolved
+        ? `Abandoned runner ${runner.id} (${runner.status}) for ${projectName}`
+        : `Abandoned unresolved runner ${runner.id} from ${runner.raw_project_path ?? 'unknown path'}`,
+      context: {
+        pid: runner.pid,
+        rawProjectPath: runner.raw_project_path,
+        parallelSessionId: runner.parallel_session_id,
+        projectResolved: runner.project_resolved,
+        reason: runner.reason,
+      },
+    });
   }
 
   // M9: Filter out suppressed anomalies

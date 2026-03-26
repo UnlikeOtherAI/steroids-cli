@@ -75,7 +75,9 @@ const mockRemoveLock = jest.fn();
 // Mock node:child_process
 jest.unstable_mockModule('node:child_process', () => ({
   spawn: mockSpawn,
+  execFile: jest.fn(),
   execFileSync: jest.fn(),
+  execSync: jest.fn(),
 }));
 
 // Mock global-db
@@ -110,6 +112,7 @@ jest.unstable_mockModule('../src/runners/heartbeat.js', () => ({
 jest.unstable_mockModule('../src/runners/lock.js', () => ({
   checkLockStatus: mockCheckLockStatus,
   removeLock: mockRemoveLock,
+  isProcessAlive: jest.fn(),
 }));
 
 // Create mock database
@@ -170,17 +173,29 @@ describe('wakeup() - basic functionality', () => {
   });
 
   it('should clean up stale runners before checking projects', async () => {
-    const staleRunner = {
-      id: 'stale-runner-id',
-      pid: 99999,
-      status: 'running',
-    };
-
-    mockFindStaleRunners.mockReturnValue([staleRunner]);
     mockGetRegisteredProjects.mockReturnValue([]);
 
     const mockRun = jest.fn();
-    const mockPrepare = jest.fn().mockReturnValue({ run: mockRun });
+    const mockPrepare = jest.fn().mockImplementation((query: unknown) => {
+      const sql = String(query);
+      if (sql.startsWith('SELECT') && sql.includes('FROM runners')) {
+        return {
+          all: jest.fn().mockReturnValue([{
+            id: 'stale-runner-id',
+            status: 'running',
+            pid: null,
+            heartbeat_at: '2026-03-20 14:00:00',
+            current_task_id: null,
+            project_path: '/tmp/project',
+            raw_project_path: '/tmp/project',
+            parallel_session_id: null,
+            project_resolved: 0,
+            stale_heartbeat: 1,
+          }]),
+        };
+      }
+      return { run: mockRun, all: jest.fn().mockReturnValue([]) };
+    });
     mockGlobalDb.prepare = mockPrepare;
 
     const results = await wakeup({ quiet: true });
@@ -200,7 +215,7 @@ describe('wakeup() - basic functionality', () => {
 
     mockGlobalDb.prepare.mockReturnValue({
       get: jest.fn().mockReturnValue(undefined),
-      all: jest.fn(),
+      all: jest.fn().mockReturnValue([]),
       run: jest.fn(),
     });
 
@@ -267,7 +282,7 @@ describe('wakeup() - basic functionality', () => {
 
     mockGlobalDb.prepare.mockReturnValue({
       get: jest.fn().mockReturnValue(undefined),
-      all: jest.fn(),
+      all: jest.fn().mockReturnValue([]),
       run: jest.fn(),
     });
 

@@ -2,10 +2,7 @@ import { existsSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { checkLockStatus, removeLock } from './lock.js';
-import { findStaleRunners } from './heartbeat.js';
-import { isProcessAlive } from './lock.js';
-import { openDatabase } from '../database/connection.js';
-import { killProcess } from './wakeup-runner.js';
+import { cleanupAbandonedRunners } from './abandoned-runners.js';
 import type { WakeupLogger, WakeupResult } from './wakeup-types.js';
 import { cleanupStaleRemoteTaskBranches } from '../workspace/remote-branch-cleanup.js';
 
@@ -13,109 +10,6 @@ interface GlobalMaintenanceOptions {
   globalDb: any;
   dryRun: boolean;
   log: WakeupLogger;
-}
-
-function cleanupStaleRunnerTaskState(runner: {
-  current_task_id?: string | null;
-  project_path?: string | null;
-}): void {
-  if (!runner.current_task_id || !runner.project_path) {
-    return;
-  }
-
-  try {
-    const { db: projectDb, close: closeProjectDb } = openDatabase(runner.project_path);
-    try {
-      const nowMs = Date.now();
-      projectDb.prepare(
-        `UPDATE task_invocations
-         SET status = 'failed', success = 0, timed_out = 0, exit_code = 1,
-             completed_at_ms = ?, duration_ms = ?,
-             error = COALESCE(error, 'Runner process died (stale heartbeat).')
-         WHERE task_id = ? AND status = 'running'`
-      ).run(nowMs, 0, runner.current_task_id);
-      projectDb.prepare(
-        `UPDATE tasks SET status = 'pending', updated_at = datetime('now')
-         WHERE id = ? AND status = 'in_progress'`
-      ).run(runner.current_task_id);
-      projectDb.prepare(
-        `DELETE FROM task_locks WHERE task_id = ?`
-      ).run(runner.current_task_id);
-    } finally {
-      closeProjectDb();
-    }
-  } catch {
-    // Project DB errors must not block runner row cleanup.
-  }
-}
-
-function cleanupStaleRunners(globalDb: any, dryRun: boolean, log: WakeupLogger): WakeupResult[] {
-  const results: WakeupResult[] = [];
-
-  try {
-    const staleRunners = findStaleRunners(globalDb);
-    const deadRunners = globalDb.prepare(
-      `SELECT r.id, r.pid, r.heartbeat_at, r.current_task_id,
-              COALESCE(ps.project_path, r.project_path) AS project_path,
-              r.parallel_session_id
-       FROM runners r
-       LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
-       WHERE r.pid IS NOT NULL`
-    ).all() as Array<{
-      id: string;
-      pid: number | null;
-      heartbeat_at: string;
-      current_task_id: string | null;
-      project_path: string | null;
-      parallel_session_id: string | null;
-    }>;
-
-    const abandonedById = new Map<string, typeof deadRunners[number]>();
-    for (const runner of staleRunners) {
-      abandonedById.set(runner.id, runner);
-    }
-    for (const runner of deadRunners) {
-      if (runner.pid !== null && isProcessAlive(runner.pid)) {
-        continue;
-      }
-      abandonedById.set(runner.id, runner);
-    }
-
-    const abandonedRunners = [...abandonedById.values()];
-    if (abandonedRunners.length === 0) {
-      return results;
-    }
-
-    log(`Found ${abandonedRunners.length} abandoned runner(s), cleaning up...`);
-
-    if (!dryRun) {
-      for (const runner of abandonedRunners) {
-        cleanupStaleRunnerTaskState(runner);
-
-        if (runner.pid && isProcessAlive(runner.pid)) {
-          killProcess(runner.pid);
-        }
-
-        globalDb.prepare(
-          `UPDATE workstreams
-           SET runner_id = NULL,
-               lease_expires_at = datetime('now')
-           WHERE runner_id = ?`
-        ).run(runner.id);
-        globalDb.prepare('DELETE FROM runners WHERE id = ?').run(runner.id);
-      }
-    }
-
-    results.push({
-      action: 'cleaned',
-      reason: `Cleaned ${abandonedRunners.length} abandoned runner(s)`,
-      staleRunners: abandonedRunners.length,
-    });
-  } catch {
-    // Ignore global DB issues; wakeup will still attempt per-project checks.
-  }
-
-  return results;
 }
 
 function releaseExpiredLeases(globalDb: any, log: WakeupLogger): void {
@@ -379,7 +273,7 @@ export async function performWakeupGlobalMaintenance(
   options: GlobalMaintenanceOptions
 ): Promise<WakeupResult[]> {
   const { globalDb, dryRun, log } = options;
-  const results = cleanupStaleRunners(globalDb, dryRun, log);
+  const results = cleanupAbandonedRunners(globalDb, { dryRun, log });
 
   releaseExpiredLeases(globalDb, log);
   await reconcileStaleWorkspaces(globalDb, log);

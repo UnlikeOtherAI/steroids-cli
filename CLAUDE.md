@@ -8,6 +8,7 @@
 ## Debugging Protocol
 - **Always check logs first** before using browser automation or code analysis. Look at server logs (`~/.steroids/logs/api.log`, `~/.steroids/logs/webui.log`), runner logs (`~/.steroids/runners/logs/`), and browser console errors before diving into source code.
 - **Never manually trigger recovery.** Do not run `steroids monitor run`, `steroids runners wakeup`, reset tasks, or invoke any other recovery command to work around a bug. Fix the code so the system self-heals, then let the user restart and verify.
+- **Monitor/recovery fixes require two test layers.** Any monitor, runner-health, recovery, or orphan-detection fix must add both targeted unit tests and a mock-style integration test that exercises the real DB shape and trigger path.
 
 ## How to Run Parallel Adversarial Reviews
 

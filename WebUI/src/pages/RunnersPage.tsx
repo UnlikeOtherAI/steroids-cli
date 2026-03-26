@@ -4,6 +4,7 @@ import { runnersApi, tasksApi, ApiError } from '../services/api';
 import { Runner, TaskDetails } from '../types';
 import { Badge } from '../components/atoms/Badge';
 import { Button } from '../components/atoms/Button';
+import { useReloadSelfHeal } from '../hooks/useReloadSelfHeal';
 
 function getStatusBadgeVariant(status: string) {
   const s = status.toLowerCase();
@@ -43,6 +44,7 @@ function stripGuidPrefix(title: string): string {
 
 export const RunnersPage: React.FC = () => {
   const navigate = useNavigate();
+  useReloadSelfHeal({ source: 'runners_page' });
   const [runners, setRunners] = useState<Runner[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
