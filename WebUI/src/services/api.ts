@@ -530,6 +530,12 @@ export interface MonitorAgentConfig {
   model: string;
 }
 
+export type MonitorResponseMode =
+  | 'monitor_only'
+  | 'triage_only'
+  | 'fix_and_monitor'
+  | 'custom';
+
 export interface EscalationRules {
   min_severity: 'info' | 'warning' | 'critical';
 }
@@ -539,6 +545,8 @@ export interface MonitorConfig {
   interval_seconds: number;
   first_responder_agents: MonitorAgentConfig[];
   response_preset: string;
+  canonical_response_mode: MonitorResponseMode;
+  response_preset_deprecated: boolean;
   custom_prompt: string | null;
   escalation_rules: EscalationRules;
   first_responder_timeout_seconds: number;
@@ -613,14 +621,14 @@ export const monitorApi = {
     return response.scan;
   },
 
-  async triggerRun(options?: { preset?: string; forceDispatch?: boolean }): Promise<{ result: { outcome: string; runId?: number; anomalyCount: number } }> {
+  async triggerRun(options?: { preset?: MonitorResponseMode; forceDispatch?: boolean }): Promise<{ result: { outcome: string; runId?: number; anomalyCount: number } }> {
     return fetchJson('/api/monitor/run', {
       method: 'POST',
       body: options ? JSON.stringify(options) : undefined,
     });
   },
 
-  async investigate(runId: number, preset?: string): Promise<{ success: boolean; run_id: number; status: string }> {
+  async investigate(runId: number, preset?: MonitorResponseMode): Promise<{ success: boolean; run_id: number; status: string }> {
     return fetchJson(`/api/monitor/runs/${runId}/investigate`, {
       method: 'POST',
       body: JSON.stringify(preset ? { preset } : {}),

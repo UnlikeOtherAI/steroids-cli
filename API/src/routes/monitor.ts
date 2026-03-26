@@ -4,38 +4,20 @@
  */
 
 import { Router, Request, Response } from 'express';
+import {
+  getCanonicalResponseMode,
+  requiresManualInvestigationOverride,
+  validateResponsePreset,
+} from '../../../src/monitor/response-mode.js';
 import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
+import {
+  formatRunRow,
+  type MonitorConfigRow,
+  type MonitorRunRow,
+  safeJsonParse,
+} from './monitor-shared.js';
 
 const router = Router();
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface MonitorConfigRow {
-  id: number;
-  enabled: number;
-  interval_seconds: number;
-  first_responder_agents: string;
-  response_preset: string;
-  custom_prompt: string | null;
-  escalation_rules: string;
-  first_responder_timeout_seconds: number;
-  updated_at: number;
-}
-
-interface MonitorRunRow {
-  id: number;
-  started_at: number;
-  completed_at: number | null;
-  outcome: string;
-  scan_results: string | null;
-  escalation_reason: string | null;
-  first_responder_needed: number;
-  first_responder_agent: string | null;
-  first_responder_actions: string | null;
-  first_responder_report: string | null;
-  action_results: string | null;
-  error: string | null;
-}
 
 // ── Config endpoints ─────────────────────────────────────────────────────────
 
@@ -52,10 +34,12 @@ router.get('/monitor/config', (_req: Request, res: Response) => {
       config: {
         enabled: Boolean(row.enabled),
         interval_seconds: row.interval_seconds,
-        first_responder_agents: safeJsonParse(row.first_responder_agents, []),
+        first_responder_agents: safeJsonParse<unknown[]>(row.first_responder_agents, []),
         response_preset: row.response_preset,
+        canonical_response_mode: getCanonicalResponseMode(row.response_preset),
+        response_preset_deprecated: row.response_preset !== getCanonicalResponseMode(row.response_preset),
         custom_prompt: row.custom_prompt,
-        escalation_rules: safeJsonParse(row.escalation_rules, { min_severity: 'critical' }),
+        escalation_rules: safeJsonParse<Record<string, unknown>>(row.escalation_rules, { min_severity: 'critical' }),
         first_responder_timeout_seconds: row.first_responder_timeout_seconds,
         updated_at: row.updated_at,
       },
@@ -84,6 +68,20 @@ router.put('/monitor/config', (req: Request, res: Response) => {
 
   const { db, close } = openGlobalDatabase();
   try {
+    const existing = db.prepare('SELECT * FROM monitor_config WHERE id = 1').get() as MonitorConfigRow | undefined;
+    if (!existing) {
+      res.status(500).json({ success: false, error: 'Monitor config row not found' });
+      return;
+    }
+
+    const nextPreset = response_preset !== undefined ? response_preset : existing.response_preset;
+    const nextCustomPrompt = custom_prompt !== undefined ? (custom_prompt === null ? null : String(custom_prompt)) : existing.custom_prompt;
+    const validationError = validateResponsePreset(nextPreset, nextCustomPrompt);
+    if (validationError) {
+      res.status(400).json({ success: false, error: validationError });
+      return;
+    }
+
     const sets: string[] = [];
     const params: Array<string | number | null> = [];
 
@@ -105,7 +103,7 @@ router.put('/monitor/config', (req: Request, res: Response) => {
     }
     if (custom_prompt !== undefined) {
       sets.push('custom_prompt = ?');
-      params.push(custom_prompt === null ? null : String(custom_prompt));
+      params.push(nextCustomPrompt);
     }
     if (escalation_rules !== undefined) {
       sets.push('escalation_rules = ?');
@@ -231,6 +229,19 @@ router.post('/monitor/run', async (req: Request, res: Response) => {
   // Idempotency: reject if first responder already in progress
   const { db, close } = openGlobalDatabase();
   try {
+    const config = db.prepare('SELECT * FROM monitor_config WHERE id = 1').get() as MonitorConfigRow | undefined;
+    if (!config) {
+      res.status(500).json({ success: false, error: 'Monitor config row not found' });
+      close();
+      return;
+    }
+    const validationError = validateResponsePreset(preset ?? config?.response_preset, config?.custom_prompt ?? null);
+    if (validationError) {
+      res.status(400).json({ success: false, error: validationError });
+      close();
+      return;
+    }
+
     const active = db
       .prepare("SELECT id FROM monitor_runs WHERE outcome = 'first_responder_dispatched'")
       .get() as { id: number } | undefined;
@@ -269,9 +280,29 @@ router.post('/monitor/runs/:id/investigate', async (req: Request, res: Response)
     const row = db
       .prepare('SELECT * FROM monitor_runs WHERE id = ?')
       .get(runId) as MonitorRunRow | undefined;
+    const config = db.prepare('SELECT * FROM monitor_config WHERE id = 1').get() as MonitorConfigRow | undefined;
 
     if (!row) {
       res.status(404).json({ success: false, error: 'Run not found' });
+      close();
+      return;
+    }
+    if (!config) {
+      res.status(500).json({ success: false, error: 'Monitor config row not found' });
+      close();
+      return;
+    }
+    if (!preset && requiresManualInvestigationOverride(config.response_preset)) {
+      res.status(400).json({
+        success: false,
+        error: 'Manual investigation from monitor_only requires an explicit preset override',
+      });
+      close();
+      return;
+    }
+    const validationError = validateResponsePreset(preset ?? config.response_preset, config.custom_prompt);
+    if (validationError) {
+      res.status(400).json({ success: false, error: validationError });
       close();
       return;
     }
@@ -332,35 +363,6 @@ router.post('/monitor/runs/:id/investigate', async (req: Request, res: Response)
     });
   }
 });
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function safeJsonParse(str: string | null, fallback: unknown): unknown {
-  if (!str) return fallback;
-  try {
-    return JSON.parse(str);
-  } catch {
-    return fallback;
-  }
-}
-
-function formatRunRow(row: MonitorRunRow) {
-  return {
-    id: row.id,
-    started_at: row.started_at,
-    completed_at: row.completed_at,
-    outcome: row.outcome,
-    scan_results: safeJsonParse(row.scan_results, null),
-    escalation_reason: row.escalation_reason,
-    first_responder_needed: Boolean(row.first_responder_needed),
-    first_responder_agent: row.first_responder_agent,
-    first_responder_actions: safeJsonParse(row.first_responder_actions, null),
-    first_responder_report: row.first_responder_report,
-    action_results: safeJsonParse(row.action_results, null),
-    error: row.error,
-    duration_ms: row.completed_at ? row.completed_at - row.started_at : null,
-  };
-}
 
 // ── GitHub integration ────────────────────────────────────────────────────────
 

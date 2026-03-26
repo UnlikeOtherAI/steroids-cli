@@ -7,12 +7,17 @@ import {
   ExclamationTriangleIcon,
   CheckCircleIcon,
   XCircleIcon,
-  MagnifyingGlassIcon,
   ClockIcon,
+  MagnifyingGlassIcon,
   PlayIcon,
   WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
-import { monitorApi, MonitorRun, MonitorAnomaly } from '../services/api';
+import {
+  monitorApi,
+  MonitorRun,
+  MonitorAnomaly,
+  MonitorResponseMode,
+} from '../services/api';
 
 function formatEpochMs(ms: number): string {
   return new Date(ms).toLocaleString();
@@ -98,7 +103,7 @@ export const MonitorRunDetailPage: React.FC = () => {
     };
   }, [run?.outcome, fetchRun]);
 
-  const handleDispatch = async (preset?: string) => {
+  const handleDispatch = async (preset?: MonitorResponseMode) => {
     if (!run) return;
     setInvestigating(true);
     setError(null);
@@ -217,7 +222,7 @@ export const MonitorRunDetailPage: React.FC = () => {
       {canDispatch && (
         <div className="mb-6 flex items-center gap-3">
           <button
-            onClick={() => handleDispatch()}
+            onClick={() => handleDispatch('triage_only')}
             disabled={investigating}
             className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-accent text-white hover:bg-accent/90 font-medium transition-colors disabled:opacity-50"
           >
@@ -226,7 +231,7 @@ export const MonitorRunDetailPage: React.FC = () => {
             ) : (
               <PlayIcon className="w-5 h-5" />
             )}
-            {investigating ? 'Dispatching...' : 'Dispatch First Responder'}
+            {investigating ? 'Dispatching...' : 'Triage Issue'}
           </button>
           <button
             onClick={() => handleDispatch('fix_and_monitor')}
@@ -255,11 +260,11 @@ export const MonitorRunDetailPage: React.FC = () => {
             {investigating ? 'Dispatching...' : 'Try to Fix'}
           </button>
           <button
-            onClick={() => handleDispatch('stop_on_error')}
+            onClick={() => handleDispatch('triage_only')}
             disabled={investigating}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-red-300 text-red-700 hover:bg-red-50 font-medium transition-colors disabled:opacity-50"
           >
-            Stop All Runners
+            Triage Again
           </button>
         </div>
       )}

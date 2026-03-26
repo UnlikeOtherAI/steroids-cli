@@ -4,6 +4,11 @@
 
 import { parseArgs } from 'node:util';
 import type { GlobalFlags } from '../cli/flags.js';
+import {
+  requiresManualInvestigationOverride,
+  resolveStoredMonitorResponsePreset,
+  validateResponsePreset,
+} from '../monitor/response-mode.js';
 import { openGlobalDatabase } from '../runners/global-db-connection.js';
 
 // ── Types (shared with monitor.ts) ──────────────────────────────────────
@@ -83,7 +88,7 @@ USAGE:
 
 OPTIONS:
   --run-id <id>      Monitor run ID to dispatch first responder for (required)
-  --preset <preset>  Override response preset (stop_on_error, investigate_and_stop, fix_and_monitor, custom)
+  --preset <preset>  Override response mode (triage_only, fix_and_monitor, custom, plus legacy aliases)
   -h, --help         Show help
 `);
     return;
@@ -134,7 +139,20 @@ OPTIONS:
   const agents = safeJsonParse(config.first_responder_agents) as
     Array<{ provider: string; model: string }> | null;
   const presetOverride = values.preset as string | undefined;
-  const responsePreset = presetOverride || config.response_preset;
+  if (!presetOverride && requiresManualInvestigationOverride(config.response_preset)) {
+    updateRunError(runId, 'Manual investigation from monitor_only requires an explicit override');
+    console.error('Error: manual investigation from monitor_only requires --preset triage_only, fix_and_monitor, or custom');
+    process.exit(2);
+  }
+
+  const requestedPreset = presetOverride || config.response_preset;
+  const validationError = validateResponsePreset(requestedPreset, config.custom_prompt);
+  if (validationError) {
+    updateRunError(runId, validationError);
+    console.error(`Error: ${validationError}`);
+    process.exit(2);
+  }
+  const responsePreset = resolveStoredMonitorResponsePreset(requestedPreset);
 
   if (!Array.isArray(agents) || agents.length === 0) {
     updateRunError(runId, 'No first responder agents configured');

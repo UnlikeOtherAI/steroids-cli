@@ -795,6 +795,11 @@ This warning appears in:
 - `steroids tasks --global` (when showing tasks from multiple projects)
 
 ---
+## `steroids monitor`
+Use `steroids monitor --help` for the live monitor CLI reference.
+Canonical response modes: `monitor_only`, `triage_only`, `fix_and_monitor`, `custom`.
+Manual overrides use `steroids monitor run --preset <mode>` or `steroids monitor respond --run-id <id> --preset <mode>`.
+---
 
 ## `steroids loop`
 

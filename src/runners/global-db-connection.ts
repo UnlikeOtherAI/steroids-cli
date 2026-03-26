@@ -32,6 +32,7 @@ import {
   applyGlobalSchemaV22,
   applyGlobalSchemaV23,
   applyGlobalSchemaV24,
+  applyGlobalSchemaV25,
 } from './global-db-schema';
 
 const STEROIDS_DIR = '.steroids';
@@ -115,6 +116,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     applyGlobalSchemaV22(db);
     applyGlobalSchemaV23(db);
     applyGlobalSchemaV24(db);
+    applyGlobalSchemaV25(db);
 
     db.prepare('INSERT OR REPLACE INTO _global_schema (key, value) VALUES (?, ?)')
       .run('version', GLOBAL_SCHEMA_VERSION);
@@ -264,6 +266,8 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     applyGlobalSchemaV21(db);
     applyGlobalSchemaV22(db);
     applyGlobalSchemaV23(db);
+    applyGlobalSchemaV24(db);
+    applyGlobalSchemaV25(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -273,6 +277,8 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     applyGlobalSchemaV21(db);
     applyGlobalSchemaV22(db);
     applyGlobalSchemaV23(db);
+    applyGlobalSchemaV24(db);
+    applyGlobalSchemaV25(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -281,6 +287,8 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
     applyGlobalSchemaV21(db);
     applyGlobalSchemaV22(db);
     applyGlobalSchemaV23(db);
+    applyGlobalSchemaV24(db);
+    applyGlobalSchemaV25(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -288,12 +296,29 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   } else if (currentVersion === '21') {
     applyGlobalSchemaV22(db);
     applyGlobalSchemaV23(db);
+    applyGlobalSchemaV24(db);
+    applyGlobalSchemaV25(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
     );
   } else if (currentVersion === '22') {
     applyGlobalSchemaV23(db);
+    applyGlobalSchemaV24(db);
+    applyGlobalSchemaV25(db);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '23') {
+    applyGlobalSchemaV24(db);
+    applyGlobalSchemaV25(db);
+    db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
+      GLOBAL_SCHEMA_VERSION,
+      'version'
+    );
+  } else if (currentVersion === '24') {
+    applyGlobalSchemaV25(db);
     db.prepare('UPDATE _global_schema SET value = ? WHERE key = ?').run(
       GLOBAL_SCHEMA_VERSION,
       'version'
@@ -314,6 +339,7 @@ export function openGlobalDatabase(): GlobalDatabaseConnection {
   applyGlobalSchemaV22(db);
   applyGlobalSchemaV23(db);
   applyGlobalSchemaV24(db);
+  applyGlobalSchemaV25(db);
   db.prepare(
     `INSERT INTO _global_schema (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`

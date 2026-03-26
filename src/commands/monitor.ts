@@ -6,15 +6,20 @@
  *   enable       Enable the monitor
  *   disable      Disable the monitor
  *   scan         Run a scan and print results
- *   run          Run full cycle (scan + rules, no first responder)
+ *   run          Run a full monitor cycle using the configured or overridden response mode
  *   respond      Dispatch first responder for a specific run (detached from wakeup)
  *   investigate  Alias for respond (backward compat)
  *   ack          Acknowledge monitor alerts
  */
 
 import { basename } from 'node:path';
+import { parseArgs } from 'node:util';
 import type { GlobalFlags } from '../cli/flags.js';
 import { generateHelp } from '../cli/help.js';
+import {
+  MONITOR_RESPONSE_OPTIONS,
+  formatResponsePresetLabel,
+} from '../monitor/response-mode.js';
 import { openGlobalDatabase } from '../runners/global-db-connection.js';
 import { runRespondCmd, runAckCmd } from './monitor-respond.js';
 
@@ -54,19 +59,24 @@ const HELP = generateHelp({
   description: 'Monitor system health and dispatch first responder',
   details: `The monitor periodically scans all registered projects for anomalies
 (stuck tasks, zombie runners, idle projects, etc.) and can dispatch an
-AI first responder agent when escalation rules are triggered.`,
+AI first responder agent when escalation rules are triggered.
+
+Canonical response modes:
+${MONITOR_RESPONSE_OPTIONS.map((option) => `- ${option.value}: ${option.description}`).join('\n')}`,
   usage: ['steroids monitor <subcommand> [options]'],
   subcommands: [
     { name: 'status', description: 'Show current monitor configuration and state' },
     { name: 'enable', description: 'Enable the monitor' },
     { name: 'disable', description: 'Disable the monitor' },
     { name: 'scan', description: 'Run a scan and print anomaly results' },
-    { name: 'run', description: 'Run full cycle (scan + rules, no first responder)' },
+    { name: 'run', description: 'Run full cycle using the configured or overridden response mode' },
     { name: 'respond', args: '--run-id <id>', description: 'Dispatch first responder for a monitor run' },
     { name: 'investigate', args: '--run-id <id>', description: 'Alias for respond' },
     { name: 'ack', args: '--alert-id <id> | --all', description: 'Acknowledge monitor alerts' },
   ],
   options: [
+    { long: 'preset', description: 'Override response mode for run/respond', values: '<mode>' },
+    { long: 'force-dispatch', description: 'Dispatch even when rules would not escalate (mode still applies)' },
     { long: 'run-id', description: 'Monitor run ID for first responder dispatch', values: '<id>' },
     { long: 'alert-id', description: 'Alert ID to acknowledge', values: '<id>' },
     { long: 'all', description: 'Acknowledge all unacknowledged alerts' },
@@ -77,6 +87,7 @@ AI first responder agent when escalation rules are triggered.`,
     { command: 'steroids monitor disable', description: 'Disable the monitor' },
     { command: 'steroids monitor scan', description: 'Run a scan now' },
     { command: 'steroids monitor run', description: 'Run full scan+rules cycle' },
+    { command: 'steroids monitor run --preset fix_and_monitor --force-dispatch', description: 'Run a manual fix pass' },
     { command: 'steroids monitor respond --run-id 42', description: 'Dispatch first responder for run 42' },
     { command: 'steroids monitor ack --alert-id 1', description: 'Acknowledge alert #1' },
     { command: 'steroids monitor ack --all', description: 'Acknowledge all alerts' },
@@ -174,7 +185,7 @@ async function runStatus(_args: string[], flags: GlobalFlags): Promise<void> {
     console.log(`  Enabled:            ${config.enabled ? 'yes' : 'no'}`);
     console.log(`  Interval:           ${config.interval_seconds}s`);
     console.log(`  Agent count:        ${Array.isArray(agents) ? agents.length : 0}`);
-    console.log(`  Response preset:    ${config.response_preset}`);
+    console.log(`  Response mode:      ${formatResponsePresetLabel(config.response_preset)}`);
     console.log(`  Min severity:       ${escalation?.min_severity ?? 'unknown'}`);
     console.log(`  FR timeout:         ${config.first_responder_timeout_seconds}s`);
     console.log(`  Last config update: ${config.updated_at ? new Date(config.updated_at).toISOString() : 'never'}`);
@@ -264,9 +275,38 @@ async function runScanCmd(_args: string[], flags: GlobalFlags): Promise<void> {
 
 // ── run ────────────────────────────────────────────────────────────────────
 
-async function runCycleCmd(_args: string[], flags: GlobalFlags): Promise<void> {
+async function runCycleCmd(args: string[], flags: GlobalFlags): Promise<void> {
+  const { values } = parseArgs({
+    args,
+    options: {
+      preset: { type: 'string' },
+      'force-dispatch': { type: 'boolean', default: false },
+      help: { type: 'boolean', short: 'h', default: false },
+    },
+    allowPositionals: false,
+  });
+
+  if (values.help || flags.help) {
+    console.log(`
+steroids monitor run - Run a full monitor cycle
+
+USAGE:
+  steroids monitor run [--preset <mode>] [--force-dispatch]
+
+OPTIONS:
+  --preset <mode>      Override response mode for this manual run
+  --force-dispatch     Dispatch even when escalation rules would not trigger (mode still applies)
+  -h, --help           Show help
+`);
+    return;
+  }
+
   const { runMonitorCycle } = await import('../monitor/loop.js');
-  const result = await runMonitorCycle({ manual: true });
+  const result = await runMonitorCycle({
+    manual: true,
+    preset: values.preset as string | undefined,
+    forceDispatch: values['force-dispatch'] === true,
+  });
 
   if (flags.json) {
     console.log(JSON.stringify(result, null, 2));

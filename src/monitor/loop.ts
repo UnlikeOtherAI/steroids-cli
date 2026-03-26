@@ -12,6 +12,11 @@ import { spawn } from 'node:child_process';
 import { openGlobalDatabase } from '../runners/global-db-connection.js';
 import { resolveCliEntrypoint } from '../cli/entrypoint.js';
 import { runScan, type ScanResult } from './scanner.js';
+import {
+  getMonitorResponsePolicy,
+  resolveStoredMonitorResponsePreset,
+  validateResponsePreset,
+} from './response-mode.js';
 import { shouldEscalate, type EscalationRules } from './rules.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -180,6 +185,17 @@ function createRunRow(scanResult: ScanResult, escalationReason: string | null, f
   }
 }
 
+function updateRunError(runId: number, error: string): void {
+  const { db, close } = openGlobalDatabase();
+  try {
+    db.prepare(
+      "UPDATE monitor_runs SET outcome = 'error', error = ?, completed_at = ? WHERE id = ?"
+    ).run(error, Date.now(), runId);
+  } finally {
+    close();
+  }
+}
+
 function pruneOldRuns(maxRows: number): void {
   const { db, close } = openGlobalDatabase();
   try {
@@ -193,19 +209,24 @@ function pruneOldRuns(maxRows: number): void {
   }
 }
 
-function spawnFirstResponder(runId: number, preset?: string): void {
+function spawnFirstResponder(runId: number, preset?: string): string | null {
   const entrypoint = resolveCliEntrypoint();
-  if (!entrypoint) return;
+  if (!entrypoint) return 'CLI entrypoint not found';
 
   const args = [entrypoint, 'monitor', 'respond', '--run-id', String(runId)];
   if (preset) args.push('--preset', preset);
 
-  const child = spawn(
-    process.execPath,
-    args,
-    { detached: true, stdio: 'ignore' },
-  );
-  child.unref();
+  try {
+    const child = spawn(
+      process.execPath,
+      args,
+      { detached: true, stdio: 'ignore' },
+    );
+    child.unref();
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : 'Failed to spawn first responder';
+  }
 }
 
 /**
@@ -332,10 +353,20 @@ export async function monitorCheck(): Promise<void> {
   // Apply rules
   const rules = safeJsonParse<EscalationRules>(config.escalation_rules, { min_severity: 'warning' });
   const decision = shouldEscalate(scanResult.anomalies, rules);
+  const requestedPreset = config.response_preset;
+  const presetValidationError = validateResponsePreset(requestedPreset, config.custom_prompt);
+  if (presetValidationError && decision.escalate) {
+    const runId = createRunRow(scanResult, decision.reason, false, 'error');
+    updateRunError(runId, presetValidationError);
+    pruneOldRuns(500);
+    return;
+  }
+  const responsePreset = resolveStoredMonitorResponsePreset(requestedPreset);
+  const policy = getMonitorResponsePolicy(responsePreset);
 
   // Determine if FR dispatch is needed
   const agents = safeJsonParse<Array<{ provider: string; model: string }>>(config.first_responder_agents, []);
-  let needsFirstResponder = decision.escalate && agents.length > 0;
+  let needsFirstResponder = decision.escalate && policy.autoDispatch && agents.length > 0;
 
   // M4: Cooldown — don't dispatch FR too soon after the last one completed (scan still records)
   if (needsFirstResponder && Date.now() - getLastFRCompletedAt() < FR_COOLDOWN_MS) {
@@ -361,7 +392,10 @@ export async function monitorCheck(): Promise<void> {
   if (needsFirstResponder) {
     // Only record attempts for uncapped projects
     recordRemediationAttempts(scanResult, uncappedProjects);
-    spawnFirstResponder(runId);
+    const dispatchError = spawnFirstResponder(runId, responsePreset);
+    if (dispatchError) {
+      updateRunError(runId, dispatchError);
+    }
   }
 }
 
@@ -384,11 +418,30 @@ export async function runMonitorCycle(options?: { manual?: boolean; preset?: str
       { min_severity: 'warning' },
     );
     const decision = shouldEscalate(scanResult.anomalies, rules);
+    const requestedPreset = options?.preset ?? config?.response_preset ?? 'triage_only';
+    const presetValidationError = validateResponsePreset(requestedPreset, config?.custom_prompt ?? null);
+    if (presetValidationError) {
+      const runId = createRunRow(scanResult, decision.reason, false, 'error');
+      updateRunError(runId, presetValidationError);
+      pruneOldRuns(500);
+      return {
+        outcome: 'error',
+        runId,
+        anomalyCount: scanResult.anomalies.length,
+        error: presetValidationError,
+      };
+    }
+    const responsePreset = resolveStoredMonitorResponsePreset(requestedPreset);
+    const policy = getMonitorResponsePolicy(responsePreset);
 
     const agents = safeJsonParse<Array<{ provider: string; model: string }>>(
       config?.first_responder_agents ?? null, [],
     );
-    let needsFirstResponder = !!(decision.escalate || options?.forceDispatch) && agents.length > 0 && scanResult.anomalies.length > 0;
+    let needsFirstResponder =
+      policy.autoDispatch &&
+      !!(decision.escalate || options?.forceDispatch) &&
+      agents.length > 0 &&
+      scanResult.anomalies.length > 0;
 
     // M4: Cooldown — skip FR dispatch if too soon after last completion (unless forceDispatch)
     if (needsFirstResponder && !options?.forceDispatch && Date.now() - getLastFRCompletedAt() < FR_COOLDOWN_MS) {
@@ -413,7 +466,16 @@ export async function runMonitorCycle(options?: { manual?: boolean; preset?: str
 
     if (needsFirstResponder) {
       recordRemediationAttempts(scanResult, uncappedProjects);
-      spawnFirstResponder(runId, options?.preset);
+      const dispatchError = spawnFirstResponder(runId, responsePreset);
+      if (dispatchError) {
+        updateRunError(runId, dispatchError);
+        return {
+          outcome: 'error',
+          runId,
+          anomalyCount: scanResult.anomalies.length,
+          error: dispatchError,
+        };
+      }
       return {
         outcome: 'first_responder_dispatched',
         runId,

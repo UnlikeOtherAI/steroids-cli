@@ -1,97 +1,22 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowPathIcon,
   ShieldCheckIcon,
-  TrashIcon,
   PlayIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   ExclamationTriangleIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  MagnifyingGlassIcon,
-  ClockIcon,
-  PlusIcon,
   WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
 import {
   monitorApi,
   aiApi,
-  MonitorRun,
   MonitorAgentConfig,
+  MonitorResponseMode,
   AIProvider,
   AIModel,
 } from '../services/api';
-import { AISetupRoleSelector } from '../components/onboarding/AISetupRoleSelector';
-
-type ResponsePreset = 'stop_on_error' | 'investigate_and_stop' | 'fix_and_monitor' | 'custom';
-
-const PRESET_LABELS: Record<ResponsePreset, { label: string; description: string }> = {
-  stop_on_error: {
-    label: 'Stop on Error',
-    description: 'When anomalies are detected, stop all runners and report.',
-  },
-  investigate_and_stop: {
-    label: 'Investigate & Stop',
-    description: 'Investigate what\'s happening, provide a diagnostic report, then stop runners.',
-  },
-  fix_and_monitor: {
-    label: 'Fix & Monitor',
-    description: 'Attempt to fix issues automatically (reset tasks, restart runners), keep monitoring.',
-  },
-  custom: {
-    label: 'Custom Prompt',
-    description: 'Provide your own instructions for the first responder.',
-  },
-};
-
-const INTERVAL_OPTIONS = [
-  { value: 60, label: '1 minute' },
-  { value: 120, label: '2 minutes' },
-  { value: 300, label: '5 minutes' },
-  { value: 600, label: '10 minutes' },
-  { value: 900, label: '15 minutes' },
-  { value: 1800, label: '30 minutes' },
-];
-
-const SEVERITY_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'critical', label: 'Critical only' },
-  { value: 'warning', label: 'Warning and above' },
-  { value: 'info', label: 'All anomalies' },
-];
-
-function formatEpochMs(ms: number): string {
-  return new Date(ms).toLocaleString();
-}
-
-function formatDuration(ms: number | null): string {
-  if (ms === null) return '--';
-  if (ms < 1000) return `${ms}ms`;
-  const secs = Math.round(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const remainSecs = secs % 60;
-  return `${mins}m ${remainSecs}s`;
-}
-
-function outcomeVariant(outcome: string): { color: string; icon: React.ReactNode } {
-  switch (outcome) {
-    case 'clean':
-      return { color: 'bg-green-100 text-green-800', icon: <CheckCircleIcon className="w-4 h-4" /> };
-    case 'anomalies_found':
-      return { color: 'bg-yellow-100 text-yellow-800', icon: <ExclamationTriangleIcon className="w-4 h-4" /> };
-    case 'first_responder_dispatched':
-      return { color: 'bg-blue-100 text-blue-800', icon: <MagnifyingGlassIcon className="w-4 h-4" /> };
-    case 'first_responder_complete':
-    case 'investigation_complete':
-      return { color: 'bg-purple-100 text-purple-800', icon: <CheckCircleIcon className="w-4 h-4" /> };
-    case 'error':
-      return { color: 'bg-red-100 text-red-800', icon: <XCircleIcon className="w-4 h-4" /> };
-    default:
-      return { color: 'bg-gray-100 text-gray-800', icon: <ClockIcon className="w-4 h-4" /> };
-  }
-}
+import { MonitorConfigSection } from './monitor-page-config';
+import { MonitorRunHistorySection, MonitorStatusCard } from './monitor-page-runs';
 
 export const MonitorPage: React.FC = () => {
   const navigate = useNavigate();
@@ -106,7 +31,8 @@ export const MonitorPage: React.FC = () => {
   const [enabled, setEnabled] = useState(false);
   const [intervalSeconds, setIntervalSeconds] = useState(300);
   const [agents, setAgents] = useState<MonitorAgentConfig[]>([]);
-  const [responsePreset, setResponsePreset] = useState<ResponsePreset>('investigate_and_stop');
+  const [responsePreset, setResponsePreset] = useState<MonitorResponseMode>('triage_only');
+  const [responsePresetDeprecated, setResponsePresetDeprecated] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
   const [minSeverity, setMinSeverity] = useState<string>('critical');
 
@@ -118,7 +44,7 @@ export const MonitorPage: React.FC = () => {
   const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null);
 
   // Run history
-  const [runs, setRuns] = useState<MonitorRun[]>([]);
+  const [runs, setRuns] = useState<Awaited<ReturnType<typeof monitorApi.listRuns>>['runs']>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [runsLoading, setRunsLoading] = useState(true);
   const [runsPage, setRunsPage] = useState(0);
@@ -156,7 +82,8 @@ export const MonitorPage: React.FC = () => {
         setEnabled(cfg.enabled);
         setIntervalSeconds(cfg.interval_seconds);
         setAgents(cfg.first_responder_agents.length > 0 ? cfg.first_responder_agents : []);
-        setResponsePreset(cfg.response_preset as ResponsePreset);
+        setResponsePreset(cfg.canonical_response_mode);
+        setResponsePresetDeprecated(cfg.response_preset_deprecated);
         setCustomPrompt(cfg.custom_prompt || '');
         setMinSeverity(cfg.escalation_rules?.min_severity || 'critical');
       }
@@ -442,361 +369,63 @@ export const MonitorPage: React.FC = () => {
         </div>
       )}
 
-      {/* Configuration Section */}
-      <div className="mb-8">
-        <button
-          onClick={toggleConfig}
-          className="flex items-center gap-2 text-xl font-semibold text-text-primary mb-4 hover:text-text-secondary"
-        >
-          {configOpen ? (
-            <ChevronDownIcon className="w-5 h-5" />
-          ) : (
-            <ChevronRightIcon className="w-5 h-5" />
-          )}
-          <i className="fa-solid fa-gear w-5 h-5 flex items-center justify-center text-sm"></i>
-          <span>Configuration</span>
-        </button>
+      <MonitorConfigSection
+        configOpen={configOpen}
+        intervalSeconds={intervalSeconds}
+        minSeverity={minSeverity}
+        agents={agents}
+        providers={providers}
+        models={models}
+        modelSources={modelSources}
+        copiedCommand={copiedCommand}
+        refreshingProvider={refreshingProvider}
+        responsePreset={responsePreset}
+        responsePresetDeprecated={responsePresetDeprecated}
+        customPrompt={customPrompt}
+        saveSuccess={saveSuccess}
+        saving={saving}
+        onToggleConfig={toggleConfig}
+        onIntervalSecondsChange={setIntervalSeconds}
+        onMinSeverityChange={setMinSeverity}
+        onAgentProviderChange={handleAgentProviderChange}
+        onAgentModelChange={handleAgentModelChange}
+        onRefreshModels={refreshModels}
+        onCopyToClipboard={copyToClipboard}
+        onAddAgent={addAgent}
+        onRemoveAgent={removeAgent}
+        onResponsePresetChange={(mode) => {
+          setResponsePreset(mode);
+          setResponsePresetDeprecated(false);
+        }}
+        onCustomPromptChange={setCustomPrompt}
+        onSave={handleSave}
+      />
 
-        {configOpen && (
-          <div className="bg-bg-surface rounded-lg p-6 shadow-sm border border-border space-y-6">
-            {/* Interval + Severity row */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-text-secondary mb-1 uppercase tracking-wider">
-                  Check Interval
-                </label>
-                <select
-                  value={intervalSeconds}
-                  onChange={e => setIntervalSeconds(Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-bg-base border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent"
-                >
-                  {INTERVAL_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-text-secondary mb-1 uppercase tracking-wider">
-                  Escalation Threshold
-                </label>
-                <select
-                  value={minSeverity}
-                  onChange={e => setMinSeverity(e.target.value)}
-                  className="w-full px-3 py-2 bg-bg-base border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent"
-                >
-                  {SEVERITY_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+      <MonitorStatusCard
+        latestRun={runs[0]}
+        onOpenIssues={() => navigate('/monitor/issues')}
+      />
 
-            {/* First Responder Agents */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <i className="fa-solid fa-user-secret text-accent"></i>
-                  <span className="font-medium text-text-primary text-sm uppercase tracking-wider">
-                    First Responder Agents
-                  </span>
-                  <span className="text-[10px] text-text-muted">(fallback chain, first = preferred)</span>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {agents.map((agent, i) => (
-                  <AISetupRoleSelector
-                    key={i}
-                    label={`First Responder ${i + 1}`}
-                    icon="fa-user-secret"
-                    config={agent}
-                    providers={providers}
-                    modelsByProvider={models}
-                    modelSources={modelSources}
-                    copiedCommand={copiedCommand}
-                    refreshingProvider={refreshingProvider}
-                    isProjectLevel={false}
-                    isInherited={false}
-                    onProviderChange={providerId => handleAgentProviderChange(i, providerId)}
-                    onModelChange={modelId => handleAgentModelChange(i, modelId)}
-                    onRefreshModels={refreshModels}
-                    onCopyToClipboard={copyToClipboard}
-                    onRemove={agents.length > 1 ? () => removeAgent(i) : undefined}
-                  />
-                ))}
-                <button
-                  onClick={addAgent}
-                  className="w-full py-2 border border-dashed border-border rounded-lg text-xs text-text-muted hover:text-accent hover:border-accent transition-colors flex items-center justify-center gap-1"
-                >
-                  <PlusIcon className="w-3 h-3" />
-                  Add First Responder (Fallback)
-                </button>
-              </div>
-            </div>
-
-            {/* Response Preset */}
-            <div>
-              <label className="block text-xs text-text-secondary mb-2 uppercase tracking-wider">
-                Response Strategy
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                {(Object.entries(PRESET_LABELS) as [ResponsePreset, typeof PRESET_LABELS[ResponsePreset]][]).map(
-                  ([key, { label, description }]) => (
-                    <label
-                      key={key}
-                      className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                        responsePreset === key
-                          ? 'border-accent bg-accent/5'
-                          : 'border-border bg-bg-base hover:border-accent/50'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="preset"
-                        value={key}
-                        checked={responsePreset === key}
-                        onChange={() => setResponsePreset(key)}
-                        className="mt-1 w-4 h-4 text-accent border-border focus:ring-accent"
-                      />
-                      <div>
-                        <div className="font-medium text-text-primary text-sm">{label}</div>
-                        <div className="text-xs text-text-muted mt-0.5">{description}</div>
-                      </div>
-                    </label>
-                  )
-                )}
-              </div>
-
-              {responsePreset === 'custom' && (
-                <textarea
-                  value={customPrompt}
-                  onChange={e => setCustomPrompt(e.target.value)}
-                  placeholder="Enter custom instructions for the first responder agent..."
-                  rows={4}
-                  className="w-full mt-3 px-3 py-2 bg-bg-base border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-accent resize-y"
-                />
-              )}
-            </div>
-
-            {/* Save button */}
-            <div className="flex items-center justify-between pt-4 border-t border-border">
-              <div>
-                {saveSuccess && (
-                  <span className="flex items-center gap-1 text-sm text-green-600">
-                    <CheckCircleIcon className="w-4 h-4" />
-                    Saved
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-6 py-2 rounded-lg font-medium transition-colors bg-accent text-white hover:bg-accent/90 disabled:opacity-50"
-              >
-                {saving ? (
-                  <span className="flex items-center gap-2">
-                    <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                    Saving...
-                  </span>
-                ) : (
-                  'Save Configuration'
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Current Status Card */}
-      {(() => {
-        const latestRun = runs[0];
-        const anomalies = latestRun?.scan_results?.anomalies ?? [];
-        const criticals = anomalies.filter(a => a.severity === 'critical').length;
-        const warnings = anomalies.filter(a => a.severity === 'warning').length;
-        const infos = anomalies.filter(a => a.severity === 'info').length;
-        const hasIssues = anomalies.length > 0;
-        const isHealthy = latestRun && anomalies.length === 0;
-        const projectsAffected = new Set(anomalies.map(a => a.projectPath)).size;
-
-        return (
-          <div
-            onClick={() => navigate('/monitor/issues')}
-            className={`mb-8 p-5 rounded-lg border cursor-pointer transition-all hover:shadow-md ${
-              !latestRun
-                ? 'bg-bg-surface border-border'
-                : isHealthy
-                  ? 'bg-green-50 border-green-200 hover:border-green-300'
-                  : criticals > 0
-                    ? 'bg-red-50 border-red-200 hover:border-red-300'
-                    : 'bg-yellow-50 border-yellow-200 hover:border-yellow-300'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                {!latestRun ? (
-                  <ShieldCheckIcon className="w-10 h-10 text-text-muted" />
-                ) : isHealthy ? (
-                  <CheckCircleIcon className="w-10 h-10 text-green-500" />
-                ) : (
-                  <ExclamationTriangleIcon className="w-10 h-10 text-orange-500" />
-                )}
-                <div>
-                  <h3 className="text-lg font-semibold text-text-primary">
-                    {!latestRun
-                      ? 'No scans yet'
-                      : isHealthy
-                        ? 'All Systems Healthy'
-                        : `${anomalies.length} Issue${anomalies.length !== 1 ? 's' : ''} Detected`}
-                  </h3>
-                  <p className="text-sm text-text-muted mt-0.5">
-                    {!latestRun
-                      ? 'Run a scan to check system health'
-                      : isHealthy
-                        ? `${latestRun.scan_results?.projectCount ?? 0} projects scanned — no anomalies`
-                        : `${projectsAffected} project${projectsAffected !== 1 ? 's' : ''} affected`}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                {hasIssues && (
-                  <div className="flex items-center gap-3">
-                    {criticals > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
-                        <span className="text-sm font-medium text-red-700">{criticals}</span>
-                      </div>
-                    )}
-                    {warnings > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>
-                        <span className="text-sm font-medium text-yellow-700">{warnings}</span>
-                      </div>
-                    )}
-                    {infos > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
-                        <span className="text-sm font-medium text-blue-700">{infos}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-                <ChevronRightIcon className="w-5 h-5 text-text-muted" />
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Run History */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-text-primary">Run History</h2>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-text-muted">{runsTotal} runs</span>
-            {runs.length > 0 && (
-              <button
-                onClick={handleClearHistory}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border text-text-muted hover:text-danger hover:border-danger/50 text-xs transition-colors"
-              >
-                <TrashIcon className="w-3 h-3" />
-                Clear
-              </button>
-            )}
-            <button
-              onClick={() => loadRuns()}
-              disabled={runsLoading}
-              className="p-1.5 rounded-lg hover:bg-bg-surface2 text-text-secondary"
-            >
-              <ArrowPathIcon className={`w-4 h-4 ${runsLoading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-        </div>
-
-        {runs.length === 0 ? (
-          <div className="text-center py-12 bg-bg-surface rounded-lg border border-border">
-            <ShieldCheckIcon className="w-12 h-12 text-text-muted mx-auto mb-3" />
-            <p className="text-text-muted">No monitor runs yet</p>
-            <p className="text-xs text-text-muted mt-1">
-              Enable the monitor or click "Run Now" to start
-            </p>
-          </div>
-        ) : (
-          <div className="bg-bg-surface rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left">
-                  <th className="px-4 py-3 text-xs text-text-muted font-medium uppercase tracking-wider">Time</th>
-                  <th className="px-4 py-3 text-xs text-text-muted font-medium uppercase tracking-wider">Outcome</th>
-                  <th className="px-4 py-3 text-xs text-text-muted font-medium uppercase tracking-wider">Anomalies</th>
-                  <th className="px-4 py-3 text-xs text-text-muted font-medium uppercase tracking-wider">Escalation</th>
-                  <th className="px-4 py-3 text-xs text-text-muted font-medium uppercase tracking-wider">Duration</th>
-                  <th className="px-4 py-3 text-xs text-text-muted font-medium uppercase tracking-wider w-8"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map(run => {
-                  const ov = outcomeVariant(run.outcome);
-                  const anomalyCount = run.scan_results?.anomalies?.length ?? 0;
-
-                  return (
-                      <tr
-                        key={run.id}
-                        className="border-b border-border/50 hover:bg-bg-base cursor-pointer transition-colors"
-                        onClick={() => navigate(`/monitor/run/${run.id}`)}
-                      >
-                        <td className="px-4 py-3 text-text-secondary">
-                          {formatEpochMs(run.started_at)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${ov.color}`}>
-                            {ov.icon}
-                            {(run.outcome === 'investigation_complete' ? 'first_responder_complete' : run.outcome).replace(/_/g, ' ')}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-text-secondary">
-                          {anomalyCount > 0 ? anomalyCount : '--'}
-                        </td>
-                        <td className="px-4 py-3 text-text-secondary text-xs truncate max-w-[200px]">
-                          {run.escalation_reason || (run.error ? <span className="text-red-600">{run.error}</span> : '--')}
-                        </td>
-                        <td className="px-4 py-3 text-text-muted">
-                          {formatDuration(run.duration_ms)}
-                        </td>
-                        <td className="px-4 py-3 text-text-muted">
-                          <ChevronRightIcon className="w-4 h-4" />
-                        </td>
-                      </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {/* Pagination */}
-        {runsTotal > RUNS_PAGE_SIZE && (
-          <div className="flex items-center justify-between mt-3">
-            <span className="text-xs text-text-muted">
-              {runsPage * RUNS_PAGE_SIZE + 1}–{Math.min((runsPage + 1) * RUNS_PAGE_SIZE, runsTotal)} of {runsTotal}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => { const p = runsPage - 1; setRunsPage(p); loadRuns(p); }}
-                disabled={runsPage === 0}
-                className="px-3 py-1 rounded border border-border text-xs text-text-secondary hover:bg-bg-surface2 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => { const p = runsPage + 1; setRunsPage(p); loadRuns(p); }}
-                disabled={(runsPage + 1) * RUNS_PAGE_SIZE >= runsTotal}
-                className="px-3 py-1 rounded border border-border text-xs text-text-secondary hover:bg-bg-surface2 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      <MonitorRunHistorySection
+        runs={runs}
+        runsTotal={runsTotal}
+        runsLoading={runsLoading}
+        runsPage={runsPage}
+        pageSize={RUNS_PAGE_SIZE}
+        onClearHistory={handleClearHistory}
+        onRefresh={() => loadRuns()}
+        onOpenRun={(runId) => navigate(`/monitor/run/${runId}`)}
+        onPreviousPage={() => {
+          const page = runsPage - 1;
+          setRunsPage(page);
+          loadRuns(page);
+        }}
+        onNextPage={() => {
+          const page = runsPage + 1;
+          setRunsPage(page);
+          loadRuns(page);
+        }}
+      />
     </div>
   );
 };

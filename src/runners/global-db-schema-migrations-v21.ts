@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS monitor_config (
   enabled INTEGER NOT NULL DEFAULT 0,
   interval_seconds INTEGER NOT NULL DEFAULT 300,
   investigator_agents TEXT NOT NULL DEFAULT '[]',
-  response_preset TEXT NOT NULL DEFAULT 'investigate_and_stop',
+  response_preset TEXT NOT NULL DEFAULT 'triage_only',
   custom_prompt TEXT,
   escalation_rules TEXT NOT NULL DEFAULT '{"min_severity":"critical"}',
   investigation_timeout_seconds INTEGER NOT NULL DEFAULT 900,
@@ -82,4 +82,10 @@ CREATE TABLE IF NOT EXISTS monitor_suppressions (
 CREATE INDEX IF NOT EXISTS idx_monitor_suppressions_lookup ON monitor_suppressions(project_path, anomaly_type);
 `;
 
-export const GLOBAL_SCHEMA_VERSION = '24';
+export const GLOBAL_SCHEMA_V25_SQL = `
+UPDATE monitor_config
+SET response_preset = 'triage_only'
+WHERE response_preset = 'investigate_and_stop';
+`;
+
+export const GLOBAL_SCHEMA_VERSION = '25';

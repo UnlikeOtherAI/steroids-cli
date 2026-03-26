@@ -121,6 +121,7 @@ pending → in_progress → review → completed
 * **Event hooks** — trigger scripts/webhooks on task completion, project events
 * **Multi-project support** with global project registry
 * **Web dashboard** for monitoring progress across projects
+* **Monitor modes** for just watching, triaging, fixing, or running custom first-responder instructions
 * **Shell completion** for bash, zsh, and fish
 * **Backup & restore** for Steroids data
 * **Health checks** with weighted scoring for project fitness
@@ -216,6 +217,7 @@ Steroids processes tasks in order, looping coder/reviewer until completion or di
 ## Web Dashboard
 
 Steroids ships with a full web dashboard for monitoring tasks, runners, and project health.
+The monitor supports four response modes: `monitor_only`, `triage_only`, `fix_and_monitor`, and `custom`.
 
 On first run, `steroids web` clones the dashboard repository to `~/.steroids/webui/` and installs everything automatically. On subsequent runs, it pulls the latest version before launching — so you're always up to date.
 
@@ -279,6 +281,9 @@ That's it. Open your browser at:
 | `steroids tasks skip <id> --notes "..."` | Skip external setup task |
 | `steroids tasks skip <id> --partial --notes "..."` | Partial skip (coded some, rest external) |
 | `steroids tasks audit <id>` | View task audit trail |
+| `steroids tasks delete <id> --force` | Permanently delete a task and clean runner/workspace state |
+
+`steroids tasks approve` now runs the same completion-effects pipeline as reviewer no-op completion and merge-queue completion, including intake follow-up replay, section completion checks, and project/task completion hooks unless `--no-hooks` is set.
 
 ### Section Management
 
@@ -298,6 +303,7 @@ That's it. Open your browser at:
 | `steroids sections depends-on <id> <dep-id>` | Add section dependency |
 | `steroids sections no-depends-on <id> <dep-id>` | Remove section dependency |
 | `steroids sections graph` | Show dependency graph (ASCII, `--mermaid`, or `--output png`) |
+| `steroids sections delete <id> --force` | Permanently delete a section and all its tasks |
 
 ### Runner Management
 
@@ -331,6 +337,8 @@ That's it. Open your browser at:
 | `steroids ai providers` | List detected AI providers |
 | `steroids ai models <provider>` | List available models for a provider |
 | `steroids ai test` | Test AI configuration (coder/reviewer connectivity) |
+| `steroids ai run <role> --prompt "..."` | Run one agent invocation for debugging |
+| `steroids ai proxy <start\|stop\|status>` | Manage the local HuggingFace proxy |
 | `steroids ai setup` | Interactive provider setup |
 
 ### Project Registry

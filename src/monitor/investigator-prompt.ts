@@ -2,23 +2,133 @@
  * Prompt builder for the first responder agent.
  */
 
+import {
+  getMonitorResponsePolicy,
+  type FirstResponderActionName,
+  type StoredMonitorResponsePreset,
+} from './response-mode.js';
 import type { ScanResult } from './scanner.js';
 
-const PRESET_INSTRUCTIONS: Record<string, string> = {
-  stop_on_error: 'If you find any critical anomaly, emit a stop_all_runners action immediately. Do not attempt repairs.',
-  investigate_and_stop: 'Diagnose the root cause. If the situation is dangerous, stop all runners. Otherwise, report only.',
+const PRESET_INSTRUCTIONS: Record<StoredMonitorResponsePreset, string> = {
+  monitor_only: 'This mode is observation-only. Do not request any actions. Provide diagnosis only.',
+  triage_only: 'Diagnose the root cause. Investigate with read-only queries when needed. Do not request mutating actions.',
   fix_and_monitor: 'Attempt to fix issues by resetting stuck tasks, adding missing dependencies, providing feedback to coders, or killing zombie runners. Only stop all runners as a last resort.',
+  custom: 'Follow the custom instructions below while staying within the host-enforced action policy.',
+  stop_on_error: 'Legacy mode: if the situation is dangerous, stop all runners immediately. Do not attempt other repairs.',
+  investigate_and_stop: 'Legacy mode: diagnose the root cause. If the situation is dangerous, stop all runners. Otherwise, report only.',
 };
+
+interface ActionDoc {
+  action: FirstResponderActionName;
+  text: string;
+}
+
+const ACTION_DOCS: readonly ActionDoc[] = [
+  {
+    action: 'query_db',
+    text: `**Investigation & Debugging:**
+
+- { "action": "query_db", "projectPath": "<path>", "sql": "<SELECT ...>", "reason": "<why>" }
+  Run a READ-ONLY SQL query against a project's database to investigate issues.
+  Only SELECT statements are allowed.
+  Tables available: tasks, sections, section_dependencies, task_invocations, task_feedback, task_rejections.`,
+  },
+  {
+    action: 'reset_task',
+    text: `**Task Fixes:**
+
+- { "action": "reset_task", "projectPath": "<path>", "taskId": "<id>", "reason": "<why>" }
+  Reset a stuck or failed task so it can run again.`,
+  },
+  {
+    action: 'update_task',
+    text: `- { "action": "update_task", "projectPath": "<path>", "taskId": "<id>", "fields": { ... }, "reason": "<why>" }
+  Update specific task fields. Allowed fields: status, failure_count, rejection_count, merge_failure_count, conflict_count, blocked_reason, description, merge_phase, approved_sha, rebase_attempts.`,
+  },
+  {
+    action: 'add_task_feedback',
+    text: `- { "action": "add_task_feedback", "projectPath": "<path>", "taskId": "<id>", "feedback": "<guidance>", "reason": "<why>" }
+  Add feedback that future coder or reviewer attempts will see.`,
+  },
+  {
+    action: 'add_dependency',
+    text: `**Dependency & Ordering Fixes:**
+
+- { "action": "add_dependency", "projectPath": "<path>", "sectionId": "<id>", "dependsOnSectionId": "<id>", "reason": "<why>" }
+  Add a section dependency so work runs in the correct order.`,
+  },
+  {
+    action: 'reset_project',
+    text: `**Project & Runner Controls:**
+
+- { "action": "reset_project", "projectPath": "<path>", "reason": "<why>" }
+  Reset all blocked or failed tasks in a project to pending.`,
+  },
+  {
+    action: 'kill_runner',
+    text: `- { "action": "kill_runner", "runnerId": "<pid>", "reason": "<why>" }
+  Send SIGTERM to a specific runner process by PID.`,
+  },
+  {
+    action: 'stop_all_runners',
+    text: `- { "action": "stop_all_runners", "reason": "<why>" }
+  Stop every active runner. Use only when the system is in a dangerous state.`,
+  },
+  {
+    action: 'trigger_wakeup',
+    text: `- { "action": "trigger_wakeup", "reason": "<why>" }
+  Trigger the wakeup cycle to restart runners and recover from idle states.`,
+  },
+  {
+    action: 'release_merge_lock',
+    text: `**Merge Queue:**
+
+- { "action": "release_merge_lock", "projectPath": "<path>", "diagnosis": "<why>" }
+  Force-release a stale merge lock for a project.`,
+  },
+  {
+    action: 'reset_merge_phase',
+    text: `- { "action": "reset_merge_phase", "projectPath": "<path>", "taskId": "<id>", "diagnosis": "<why>" }
+  Reset a stuck merge_pending task back to the queued phase.`,
+  },
+  {
+    action: 'suppress_anomaly',
+    text: `**Suppression:**
+
+- { "action": "suppress_anomaly", "projectPath": "<path>", "anomalyType": "<type>", "duration_hours": <number>, "reason": "<why>" }
+  Suppress a known false positive anomaly for the specified project and type (max 168 hours).`,
+  },
+  {
+    action: 'report_only',
+    text: `**Report:**
+
+- { "action": "report_only", "diagnosis": "<summary>" }
+  No action taken, just report findings.`,
+  },
+];
+
+function buildAllowedActionsSection(preset: StoredMonitorResponsePreset): string {
+  const policy = getMonitorResponsePolicy(preset);
+  if (policy.allowedActions.size === 0) {
+    return `No actions are allowed in this mode. Return an empty "actions" array.`;
+  }
+
+  return ACTION_DOCS
+    .filter((doc) => policy.allowedActions.has(doc.action))
+    .map((doc) => doc.text)
+    .join('\n\n');
+}
 
 export function buildFirstResponderPrompt(
   scanResult: ScanResult,
-  preset: string,
+  preset: StoredMonitorResponsePreset,
   customPrompt: string | null,
   remediationContext?: string,
 ): string {
+  const policy = getMonitorResponsePolicy(preset);
   const presetText = preset === 'custom' && customPrompt
     ? customPrompt
-    : PRESET_INSTRUCTIONS[preset] ?? PRESET_INSTRUCTIONS.investigate_and_stop;
+    : PRESET_INSTRUCTIONS[preset];
 
   const anomalyList = scanResult.anomalies.length === 0
     ? 'No anomalies detected.'
@@ -53,6 +163,12 @@ ${presetText}
 
 ## Instructions
 
+Selected response mode: ${policy.label}
+Host policy:
+- Auto-dispatch allowed: ${policy.autoDispatch ? 'yes' : 'no'}
+- Mutating actions allowed: ${policy.allowedActions.has('reset_task') ? 'yes' : 'no'}
+- Fallback repair injection allowed: ${policy.allowFallbackRepairInjection ? 'yes' : 'no'}
+
 Analyze the anomalies above and respond with a JSON object matching this schema:
 
 {
@@ -66,71 +182,7 @@ Analyze the anomalies above and respond with a JSON object matching this schema:
 
 ### Allowed Actions
 
-**Investigation & Debugging:**
-
-- { "action": "query_db", "projectPath": "<path>", "sql": "<SELECT ...>", "reason": "<why>" }
-  Run a READ-ONLY SQL query against a project's database to investigate issues.
-  Use this to inspect task states, dependencies, invocation history, section ordering, etc.
-  Only SELECT statements are allowed. Results are returned for your analysis.
-  Tables available: tasks, sections, section_dependencies, task_invocations, task_feedback, task_rejections.
-  Example: SELECT id, title, status, failure_count, rejection_count, section_id FROM tasks WHERE status NOT IN ('completed', 'skipped')
-
-**Task Fixes:**
-
-- { "action": "reset_task", "projectPath": "<path>", "taskId": "<id>", "reason": "<why>" }
-  Resets a stuck/failed task to pending (clears failure and rejection counts).
-
-- { "action": "update_task", "projectPath": "<path>", "taskId": "<id>", "fields": { ... }, "reason": "<why>" }
-  Update specific task fields. Allowed fields: status, failure_count, rejection_count, merge_failure_count, conflict_count, blocked_reason, description, merge_phase, approved_sha, rebase_attempts.
-  Valid statuses: pending, in_progress, review, merge_pending, completed, failed, skipped, disputed, blocked_conflict, blocked_error.
-  Use this for surgical fixes — e.g., changing status from blocked_error to pending, clearing a blocked_reason, updating a description to be clearer.
-
-- { "action": "add_task_feedback", "projectPath": "<path>", "taskId": "<id>", "feedback": "<guidance>", "reason": "<why>" }
-  Add human-style feedback notes to a task. Next time a coder or reviewer works on this task, they will see your feedback.
-  Use this to guide future attempts — e.g., "The previous approach failed because X. Try Y instead." or "This task depends on task Z being completed first — check that Z's output file exists before proceeding."
-
-**Dependency & Ordering Fixes:**
-
-- { "action": "add_dependency", "projectPath": "<path>", "sectionId": "<id>", "dependsOnSectionId": "<id>", "reason": "<why>" }
-  Add a section dependency so sectionId won't run until dependsOnSectionId completes.
-  Use when tasks are failing because they run before a prerequisite section is done.
-  Circular dependencies are automatically rejected.
-
-**Project & Runner Controls:**
-
-- { "action": "reset_project", "projectPath": "<path>", "reason": "<why>" }
-  Resets ALL blocked/failed/skipped tasks in a project to pending and re-enables the project.
-  Use when a project has multiple blocked tasks that need bulk recovery.
-
-- { "action": "kill_runner", "runnerId": "<pid>", "reason": "<why>" }
-  Sends SIGTERM to a specific runner process by PID.
-
-- { "action": "stop_all_runners", "reason": "<why>" }
-  Stops every active runner. Use only when the system is in a dangerous state.
-
-- { "action": "trigger_wakeup", "reason": "<why>" }
-  Triggers the wakeup cycle to restart runners and recover from idle states.
-
-**Merge Queue:**
-
-- { "action": "release_merge_lock", "projectPath": "<path>", "diagnosis": "<why>" }
-  Force-release a stale merge lock for a project. Use when a merge_pending task is stuck because the merge lock was not released after a crash.
-
-- { "action": "reset_merge_phase", "projectPath": "<path>", "taskId": "<id>", "diagnosis": "<why>" }
-  Reset a merge_pending task's merge_phase to 'queued' and clear rebase_attempts. Use when a task is stuck in rebasing/rebase_review phase.
-
-**Suppression:**
-
-- { "action": "suppress_anomaly", "projectPath": "<path>", "anomalyType": "<type>", "duration_hours": <number>, "reason": "<why>" }
-  Suppress a known false positive anomaly for the specified project and type (max 168 hours = 1 week).
-  The scanner will skip matching anomalies until the suppression expires.
-  Use when you have confirmed an anomaly is a false positive (e.g., idle_project when runners are actually active via parallel sessions).
-  Valid anomaly types: orphaned_task, hanging_invocation, zombie_runner, dead_runner, db_inconsistency, credit_exhaustion, failed_task, skipped_task, idle_project, high_invocations, repeated_failures, blocked_task, stale_merge_lock, stuck_merge_phase, disputed_task.
-
-**Report:**
-
-- { "action": "report_only", "diagnosis": "<summary>" }
-  No action taken, just report findings. Use when anomalies are informational only.
+${buildAllowedActionsSection(preset)}
 
 ## Guidelines
 
@@ -142,6 +194,7 @@ Analyze the anomalies above and respond with a JSON object matching this schema:
 - NEVER modify the steroids CLI source code — your job is to fix project-level task/runner issues.
 - Respond with valid JSON only — no markdown fences, no commentary outside the JSON.
 - If no action is needed, use a single report_only action.
-- Blocking issues (blocked_task, idle_project, orphaned_task) MUST be acted upon — do NOT use report_only for these.
+- If this mode does not allow a desired action, do not request it.
+- Blocking issues still require a useful diagnosis even when this mode forbids repair.
 - Document everything. Your actions will be reviewed. Explain your reasoning.`;
 }

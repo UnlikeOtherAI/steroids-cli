@@ -17,6 +17,10 @@
 import { getProviderRegistry } from '../providers/registry.js';
 import { buildFirstResponderPrompt } from './investigator-prompt.js';
 import { executeActions } from './investigator-actions.js';
+import {
+  getMonitorResponsePolicy,
+  type StoredMonitorResponsePreset,
+} from './response-mode.js';
 import type { ScanResult } from './scanner.js';
 
 // ---------------------------------------------------------------------------
@@ -182,6 +186,27 @@ export function parseFirstResponderResponse(raw: string): FirstResponderResponse
   return { diagnosis, actions: validActions };
 }
 
+function filterActionsForPreset(
+  actions: FirstResponderAction[],
+  preset: StoredMonitorResponsePreset,
+  diagnosis: string,
+): FirstResponderAction[] {
+  const policy = getMonitorResponsePolicy(preset);
+  const filtered = actions.filter((action) => {
+    const allowed = policy.allowedActions.has(action.action);
+    if (!allowed) {
+      console.warn(`[first-responder] Dropping disallowed ${action.action} action for ${policy.preset}`);
+    }
+    return allowed;
+  });
+
+  if (filtered.length > 0 || actions.length === 0 || !policy.allowedActions.has('report_only')) {
+    return filtered;
+  }
+
+  return [{ action: 'report_only', diagnosis }];
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point — fallback chain
 // ---------------------------------------------------------------------------
@@ -189,12 +214,13 @@ export function parseFirstResponderResponse(raw: string): FirstResponderResponse
 export async function runFirstResponder(
   agents: Array<{ provider: string; model: string }>,
   scanResult: ScanResult,
-  preset: string,
+  preset: StoredMonitorResponsePreset,
   customPrompt: string | null,
   remediationContext?: string,
 ): Promise<FirstResponderResult> {
   const registry = await getProviderRegistry();
   const prompt = buildFirstResponderPrompt(scanResult, preset, customPrompt, remediationContext);
+  const policy = getMonitorResponsePolicy(preset);
 
   for (const agent of agents) {
     let provider;
@@ -239,36 +265,44 @@ export async function runFirstResponder(
       }
 
       const response = parseFirstResponderResponse(result.stdout);
+      const filteredActions: FirstResponderAction[] = filterActionsForPreset(
+        response.actions,
+        preset,
+        response.diagnosis,
+      );
 
       // M6: If FR returned only report_only but scan has actionable anomalies, inject fallback actions.
       // Uses reset_task for task-level anomalies (94.9% success) over trigger_wakeup (0% for idle_project).
       const ACTIONABLE_TYPES = new Set(['blocked_task', 'failed_task', 'orphaned_task', 'hanging_invocation', 'zombie_runner', 'dead_runner']);
       const actionableAnomalies = scanResult.anomalies.filter(a => ACTIONABLE_TYPES.has(a.type));
-      const onlyReportOnly = response.actions.length === 0 || response.actions.every(a => a.action === 'report_only');
-      if (actionableAnomalies.length > 0 && onlyReportOnly) {
+      const onlyReportOnly = filteredActions.length === 0 || filteredActions.every(a => a.action === 'report_only');
+      let finalActions: FirstResponderAction[] = filteredActions;
+      if (policy.allowFallbackRepairInjection && actionableAnomalies.length > 0 && onlyReportOnly) {
+        const repairActions: FirstResponderAction[] = [];
         const taskAnomaly = actionableAnomalies.find(a => a.taskId);
         if (taskAnomaly) {
-          response.actions.push({
+          repairActions.push({
             action: 'reset_task',
             projectPath: taskAnomaly.projectPath,
             taskId: taskAnomaly.taskId!,
             reason: 'M6: FR returned only report_only for actionable anomalies; injecting reset_task',
           });
         } else {
-          response.actions.push({
+          repairActions.push({
             action: 'trigger_wakeup',
             reason: 'M6: FR returned only report_only for actionable anomalies; injecting wakeup',
           });
         }
+        finalActions = [...filteredActions, ...repairActions];
       }
 
-      const actionResults = await executeActions(response.actions);
+      const actionResults = await executeActions(finalActions);
 
       return {
         success: true,
         agentUsed: `${agent.provider}/${agent.model}`,
         diagnosis: response.diagnosis,
-        actions: response.actions,
+        actions: finalActions,
         actionResults,
       };
     } catch (err) {
