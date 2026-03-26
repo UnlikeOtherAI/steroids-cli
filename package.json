@@ -37,7 +37,33 @@
     "better-sqlite3": "^11.0.0",
     "tiktoken": "^1.0.22",
     "uuid": "^9.0.0",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.3"
+  },
+  "overrides": {
+    "anymatch": {
+      "picomatch": "2.3.2"
+    },
+    "micromatch": {
+      "picomatch": "2.3.2"
+    },
+    "jest-util": {
+      "picomatch": "4.0.4"
+    },
+    "tinyglobby": {
+      "picomatch": "4.0.4"
+    },
+    "fdir": {
+      "picomatch": "4.0.4"
+    }
+  },
+  "pnpm": {
+    "overrides": {
+      "anymatch>picomatch": "2.3.2",
+      "micromatch>picomatch": "2.3.2",
+      "jest-util>picomatch": "4.0.4",
+      "tinyglobby>picomatch": "4.0.4",
+      "fdir>picomatch": "4.0.4"
+    }
   },
   "engines": {
     "node": ">=18.0.0"
