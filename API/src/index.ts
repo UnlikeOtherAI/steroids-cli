@@ -53,6 +53,7 @@ import huggingFaceRouter from './routes/huggingface.js';
 import ollamaRouter from './routes/ollama.js';
 import monitorRouter from './routes/monitor.js';
 import selfHealRouter from './routes/self-heal.js';
+import projectRecoveryRouter from './routes/project-recovery.js';
 
 const PORT = process.env.PORT || 3501;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -116,6 +117,7 @@ export function createApp(): express.Express {
   app.use('/api', ollamaRouter);
   app.use('/api', monitorRouter);
   app.use('/api', selfHealRouter);
+  app.use('/api', projectRecoveryRouter);
   app.use('/api/credit-alerts', creditAlertRoutes);
 
   // Health check
@@ -136,6 +138,7 @@ export function createApp(): express.Express {
         'GET /health',
         'GET /api/projects',
         'GET /api/projects/status?path=<path>',
+        'GET /api/projects/recovery?path=<path>',
         'GET /api/projects/storage?path=<path>',
         'GET /api/projects/<path>/tasks?status=<status>&section=<id>&issue=<failed_retries|stale>&hours=<hours>',
         'GET /api/projects/<path>/sections',

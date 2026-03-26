@@ -9,7 +9,12 @@ import { createReadStream, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { Tail } from 'tail';
+import { openGlobalDatabase } from '../../../dist/runners/global-db.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
+import {
+  annotateInvocationLiveness,
+  selectLatestLiveRunningInvocation,
+} from '../utils/task-invocation-liveness.js';
 
 const router = Router();
 
@@ -51,12 +56,17 @@ interface InvocationEntry {
   provider: string;
   model: string;
   status: string;
+  is_live?: boolean;
   exit_code: number | null;
   duration_ms: number;
   success: number | null;
   timed_out: number | null;
   rejection_number: number | null;
   created_at: string;
+}
+
+interface InvocationQueryRow extends InvocationEntry {
+  runner_id: string | null;
 }
 
 interface InvocationDetails extends InvocationEntry {
@@ -389,14 +399,28 @@ router.get('/tasks/:taskId', (req: Request, res: Response) => {
         .all(taskId) as DisputeEntry[];
 
       // Get LLM invocations (exclude prompt/response to keep payload light)
-      const invocations = db
+      const invocationRows = db
         .prepare(
-          `SELECT id, task_id, role, provider, model, status, exit_code, duration_ms, success, timed_out, rejection_number, created_at
+          `SELECT id, task_id, role, provider, model, status, runner_id, exit_code, duration_ms, success, timed_out, rejection_number, created_at
           FROM task_invocations
           WHERE task_id = ?
           ORDER BY created_at ASC`
         )
-        .all(taskId) as InvocationEntry[];
+        .all(taskId) as InvocationQueryRow[];
+
+      let invocations: InvocationEntry[] = invocationRows.map(({ runner_id: _runnerId, ...invocation }) => invocation);
+      try {
+        const { db: globalDb, close: closeGlobal } = openGlobalDatabase();
+        try {
+          invocations = annotateInvocationLiveness(globalDb, projectPath, invocationRows).map(
+            ({ runner_id: _runnerId, ...invocation }) => invocation,
+          );
+        } finally {
+          closeGlobal();
+        }
+      } catch {
+        invocations = invocationRows.map(({ runner_id: _runnerId, ...invocation }) => invocation);
+      }
 
       // Calculate durations for each status
       const auditWithDurations = calculateDurations(auditTrail);
@@ -506,17 +530,16 @@ router.get('/tasks/:taskId/stream', async (req: Request, res: Response) => {
     return;
   }
 
-  let invocation: { id: number; status: string } | undefined;
+  let invocationRows: Array<{ id: number; status: string; task_id: string; runner_id: string | null }> = [];
   try {
-    invocation = db
+    invocationRows = db
       .prepare(
-        `SELECT id, status
+        `SELECT id, status, task_id, runner_id
          FROM task_invocations
          WHERE task_id = ? AND status = 'running'
-         ORDER BY started_at_ms DESC
-         LIMIT 1`
+         ORDER BY started_at_ms DESC, id DESC`
       )
-      .get(taskId) as { id: number; status: string } | undefined;
+      .all(taskId) as Array<{ id: number; status: string; task_id: string; runner_id: string | null }>;
   } catch (error) {
     await writeSSE(res, {
       type: 'error',
@@ -530,6 +553,21 @@ router.get('/tasks/:taskId/stream', async (req: Request, res: Response) => {
       db.close();
     } catch {
       // ignore
+    }
+  }
+
+  let invocation: { id: number; status: string; task_id: string; runner_id: string | null } | undefined =
+    invocationRows[0];
+  if (invocationRows.length > 0) {
+    try {
+      const { db: globalDb, close: closeGlobal } = openGlobalDatabase();
+      try {
+        invocation = selectLatestLiveRunningInvocation(globalDb, projectPath, invocationRows);
+      } finally {
+        closeGlobal();
+      }
+    } catch {
+      invocation = invocationRows[0];
     }
   }
 
@@ -1340,6 +1378,13 @@ router.post('/tasks/:taskId/restart', (req: Request, res: Response) => {
            WHERE id = ?`
         ).run(notes || 'Resolved via WebUI restart', dispute.id);
       }
+
+      db.prepare(
+        `UPDATE task_invocations
+         SET status = 'failed'
+         WHERE task_id = ?
+           AND status = 'running'`
+      ).run(taskId);
 
       // Reset task: set status to pending and rejection_count to 0
       db.prepare(

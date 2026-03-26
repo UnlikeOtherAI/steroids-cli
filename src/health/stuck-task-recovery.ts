@@ -184,6 +184,21 @@ function deleteRunnerRow(globalDb: Database.Database, runnerId: string): void {
   }
 }
 
+function closeRunningInvocationsForTask(projectDb: Database.Database, taskId: string): void {
+  try {
+    projectDb
+      .prepare(
+        `UPDATE task_invocations
+         SET status = 'failed'
+         WHERE task_id = ?
+           AND status = 'running'`,
+      )
+      .run(taskId);
+  } catch {
+    // Best-effort: older test schemas may not expose every invocation column.
+  }
+}
+
 function recoverOrphanedTask(
   projectDb: Database.Database,
   signal: OrphanedTaskSignal,
@@ -199,6 +214,7 @@ function recoverOrphanedTask(
 
   if (!dryRun) {
     const tx = projectDb.transaction(() => {
+      closeRunningInvocationsForTask(projectDb, signal.taskId);
       forceReleaseTaskLock(projectDb, signal.taskId);
       updateTaskStatus(
         projectDb,
@@ -258,6 +274,7 @@ async function recoverHangingInvocation(
     deleteRunnerRow(globalDb, signal.runnerId);
 
     const tx = projectDb.transaction(() => {
+      closeRunningInvocationsForTask(projectDb, signal.taskId);
       forceReleaseTaskLock(projectDb, signal.taskId);
       updateTaskStatus(
         projectDb,
@@ -320,6 +337,7 @@ async function recoverZombieOrDeadRunner(
       })();
 
       const tx = projectDb.transaction(() => {
+        closeRunningInvocationsForTask(projectDb, signal.currentTaskId as string);
         forceReleaseTaskLock(projectDb, signal.currentTaskId as string);
         if (taskExists) {
           updateTaskStatus(

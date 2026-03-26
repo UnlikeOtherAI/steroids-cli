@@ -244,6 +244,7 @@ That's it. Open your browser at:
 
 - **Multi-project view** — See all registered projects at a glance
 - **Task queues** — Pending, in-progress, review, completed
+- **Project recovery panel** — Failure-focused task pages surface the last active task and a whole-project reset action for blocked/failed/orphaned work
 - **Runner status** — Active daemons with heartbeat monitoring
 - **Audit trails** — Full history of every task state change
 - **Configuration** — Edit project settings from the browser

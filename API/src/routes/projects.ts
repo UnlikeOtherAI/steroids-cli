@@ -6,7 +6,6 @@
 import { Router, Request, Response } from 'express';
 import { execSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync, realpathSync } from 'node:fs';
-import Database from 'better-sqlite3';
 import { join, relative, resolve, sep } from 'node:path';
 import {
   getRegisteredProjects,
@@ -24,6 +23,7 @@ import {
   readInstructionOverrides,
   writeInstructionOverrides,
 } from '../../../dist/prompts/instruction-files.js';
+import { resetOrphanedInProgressTasks } from '../utils/project-reset-runtime.js';
 import { isValidProjectPath, validatePathRequest } from '../utils/validation.js';
 import { openSqliteForRead } from '../utils/sqlite.js';
 import { getCachedListStorage } from '../utils/storage-cache.js';
@@ -387,7 +387,7 @@ router.post('/projects/enable', (req: Request, res: Response) => {
 
 /**
  * POST /api/projects/reset
- * Reset failed, skipped, and disputed tasks for a project, and re-enable it.
+ * Reset resettable tasks for a project, and recover orphaned in-progress work when safe.
  * Body: { path: string }
  */
 router.post('/projects/reset', (req: Request, res: Response) => {
@@ -420,44 +420,10 @@ router.post('/projects/reset', (req: Request, res: Response) => {
     const cliBin = fileURLToPath(new URL('../../../dist/index.js', import.meta.url));
     execSync(`node "${cliBin}" tasks reset --all`, { cwd: projectPath, stdio: 'pipe' });
 
-    // Reset orphaned in_progress tasks — only when no active runner exists
-    // Uses inline SQL against the already-open globalDb — same pattern as detection
-    const { db: globalDb, close: closeGlobalDb } = openGlobalDatabase();
-    try {
-      const hasStandaloneRunner = globalDb.prepare(
-        `SELECT 1 FROM runners WHERE project_path = ? AND status != 'stopped'
-         AND heartbeat_at > datetime('now', '-5 minutes') AND parallel_session_id IS NULL`
-      ).get(projectPath) !== undefined;
-      // Cast: DbLike's run signature uses unknown[] but better-sqlite3 uses {} — runtime-compatible
-      const hasParallelSession = hasActiveParallelSessionForProjectDb(globalDb as never, projectPath);
-
-      if (!hasStandaloneRunner && !hasParallelSession) {
-        const dbPath = join(projectPath, '.steroids', 'steroids.db');
-        if (existsSync(dbPath)) {
-          // Declare before try so finally can safely reference it (even if constructor throws)
-          let projectDb: Database.Database | undefined;
-          try {
-            projectDb = new Database(dbPath, { fileMustExist: true });
-            projectDb.transaction(() => {
-              // Clear locks first — 60-min TTL would block new runner pickup otherwise
-              projectDb!
-                .prepare(`DELETE FROM task_locks WHERE task_id IN (SELECT id FROM tasks WHERE status = 'in_progress')`)
-                .run();
-              projectDb!
-                .prepare(`UPDATE tasks SET status = 'pending', updated_at = datetime('now') WHERE status = 'in_progress'`)
-                .run();
-            })();
-          } finally {
-            projectDb?.close();
-          }
-        }
-      }
-      // No wakeup() call — its blast radius covers ALL projects, not just this one.
-      // The cron daemon picks up newly-pending tasks on its next cycle.
-      // Users wanting immediate pickup can hit "Start Daemon."
-    } finally {
-      closeGlobalDb();
-    }
+    resetOrphanedInProgressTasks(projectPath);
+    // No wakeup() call — its blast radius covers ALL projects, not just this one.
+    // The cron daemon picks up newly-pending tasks on its next cycle.
+    // Users wanting immediate pickup can hit "Start Daemon."
 
     res.json({
       success: true,

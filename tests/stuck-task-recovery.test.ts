@@ -215,6 +215,8 @@ describe('recoverStuckTasks', () => {
     const task = projectDb.prepare('SELECT status, failure_count FROM tasks WHERE id = ?').get('t1') as { status: string; failure_count: number };
     expect(task.status).toBe('pending');
     expect(task.failure_count).toBe(1);
+    const invocation = projectDb.prepare('SELECT status FROM task_invocations WHERE task_id = ?').get('t1') as { status: string };
+    expect(invocation.status).toBe('failed');
   });
 
   it('skips auto-recovery when safety limit (maxIncidentsPerHour) is hit', async () => {
@@ -272,6 +274,9 @@ describe('recoverStuckTasks', () => {
     projectDb
       .prepare(`INSERT INTO task_locks (task_id, runner_id, expires_at) VALUES (?, ?, ?)`)
       .run('t1', 'r1', new Date(now.getTime() + 60 * 60 * 1000).toISOString());
+    projectDb
+      .prepare(`INSERT INTO task_invocations (task_id, role, status, created_at) VALUES (?, ?, ?, ?)`)
+      .run('t1', 'coder', 'running', dt(new Date(now.getTime() - 700 * 1000)));
 
     let killedPid: number | null = null;
     const result = await recoverStuckTasks({
@@ -302,6 +307,8 @@ describe('recoverStuckTasks', () => {
 
     const lock = projectDb.prepare('SELECT * FROM task_locks WHERE task_id = ?').get('t1');
     expect(lock).toBeUndefined();
+    const invocation = projectDb.prepare('SELECT status FROM task_invocations WHERE task_id = ?').get('t1') as { status: string };
+    expect(invocation.status).toBe('failed');
 
     const incidents = projectDb.prepare('SELECT failure_mode FROM incidents WHERE runner_id = ?').all('r1') as Array<{ failure_mode: string }>;
     expect(incidents.map((i) => i.failure_mode)).toContain('zombie_runner');
@@ -325,6 +332,9 @@ describe('recoverStuckTasks', () => {
     projectDb
       .prepare(`INSERT INTO task_locks (task_id, runner_id, expires_at) VALUES (?, ?, ?)`)
       .run('t1', 'r1', new Date(now.getTime() + 60 * 60 * 1000).toISOString());
+    projectDb
+      .prepare(`INSERT INTO task_invocations (task_id, role, status, created_at) VALUES (?, ?, ?, ?)`)
+      .run('t1', 'coder', 'running', dt(new Date(now.getTime() - 700 * 1000)));
 
     const result = await recoverStuckTasks({
       projectPath,
@@ -350,6 +360,8 @@ describe('recoverStuckTasks', () => {
 
     const lock = projectDb.prepare('SELECT * FROM task_locks WHERE task_id = ?').get('t1');
     expect(lock).toBeUndefined();
+    const invocation = projectDb.prepare('SELECT status FROM task_invocations WHERE task_id = ?').get('t1') as { status: string };
+    expect(invocation.status).toBe('failed');
 
     const incidents = projectDb.prepare('SELECT failure_mode FROM incidents WHERE runner_id = ?').all('r1') as Array<{ failure_mode: string }>;
     expect(incidents.map((i) => i.failure_mode)).toContain('dead_runner');

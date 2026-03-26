@@ -142,6 +142,8 @@ Use non-interactive modes for all scripted/automated flows. For `npx` in automat
 ### Architecture and Quality Practices
 
 - Prefer proven patterns in this codebase over new architectural models for routine problems.
+- Prefer single-responsibility functions. A function should do one cohesive thing or answer one invariant question. Do not stack unrelated checks, recovery paths, or policy decisions into one method just because they touch the same data.
+- When touching a function that already mixes responsibilities, treat that as an immediate refactor prompt. Before adding more logic, consider splitting the whole method along clear responsibility boundaries. If the function stays multi-purpose, the reason must be explicit and the overall change must still reduce complexity.
 - Any monitor, recovery, runner-health, or orphan-detection fix must ship with both targeted unit tests and a mock-style integration test that exercises the real DB shape and the real trigger path. If a finding cannot be proven in both layers, treat that as missing coverage and keep going.
 - **After editing any file, check its line count — hard limits:**
   - Source, tests, config: **500 lines**. Exceeding is an architectural signal — the file has too many responsibilities. **Never move random functions to a new file just to fit the limit.** Identify the cohesive responsibility groups within the file and split along those seams — each resulting file owns a complete concern describable in one sentence. **Never trim comments or blank lines to fit.**

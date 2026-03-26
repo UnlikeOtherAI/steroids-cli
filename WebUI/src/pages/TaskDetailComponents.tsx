@@ -164,7 +164,8 @@ export const InvocationCard: React.FC<InvocationCardProps> = ({ invocation, task
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [responseExpanded, setResponseExpanded] = useState(false);
 
-  const isOngoing = invocation.status === 'running';
+  const isOngoing = invocation.status === 'running' && invocation.is_live !== false;
+  const isStaleRunning = invocation.status === 'running' && invocation.is_live === false;
   const isSuccess = invocation.success === 1;
   const isTimedOut = invocation.timed_out === 1;
   const isCoder = invocation.role === 'coder';
@@ -172,6 +173,7 @@ export const InvocationCard: React.FC<InvocationCardProps> = ({ invocation, task
 
   let accentColor = 'border-success';
   if (isOngoing) accentColor = 'border-info';
+  else if (isStaleRunning) accentColor = 'border-warning';
   else if (isTimedOut) accentColor = 'border-warning';
   else if (!isSuccess) accentColor = 'border-danger';
 
@@ -219,6 +221,8 @@ export const InvocationCard: React.FC<InvocationCardProps> = ({ invocation, task
                 <i className="fa-solid fa-spinner fa-spin mr-1 text-[10px]"></i>
                 Running
               </Badge>
+            ) : isStaleRunning ? (
+              <Badge variant="warning">Stale Runtime</Badge>
             ) : isSuccess ? (
               <Badge variant="success">OK</Badge>
             ) : isTimedOut ? (

@@ -4,6 +4,7 @@
 ## Claude-specific notes
 - Keep instructions modular and prefer progressive disclosure.
 - If deeper scoped behavior is needed, use `.claude/rules/` files.
+- Prefer single-responsibility functions. When touching a method that mixes multiple concerns, treat that as a prompt to split it along readability and responsibility boundaries before adding more logic.
 
 ## Debugging Protocol
 - **Always check logs first** before using browser automation or code analysis. Look at server logs (`~/.steroids/logs/api.log`, `~/.steroids/logs/webui.log`), runner logs (`~/.steroids/runners/logs/`), and browser console errors before diving into source code.

@@ -11,7 +11,6 @@ import { loadConfig } from '../config/loader.js';
 import { updateTaskStatus, type Task } from '../database/queries.js';
 import type { openGlobalDatabase } from './global-db.js';
 import { parseReviewerDecisionSignal } from '../orchestrator/reviewer-decision-parser.js';
-import type { SanitiseSummary } from './wakeup-sanitise.js';
 import {
   applyApprovedOutcome,
   deriveApprovedOutcome,
@@ -29,6 +28,12 @@ export interface StaleInvocationRow {
   started_at_ms: number;
   runner_id: string | null;
   task_status: string | null;
+}
+
+export interface InvocationRecoverySummary {
+  recoveredApprovals: number;
+  recoveredRejects: number;
+  closedStaleInvocations: number;
 }
 
 export function parseReviewerDecisionFromInvocationLogContent(
@@ -133,7 +138,7 @@ export async function recoverOrphanedInvocation(
   projectPath: string,
   row: StaleInvocationRow,
   dryRun: boolean,
-  summary: SanitiseSummary,
+  summary: InvocationRecoverySummary,
   source: string
 ): Promise<void> {
   const completedAtMs = Date.now();

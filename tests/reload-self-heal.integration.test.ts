@@ -8,7 +8,7 @@ import { createApp } from '../API/src/index.js';
 import { initDatabase } from '../src/database/connection.js';
 import { openGlobalDatabase } from '../src/runners/global-db-connection.js';
 
-const { resetReloadSelfHealStateForTests } = await import('../dist/self-heal/reload-sweep.js');
+const { resetReloadSelfHealStateForTests } = await import('../src/self-heal/reload-sweep.js');
 
 function createTempDir(prefix: string): string {
   const dir = join(
@@ -56,6 +56,19 @@ function createProjectDb(projectPath: string, taskId: string): void {
       `INSERT INTO tasks (id, title, status, updated_at, failure_count)
        VALUES (?, ?, 'in_progress', datetime('now', '-2 hours'), 0)`
     ).run(taskId, `Task ${taskId}`);
+  } finally {
+    close();
+  }
+}
+
+function insertStaleRunningInvocation(projectPath: string, taskId: string, role: 'coder' | 'reviewer'): void {
+  const { db, close } = initDatabase(projectPath);
+  try {
+    db.prepare(
+      `INSERT INTO task_invocations (
+         task_id, role, provider, model, prompt, started_at_ms, last_activity_at_ms, status, runner_id
+       ) VALUES (?, ?, 'mock', 'mock-model', 'prompt', ?, ?, 'running', ?)`,
+    ).run(taskId, role, Date.now() - 180_000, Date.now() - 180_000, 'runner-missing');
   } finally {
     close();
   }
@@ -197,6 +210,42 @@ describe('reload self-heal integration', () => {
         expect(task.status).toBe('pending');
       } finally {
         close();
+      }
+    });
+  });
+
+  it('reconciles stale running invocations during reload self-heal when wakeup is paused', async () => {
+    const projectPath = createTempDir('steroids-project-stale-invocation');
+    createdDirs.push(projectPath);
+    const { db, close } = initDatabase(projectPath);
+    try {
+      db.prepare(
+        `INSERT INTO tasks (id, title, status, updated_at)
+         VALUES (?, ?, 'review', datetime('now', '-10 minutes'))`,
+      ).run('task-review', 'Review task');
+    } finally {
+      close();
+    }
+    insertStaleRunningInvocation(projectPath, 'task-review', 'reviewer');
+    registerProject(projectPath);
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/self-heal/reload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'task_page', projectPath }),
+    });
+
+    expect(response.status).toBe(202);
+
+    await waitFor(() => {
+      const { db: projectDb, close: closeProjectDb } = initDatabase(projectPath);
+      try {
+        const invocation = projectDb.prepare(
+          `SELECT status FROM task_invocations WHERE task_id = ? ORDER BY id DESC LIMIT 1`,
+        ).get('task-review') as { status: string };
+        expect(invocation.status).toBe('failed');
+      } finally {
+        closeProjectDb();
       }
     });
   });

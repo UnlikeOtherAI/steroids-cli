@@ -6,12 +6,9 @@ import { openDatabase } from '../database/connection.js';
 import { openGlobalDatabase } from './global-db.js';
 import { loadConfig } from '../config/loader.js';
 import {
-  type StaleInvocationRow,
-  shouldSkipInvocation,
-  isRunnerProcessDead,
-  recoverOrphanedInvocation,
+  parseReviewerDecisionFromInvocationLogContent,
 } from './wakeup-sanitise-recovery.js';
-import { getProjectHash } from '../parallel/clone.js';
+import { reconcileInvocationRuntimeState } from './wakeup-sanitise-runtime.js';
 
 export interface SanitiseSettings {
   enabled: boolean;
@@ -89,8 +86,6 @@ function markPeriodicSanitiseRun(
   ).run(getSanitiseSchemaKey(projectPath));
 }
 
-export { parseReviewerDecisionFromInvocationLogContent } from './wakeup-sanitise-recovery.js';
-
 async function sanitiseProjectState(
   globalDb: ReturnType<typeof openGlobalDatabase>['db'],
   projectDb: ReturnType<typeof openDatabase>['db'],
@@ -110,117 +105,17 @@ async function sanitiseProjectState(
     recoveredFailedTasks: 0,
   };
 
-  const staleCutoffMs = Date.now() - staleInvocationTimeoutSec * 1000;
-  // S1/S2: Include parallel session runners (workspace-prefixed paths don't match project_path directly)
-  const activeRunnerTaskRows = globalDb
-    .prepare(
-      `SELECT r.current_task_id, r.parallel_session_id
-       FROM runners r
-       LEFT JOIN parallel_sessions ps ON ps.id = r.parallel_session_id
-       WHERE (r.project_path = ? OR ps.project_path = ?)
-         AND r.status = 'running'
-         AND r.heartbeat_at > datetime('now', '-5 minutes')
-         AND (r.current_task_id IS NOT NULL OR r.parallel_session_id IS NOT NULL)`
-    )
-    .all(projectPath, projectPath) as Array<{ current_task_id: string | null; parallel_session_id: string | null }>;
-  const activeTaskIds = new Set(
-    activeRunnerTaskRows
-      .map((row) => row.current_task_id)
-      .filter((taskId): taskId is string => typeof taskId === 'string' && taskId.length > 0)
-  );
-  const hasActiveParallelRunner = activeRunnerTaskRows.some(
-    (row) => typeof row.parallel_session_id === 'string' && row.parallel_session_id.length > 0
-  );
-  let hasActiveMergeLock = false;
-  try {
-    const STALE_LOCK_TTL_MS = 90_000;
-    const projectId = getProjectHash(projectPath);
-    const mergeLockRows = globalDb
-      .prepare('SELECT heartbeat_at FROM workspace_merge_locks WHERE project_id = ?')
-      .all(projectId) as Array<{ heartbeat_at: string }>;
-    const nowMs = Date.now();
-    hasActiveMergeLock = mergeLockRows.some((row) => {
-      const hbMs = Date.parse(row.heartbeat_at);
-      return Number.isFinite(hbMs) && (nowMs - hbMs) < STALE_LOCK_TTL_MS;
-    });
-  } catch {
-    hasActiveMergeLock = false;
-  }
-
-  // ── Pass 1: Stale invocations (exceeded timeout, any runner state) ──
-  const staleInvocations = projectDb
-    .prepare(
-      `SELECT i.id, i.task_id, i.role, i.started_at_ms, i.runner_id, t.status AS task_status
-       FROM task_invocations i
-       LEFT JOIN tasks t ON t.id = i.task_id
-       WHERE i.status = 'running'
-         AND i.started_at_ms IS NOT NULL
-         AND i.started_at_ms <= ?
-       ORDER BY i.started_at_ms ASC`
-    )
-    .all(staleCutoffMs) as Array<StaleInvocationRow>;
-
-  for (const row of staleInvocations) {
-    if (shouldSkipInvocation(row, activeTaskIds, hasActiveMergeLock, hasActiveParallelRunner, globalDb)) {
-      continue;
-    }
-    await recoverOrphanedInvocation(projectDb, projectPath, row, dryRun, summary, 'stale timeout');
-  }
-
-  // ── Pass 2: Dead-runner orphans (runner process is dead, invocation >2 min old) ──
-  // Catches invocations left 'running' by crashed/killed runners without waiting 30 min.
-  const deadRunnerCutoffMs = Date.now() - 120_000;
-  const recentRunningInvocations = projectDb
-    .prepare(
-      `SELECT i.id, i.task_id, i.role, i.started_at_ms, i.runner_id, t.status AS task_status
-       FROM task_invocations i
-       LEFT JOIN tasks t ON t.id = i.task_id
-       WHERE i.status = 'running'
-         AND i.started_at_ms IS NOT NULL
-         AND i.started_at_ms > ?
-         AND i.started_at_ms <= ?
-       ORDER BY i.started_at_ms ASC`
-    )
-    .all(staleCutoffMs, deadRunnerCutoffMs) as Array<StaleInvocationRow>;
-
-  for (const row of recentRunningInvocations) {
-    const isRebaseRole = row.role === 'rebase_coder' || row.role === 'rebase_reviewer';
-    if (activeTaskIds.has(row.task_id) || (hasActiveMergeLock && !isRebaseRole)) {
-      continue;
-    }
-    // Only recover if we can confirm the runner process is dead
-    if (!isRunnerProcessDead(row.runner_id, globalDb)) {
-      continue;
-    }
-    await recoverOrphanedInvocation(projectDb, projectPath, row, dryRun, summary, 'dead runner');
-  }
-
-  // ── Pass 3: Orphaned task locks (task has no running invocations and no active runner) ──
-  if (!dryRun) {
-    const orphanedLocks = projectDb
-      .prepare(
-        `SELECT tl.task_id FROM task_locks tl
-         WHERE NOT EXISTS (
-           SELECT 1 FROM task_invocations i
-           WHERE i.task_id = tl.task_id AND i.status = 'running'
-         )
-         AND tl.task_id NOT IN (${
-           activeTaskIds.size > 0
-             ? [...activeTaskIds].map(() => '?').join(',')
-             : "'__none__'"
-         })`
-      )
-      .all(...(activeTaskIds.size > 0 ? [...activeTaskIds] : [])) as Array<{ task_id: string }>;
-
-    if (orphanedLocks.length > 0) {
-      const taskIds = orphanedLocks.map((r) => r.task_id);
-      const placeholders = taskIds.map(() => '?').join(',');
-      const released = projectDb
-        .prepare(`DELETE FROM task_locks WHERE task_id IN (${placeholders})`)
-        .run(...taskIds);
-      summary.releasedTaskLocks += released.changes;
-    }
-  }
+  const runtimeSummary = await reconcileInvocationRuntimeState({
+    globalDb,
+    projectDb,
+    projectPath,
+    dryRun,
+    staleInvocationTimeoutSec,
+  });
+  summary.recoveredApprovals += runtimeSummary.recoveredApprovals;
+  summary.recoveredRejects += runtimeSummary.recoveredRejects;
+  summary.closedStaleInvocations += runtimeSummary.closedStaleInvocations;
+  summary.releasedTaskLocks += runtimeSummary.releasedTaskLocks;
 
   if (!dryRun) {
     const releasedTaskLocks = projectDb
@@ -479,6 +374,8 @@ export async function runPeriodicSanitiseForProject(
 
   return summary;
 }
+
+export { parseReviewerDecisionFromInvocationLogContent };
 
 export function sanitisedActionCount(summary: SanitiseSummary): number {
   return (

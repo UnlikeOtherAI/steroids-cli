@@ -7,6 +7,7 @@ export * from './huggingFace';
 export * from './ollama';
 export * from './modelUsage';
 export * from './ollama';
+export * from './project-recovery';
 export * from './runner';
 export * from './task';
 

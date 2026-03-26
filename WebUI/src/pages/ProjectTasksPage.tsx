@@ -5,6 +5,10 @@ import { tasksApi, sectionsApi } from '../services/api';
 import { Badge } from '../components/atoms/Badge';
 import { PageLayout } from '../components/templates/PageLayout';
 import { useReloadSelfHeal } from '../hooks/useReloadSelfHeal';
+import { useProjectRecovery } from '../hooks/useProjectRecovery';
+import { useProjectReset } from '../hooks/useProjectReset';
+import { ProjectRecoveryPanel } from '../components/molecules/ProjectRecoveryPanel';
+import { stripGuidPrefix } from '../utils/task-title';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   pending: 'Pending',
@@ -40,12 +44,6 @@ const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'in
 // Queue statuses for "next to run" sorting (pending first, then in_progress, then review)
 const QUEUE_STATUSES = ['pending', 'in_progress', 'review', 'completed'];
 
-// Strip GUID prefix from task title (format: "#<uuid>: <title>")
-function stripGuidPrefix(title: string): string {
-  const match = title.match(/^#[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\s*/i);
-  return match ? title.slice(match[0].length) : title;
-}
-
 export const ProjectTasksPage: React.FC = () => {
   const { projectPath } = useParams<{ projectPath: string }>();
   const [searchParams] = useSearchParams();
@@ -70,6 +68,16 @@ export const ProjectTasksPage: React.FC = () => {
   const [currentSection, setCurrentSection] = useState<Section | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { recovery, loading: recoveryLoading, reload: reloadRecovery } = useProjectRecovery(decodedPath || null);
+  const { resetting, resetProject } = useProjectReset({
+    projectPath: decodedPath || null,
+    onSuccess: async () => {
+      await Promise.all([fetchTasks(), reloadRecovery()]);
+    },
+    onError: (nextError) => {
+      setError(nextError.message);
+    },
+  });
 
   // Fetch sections for the filter dropdown
   const fetchSections = useCallback(async () => {
@@ -200,6 +208,14 @@ export const ProjectTasksPage: React.FC = () => {
       loadingMessage="Loading tasks..."
       error={error}
     >
+      <ProjectRecoveryPanel
+        projectPath={decodedPath}
+        recovery={recovery}
+        loading={recoveryLoading}
+        resetting={resetting}
+        onResetProject={resetProject}
+      />
+
       {/* Section filter (if filtering by section, show section info) */}
       {currentSection && (
         <div className="mb-4 p-3 bg-bg-surface rounded-lg border border-border flex items-center justify-between">

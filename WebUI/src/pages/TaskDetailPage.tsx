@@ -10,6 +10,10 @@ import { AuditLogRow, DisputePanel, formatDuration, formatTimestamp, Invocations
 import { FirstResponderPanel } from './FirstResponderPanel';
 import { LiveInvocationActivityPanel, InvocationTimelineEventRow, StreamState } from './TaskLiveTimelineComponents';
 import { useReloadSelfHeal } from '../hooks/useReloadSelfHeal';
+import { useProjectRecovery } from '../hooks/useProjectRecovery';
+import { useProjectReset } from '../hooks/useProjectReset';
+import { ProjectRecoveryPanel } from '../components/molecules/ProjectRecoveryPanel';
+import { stripGuidPrefix } from '../utils/task-title';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   pending: 'Pending',
@@ -35,12 +39,6 @@ const STATUS_VARIANTS: Record<TaskStatus, 'success' | 'danger' | 'warning' | 'in
   blocked_conflict: 'warning',
 };
 
-// Strip GUID prefix from task title (format: "#<uuid>: <title>")
-function stripGuidPrefix(title: string): string {
-  const match = title.match(/^#[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\s*/i);
-  return match ? title.slice(match[0].length) : title;
-}
-
 export const TaskDetailPage: React.FC = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const [searchParams] = useSearchParams();
@@ -64,6 +62,16 @@ export const TaskDetailPage: React.FC = () => {
   const [timelineCollapsed, toggleTimelineCollapsed] = usePersistentToggle('steroids:timeline-collapsed', false);
   const intervalRef = useRef<number | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const { recovery, loading: recoveryLoading, reload: reloadRecovery } = useProjectRecovery(projectPath);
+  const { resetting: projectResetting, resetProject } = useProjectReset({
+    projectPath,
+    onSuccess: async () => {
+      await Promise.all([fetchTask(), reloadRecovery()]);
+    },
+    onError: (nextError) => {
+      alert('Failed to reset project: ' + nextError.message);
+    },
+  });
 
   const fetchTask = useCallback(async () => {
     if (!taskId || !projectPath) return;
@@ -276,6 +284,14 @@ export const TaskDetailPage: React.FC = () => {
     >
       {task && (
         <>
+          <ProjectRecoveryPanel
+            projectPath={projectPath}
+            recovery={recovery}
+            loading={recoveryLoading}
+            resetting={projectResetting}
+            onResetProject={resetProject}
+          />
+
           {/* Task metadata */}
           <div className="flex items-center gap-3 text-sm text-text-muted -mt-4 mb-6">
             {task.section_name && (

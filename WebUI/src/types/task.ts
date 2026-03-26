@@ -26,6 +26,7 @@ export interface TaskInvocation {
   provider: string;
   model: string;
   status: string;
+  is_live?: boolean;
   exit_code: number | null;
   duration_ms: number;
   success: number | null;

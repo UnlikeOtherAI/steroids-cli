@@ -77,11 +77,16 @@ export function cleanupTaskRuntimeState(
       current_task_id: string | null;
     } | undefined;
 
-    if (runner && runner.current_task_id && runner.current_task_id !== taskId) {
+    if (!runner) {
+      runnerMap.set(runnerId, { id: runnerId, pid: null });
       continue;
     }
 
-    runnerMap.set(runnerId, { id: runnerId, pid: runner?.pid ?? null });
+    if (runner.current_task_id !== taskId) {
+      continue;
+    }
+
+    runnerMap.set(runnerId, { id: runnerId, pid: runner.pid ?? null });
   }
 
   for (const runner of runnerMap.values()) {

@@ -6,6 +6,11 @@ import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
 import { cleanupAbandonedRunners } from '../runners/abandoned-runners.js';
 import { openGlobalDatabase } from '../runners/global-db-connection.js';
 import { getRegisteredProjects } from '../runners/projects.js';
+import { getSanitiseSettings } from '../runners/wakeup-sanitise.js';
+import {
+  reconcileInvocationRuntimeState,
+  runtimeSanitiseActionCount,
+} from '../runners/wakeup-sanitise-runtime.js';
 
 export type ReloadSelfHealSource = 'runners_page' | 'task_page' | 'project_tasks_page';
 
@@ -70,9 +75,16 @@ async function recoverProject(globalDb: any, projectPath: string): Promise<Reloa
         config,
         dryRun: false,
       });
+      const runtimeSummary = await reconcileInvocationRuntimeState({
+        globalDb,
+        projectDb,
+        projectPath,
+        dryRun: false,
+        staleInvocationTimeoutSec: getSanitiseSettings(projectPath).staleInvocationTimeoutSec,
+      });
       return {
         projectPath,
-        recoveredActions: recovery.actions.length,
+        recoveredActions: recovery.actions.length + runtimeSanitiseActionCount(runtimeSummary),
         skippedRecoveryDueToSafetyLimit: recovery.skippedDueToSafetyLimit,
       };
     } finally {

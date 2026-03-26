@@ -47,7 +47,7 @@ function createGlobalDb(projectPath: string): Database.Database {
 
   db.prepare(
     `INSERT INTO runners (id, pid, project_path, parallel_session_id, current_task_id)
-     VALUES ('runner-1', NULL, ?, 'session-1', NULL)`
+     VALUES ('runner-1', NULL, ?, 'session-1', 'task-1')`
   ).run(projectPath);
   db.prepare(
     `INSERT INTO parallel_sessions (id, project_path, status)
@@ -146,6 +146,62 @@ function createIdleGlobalDb(projectPath: string): Database.Database {
   return db;
 }
 
+function createLiveRunnerBetweenTasksDb(projectPath: string): Database.Database {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE runners (
+      id TEXT PRIMARY KEY,
+      pid INTEGER,
+      project_path TEXT,
+      parallel_session_id TEXT,
+      current_task_id TEXT
+    );
+    CREATE TABLE parallel_sessions (
+      id TEXT PRIMARY KEY,
+      project_path TEXT NOT NULL,
+      status TEXT NOT NULL
+    );
+    CREATE TABLE workstreams (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      runner_id TEXT,
+      lease_expires_at TEXT
+    );
+    CREATE TABLE workspace_pool_slots (
+      id INTEGER PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      runner_id TEXT,
+      task_id TEXT,
+      task_branch TEXT,
+      starting_sha TEXT,
+      claimed_at INTEGER,
+      heartbeat_at INTEGER
+    );
+    CREATE TABLE workspace_merge_locks (
+      id INTEGER PRIMARY KEY,
+      project_id TEXT NOT NULL UNIQUE,
+      runner_id TEXT NOT NULL,
+      slot_id INTEGER NOT NULL,
+      acquired_at INTEGER NOT NULL,
+      heartbeat_at INTEGER NOT NULL
+    );
+  `);
+  db.prepare(
+    `INSERT INTO runners (id, pid, project_path, parallel_session_id, current_task_id)
+     VALUES ('runner-1', NULL, ?, 'session-1', NULL)`
+  ).run(projectPath);
+  db.prepare(
+    `INSERT INTO parallel_sessions (id, project_path, status)
+     VALUES ('session-1', ?, 'running')`
+  ).run(projectPath);
+  db.prepare(
+    `INSERT INTO workstreams (id, session_id, runner_id, lease_expires_at)
+     VALUES ('ws-1', 'session-1', 'runner-1', '2026-03-25T00:00:00Z')`
+  ).run();
+  return db;
+}
+
 describe('cleanupTaskRuntimeState', () => {
   it('releases workstream, slot, and merge lock ownership for a deleted task', () => {
     const projectPath = '/tmp/project-cleanup';
@@ -192,6 +248,29 @@ describe('cleanupTaskRuntimeState', () => {
 
     const runner = globalDb.prepare('SELECT * FROM runners WHERE id = ?').get('runner-1') as any;
     expect(runner).toBeDefined();
+    expect(summary.runnerIds).toEqual([]);
+    expect(summary.releasedSlotIds).toEqual([]);
+    expect(summary.unblockedSessionIds).toEqual([]);
+    expect(summary.releasedMergeLocks).toBe(0);
+
+    projectDb.close();
+    globalDb.close();
+  });
+
+  it('does not revoke a live runner between tasks just because a stale running invocation points at it', () => {
+    const projectPath = '/tmp/project-cleanup-live-runner';
+    const globalDb = createLiveRunnerBetweenTasksDb(projectPath);
+    const projectDb = createProjectDb();
+
+    const summary = cleanupTaskRuntimeState(globalDb, 'task-1', projectPath, undefined, projectDb);
+
+    const runner = globalDb.prepare('SELECT * FROM runners WHERE id = ?').get('runner-1') as any;
+    const workstream = globalDb.prepare('SELECT runner_id FROM workstreams WHERE id = ?').get('ws-1') as any;
+    const session = globalDb.prepare('SELECT status FROM parallel_sessions WHERE id = ?').get('session-1') as any;
+
+    expect(runner).toBeDefined();
+    expect(workstream.runner_id).toBe('runner-1');
+    expect(session.status).toBe('running');
     expect(summary.runnerIds).toEqual([]);
     expect(summary.releasedSlotIds).toEqual([]);
     expect(summary.unblockedSessionIds).toEqual([]);

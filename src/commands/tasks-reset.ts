@@ -12,6 +12,7 @@ import { deleteTaskBranchFromSlot } from '../workspace/git-lifecycle.js';
 import { releaseSlot } from '../workspace/pool.js';
 import { getProjectHash } from '../parallel/clone.js';
 import { cleanupTaskRuntimeState, taskDeleteRequiresForce } from './task-runtime-cleanup.js';
+import { PROJECT_RESETTABLE_STATUSES } from '../tasks/resettable-statuses.js';
 
 export async function resetTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'tasks', subcommand: 'reset', flags });
@@ -43,7 +44,7 @@ OPTIONS:
   --failed          Reset all failed tasks
   --disputed        Reset all disputed tasks
   --blocked         Reset all blocked tasks (blocked_error and blocked_conflict)
-  --all             Reset all failed, disputed, and blocked tasks
+  --all             Reset all resettable tasks (${PROJECT_RESETTABLE_STATUSES.join(', ')})
   -h, --help        Show help
 
 DESCRIPTION:

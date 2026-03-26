@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import {
   scheduleReloadSelfHeal,
   type ReloadSelfHealOptions,
-} from '../../../dist/self-heal/reload-sweep.js';
+} from '../../../src/self-heal/reload-sweep.js';
 
 const router = Router();
 
