@@ -2,6 +2,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const WEB_HOST = '0.0.0.0';
+const WEB_PORT = 3500;
+const API_PROXY_TARGET = 'http://localhost:3501';
+
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -9,14 +13,21 @@ export default defineConfig({
     target: 'es2019',
   },
   server: {
-    host: '0.0.0.0', // Listen on all interfaces (localhost + IP)
-    port: 3500,
+    host: WEB_HOST,
+    port: WEB_PORT,
+    // The dashboard is expected to be reachable by LAN/IP/hostname, not only localhost.
+    allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3501',
+        target: API_PROXY_TARGET,
         changeOrigin: true,
       },
     },
+  },
+  preview: {
+    host: WEB_HOST,
+    port: WEB_PORT,
+    allowedHosts: true,
   },
   test: {
     globals: true,

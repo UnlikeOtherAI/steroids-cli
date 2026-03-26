@@ -37,6 +37,7 @@ const WEB_BUILD_STATE_PATH = join(homedir(), '.steroids', 'web-build-state.json'
 const REPO_URL = 'https://github.com/UnlikeOtherAI/steroids-cli.git';
 const API_PORT = 3501;
 const WEBUI_PORT = 3500;
+const WEBUI_HOST = '0.0.0.0';
 const PROXY_PORT = 3580;
 
 interface WebBuildState {
@@ -259,6 +260,10 @@ function installAndBuild(out: ReturnType<typeof createOutput>): void {
   }
 }
 
+export function getWebUiPreviewArgs(port = WEBUI_PORT): string[] {
+  return ['run', 'preview', '--', '--host', WEBUI_HOST, '--strictPort', '--port', String(port)];
+}
+
 /**
  * Launch API and WebUI as background processes
  */
@@ -288,7 +293,7 @@ async function launchProcesses(out: ReturnType<typeof createOutput>): Promise<vo
   // Start WebUI
   const webUiLogPath = join(LOGS_DIR, 'webui.log');
   const webUiLog = openSync(webUiLogPath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC);
-  const webUiProcess = spawn('npm', ['run', 'preview', '--', '--port', String(WEBUI_PORT)], {
+  const webUiProcess = spawn('npm', getWebUiPreviewArgs(WEBUI_PORT), {
     cwd: webUiDir,
     detached: true,
     stdio: ['ignore', webUiLog, webUiLog],
