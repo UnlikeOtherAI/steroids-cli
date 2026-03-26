@@ -1,9 +1,10 @@
 /**
  * Auto-PR creation for section completion.
  *
- * checkSectionCompletionAndPR() is called from all three approval paths:
- *   1. Pool reviewer approval (loop-phases-reviewer.ts — pool path)
- *   2. Non-pool reviewer approval (loop-phases-reviewer.ts — legacy path)
+ * checkSectionCompletionAndPR() is called from the automated completion paths and
+ * the manual CLI approval path:
+ *   1. Reviewer no-op approval (via automated approval effects)
+ *   2. Merge-queue completion (via automated approval effects)
  *   3. Manual CLI approval (tasks.ts approveTaskCmd)
  *
  * GitHub-only: uses `gh` CLI. GitLab/Bitbucket are not supported.
@@ -14,30 +15,13 @@ import type Database from 'better-sqlite3';
 import type { SteroidsConfig } from '../config/loader.js';
 import { getSection, listTasks, setSectionPrNumber } from '../database/queries.js';
 import { handleIntakePostPR } from '../intake/post-pr.js';
-
-// ─── Terminal state check ────────────────────────────────────────────────────
-
-interface SectionCounts {
-  total: number;
-  active: number;
-  completed: number;
-}
+import { getSectionCompletionState } from '../orchestrator/section-completion.js';
 
 interface PrMetadata {
   labels: string[];
   assignees: string[];
   reviewers: string[];
   draft: boolean;
-}
-
-function getSectionCounts(db: Database.Database, sectionId: string): SectionCounts {
-  return db.prepare(`
-    SELECT
-      COUNT(*) as total,
-      SUM(CASE WHEN status IN ('pending','in_progress','review','merge_pending','partial') THEN 1 ELSE 0 END) as active,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
-    FROM tasks WHERE section_id = ?
-  `).get(sectionId) as SectionCounts;
 }
 
 function normalizeMetadataList(values: string[] | null | undefined): string[] {
@@ -256,8 +240,9 @@ export async function checkSectionCompletionAndPR(
   }
 
   // Check task completion
-  const counts = getSectionCounts(db, sectionId);
-  if (counts.total === 0 || counts.active > 0 || counts.completed === 0) return null;
+  const tasks = listTasks(db, { sectionId });
+  const completionState = getSectionCompletionState(tasks);
+  if (!completionState.done) return null;
 
   // All tasks are in terminal states and at least one completed — create the PR
   const baseBranch = config.git?.branch ?? 'main';
@@ -280,7 +265,6 @@ export async function checkSectionCompletionAndPR(
   }
 
   // Collect completed task titles for PR body
-  const tasks = listTasks(db, { sectionId });
   const completedTitles = tasks
     .filter(t => t.status === 'completed')
     .map(t => t.title);

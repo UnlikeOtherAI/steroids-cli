@@ -16,8 +16,8 @@ import {
   classifyFetchError,
   fetchAndPrepare,
   handlePrepFailure,
-  markCompleted,
   attemptRebaseAndFastForward,
+  resolveRebaseRemoteUrl,
 } from '../src/orchestrator/merge-queue.js';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -78,6 +78,18 @@ function makeProjectDb(): Database.Database {
       notes TEXT,
       commit_sha TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  return db;
+}
+
+function makeGlobalDb(): Database.Database {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE workspace_pool_slots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT,
+      remote_url TEXT
     );
   `);
   return db;
@@ -167,30 +179,6 @@ describe('handlePrepFailure', () => {
 
     const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get('t1') as any;
     expect(task.status).toBe('blocked_error');
-    db.close();
-  });
-});
-
-// ─── Unit: markCompleted ─────────────────────────────────────────────────────
-
-describe('markCompleted', () => {
-  it('clears merge columns and sets completed', () => {
-    const db = makeProjectDb();
-    db.prepare("INSERT INTO tasks (id, title, status, merge_phase, approved_sha, rebase_attempts) VALUES (?, ?, ?, ?, ?, ?)")
-      .run('t1', 'Test', 'merge_pending', 'queued', 'abc123', 2);
-
-    markCompleted(db, 't1', 'def456');
-
-    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get('t1') as any;
-    expect(task.status).toBe('completed');
-    expect(task.merge_phase).toBeNull();
-    expect(task.approved_sha).toBeNull();
-    expect(task.rebase_attempts).toBe(0);
-
-    const audits = db.prepare("SELECT * FROM audit WHERE task_id = ?").all('t1') as any[];
-    expect(audits.length).toBe(1);
-    expect(audits[0].to_status).toBe('completed');
-    expect(audits[0].commit_sha).toBe('def456');
     db.close();
   });
 });
@@ -385,18 +373,26 @@ describe('reviewer rejection regression', () => {
   });
 });
 
-// ─── Integration: local-only project guard ──────────────────────────────────
+// ─── Unit: resolveRebaseRemoteUrl ────────────────────────────────────────────
 
-describe('local-only project guard', () => {
-  it('markCompleted called when no remote URL', () => {
-    const db = makeProjectDb();
-    db.prepare("INSERT INTO tasks (id, title, status, merge_phase, approved_sha) VALUES (?, ?, ?, ?, ?)")
-      .run('t1', 'Test', 'merge_pending', 'queued', 'abc123');
+describe('resolveRebaseRemoteUrl', () => {
+  it('prefers stored workspace_pool_slots.remote_url', () => {
+    const globalDb = makeGlobalDb();
+    globalDb
+      .prepare('INSERT INTO workspace_pool_slots (task_id, remote_url) VALUES (?, ?)')
+      .run('t1', 'git@github.com:example/stored.git');
 
-    markCompleted(db, 't1', 'abc123');
+    expect(resolveRebaseRemoteUrl(globalDb, 't1', '/tmp/not-a-repo')).toBe('git@github.com:example/stored.git');
+    globalDb.close();
+  });
 
-    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get('t1') as any;
-    expect(task.status).toBe('completed');
-    db.close();
+  it('falls back to repo remote lookup when no stored remote exists', () => {
+    const repo = makeTempDir('repo');
+    gitInitRepo(repo);
+    execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://example.com/fallback.git'], { stdio: 'pipe' });
+
+    const globalDb = makeGlobalDb();
+    expect(resolveRebaseRemoteUrl(globalDb, 't1', repo)).toBe('https://example.com/fallback.git');
+    globalDb.close();
   });
 });

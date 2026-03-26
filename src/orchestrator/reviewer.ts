@@ -7,8 +7,6 @@ import type { Task } from '../database/queries.js';
 import {
   listTasks,
   getTaskRejections,
-  getLatestSubmissionNotes,
-  getSubmissionCommitShas,
   findResumableSession,
   invalidateSession,
 } from '../database/queries.js';
@@ -29,6 +27,14 @@ import { resolveSubmissionCommitHistoryWithRecovery, resolveSubmissionCommitWith
 import { HistoryManager } from './history-manager.js';
 import { BaseRunner, type BaseRunnerResult } from './base-runner.js';
 import { parseReviewerDecisionSignal } from './reviewer-decision-parser.js';
+import {
+  getReviewerConfigs,
+  isMultiReviewEnabled,
+  resolveDecision,
+  type FinalDecision,
+  type MultiReviewRoute,
+} from './reviewer-policy.js';
+import { loadSubmissionContext } from './submission-context.js';
 
 export interface ReviewerResult extends BaseRunnerResult {
   decision?: 'approve' | 'reject' | 'dispute' | 'skip';
@@ -39,71 +45,8 @@ export interface ReviewerResult extends BaseRunnerResult {
   isNoOp?: boolean;
 }
 
-export type FinalDecision = 'approve' | 'reject' | 'dispute' | 'skip' | 'unclear';
-
-export type MultiReviewRoute = 'direct' | 'local_reject_merge' | 'arbitrate';
-
-/**
- * Deterministic policy engine for multi-reviewer decisions
- */
-export function resolveDecision(
-  results: ReviewerResult[],
-): { decision: FinalDecision; needsMerge: boolean; route: MultiReviewRoute } {
-  if (results.length === 0) return { decision: 'unclear', needsMerge: false, route: 'direct' };
-
-  const decisions = results.map(r => r.decision);
-  const defined = decisions.filter((d): d is Exclude<FinalDecision, 'unclear'> => d !== undefined);
-  const hasReject = defined.includes('reject');
-  const hasDispute = defined.includes('dispute');
-  const hasApprove = defined.includes('approve');
-  const hasSkip = defined.includes('skip');
-  const hasUndefined = decisions.some(d => d === undefined);
-
-  if (!hasUndefined && defined.length > 0 && defined.every(d => d === 'approve')) {
-    return { decision: 'approve', needsMerge: false, route: 'direct' };
-  }
-  if (!hasUndefined && defined.length > 0 && defined.every(d => d === 'skip')) {
-    return { decision: 'skip', needsMerge: false, route: 'direct' };
-  }
-  if (!hasUndefined && defined.length > 0 && defined.every(d => d === 'dispute')) {
-    return { decision: 'dispute', needsMerge: false, route: 'direct' };
-  }
-  if (!hasUndefined && !hasDispute && hasReject && defined.every(d => d === 'reject')) {
-    const rejectCount = defined.length;
-    return {
-      decision: 'reject',
-      needsMerge: rejectCount > 1,
-      route: rejectCount > 1 ? 'local_reject_merge' : 'direct',
-    };
-  }
-  if (!hasUndefined && !hasReject && !hasDispute && hasApprove && hasSkip) {
-    return { decision: 'unclear', needsMerge: false, route: 'arbitrate' };
-  }
-  if (hasReject || hasDispute || hasUndefined) {
-    return { decision: 'unclear', needsMerge: false, route: 'arbitrate' };
-  }
-  return { decision: 'unclear', needsMerge: false, route: 'direct' };
-}
-
-/**
- * Helper to get reviewer configurations, handling both singular and plural config
- */
-export function getReviewerConfigs(config: SteroidsConfig): ReviewerConfig[] {
-  if (config.ai?.reviewers && config.ai.reviewers.length > 0) {
-    return config.ai.reviewers;
-  }
-  if (config.ai?.reviewer) {
-    return [config.ai.reviewer];
-  }
-  return [];
-}
-
-/**
- * Check if multi-review is enabled
- */
-export function isMultiReviewEnabled(config: SteroidsConfig): boolean {
-  return !!(config.ai?.reviewers && config.ai.reviewers.length > 1);
-}
+export { getReviewerConfigs, isMultiReviewEnabled, resolveDecision };
+export type { FinalDecision, MultiReviewRoute };
 
 /**
  * Invoke multiple reviewers in parallel
@@ -174,6 +117,7 @@ class ReviewerRunner extends BaseRunner {
     let submissionCommitHashes: string[] = [];
     let unresolvedSubmissionCommits: string[] = [];
     let userFeedbackItems: string[] = [];
+    let isNoOp = false;
 
     try {
       withDatabase(projectPath, (db) => {
@@ -197,14 +141,16 @@ class ReviewerRunner extends BaseRunner {
           console.log(`Found ${feedbackRows.length} user feedback item(s) for reviewer`);
         }
 
-        submissionNotes = getLatestSubmissionNotes(db, task.id);
+        const submissionContext = loadSubmissionContext(db, projectPath, task.id);
+        submissionNotes = submissionContext.latestReviewNotes;
+        isNoOp = submissionContext.isNoOp;
         if (submissionNotes) {
           console.log(`Coder included notes with submission`);
         }
         
         const submissionHistory = resolveSubmissionCommitHistoryWithRecovery(
           projectPath,
-          getSubmissionCommitShas(db, task.id)
+          submissionContext.approvalCandidateShas
         );
         if (!submissionHistory.latestReachableSha) {
           const attemptsText = submissionHistory.attempts.join(' | ') || 'none';
@@ -359,7 +305,7 @@ class ReviewerRunner extends BaseRunner {
         notes: decision === 'reject' ? 'See reviewer output for details' : undefined,
         provider: providerName,
         model: modelName,
-        isNoOp: Boolean((submissionNotes as string | null)?.startsWith('[NO_OP_SUBMISSION]')),
+        isNoOp,
       };
     } finally {
       this.cleanupTempFile(promptFile);
@@ -389,9 +335,10 @@ class ReviewerRunner extends BaseRunner {
       const unresolved: string[] = [];
 
       taskCommits = tasks.map(task => {
+        const submissionContext = loadSubmissionContext(db, projectPath, task.id);
         const submissionResolution = resolveSubmissionCommitWithRecovery(
           projectPath,
-          getSubmissionCommitShas(db, task.id)
+          submissionContext.approvalCandidateShas
         );
         if (submissionResolution.status !== 'resolved') {
           const attemptsText = submissionResolution.attempts.join(' | ') || 'none';

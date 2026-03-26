@@ -2,7 +2,6 @@ import { withGlobalDatabase } from '../runners/global-db.js';
 import {
   getTask,
   updateTaskStatus,
-  approveTask,
   rejectTask,
   getTaskAudit,
   incrementTaskFailureCount,
@@ -23,7 +22,6 @@ import type { CoordinatorResult } from '../orchestrator/coordinator.js';
 import { resolveReviewerDecision } from './loop-phases-reviewer-resolution.js';
 import { loadConfig } from '../config/loader.js';
 import { resolveEffectiveBranch } from '../git/branch-resolver.js';
-import { checkSectionCompletionAndPR } from '../git/section-pr.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { PoolSlotContext } from '../workspace/types.js';
 import { prepareForTask, postReviewGate } from '../workspace/git-lifecycle.js';
@@ -42,7 +40,11 @@ import {
 } from './loop-phases-helpers.js';
 import { runReviewerSubmissionPreflight } from './reviewer-preflight.js';
 import { createFollowUpTasksIfNeeded } from './loop-phases-reviewer-follow-ups.js';
-import { handleIntakeTaskApproval } from '../intake/reviewer-approval.js';
+import {
+  applyApprovedOutcome,
+  deriveApprovedOutcome,
+} from '../orchestrator/reviewer-approval-outcome.js';
+import { loadSubmissionContext } from '../orchestrator/submission-context.js';
 
 export async function runReviewerPhase(
   db: ReturnType<typeof openDatabase>['db'],
@@ -348,54 +350,33 @@ export async function runReviewerPhase(
         postReviewGate(effectiveProjectPath);
       }
 
-      // No-op submission: coder made no new commits; work pre-existed.
-      const isNoOp = reviewerResult?.isNoOp ?? false;
-      if (isNoOp) {
-        approveTask(db, task.id, 'orchestrator', decision.notes, commitSha);
-        handleIntakeTaskApproval(db, task, effectiveProjectPath);
+      const submissionContext = loadSubmissionContext(db, effectiveProjectPath, task.id);
+      const outcome = deriveApprovedOutcome(submissionContext, {
+        ok: true,
+        approvalSha: commitSha,
+      });
+
+      await applyApprovedOutcome(db, task, outcome, {
+        actor: 'orchestrator',
+        notes:
+          outcome.kind === 'complete'
+            ? decision.notes ?? 'Reviewer approved no-op submission.'
+            : `Reviewer approved (${decision.confidence}). Queued for merge.`,
+        config: phaseConfig,
+        projectPath,
+        intakeProjectPath: effectiveProjectPath,
+      });
+
+      if (outcome.kind === 'complete') {
         if (poolSlotContext) {
           releaseSlot(poolSlotContext.globalDb, poolSlotContext.slot.id);
         }
         if (!jsonMode) console.log('\n✓ Task APPROVED (pre-existing work confirmed by reviewer, no merge needed)');
-        await checkSectionCompletionAndPR(db, projectPath, task.section_id, phaseConfig);
         return;
       }
 
-      // Resolve approved_sha from the remote task branch HEAD
-      const taskBranch = poolSlotContext?.slot.task_branch;
-      let approvedSha = commitSha;
-      if (taskBranch) {
-        try {
-          const { execFileSync: efs } = await import('node:child_process');
-          const remoteSha = efs('git', ['rev-parse', `refs/remotes/origin/${taskBranch}`], {
-            cwd: effectiveProjectPath, encoding: 'utf-8',
-          }).trim();
-          if (remoteSha) approvedSha = remoteSha;
-        } catch {
-          // Remote ref not in local reflog — use local commit SHA.
-          // The merge queue's fetchAndPrepare will independently verify the SHA
-          // matches the remote branch HEAD; mismatches return the task to review.
-          if (!jsonMode) console.log(`  ⚠ Could not resolve remote ref for ${taskBranch}, using local SHA`);
-        }
-      }
-
-      // Transition to merge_pending — merge queue will handle the actual merge
-      updateTaskStatus(db, task.id, 'merge_pending', 'orchestrator',
-        `Reviewer approved (${decision.confidence}). Queued for merge.`);
-      // Set merge queue columns
-      db.prepare(
-        `UPDATE tasks SET merge_phase = 'queued', approved_sha = ?, updated_at = datetime('now')
-         WHERE id = ?`
-      ).run(approvedSha, task.id);
-
-      addAuditEntry(db, task.id, 'review', 'merge_pending', 'orchestrator', {
-        actorType: 'orchestrator',
-        notes: `[merge_queue] Reviewer approved → merge_pending (approved_sha: ${approvedSha})`,
-        commitSha: approvedSha,
-      });
-
       if (!jsonMode) {
-        console.log(`\n✓ Task APPROVED → merge_pending (sha: ${approvedSha}, confidence: ${decision.confidence})`);
+        console.log(`\n✓ Task APPROVED → merge_pending (sha: ${commitSha}, confidence: ${decision.confidence})`);
       }
       break;
     }

@@ -16,6 +16,7 @@ import { getProjectHash } from '../parallel/clone.js';
 import { pushWithRetriesAsync } from '../workspace/git-helpers.js';
 import type { SteroidsConfig } from '../config/loader.js';
 import { openGlobalDatabase } from '../runners/global-db.js';
+import { completeMergePendingTask } from './merge-queue-completion.js';
 
 // ─── Error classifiers (pure functions) ──────────────────────────────────────
 
@@ -212,19 +213,23 @@ export function cleanupTaskBranch(
   }
 }
 
-export function markCompleted(
+export async function markCompleted(
   db: Database.Database,
-  taskId: string,
-  mergedSha?: string,
-): void {
-  db.prepare(
-    `UPDATE tasks SET status = 'completed', merge_phase = NULL, approved_sha = NULL, rebase_attempts = 0, updated_at = datetime('now')
-     WHERE id = ?`
-  ).run(taskId);
-  addAuditEntry(db, taskId, 'merge_pending', 'completed', 'orchestrator', {
-    actorType: 'orchestrator',
-    notes: '[merge_queue] Merge completed successfully',
-    commitSha: mergedSha,
+  task: Pick<Task, 'id' | 'title' | 'source_file' | 'section_id'>,
+  options: {
+    config: SteroidsConfig;
+    projectPath: string;
+    intakeProjectPath?: string;
+    mergedSha?: string;
+    notes: string;
+  },
+): Promise<void> {
+  await completeMergePendingTask(db, task, {
+    config: options.config,
+    projectPath: options.projectPath,
+    intakeProjectPath: options.intakeProjectPath,
+    mergedSha: options.mergedSha,
+    notes: options.notes,
   });
 }
 
@@ -283,7 +288,13 @@ export async function handleMergeAttempt(
   // Local-only guard: no remote configured → skip merge queue
   const remoteUrl = resolveRemoteUrl(sourceProjectPath);
   if (!remoteUrl) {
-    markCompleted(db, task.id, approvedSha);
+    await markCompleted(db, task, {
+      config,
+      projectPath: sourceProjectPath,
+      intakeProjectPath: sourceProjectPath,
+      mergedSha: approvedSha,
+      notes: '[merge_queue] Local-only task completed without remote merge',
+    });
     return;
   }
 
@@ -314,7 +325,13 @@ export async function handleMergeAttempt(
     const prepResult = fetchAndPrepare(slotPath, taskBranch, targetBranch, approvedSha);
 
     if (prepResult.alreadyMerged) {
-      markCompleted(db, task.id, approvedSha);
+      await markCompleted(db, task, {
+        config,
+        projectPath: sourceProjectPath,
+        intakeProjectPath: sourceProjectPath,
+        mergedSha: approvedSha,
+        notes: '[merge_queue] Task branch was already merged; marking completed',
+      });
       cleanupTaskBranch(slotPath, taskBranch);
       return;
     }
@@ -362,7 +379,13 @@ export async function handleMergeAttempt(
     cleanupTaskBranch(slotPath, taskBranch);
 
     // Step 6: Mark completed
-    markCompleted(db, task.id, mergedSha);
+    await markCompleted(db, task, {
+      config,
+      projectPath: sourceProjectPath,
+      intakeProjectPath: sourceProjectPath,
+      mergedSha,
+      notes: '[merge_queue] Merge completed successfully',
+    });
   } finally {
     if (lockAcquired) {
       try {
@@ -382,6 +405,23 @@ export async function handleMergeAttempt(
 
 // ─── Rebase phase wrapper ────────────────────────────────────────────────────
 
+export function resolveRebaseRemoteUrl(
+  globalDb: Database.Database,
+  taskId: string,
+  sourceProjectPath: string,
+): string | null {
+  const existingSlot = globalDb
+    .prepare(
+      `SELECT remote_url
+       FROM workspace_pool_slots
+       WHERE task_id = ? AND remote_url IS NOT NULL AND remote_url != ''
+       ORDER BY id DESC LIMIT 1`
+    )
+    .get(taskId) as { remote_url: string } | undefined;
+
+  return existingSlot?.remote_url ?? resolveRemoteUrl(sourceProjectPath);
+}
+
 async function handleRebasePhase(
   db: Database.Database,
   task: Task,
@@ -392,24 +432,18 @@ async function handleRebasePhase(
 ): Promise<void> {
   const { handleRebaseCoder, handleRebaseReview } = await import('./merge-queue-rebase.js');
   const targetBranch = config.git?.branch ?? 'main';
-
-  // Look up the existing slot's remote_url that was stored by handleMergeAttempt.
-  // This is critical when the runner's CWD is a worktree from a different repo —
-  // calling resolveRemoteUrl(sourceProjectPath) would return the wrong git remote.
   const gdb = openGlobalDatabase();
-  const existingSlot = gdb.db
-    .prepare(
-      `SELECT remote_url, slot_path FROM workspace_pool_slots
-       WHERE task_id = ? AND remote_url IS NOT NULL AND remote_url != ''
-       ORDER BY id DESC LIMIT 1`
-    )
-    .get(task.id) as { remote_url: string; slot_path: string } | undefined;
-
-  const remoteUrl = existingSlot?.remote_url ?? resolveRemoteUrl(sourceProjectPath);
+  const remoteUrl = resolveRebaseRemoteUrl(gdb.db, task.id, sourceProjectPath);
 
   if (!remoteUrl) {
     // Local-only — no rebase needed, mark completed
-    markCompleted(db, task.id, task.approved_sha ?? undefined);
+    await markCompleted(db, task, {
+      config,
+      projectPath: sourceProjectPath,
+      intakeProjectPath: sourceProjectPath,
+      mergedSha: task.approved_sha ?? undefined,
+      notes: '[merge_queue] Local-only rebase path completed without remote merge',
+    });
     return;
   }
 

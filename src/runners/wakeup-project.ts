@@ -5,6 +5,7 @@ import { recoverStuckTasks } from '../health/stuck-task-recovery.js';
 import { cleanupInvocationLogs } from '../cleanup/invocation-logs.js';
 import { pollIntakeProject } from '../intake/poller.js';
 import { syncGitHubIntakeGate } from '../intake/github-gate.js';
+import { reconcilePendingApprovalEffects } from '../orchestrator/automated-approval-effects.js';
 import { clearProviderBackoff } from './global-db.js';
 import { getProviderBackoffInfo, getProjectProviderBackoff } from './global-db-backoffs.js';
 import {
@@ -112,7 +113,7 @@ async function runProjectMaintenance(
         log(`GitHub intake gate for ${projectPath} failed: ${githubGateSummary.reason}`);
       }
 
-      const sanitiseSummary: SanitiseSummary = runPeriodicSanitiseForProject(
+      const sanitiseSummary: SanitiseSummary = await runPeriodicSanitiseForProject(
         globalDb,
         projectDb,
         projectPath,
@@ -138,6 +139,14 @@ async function runProjectMaintenance(
       }
       if (state.skippedRecoveryDueToSafetyLimit) {
         log(`Skipping auto-recovery in ${projectPath}: safety limit hit (maxIncidentsPerHour)`);
+      }
+
+      const replayedApprovalEffects = await reconcilePendingApprovalEffects(projectDb, {
+        config,
+        projectPath,
+      });
+      if (replayedApprovalEffects > 0) {
+        log(`Replayed approval effects for ${replayedApprovalEffects} completed task(s) in ${projectPath}`);
       }
     } finally {
       closeProjectDb();

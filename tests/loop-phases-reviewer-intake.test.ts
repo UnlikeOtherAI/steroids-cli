@@ -5,18 +5,14 @@ const mockApproveTask = jest.fn();
 const mockUpdateTaskStatus = jest.fn();
 const mockRejectTask = jest.fn();
 const mockClearTaskFailureCount = jest.fn();
-const mockClearMergeFailureCount = jest.fn();
 const mockAddAuditEntry = jest.fn();
-const mockHandleIntakeTaskApproval = jest.fn();
-const mockPushToRemote = jest.fn();
-const mockMergeToBase = jest.fn();
-const mockGetSlot = jest.fn();
-const mockReleaseSlot = jest.fn();
-const mockUpdateSlotStatus = jest.fn();
-const mockCheckSectionCompletionAndPR = jest.fn().mockResolvedValue(undefined);
 const mockResolveReviewerDecision = jest.fn();
 const mockInvokeReviewer = jest.fn();
 const mockLoadConfig = jest.fn();
+const mockReleaseSlot = jest.fn();
+const mockApplyApprovedOutcome = jest.fn().mockResolvedValue(undefined);
+const mockDeriveApprovedOutcome = jest.fn();
+const mockLoadSubmissionContext = jest.fn();
 
 jest.unstable_mockModule('../src/database/queries.js', () => ({
   getTask: jest.fn(),
@@ -24,11 +20,8 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   approveTask: mockApproveTask,
   rejectTask: mockRejectTask,
   getTaskAudit: jest.fn().mockReturnValue([]),
-  getFollowUpDepth: jest.fn().mockReturnValue(0),
-  createFollowUpTask: jest.fn(),
   incrementTaskFailureCount: jest.fn(),
   clearTaskFailureCount: mockClearTaskFailureCount,
-  clearMergeFailureCount: mockClearMergeFailureCount,
   addAuditEntry: mockAddAuditEntry,
 }));
 
@@ -37,10 +30,6 @@ jest.unstable_mockModule('../src/orchestrator/reviewer.js', () => ({
   invokeReviewers: jest.fn(),
   getReviewerConfigs: jest.fn(),
   isMultiReviewEnabled: jest.fn().mockReturnValue(false),
-}));
-
-jest.unstable_mockModule('../src/git/push.js', () => ({
-  pushToRemote: mockPushToRemote,
 }));
 
 jest.unstable_mockModule('../src/git/status.js', () => ({
@@ -61,32 +50,18 @@ jest.unstable_mockModule('../src/git/branch-resolver.js', () => ({
   resolveEffectiveBranch: jest.fn().mockReturnValue('main'),
 }));
 
-jest.unstable_mockModule('../src/git/section-pr.js', () => ({
-  checkSectionCompletionAndPR: mockCheckSectionCompletionAndPR,
-}));
-
 jest.unstable_mockModule('../src/providers/registry.js', () => ({
   getProviderRegistry: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/workspace/git-lifecycle.js', () => ({
   prepareForTask: jest.fn(),
-  postCoderGate: jest.fn(),
   postReviewGate: jest.fn(),
 }));
 
-jest.unstable_mockModule('../src/workspace/git-lifecycle-merge.js', () => ({
-  mergeToBase: mockMergeToBase,
-}));
-
 jest.unstable_mockModule('../src/workspace/pool.js', () => ({
-  updateSlotStatus: mockUpdateSlotStatus,
+  updateSlotStatus: jest.fn(),
   releaseSlot: mockReleaseSlot,
-  getSlot: mockGetSlot,
-}));
-
-jest.unstable_mockModule('../src/workspace/merge-pipeline.js', () => ({
-  handleMergeFailure: jest.fn(),
 }));
 
 jest.unstable_mockModule('../src/commands/loop-phases-helpers.js', () => ({
@@ -114,8 +89,13 @@ jest.unstable_mockModule('../src/commands/loop-phases-reviewer-follow-ups.js', (
   createFollowUpTasksIfNeeded: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.unstable_mockModule('../src/intake/reviewer-approval.js', () => ({
-  handleIntakeTaskApproval: mockHandleIntakeTaskApproval,
+jest.unstable_mockModule('../src/orchestrator/reviewer-approval-outcome.js', () => ({
+  applyApprovedOutcome: mockApplyApprovedOutcome,
+  deriveApprovedOutcome: mockDeriveApprovedOutcome,
+}));
+
+jest.unstable_mockModule('../src/orchestrator/submission-context.js', () => ({
+  loadSubmissionContext: mockLoadSubmissionContext,
 }));
 
 const { runReviewerPhase } = await import('../src/commands/loop-phases-reviewer.js');
@@ -138,7 +118,13 @@ function makeTask(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('runReviewerPhase intake glue wiring', () => {
+function makeDb() {
+  return {
+    prepare: jest.fn().mockReturnValue({ run: jest.fn() }),
+  };
+}
+
+describe('runReviewerPhase approval effect wiring', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockLoadConfig.mockReturnValue({
@@ -161,50 +147,25 @@ describe('runReviewerPhase intake glue wiring', () => {
       confidence: 'high',
       push_to_remote: false,
     });
-    mockHandleIntakeTaskApproval.mockReturnValue({ handled: true });
-    mockPushToRemote.mockReturnValue({ success: true, commitHash: 'pushed-sha' });
-    mockMergeToBase.mockReturnValue({ ok: true, mergedSha: 'merged-sha' });
-    mockGetSlot.mockReturnValue({ id: 'slot-1' });
-  });
-
-  it('runs intake glue on the pool no-op approval path', async () => {
-    mockInvokeReviewer.mockResolvedValue({
-      success: true,
-      timedOut: false,
-      stdout: 'approve',
-      stderr: '',
-      isNoOp: true,
-    });
-
-    await runReviewerPhase(
-      {},
-      makeTask(),
-      '/project',
-      true,
-      undefined,
-      'main',
-      undefined,
-      {
-        globalDb: {},
-        slot: { id: 'slot-1', slot_path: '/slot' },
-      }
-    );
-
-    expect(mockApproveTask).toHaveBeenCalled();
-    expect(mockHandleIntakeTaskApproval).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'task-1' }), '/slot');
-  });
-
-  it('runs intake glue on the pool merge approval path', async () => {
-    mockInvokeReviewer.mockResolvedValue({
-      success: true,
-      timedOut: false,
-      stdout: 'approve',
-      stderr: '',
+    mockLoadSubmissionContext.mockReturnValue({
       isNoOp: false,
+      latestReviewNotes: 'submission',
+      approvalCandidateShas: ['submission-sha'],
     });
+    mockDeriveApprovedOutcome.mockReturnValue({ kind: 'queue_merge', approvedSha: 'submission-sha' });
+  });
+
+  it('routes no-op approvals through the shared approved-outcome helper and releases the slot', async () => {
+    const db = makeDb();
+    mockLoadSubmissionContext.mockReturnValue({
+      isNoOp: true,
+      latestReviewNotes: '[NO_OP_SUBMISSION]',
+      approvalCandidateShas: ['submission-sha'],
+    });
+    mockDeriveApprovedOutcome.mockReturnValue({ kind: 'complete', commitSha: 'submission-sha' });
 
     await runReviewerPhase(
-      {},
+      db,
       makeTask(),
       '/project',
       true,
@@ -214,25 +175,32 @@ describe('runReviewerPhase intake glue wiring', () => {
       {
         globalDb: {},
         slot: { id: 'slot-1', slot_path: '/slot' },
-      }
+      },
     );
 
-    expect(mockMergeToBase).toHaveBeenCalled();
-    expect(mockHandleIntakeTaskApproval).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'task-1' }), '/slot');
+    expect(mockApplyApprovedOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ id: 'task-1' }),
+      { kind: 'complete', commitSha: 'submission-sha' },
+      expect.objectContaining({ projectPath: '/project', intakeProjectPath: '/slot' }),
+    );
+    expect(mockReleaseSlot).toHaveBeenCalledWith({}, 'slot-1');
   });
 
-  it('runs intake glue only after a successful legacy push', async () => {
-    await runReviewerPhase({}, makeTask(), '/project', true);
+  it('routes merge-required approvals through the shared approved-outcome helper', async () => {
+    const db = makeDb();
+    mockDeriveApprovedOutcome.mockReturnValue({ kind: 'queue_merge', approvedSha: 'submission-sha' });
 
-    expect(mockPushToRemote).toHaveBeenCalled();
-    expect(mockHandleIntakeTaskApproval).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'task-1' }), '/project');
-  });
+    await runReviewerPhase(db, makeTask(), '/project', true);
 
-  it('skips intake glue when the legacy push fails', async () => {
-    mockPushToRemote.mockReturnValue({ success: false, commitHash: null });
-
-    await runReviewerPhase({}, makeTask(), '/project', true);
-
-    expect(mockHandleIntakeTaskApproval).not.toHaveBeenCalled();
+    expect(mockApplyApprovedOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ id: 'task-1' }),
+      { kind: 'queue_merge', approvedSha: 'submission-sha' },
+      expect.objectContaining({
+        notes: expect.stringContaining('Queued for merge.'),
+      }),
+    );
+    expect(mockReleaseSlot).not.toHaveBeenCalled();
   });
 });

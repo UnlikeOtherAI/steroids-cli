@@ -880,6 +880,9 @@ export function updateTaskStatus(
            failure_count = 0,
            rejection_count = 0,
            merge_failure_count = 0,
+           merge_phase = NULL,
+           approved_sha = NULL,
+           rebase_attempts = 0,
            last_failure_at = NULL,
            updated_at = datetime('now')
        WHERE id = ?`

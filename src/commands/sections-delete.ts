@@ -5,6 +5,8 @@ import type { GlobalFlags } from '../cli/flags.js';
 import { createOutput } from '../cli/output.js';
 import { invalidArgumentsError, sectionNotFoundError } from '../cli/errors.js';
 import { ErrorCode, getExitCode } from '../cli/errors.js';
+import { openGlobalDatabase } from '../runners/global-db.js';
+import { cleanupTaskRuntimeState } from './task-runtime-cleanup.js';
 
 export async function deleteSectionCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'sections', subcommand: 'delete', flags });
@@ -60,12 +62,19 @@ EXAMPLES:
       throw sectionNotFoundError(sectionIdInput);
     }
 
+    const sectionTasks = db.prepare('SELECT id, title, status FROM tasks WHERE section_id = ? ORDER BY created_at ASC').all(section.id) as Array<{
+      id: string;
+      title: string;
+      status: string;
+    }>;
+
     if (flags.dryRun) {
-      const taskCount = (db.prepare('SELECT COUNT(*) as n FROM tasks WHERE section_id = ?').get(section.id) as { n: number }).n;
+      const taskCount = sectionTasks.length;
       out.log(`Would delete section: ${section.name} (${section.id})`);
       if (taskCount > 0) {
         if (values.force) {
           out.log(`  Would also delete ${taskCount} task(s)`);
+          out.log('  Would also release any runner/workspace state owned by those tasks');
         } else {
           out.log(`  Section has ${taskCount} task(s) — add --force to delete them too`);
         }
@@ -75,6 +84,17 @@ EXAMPLES:
 
     let deletedTaskCount: number;
     try {
+      if (values.force && sectionTasks.length > 0) {
+        const { db: globalDb, close: closeGlobal } = openGlobalDatabase();
+        try {
+          for (const task of sectionTasks) {
+            cleanupTaskRuntimeState(globalDb, task.id, projectPath, out, db);
+          }
+        } finally {
+          closeGlobal();
+        }
+      }
+
       deletedTaskCount = deleteSection(db, section.id, { force: values.force });
     } catch (err: any) {
       out.error(ErrorCode.GENERAL_ERROR, err.message);

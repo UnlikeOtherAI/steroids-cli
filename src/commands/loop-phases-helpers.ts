@@ -7,7 +7,6 @@ import { execSync } from 'node:child_process';
 import {
   getTaskRejections,
   getTaskAudit,
-  getLatestSubmissionNotes,
   incrementTaskFailureCount,
 } from '../database/queries.js';
 import type { openDatabase } from '../database/connection.js';

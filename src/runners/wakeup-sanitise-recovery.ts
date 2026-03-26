@@ -7,9 +7,20 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import type { openDatabase } from '../database/connection.js';
+import { loadConfig } from '../config/loader.js';
+import { updateTaskStatus, type Task } from '../database/queries.js';
 import type { openGlobalDatabase } from './global-db.js';
 import { parseReviewerDecisionSignal } from '../orchestrator/reviewer-decision-parser.js';
 import type { SanitiseSummary } from './wakeup-sanitise.js';
+import {
+  applyApprovedOutcome,
+  deriveApprovedOutcome,
+} from '../orchestrator/reviewer-approval-outcome.js';
+import {
+  handleUnsafeApprovalSubmission,
+  loadSubmissionContext,
+  resolveApprovalSafety,
+} from '../orchestrator/submission-context.js';
 
 export interface StaleInvocationRow {
   id: number;
@@ -117,14 +128,14 @@ export function isRunnerProcessDead(
   }
 }
 
-export function recoverOrphanedInvocation(
+export async function recoverOrphanedInvocation(
   projectDb: ReturnType<typeof openDatabase>['db'],
   projectPath: string,
   row: StaleInvocationRow,
   dryRun: boolean,
   summary: SanitiseSummary,
   source: string
-): void {
+): Promise<void> {
   const completedAtMs = Date.now();
   const durationMs = Math.max(0, completedAtMs - row.started_at_ms);
   const reviewerDecision =
@@ -142,24 +153,30 @@ export function recoverOrphanedInvocation(
         )
         .run(completedAtMs, durationMs, `Recovered by sanitise [${source}] (review approve token found).`, row.id);
 
-      // Note: approved_sha is not set here because we don't have the commit SHA
-      // from the stale invocation data and resolving from remote requires network.
-      // The merge queue's handleMergeAttempt checks for missing approved_sha and
-      // transitions to blocked_error, which is the safe fallback.
-      projectDb
-        .prepare(
-          `UPDATE tasks SET status = 'merge_pending', merge_phase = 'queued', updated_at = datetime('now')
-           WHERE id = ? AND status = 'review'`
-        )
-        .run(row.task_id);
+      const task = projectDb
+        .prepare('SELECT id, title, status, source_file, section_id FROM tasks WHERE id = ?')
+        .get(row.task_id) as Pick<Task, 'id' | 'title' | 'status' | 'source_file' | 'section_id'> | undefined;
 
-      projectDb
-        .prepare(
-          `INSERT INTO audit (task_id, from_status, to_status, actor, actor_type, notes, created_at)
-           SELECT ?, 'review', 'merge_pending', 'orchestrator', 'orchestrator', ?, datetime('now')
-           WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND status = 'merge_pending')`
-        )
-        .run(row.task_id, `Recovered by sanitise [${source}] (DECISION: APPROVE → merge_pending).`, row.task_id);
+      if (task) {
+        const submissionContext = loadSubmissionContext(projectDb, projectPath, row.task_id);
+        const approvalSafety = resolveApprovalSafety(projectPath, submissionContext);
+
+        if (!approvalSafety.ok) {
+          handleUnsafeApprovalSubmission(projectDb, task, approvalSafety);
+        } else {
+          const outcome = deriveApprovedOutcome(submissionContext, approvalSafety);
+          await applyApprovedOutcome(projectDb, task, outcome, {
+            actor: 'orchestrator',
+            notes:
+              outcome.kind === 'complete'
+                ? `Recovered by sanitise [${source}] (DECISION: APPROVE, no-op submission).`
+                : `Recovered by sanitise [${source}] (DECISION: APPROVE → merge_pending).`,
+            config: loadConfig(projectPath),
+            projectPath,
+            intakeProjectPath: projectPath,
+          });
+        }
+      }
     } else if (reviewerDecision === 'reject' && row.task_status === 'review') {
       projectDb
         .prepare(
@@ -230,7 +247,6 @@ export function recoverOrphanedInvocation(
           const rebaseDecision = parseReviewerDecisionFromLog(projectPath, row.id);
           if (rebaseDecision === 'approve') {
             // Approved — re-queue with merge_phase = 'queued'
-            // approved_sha not updated here (requires network); merge queue will re-verify
             projectDb
               .prepare(
                 `UPDATE tasks SET merge_phase = 'queued', updated_at = datetime('now')

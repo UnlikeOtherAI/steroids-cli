@@ -7,7 +7,6 @@ import { execSync } from 'node:child_process';
 import {
   getTask,
   getTaskRejections,
-  getLatestSubmissionNotes,
   getLatestMustImplementGuidance,
   listTasks,
   addAuditEntry,
@@ -19,6 +18,7 @@ import {
   type CoordinatorContext,
   type CoordinatorResult,
 } from '../orchestrator/coordinator.js';
+import { loadSubmissionContext } from '../orchestrator/submission-context.js';
 import {
   getCurrentCommitSha,
   getModifiedFiles,
@@ -95,7 +95,7 @@ export async function invokeCoordinatorIfNeeded(
           }));
         }
 
-        coordExtra.submissionNotes = getLatestSubmissionNotes(db, task!.id);
+        coordExtra.submissionNotes = loadSubmissionContext(db, effectiveProjectPath, task!.id).latestReviewNotes;
 
         const modified = getModifiedFiles(effectiveProjectPath);
         if (modified.length > 0) {

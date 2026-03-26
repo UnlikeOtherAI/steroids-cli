@@ -91,13 +91,13 @@ function markPeriodicSanitiseRun(
 
 export { parseReviewerDecisionFromInvocationLogContent } from './wakeup-sanitise-recovery.js';
 
-function sanitiseProjectState(
+async function sanitiseProjectState(
   globalDb: ReturnType<typeof openGlobalDatabase>['db'],
   projectDb: ReturnType<typeof openDatabase>['db'],
   projectPath: string,
   dryRun: boolean,
   staleInvocationTimeoutSec: number
-): SanitiseSummary {
+): Promise<SanitiseSummary> {
   const summary: SanitiseSummary = {
     ran: true,
     reason: 'ok',
@@ -164,7 +164,7 @@ function sanitiseProjectState(
     if (shouldSkipInvocation(row, activeTaskIds, hasActiveMergeLock, hasActiveParallelRunner, globalDb)) {
       continue;
     }
-    recoverOrphanedInvocation(projectDb, projectPath, row, dryRun, summary, 'stale timeout');
+    await recoverOrphanedInvocation(projectDb, projectPath, row, dryRun, summary, 'stale timeout');
   }
 
   // ── Pass 2: Dead-runner orphans (runner process is dead, invocation >2 min old) ──
@@ -192,7 +192,7 @@ function sanitiseProjectState(
     if (!isRunnerProcessDead(row.runner_id, globalDb)) {
       continue;
     }
-    recoverOrphanedInvocation(projectDb, projectPath, row, dryRun, summary, 'dead runner');
+    await recoverOrphanedInvocation(projectDb, projectPath, row, dryRun, summary, 'dead runner');
   }
 
   // ── Pass 3: Orphaned task locks (task has no running invocations and no active runner) ──
@@ -430,12 +430,12 @@ function sanitiseProjectState(
   return summary;
 }
 
-export function runPeriodicSanitiseForProject(
+export async function runPeriodicSanitiseForProject(
   globalDb: ReturnType<typeof openGlobalDatabase>['db'],
   projectDb: ReturnType<typeof openDatabase>['db'],
   projectPath: string,
   dryRun: boolean
-): SanitiseSummary {
+): Promise<SanitiseSummary> {
   const settings = getSanitiseSettings(projectPath);
   if (!settings.enabled) {
     return {
@@ -465,7 +465,7 @@ export function runPeriodicSanitiseForProject(
     };
   }
 
-  const summary = sanitiseProjectState(
+  const summary = await sanitiseProjectState(
     globalDb,
     projectDb,
     projectPath,

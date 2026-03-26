@@ -19,7 +19,6 @@ import {
   resetRejectionCount,
   resetTaskFailureCount,
   clearMergeFailureCount,
-  approveTask,
   rejectTask,
   getTaskAudit,
   getSection,
@@ -45,10 +44,7 @@ import {
   shouldSkipHooks,
   triggerTaskCreated,
   triggerTaskUpdated,
-  triggerTaskCompleted,
   triggerTaskFailed,
-  triggerSectionCompleted,
-  triggerProjectCompleted,
   triggerHooksSafely,
 } from '../hooks/integration.js';
 import { resetTaskCmd, deleteTaskCmd } from './tasks-reset.js';
@@ -59,8 +55,8 @@ import {
   getFileLastCommit,
   getFileContentHash,
 } from '../git/status.js';
-import { checkSectionCompletionAndPR } from '../git/section-pr.js';
 import { loadConfig } from '../config/loader.js';
+import { completeTaskWithApprovalEffects } from '../orchestrator/automated-approval-effects.js';
 
 const HELP = generateHelp({
   command: 'tasks',
@@ -1090,99 +1086,6 @@ EXAMPLES:
   });
 }
 
-/**
- * Check if a section is completed after a task is marked complete
- */
-async function checkSectionCompletion(
-  db: Database.Database,
-  sectionId: string | null,
-  flags: GlobalFlags
-): Promise<void> {
-  if (!sectionId) {
-    return;
-  }
-
-  // Get section info
-  const section = getSection(db, sectionId);
-  if (!section) {
-    return;
-  }
-
-  // Section is "done" when all tasks are in terminal states AND at least one completed.
-  // Terminal states: completed, skipped, failed, disputed, blocked_error, blocked_conflict.
-  // Non-terminal (active): pending, in_progress, review, partial.
-  const sectionTasks = listTasks(db, { sectionId });
-  const activeCount = sectionTasks.filter(t =>
-    ['pending', 'in_progress', 'review', 'merge_pending', 'partial'].includes(t.status)
-  ).length;
-  const completedCount = sectionTasks.filter(t => t.status === 'completed').length;
-  const sectionDone = sectionTasks.length > 0 && activeCount === 0 && completedCount > 0;
-
-  if (sectionDone) {
-    // Trigger section.completed hooks (skipped when --no-hooks)
-    if (!shouldSkipHooks(flags)) {
-      await triggerHooksSafely(
-        () =>
-          triggerSectionCompleted(
-            {
-              id: section.id,
-              name: section.name,
-              taskCount: sectionTasks.length,
-            },
-            sectionTasks.map((t) => ({ id: t.id, title: t.title })),
-            { verbose: flags.verbose }
-          ),
-        { verbose: flags.verbose }
-      );
-    }
-
-    // Auto-PR: always runs regardless of --no-hooks (hooks and PRs are orthogonal)
-    const projectPath = process.cwd();
-    const config = loadConfig(projectPath);
-    await checkSectionCompletionAndPR(db, projectPath, sectionId, config);
-  }
-}
-
-/**
- * Check if the entire project is completed after a task is marked complete
- */
-async function checkProjectCompletion(
-  db: Database.Database,
-  flags: GlobalFlags
-): Promise<void> {
-  if (shouldSkipHooks(flags)) {
-    return;
-  }
-
-  // Get all tasks
-  const allTasks = listTasks(db, { status: 'all' });
-
-  // Check if all tasks are completed
-  const allCompleted = allTasks.every((t) => t.status === 'completed');
-
-  if (allCompleted && allTasks.length > 0) {
-    // Get sections
-    const sections = listSections(db);
-
-    // Get unique source files
-    const files = Array.from(new Set(allTasks.map((t) => t.source_file).filter(Boolean))) as string[];
-
-    // Trigger project.completed hooks
-    await triggerHooksSafely(
-      () =>
-        triggerProjectCompleted(
-          {
-            totalTasks: allTasks.length,
-            files,
-            sectionCount: sections.length,
-          },
-          { verbose: flags.verbose }
-        ),
-      { verbose: flags.verbose }
-    );
-  }
-}
-
 async function approveTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'tasks', subcommand: 'approve', flags });
 
@@ -1230,23 +1133,17 @@ OPTIONS:
       process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
-    approveTask(db, task.id, values.model as string, values.notes as string);
+    await completeTaskWithApprovalEffects(db, task, {
+      actor: `model:${values.model as string}`,
+      notes: (values.notes as string | undefined) ?? 'Approved via steroids tasks approve',
+      config: loadConfig(projectPath),
+      projectPath,
+      intakeProjectPath: projectPath,
+      hooksEnabled: !shouldSkipHooks(flags),
+      verbose: flags.verbose,
+    });
 
     const updated = getTask(db, task.id);
-
-    // Trigger task.completed hooks
-    if (!shouldSkipHooks(flags) && updated) {
-      await triggerHooksSafely(
-        () => triggerTaskCompleted(updated, { verbose: flags.verbose }),
-        { verbose: flags.verbose }
-      );
-
-      // Check if section is now complete
-      await checkSectionCompletion(db, updated.section_id, flags);
-
-      // Check if entire project is now complete
-      await checkProjectCompletion(db, flags);
-    }
 
     out.success({ task: updated });
     if (!flags.json) {

@@ -11,6 +11,7 @@ import { openGlobalDatabase } from '../runners/global-db.js';
 import { deleteTaskBranchFromSlot } from '../workspace/git-lifecycle.js';
 import { releaseSlot } from '../workspace/pool.js';
 import { getProjectHash } from '../parallel/clone.js';
+import { cleanupTaskRuntimeState, taskDeleteRequiresForce } from './task-runtime-cleanup.js';
 
 export async function resetTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'tasks', subcommand: 'reset', flags });
@@ -134,7 +135,12 @@ DESCRIPTION:
     const fullyValidatedTasks: Task[] = [];
     for (const task of validatedTasks) {
        try {
-         killRunnerAndRevokeLease(task.id, db, out);
+         const { db: globalDb, close: closeGlobal } = openGlobalDatabase();
+         try {
+           cleanupTaskRuntimeState(globalDb, task.id, projectPath, out, db);
+         } finally {
+           closeGlobal();
+         }
          fullyValidatedTasks.push(task);
        } catch (e: any) {
          out.error(ErrorCode.GENERAL_ERROR, `Failed to kill active runner for task ${task.id}: ${e.message}`);
@@ -241,55 +247,6 @@ DESCRIPTION:
   });
 }
 
-function killRunnerAndRevokeLease(taskId: string, projDb: any, out: any) {
-  const { db: globalDb, close: closeGlobal } = openGlobalDatabase();
-  try {
-    let runnerId: string | null = null;
-    try {
-      const inv = projDb.prepare(`SELECT runner_id FROM task_invocations WHERE task_id = ? AND runner_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`).get(taskId) as any;
-      if (inv) runnerId = inv.runner_id;
-    } catch (err) {
-      // ignore
-    }
-
-    if (runnerId) {
-      // Find the active runner PID in global registry
-      const runner = globalDb.prepare(`SELECT pid, parallel_session_id FROM runners WHERE id = ?`).get(runnerId) as any;
-      if (runner && runner.pid) {
-        // PID Reuse Sanity Check: Ensure it belongs to a Steroids runner process
-        const ps = spawnSync('ps', ['-p', String(runner.pid), '-o', 'command='], { encoding: 'utf-8' });
-        const cmdOutput = ps.stdout.toLowerCase();
-        if (cmdOutput.includes('steroids') && cmdOutput.includes('runners')) {
-          out.log(`  -> Killing active runner process (PID: ${runner.pid})`);
-          try {
-            process.kill(runner.pid, 'SIGKILL');
-            spawnSync('sleep', ['0.1']);
-          } catch (e: any) {
-            if (e.code !== 'ESRCH') {
-              throw new Error(`Failed to kill active runner PID ${runner.pid}: ${e.message}`);
-            }
-          }
-        }
-      }
-
-      // Revoke lease and unblock session
-      globalDb.transaction(() => {
-        // Find workstream using deterministic lookup
-        const ws = globalDb.prepare(`SELECT id, session_id FROM workstreams WHERE runner_id = ?`).get(runnerId) as any;
-        if (ws) {
-          out.log(`  -> Revoking workstream lease (${ws.id})`);
-          globalDb.prepare(`UPDATE workstreams SET runner_id = NULL, lease_expires_at = NULL WHERE id = ?`).run(ws.id);
-          
-          // Unblock session
-          globalDb.prepare(`UPDATE parallel_sessions SET status = 'running' WHERE id = ? AND status IN ('blocked_recovery', 'failed', 'blocked_validation', 'blocked_conflict')`).run(ws.session_id);
-        }
-      })();
-    }
-  } finally {
-    closeGlobal();
-  }
-}
-
 export async function deleteTaskCmd(args: string[], flags: GlobalFlags): Promise<void> {
   const out = createOutput({ command: 'tasks', subcommand: 'delete', flags });
 
@@ -342,15 +299,25 @@ EXAMPLES:
       process.exit(getExitCode(ErrorCode.TASK_NOT_FOUND));
     }
 
-    if (task.status === 'in_progress' && !values.force) {
-      out.error(ErrorCode.GENERAL_ERROR, `Task is currently in progress. Use --force to delete it anyway.`);
+    if (taskDeleteRequiresForce(task.status) && !values.force) {
+      out.error(ErrorCode.GENERAL_ERROR, `Task is currently active (${task.status}). Use --force to delete it anyway.`);
       process.exit(1);
     }
 
     if (flags.dryRun) {
       out.log(`Would delete task: ${task.title} (${task.id})`);
       out.log(`  Status: ${task.status}`);
+      if (taskDeleteRequiresForce(task.status)) {
+        out.log('  Would also stop any active runner and release task-owned workspace state');
+      }
       return;
+    }
+
+    const { db: globalDb, close: closeGlobal } = openGlobalDatabase();
+    try {
+      cleanupTaskRuntimeState(globalDb, task.id, projectPath, out, db);
+    } finally {
+      closeGlobal();
     }
 
     deleteTask(db, task.id);

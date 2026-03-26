@@ -21,6 +21,7 @@ jest.unstable_mockModule('../src/database/queries.js', () => ({
   getTask: jest.fn(),
   getTaskRejections: jest.fn().mockReturnValue([]),
   getLatestSubmissionNotes: jest.fn(),
+  getSubmissionCommitShas: jest.fn().mockReturnValue([]),
   getLatestMustImplementGuidance: jest.fn().mockReturnValue(null),
   listTasks: jest.fn().mockReturnValue([]),
   addAuditEntry: mockAddAuditEntry,
@@ -37,6 +38,7 @@ jest.unstable_mockModule('../src/git/status.js', () => ({
   getCurrentCommitSha: mockGetCurrentCommitSha,
   getModifiedFiles: jest.fn().mockReturnValue([]),
   isCommitReachable: mockIsCommitReachable,
+  isCommitReachableWithFetch: jest.fn().mockReturnValue(false),
 }));
 
 jest.unstable_mockModule('../src/git/submission-durability.js', () => ({
@@ -50,6 +52,7 @@ jest.unstable_mockModule('../src/commands/loop-phases-helpers.js', () => ({
   refreshParallelWorkstreamLease: mockRefreshParallelWorkstreamLease,
   resolveCoderSubmittedCommitSha: mockResolveCoderSubmittedCommitSha,
   summarizeErrorMessage: mockSummarizeErrorMessage,
+  countCommitRecoveryAttempts: jest.fn().mockReturnValue(0),
 }));
 
 const { executeCoderDecision } = await import('../src/commands/loop-phases-coder-decision.js');
@@ -116,7 +119,7 @@ describe('executeCoderDecision push behavior', () => {
     );
   });
 
-  it('submit: pushes in non-pool mode when parallel session is active', async () => {
+  it('submit: does not push outside pool mode because durable review submission is local-first', async () => {
     const db = createDbMock();
     await executeCoderDecision(
       db as never,
@@ -125,8 +128,7 @@ describe('executeCoderDecision push behavior', () => {
       { ...baseContext, hasPoolSlot: false }
     );
 
-    expect(mockPushToRemote).toHaveBeenCalledTimes(1);
-    expect(mockPushToRemote).toHaveBeenCalledWith('/tmp/workspace', 'origin', 'steroids/task-1');
+    expect(mockPushToRemote).not.toHaveBeenCalled();
   });
 
   it('stage_commit_submit (no uncommitted): skips push in pool mode', async () => {
@@ -149,7 +151,7 @@ describe('executeCoderDecision push behavior', () => {
     );
   });
 
-  it('stage_commit_submit (no uncommitted): pushes in non-pool mode', async () => {
+  it('stage_commit_submit (no uncommitted): does not push outside pool mode', async () => {
     const db = createDbMock();
     await executeCoderDecision(
       db as never,
@@ -158,8 +160,7 @@ describe('executeCoderDecision push behavior', () => {
       { ...baseContext, has_uncommitted: false, hasPoolSlot: false }
     );
 
-    expect(mockPushToRemote).toHaveBeenCalledTimes(1);
-    expect(mockPushToRemote).toHaveBeenCalledWith('/tmp/workspace', 'origin', 'steroids/task-1');
+    expect(mockPushToRemote).not.toHaveBeenCalled();
   });
 
   it('stage_commit_submit (after auto-commit): skips push in pool mode', async () => {
@@ -184,7 +185,7 @@ describe('executeCoderDecision push behavior', () => {
     );
   });
 
-  it('stage_commit_submit (after auto-commit): pushes in non-pool mode', async () => {
+  it('stage_commit_submit (after auto-commit): does not push outside pool mode', async () => {
     const db = createDbMock();
     await executeCoderDecision(
       db as never,
@@ -195,8 +196,7 @@ describe('executeCoderDecision push behavior', () => {
 
     expect(mockRefreshParallelWorkstreamLease).toHaveBeenCalled();
     expect(mockExecSync).toHaveBeenCalledTimes(2);
-    expect(mockPushToRemote).toHaveBeenCalledTimes(1);
-    expect(mockPushToRemote).toHaveBeenCalledWith('/tmp/workspace', 'origin', 'steroids/task-1');
+    expect(mockPushToRemote).not.toHaveBeenCalled();
     expect(mockUpdateTaskStatus).toHaveBeenCalledWith(
       expect.anything(),
       'task-1',
