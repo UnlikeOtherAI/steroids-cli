@@ -297,6 +297,7 @@ async function launchProcesses(out: ReturnType<typeof createOutput>): Promise<vo
     cwd: webUiDir,
     detached: true,
     stdio: ['ignore', webUiLog, webUiLog],
+    shell: true,
   });
   webUiProcess.unref();
 
